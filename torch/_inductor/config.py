@@ -1160,6 +1160,16 @@ bw_outputs_user_visible = True
 # Whether to always use shape padding if it is enabled and possible
 force_shape_pad: bool = False
 
+# Use heuristic-based padding decisions in deterministic mode instead of
+# disabling padding entirely. When True and deterministic mode is enabled,
+# a roofline-based heuristic estimates whether padding is beneficial by
+# comparing the cost of extra memory copies against the GEMM speedup from
+# aligned dimensions. Options:
+#   - "none": Disable padding in deterministic mode (legacy behavior)
+#   - "roofline": Use roofline model with alignment efficiency lookup table
+#   - "nvmatmul": Use cuBLASLt heuristics to estimate GEMM times (future)
+pad_mm_heuristic: str = os.environ.get("TORCHINDUCTOR_PAD_MM_HEURISTIC", "roofline")
+
 # Fx-based linear/matmul/bmm + permute/transpose vertical fusion
 permute_fusion = os.environ.get("TORCHINDUCTOR_PERMUTE_FUSION", "0") == "1"
 

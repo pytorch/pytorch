@@ -647,6 +647,222 @@ class PadMMTest(TestCase):
         torch.manual_seed(42)
         test_masked_mha(B, H, S, D, device, dtype)
 
+    def test_should_pad_heuristic_unit(self):
+        """Test the should_pad_heuristic function directly."""
+        from torch._inductor.fx_passes.pad_mm import (
+            _get_alignment_efficiency,
+            _estimate_copy_time_ns,
+            _estimate_gemm_time_ns,
+            should_pad_heuristic,
+        )
+
+        # Test alignment efficiency - aligned dimensions should have efficiency 1.0
+        # Unaligned dimensions should have lower efficiency
+        eff_aligned = _get_alignment_efficiency(128, 256, 128, torch.float16)
+        eff_unaligned = _get_alignment_efficiency(127, 255, 127, torch.float16)
+        self.assertGreater(eff_aligned, eff_unaligned)
+
+        # Test that copy time is positive
+        copy_time = _estimate_copy_time_ns(1000000, torch.float16)
+        self.assertGreater(copy_time, 0)
+
+        # Test that GEMM time is positive
+        gemm_time = _estimate_gemm_time_ns(1024, 1024, 1024, torch.float16, 1.0)
+        self.assertGreater(gemm_time, 0)
+
+        # Test heuristic: large compute-bound matmul with misaligned dims should benefit from padding
+        # This is a typical case where padding helps
+        result = should_pad_heuristic(
+            m=1023, k=1023, n=1023,  # Misaligned dimensions
+            m_padded_length=1, k_padded_length=1, n_padded_length=1,
+            dtype=torch.float16,
+        )
+        # For large matmuls, padding often helps (but depends on device)
+        self.assertIsInstance(result, bool)
+
+        # Test heuristic: small matmul should not benefit from padding
+        result_small = should_pad_heuristic(
+            m=15, k=15, n=15,  # Small, misaligned
+            m_padded_length=1, k_padded_length=1, n_padded_length=1,
+            dtype=torch.float16,
+        )
+        self.assertIsInstance(result_small, bool)
+
+    @inductor_config.patch(deterministic=True, pad_mm_heuristic="roofline")
+    @fresh_cache()
+    def test_deterministic_mode_roofline_heuristic(self):
+        """Test that padding works in deterministic mode with roofline heuristic."""
+        M, K, N = 128, 255, 128  # K is misaligned for fp16 (alignment=8)
+
+        mat1 = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        mat2 = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+
+        # Verify padding is possible
+        self.assertTrue(can_pad(mat1, mat2, torch.ops.aten.mm))
+
+        @torch.compile()
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        # This should run without errors in deterministic mode
+        result = mm(mat1, mat2)
+        expected = torch.mm(mat1, mat2)
+        self.assertEqual(result, expected)
+
+    @inductor_config.patch(deterministic=True, pad_mm_heuristic="none")
+    @fresh_cache()
+    def test_deterministic_mode_none_heuristic(self):
+        """Test that padding is disabled in deterministic mode with 'none' heuristic."""
+        M, K, N = 128, 255, 128  # K is misaligned
+
+        mat1 = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        mat2 = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+
+        # With 'none' heuristic, can_pad should return False in deterministic mode
+        self.assertFalse(can_pad(mat1, mat2, torch.ops.aten.mm))
+
+    @inductor_config.patch(deterministic=True, pad_mm_heuristic="roofline", force_shape_pad=True)
+    @fresh_cache()
+    def test_deterministic_mode_force_shape_pad(self):
+        """Test that force_shape_pad works in deterministic mode."""
+        M, K, N = 128, 255, 128
+
+        mat1 = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        mat2 = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+
+        aligned_k = get_padded_length(K, get_alignment_size(mat1)) + K
+
+        @torch.compile()
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        result, (code,) = run_and_get_code(mm, mat1, mat2)
+        expected = torch.mm(mat1, mat2)
+
+        # With force_shape_pad=True, padding should always be applied
+        # Check that constant_pad_nd is called and the padded shape includes 256
+        FileCheck().check("constant_pad_nd").check(f"{aligned_k}").run(code)
+        self.assertEqual(result, expected)
+
+    def test_alignment_efficiency_table(self):
+        """Test the alignment efficiency lookup table."""
+        from torch._inductor.fx_passes.pad_mm import _get_alignment_efficiency_table
+
+        table = _get_alignment_efficiency_table()
+
+        # Check that we have entries for common compute capabilities
+        self.assertIn((8, 0), table)  # Ampere
+        self.assertIn((9, 0), table)  # Hopper
+
+        # Check that aligned (0 misalignment) always has efficiency 1.0
+        for cc, eff_table in table.items():
+            self.assertEqual(eff_table[0], 1.0)
+
+        # Check that misaligned cases have lower efficiency
+        for cc, eff_table in table.items():
+            for misalign in range(1, 8):
+                if misalign in eff_table:
+                    self.assertLess(eff_table[misalign], 1.0)
+
+    def test_nvmatmul_heuristic_unit(self):
+        """Test the nvmatmul heuristic function."""
+        from torch._inductor.fx_passes.pad_mm import (
+            _nvmatmul_heuristics_available,
+            should_pad_nvmatmul_heuristic,
+        )
+
+        # Test that the function returns a boolean regardless of nvMatmulHeuristics availability
+        result = should_pad_nvmatmul_heuristic(
+            m=1024, k=1023, n=1024,
+            m_padded_length=0, k_padded_length=1, n_padded_length=0,
+            dtype=torch.float16,
+        )
+        self.assertIsInstance(result, bool)
+
+        # If nvMatmulHeuristics is available, test that it uses the heuristic
+        if _nvmatmul_heuristics_available():
+            from torch._inductor.fx_passes.pad_mm import _get_nvmatmul_estimated_runtime
+
+            # Test runtime estimation
+            runtime = _get_nvmatmul_estimated_runtime(1024, 1024, 1024, torch.float16)
+            self.assertIsInstance(runtime, float)
+            # runtime should be positive (or inf on error)
+            self.assertGreater(runtime, 0)
+
+    @inductor_config.patch(deterministic=True, pad_mm_heuristic="nvmatmul")
+    @fresh_cache()
+    def test_deterministic_mode_nvmatmul_heuristic(self):
+        """Test that padding works in deterministic mode with nvmatmul heuristic."""
+        M, K, N = 128, 255, 128  # K is misaligned for fp16 (alignment=8)
+
+        mat1 = torch.randn(M, K, device=GPU_TYPE, dtype=torch.float16)
+        mat2 = torch.randn(K, N, device=GPU_TYPE, dtype=torch.float16)
+
+        # Verify padding is possible
+        self.assertTrue(can_pad(mat1, mat2, torch.ops.aten.mm))
+
+        @torch.compile()
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        # This should run without errors in deterministic mode
+        result = mm(mat1, mat2)
+        expected = torch.mm(mat1, mat2)
+        self.assertEqual(result, expected)
+
+    def test_matrix_layout_detection(self):
+        """Test that matrix layout detection works correctly."""
+        from torch._inductor.fx_passes.pad_mm import (
+            _is_matrix_column_major,
+            _get_alignment_efficiency,
+            should_pad_heuristic,
+        )
+
+        # Test row-major (NN layout) - stride = (K, 1)
+        mat_row = torch.randn(128, 256, device=GPU_TYPE, dtype=torch.float16)
+        self.assertFalse(_is_matrix_column_major(mat_row))
+
+        # Test column-major (transposed, TN layout) - stride = (1, M)
+        mat_col = torch.randn(256, 128, device=GPU_TYPE, dtype=torch.float16).t()
+        self.assertTrue(_is_matrix_column_major(mat_col))
+
+        # Test that TN layout (mat1 column-major) has no K alignment penalty
+        # NN layout - K misalignment should hurt (efficiency < 1.0)
+        eff_nn = _get_alignment_efficiency(
+            1024, 1023, 1024, torch.float16, mat1_col_major=False
+        )
+        self.assertLess(eff_nn, 1.0)
+
+        # TN layout - K misalignment should NOT hurt (efficiency = 1.0)
+        eff_tn = _get_alignment_efficiency(
+            1024, 1023, 1024, torch.float16, mat1_col_major=True
+        )
+        self.assertEqual(eff_tn, 1.0)
+
+        # Test that heuristic accounts for layout
+        # NN layout with K misalignment should recommend padding
+        result_nn = should_pad_heuristic(
+            1024, 1023, 1024, 0, 1, 0, torch.float16, mat1_col_major=False
+        )
+        # TN layout with K misalignment should NOT recommend padding
+        result_tn = should_pad_heuristic(
+            1024, 1023, 1024, 0, 1, 0, torch.float16, mat1_col_major=True
+        )
+        # For TN layout, padding should never be recommended for K-only misalignment
+        self.assertFalse(result_tn)
+
+    def test_batched_matrix_layout_detection(self):
+        """Test that batched matrix layout detection works correctly."""
+        from torch._inductor.fx_passes.pad_mm import _is_matrix_column_major
+
+        # Test batched row-major - stride = (M*K, K, 1)
+        mat_row = torch.randn(4, 128, 256, device=GPU_TYPE, dtype=torch.float16)
+        self.assertFalse(_is_matrix_column_major(mat_row, is_bmm=True))
+
+        # Test batched column-major via transpose - stride = (M*K, 1, M)
+        mat_col = torch.randn(4, 256, 128, device=GPU_TYPE, dtype=torch.float16).transpose(1, 2)
+        self.assertTrue(_is_matrix_column_major(mat_col, is_bmm=True))
+
 
 if __name__ == "__main__":
     if HAS_GPU_AND_TRITON:

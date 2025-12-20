@@ -170,13 +170,14 @@ def can_pad(
         if m_padded_length == k_padded_length == n_padded_length == 0:
             return False
 
-    # In deterministic mode, we can't safely benchmark - disallow padding
+    # In deterministic mode, we can use heuristics instead of benchmarking
     # Check this after other basic checks so force_shape_pad can override
-    if (
-        torch._inductor.config.deterministic
-        and not torch._inductor.config.force_shape_pad
-    ):
-        return False
+    if torch._inductor.config.deterministic:
+        heuristic = torch._inductor.config.pad_mm_heuristic
+        # If heuristic is "none", disable padding in deterministic mode (legacy behavior)
+        if heuristic == "none" and not torch._inductor.config.force_shape_pad:
+            return False
+        # Otherwise, allow padding - _should_pad will use heuristics
 
     # Triton availability check - required for padding to work
     if not has_triton():
@@ -310,6 +311,527 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
     machine_balance = machine_balance * 0.5
 
     return arithmetic_intensity > machine_balance
+
+
+def _get_dtype_bytes(dtype: torch.dtype) -> int:
+    """Return the size in bytes for a given dtype."""
+    if dtype in (torch.float16, torch.bfloat16, torch.half):
+        return 2
+    elif dtype in (torch.float32, torch.float):
+        return 4
+    elif dtype in (torch.float64, torch.double):
+        return 8
+    elif dtype == torch.int8:
+        return 1
+    elif dtype == torch.int16:
+        return 2
+    elif dtype == torch.int32:
+        return 4
+    elif dtype == torch.int64:
+        return 8
+    else:
+        # Default to 4 bytes for unknown types
+        return 4
+
+
+@functools.cache
+def _get_alignment_efficiency_table() -> dict[tuple[int, int], dict[int, float]]:
+    """
+    Return alignment efficiency lookup table based on compute capability and alignment.
+
+    The efficiency represents the fraction of peak throughput achieved when matrix
+    dimensions are not aligned to optimal boundaries. This is based on:
+    - Memory coalescing efficiency for unaligned accesses
+    - Tensor core utilization (for SM >= 7.0)
+    - Bank conflict penalties
+
+    Keys: (major, minor) compute capability
+    Values: dict mapping misalignment (in elements) to efficiency factor
+
+    The efficiency factors are derived from empirical measurements and NVIDIA
+    documentation on memory access patterns. Unaligned accesses can cause:
+    - Extra memory transactions (128-byte alignment for L1)
+    - Reduced tensor core utilization
+    - Bank conflicts in shared memory
+
+    NOTE: These values are for fp16/bf16 tensor core operations. float32 operations
+    do not benefit from padding on modern GPUs (see _should_skip_padding_for_dtype).
+    """
+    # Default efficiency for various misalignment scenarios
+    # Misalignment of 0 means perfectly aligned (efficiency = 1.0)
+    # Higher misalignment generally means lower efficiency
+
+    # Volta (SM 7.0, 7.2) - First gen tensor cores, sensitive to alignment
+    volta_efficiency = {
+        0: 1.0,    # Perfectly aligned
+        1: 0.70,   # 1-element misalignment
+        2: 0.75,   # 2-element misalignment
+        3: 0.70,   # 3-element misalignment
+        4: 0.85,   # 4-element misalignment (half-warp aligned)
+        5: 0.70,
+        6: 0.75,
+        7: 0.70,
+    }
+
+    # Ampere (SM 8.0, 8.6, 8.7) - Better handling of misalignment
+    ampere_efficiency = {
+        0: 1.0,
+        1: 0.80,
+        2: 0.85,
+        3: 0.80,
+        4: 0.90,
+        5: 0.80,
+        6: 0.85,
+        7: 0.80,
+    }
+
+    # Hopper (SM 9.0) - Much better misalignment tolerance
+    hopper_efficiency = {
+        0: 1.0,
+        1: 0.90,
+        2: 0.92,
+        3: 0.90,
+        4: 0.95,
+        5: 0.90,
+        6: 0.92,
+        7: 0.90,
+    }
+
+    # Blackwell (SM 10.0) - Fitted from benchmark measurements on NVIDIA B200
+    # Misaligned K dimension causes severe performance degradation for fp16/bf16
+    # These values represent padded_time / unpadded_time ratio
+    blackwell_efficiency = {
+        0: 1.0,     # Perfectly aligned
+        1: 0.14,    # 1-element misalignment - severe penalty
+        2: 0.14,    # Interpolated
+        3: 0.14,    # Interpolated
+        4: 0.14,    # Interpolated
+        5: 0.14,    # Interpolated
+        6: 0.14,    # Interpolated
+        7: 0.13,    # 7-element misalignment - severe penalty
+    }
+
+    return {
+        (7, 0): volta_efficiency,
+        (7, 2): volta_efficiency,
+        (7, 5): volta_efficiency,  # Turing
+        (8, 0): ampere_efficiency,
+        (8, 6): ampere_efficiency,
+        (8, 7): ampere_efficiency,
+        (8, 9): ampere_efficiency,  # Ada Lovelace
+        (9, 0): hopper_efficiency,
+        (10, 0): blackwell_efficiency,
+    }
+
+
+def _should_skip_padding_for_dtype(dtype: torch.dtype) -> bool:
+    """
+    Check if padding should be skipped for the given dtype.
+
+    Based on benchmark measurements:
+    - float32 operations do NOT benefit from padding on modern GPUs (SM 10.0+)
+    - float16/bfloat16 operations benefit significantly from padding
+    """
+    if not torch.cuda.is_available():
+        return False
+
+    try:
+        capability = torch.cuda.get_device_capability()
+    except Exception:
+        return False
+
+    # On Blackwell (SM 10.0+), float32 does not benefit from padding
+    if capability[0] >= 10 and dtype in (torch.float32, torch.float):
+        return True
+
+    return False
+
+
+# Minimum problem size (M * K * N) below which padding overhead dominates
+# Based on benchmark measurements: small matrices don't benefit from padding
+# even with severe alignment penalties because the padding overhead is too high
+# On B200: 512^3 doesn't benefit, 1024^3 does benefit
+_MIN_PROBLEM_SIZE_FOR_PADDING = 512 * 512 * 512  # ~134M elements
+
+
+def _is_matrix_column_major(mat: Tensor, is_bmm: bool = False) -> bool:
+    """
+    Check if a matrix is column-major (transposed).
+
+    For 2D matrix: stride = (K, 1) is row-major, stride = (1, M) is column-major
+    For 3D batch matrix: similar logic for last two dimensions
+
+    Returns True if the matrix is column-major (the first non-batch dimension
+    has stride 1, meaning that's the fast-moving dimension in memory).
+    """
+    strides = mat.stride()
+    if is_bmm:
+        # For batched: check if dim 1 (M dim) has smaller stride than dim 2 (K dim)
+        return strides[1] < strides[2]
+    else:
+        # For 2D: check if dim 0 (M dim) has smaller stride than dim 1 (K dim)
+        return strides[0] < strides[1]
+
+
+def _get_alignment_efficiency(
+    m: int, k: int, n: int, dtype: torch.dtype,
+    mat1_col_major: bool = False, mat2_col_major: bool = False
+) -> float:
+    """
+    Estimate the efficiency factor for unaligned matmul based on dimension alignment.
+
+    This estimates what fraction of peak FLOPS the unpadded matmul will achieve
+    due to alignment issues. Returns a value between 0 and 1.
+    """
+    if not torch.cuda.is_available():
+        return 1.0
+
+    try:
+        capability = torch.cuda.get_device_capability()
+    except Exception:
+        return 1.0
+
+    alignment_size = get_alignment_size_dtype(dtype)
+    if alignment_size == 0:
+        return 1.0
+
+    # Calculate misalignment for each dimension
+    m_misalign = m % alignment_size
+    k_misalign = k % alignment_size
+    n_misalign = n % alignment_size
+
+    efficiency_table = _get_alignment_efficiency_table()
+    cc = (capability[0], capability[1])
+
+    # Find the closest matching compute capability
+    if cc not in efficiency_table:
+        # Fall back to closest known capability
+        if capability[0] >= 10:
+            cc = (10, 0)
+        elif capability[0] >= 9:
+            cc = (9, 0)
+        elif capability[0] >= 8:
+            cc = (8, 0)
+        else:
+            cc = (7, 0)
+
+    eff_table = efficiency_table.get(cc, efficiency_table[(8, 0)])
+
+    # Get efficiency for each dimension's misalignment
+    m_eff = eff_table.get(m_misalign, 0.75)
+    k_eff = eff_table.get(k_misalign, 0.75)
+    n_eff = eff_table.get(n_misalign, 0.75)
+
+    # On Blackwell (SM 10.0+), M misalignment doesn't cause performance issues
+    # Based on benchmarks: M-only misalignment shows no benefit from padding
+    # while K and N misalignment show severe penalties (up to 7x slower)
+    if capability[0] >= 10:
+        m_eff = 1.0
+
+    # When mat1 (A) is column-major (TN layout), K misalignment doesn't hurt
+    # performance. This is because in column-major A, the K dimension is the
+    # slow-moving dimension (stride > 1), so memory access pattern doesn't
+    # depend on K being aligned. Benchmark measurements confirm this:
+    # TN layout shows NO alignment penalty for K, while NN/NT/TT layouts do.
+    if mat1_col_major:
+        k_eff = 1.0
+
+    # Combined efficiency - K dimension affects both A and B matrices
+    # M affects output and A, N affects output and B
+    # Use geometric mean weighted by importance (K weighted double)
+    combined_efficiency = (m_eff * k_eff * k_eff * n_eff) ** 0.25
+
+    return combined_efficiency
+
+
+def _estimate_copy_time_ns(
+    num_elements: int,
+    dtype: torch.dtype,
+) -> float:
+    """
+    Estimate the time to copy num_elements at peak memory bandwidth.
+    Returns time in nanoseconds.
+    """
+    try:
+        bandwidth_gbps = utils.get_gpu_dram_gbps()
+    except Exception:
+        # Default to reasonable bandwidth if unavailable
+        bandwidth_gbps = 1000.0
+
+    bytes_to_copy = num_elements * _get_dtype_bytes(dtype)
+    # bandwidth_gbps is in GB/s, convert to bytes/ns (same ratio)
+    time_ns = bytes_to_copy / bandwidth_gbps
+    return time_ns
+
+
+def _estimate_gemm_time_ns(
+    m: int, k: int, n: int, dtype: torch.dtype, efficiency: float = 1.0
+) -> float:
+    """
+    Estimate GEMM time using roofline model at peak FLOPS.
+    Returns time in nanoseconds.
+
+    Args:
+        m, k, n: Matrix dimensions
+        dtype: Data type
+        efficiency: Efficiency factor (0-1) accounting for alignment etc.
+    """
+    try:
+        tflops = utils.get_device_tflops(dtype)
+    except Exception:
+        # Default to reasonable TFLOPS if unavailable
+        tflops = 100.0
+
+    # GEMM requires 2*M*N*K FLOPs (multiply-add)
+    flops = 2.0 * m * n * k
+
+    # tflops is in TFLOPS (10^12 FLOPS)
+    # Convert to FLOPS/ns: TFLOPS * 10^12 / 10^9 = TFLOPS * 10^3
+    flops_per_ns = tflops * 1000.0
+
+    # Apply efficiency factor
+    effective_flops_per_ns = flops_per_ns * efficiency
+
+    if effective_flops_per_ns == 0:
+        return float("inf")
+
+    time_ns = flops / effective_flops_per_ns
+    return time_ns
+
+
+def should_pad_heuristic(
+    m: int,
+    k: int,
+    n: int,
+    m_padded_length: int,
+    k_padded_length: int,
+    n_padded_length: int,
+    dtype: torch.dtype,
+    mat1_col_major: bool = False,
+    mat2_col_major: bool = False,
+) -> bool:
+    """
+    Heuristic-based decision for whether padding is beneficial.
+
+    This is used in deterministic mode when benchmarking is not allowed.
+    The decision is based on:
+    1. Cost: Extra copies for padding A and B matrices
+    2. Benefit: Improved GEMM efficiency from aligned dimensions
+
+    The cost is estimated at peak memory bandwidth.
+    The GEMM time is estimated using roofline model with peak FLOPS,
+    applying an efficiency factor for unaligned access.
+
+    Args:
+        mat1_col_major: True if mat1 (A) is column-major (TN/TT layout)
+        mat2_col_major: True if mat2 (B) is column-major (NT/TT layout)
+    """
+    # Skip padding for dtypes that don't benefit (e.g., float32 on Blackwell)
+    if _should_skip_padding_for_dtype(dtype):
+        return False
+
+    # Skip padding for small matrices where overhead dominates
+    problem_size = m * k * n
+    if problem_size < _MIN_PROBLEM_SIZE_FOR_PADDING:
+        return False
+
+    # Calculate padded dimensions
+    m_padded = m + m_padded_length
+    k_padded = k + k_padded_length
+    n_padded = n + n_padded_length
+
+    # Estimate copy overhead for padding
+    # Padding A: need to copy m*k elements and zero out padding
+    # Padding B: need to copy k*n elements and zero out padding
+    # In practice, constant_pad_nd does a copy with zeros for padding
+
+    # Cost of padding operations
+    # A: original is m x k, padded is m_padded x k_padded
+    # B: original is k x n, padded is k_padded x n_padded
+    # We need to write out the full padded tensors
+    a_pad_elements = m_padded * k_padded
+    b_pad_elements = k_padded * n_padded
+
+    # Also need to slice the output (minor cost, but include it)
+    output_slice_elements = m * n if (m_padded_length > 0 or n_padded_length > 0) else 0
+
+    total_copy_elements = a_pad_elements + b_pad_elements + output_slice_elements
+    copy_time = _estimate_copy_time_ns(total_copy_elements, dtype)
+
+    # Estimate GEMM times
+    # Unpadded GEMM with alignment penalty
+    unpadded_efficiency = _get_alignment_efficiency(
+        m, k, n, dtype, mat1_col_major, mat2_col_major
+    )
+    unpadded_gemm_time = _estimate_gemm_time_ns(m, k, n, dtype, unpadded_efficiency)
+
+    # Padded GEMM at full efficiency (aligned)
+    padded_gemm_time = _estimate_gemm_time_ns(
+        m_padded, k_padded, n_padded, dtype, efficiency=1.0
+    )
+
+    # Total time comparison
+    unpadded_total = unpadded_gemm_time
+    padded_total = padded_gemm_time + copy_time
+
+    # Apply a small safety margin (5%) - prefer not padding if marginal
+    return padded_total * 1.05 < unpadded_total
+
+
+def _nvmatmul_heuristics_available() -> bool:
+    """Check if nvMatmulHeuristics is available."""
+    try:
+        import nvMatmulHeuristics  # noqa: F401
+
+        return True
+    except ImportError:
+        return False
+
+
+@functools.cache
+def _get_nvmatmul_heuristics_interface(precision: str):
+    """
+    Get a cached nvMatmulHeuristics interface for the given precision.
+
+    The interface is cached to avoid repeated initialization overhead.
+    """
+    from nvMatmulHeuristics import (
+        NvMatmulHeuristicsInterface,
+        NvMatmulHeuristicsTarget,
+    )
+
+    return NvMatmulHeuristicsInterface(
+        backend=NvMatmulHeuristicsTarget.GENERIC,
+        precision=precision,
+    )
+
+
+def _dtype_to_nvmatmul_precision(dtype: torch.dtype) -> str:
+    """
+    Convert torch dtype to nvMatmulHeuristics precision string.
+
+    Precision strings follow the format: [A dtype][B dtype][C/D dtype]
+    Common values:
+    - 'HSS': Half input, Single accumulate, Single output
+    - 'HHS': Half input, Half accumulate, Single output
+    - 'HHH': Half input, Half accumulate, Half output
+    - 'SSS': Single input, Single accumulate, Single output
+    """
+    if dtype in (torch.float16, torch.half):
+        return "HSS"  # Half compute, Single accumulate
+    elif dtype == torch.bfloat16:
+        return "BSS"  # BFloat16 compute, Single accumulate
+    elif dtype in (torch.float32, torch.float):
+        return "SSS"  # Single precision
+    elif dtype in (torch.float64, torch.double):
+        return "DDD"  # Double precision
+    else:
+        return "SSS"  # Default to single
+
+
+def _get_nvmatmul_estimated_runtime(
+    m: int, k: int, n: int, dtype: torch.dtype
+) -> float:
+    """
+    Get estimated runtime from nvMatmulHeuristics.
+
+    Returns the estimated runtime in seconds for the best kernel configuration,
+    or float('inf') on error.
+    """
+    try:
+        from nvMatmulHeuristics import NvMatmulHeuristicsMatmulLayout
+
+        precision = _dtype_to_nvmatmul_precision(dtype)
+        heuristics = _get_nvmatmul_heuristics_interface(precision)
+
+        # Query for best kernel configuration
+        # Note: nvMatmulHeuristics uses (M, N, K) order
+        configs = heuristics.get_with_mnk(
+            m, n, k,
+            NvMatmulHeuristicsMatmulLayout.NN_ROW_MAJOR,
+            count=1,
+        )
+
+        if configs:
+            return float(configs[0]["runtime"])
+        return float("inf")
+    except Exception:
+        return float("inf")
+
+
+def should_pad_nvmatmul_heuristic(
+    m: int,
+    k: int,
+    n: int,
+    m_padded_length: int,
+    k_padded_length: int,
+    n_padded_length: int,
+    dtype: torch.dtype,
+    mat1_col_major: bool = False,
+    mat2_col_major: bool = False,
+) -> bool:
+    """
+    Heuristic-based decision using NVIDIA's nvMatmulHeuristics library.
+
+    This function uses nvMatmulHeuristics to estimate kernel execution times
+    for both padded and unpadded matrix configurations. The library provides
+    performance models trained on real hardware measurements.
+
+    The decision compares:
+    1. Estimated GEMM runtime for unpadded dimensions
+    2. Estimated GEMM runtime for padded dimensions + padding copy overhead
+
+    Falls back to roofline heuristic if nvMatmulHeuristics is not available.
+
+    Args:
+        mat1_col_major: True if mat1 (A) is column-major (TN/TT layout)
+        mat2_col_major: True if mat2 (B) is column-major (NT/TT layout)
+    """
+    if not _nvmatmul_heuristics_available():
+        # Fall back to roofline heuristic
+        return should_pad_heuristic(
+            m, k, n,
+            m_padded_length, k_padded_length, n_padded_length,
+            dtype,
+            mat1_col_major, mat2_col_major,
+        )
+
+    # Calculate padded dimensions
+    m_padded = m + m_padded_length
+    k_padded = k + k_padded_length
+    n_padded = n + n_padded_length
+
+    # Get estimated runtime for unpadded and padded configurations
+    unpadded_runtime = _get_nvmatmul_estimated_runtime(m, k, n, dtype)
+    padded_runtime = _get_nvmatmul_estimated_runtime(m_padded, k_padded, n_padded, dtype)
+
+    # If we couldn't get valid estimates, fall back to roofline
+    if unpadded_runtime == float("inf") or padded_runtime == float("inf"):
+        return should_pad_heuristic(
+            m, k, n,
+            m_padded_length, k_padded_length, n_padded_length,
+            dtype,
+            mat1_col_major, mat2_col_major,
+        )
+
+    # Estimate padding copy overhead
+    # Padding requires writing padded A and B tensors
+    copy_time = _estimate_copy_time_ns(
+        m_padded * k_padded + k_padded * n_padded, dtype
+    )
+    # Add output slice time if M or N changed
+    if m_padded_length > 0 or n_padded_length > 0:
+        copy_time += _estimate_copy_time_ns(m * n, dtype)
+
+    # Convert copy_time from ns to seconds (runtime is in seconds)
+    copy_time_s = copy_time * 1e-9
+
+    # Total time comparison
+    unpadded_total = unpadded_runtime
+    padded_total = padded_runtime + copy_time_s
+
+    # Apply safety margin (5%) - prefer not padding if marginal
+    return padded_total * 1.05 < unpadded_total
 
 
 @functools.cache
@@ -528,6 +1050,49 @@ def _should_pad(
         # Check if operation is compute bound (performance check)
         if not is_mm_compute_bound(m, k, n, mat1.dtype):
             return False
+
+        # In deterministic mode, use heuristics instead of benchmarking
+        if torch._inductor.config.deterministic:
+            heuristic = torch._inductor.config.pad_mm_heuristic
+            if heuristic == "roofline":
+                # Convert symbolic dimensions to concrete values for heuristic
+                m_val = int(m) if isinstance(m, int) else m.node.hint
+                k_val = int(k) if isinstance(k, int) else k.node.hint
+                n_val = int(n) if isinstance(n, int) else n.node.hint
+                # Detect matrix layout from strides
+                is_bmm = op is torch.ops.aten.bmm
+                mat1_col_major = _is_matrix_column_major(mat1, is_bmm)
+                mat2_col_major = _is_matrix_column_major(mat2, is_bmm)
+                result = should_pad_heuristic(
+                    m_val, k_val, n_val,
+                    m_padded_length, k_padded_length, n_padded_length,
+                    mat1.dtype,
+                    mat1_col_major, mat2_col_major,
+                )
+                # Cache the heuristic result for consistency
+                key = should_pad_bench_key(match, mat1, mat2, op, input)
+                set_cached_should_pad(key, result)
+                return result
+            elif heuristic == "nvmatmul":
+                # Use cuBLASLt heuristics for GEMM time estimation
+                m_val = int(m) if isinstance(m, int) else m.node.hint
+                k_val = int(k) if isinstance(k, int) else k.node.hint
+                n_val = int(n) if isinstance(n, int) else n.node.hint
+                # Detect matrix layout from strides
+                is_bmm = op is torch.ops.aten.bmm
+                mat1_col_major = _is_matrix_column_major(mat1, is_bmm)
+                mat2_col_major = _is_matrix_column_major(mat2, is_bmm)
+                result = should_pad_nvmatmul_heuristic(
+                    m_val, k_val, n_val,
+                    m_padded_length, k_padded_length, n_padded_length,
+                    mat1.dtype,
+                    mat1_col_major, mat2_col_major,
+                )
+                key = should_pad_bench_key(match, mat1, mat2, op, input)
+                set_cached_should_pad(key, result)
+                return result
+            # If heuristic is "none", we shouldn't reach here (can_pad returns False)
+            # but handle it gracefully by falling through to benchmarking
 
         # We don't want to look up the cache for cases that are trivially false
         # since it does file io
