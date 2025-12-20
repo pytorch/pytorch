@@ -365,43 +365,46 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(eager4[1], compiled4[1])
         self.assertEqual(counter.frame_count, 1)
 
-    @torch._dynamo.config.patch(specialize_int=True)
-    def test_python_type_does_not_realize(self):
-        """Test that python_type() on a lazy constant does not trigger realization.
-        This verifies that type-based queries can be answered without full guarding.
+    def test_type_does_not_recompile_on_value_change(self):
+        """Test that type() checks do NOT trigger recompilation on value change.
 
-        Note: This test requires specialize_int=True because with specialize_int=False,
-        lazy_isinstance must realize to determine if the int becomes SymNodeVariable.
+        When type() is called on a LazyConstantVariable, it only installs a
+        TYPE_MATCH guard (not CONSTANT_MATCH), so different values of the same type
+        do not cause recompilation. This is similar to isinstance() behavior but
+        tests a different code path.
+
+        Note: We use string values here because with specialize_int=False (the default),
+        int values must be realized during handler dispatch to determine if they become
+        ConstantVariable or SymNodeVariable. Strings always become ConstantVariable.
         """
-        from torch._dynamo.source import LocalSource
-        from torch._dynamo.variables.constant import ConstantVariable
-        from torch._dynamo.variables.lazy import LazyCache, LazyConstantVariable
-        from torch._dynamo.variables.tensor import TensorVariable
-        from torch._guards import tracing, TracingContext
+        tensor_input = torch.randn(3)
 
-        # Create a dummy tracing context so guards can be installed
-        ctx = TracingContext(fake_mode=None)
-        with tracing(ctx):
-            # Create a LazyConstantVariable directly
-            # to test that python_type() doesn't trigger realization
-            source = LocalSource("test")
-            cache = LazyCache(42, source)
-            lc = LazyConstantVariable(cache, source=source)
+        def fn(t, val):
+            if type(val) is str:
+                return t + 1
+            return t - 1
 
-            # python_type() should not trigger realization
-            self.assertFalse(lc.is_realized())
-            self.assertEqual(lc.python_type(), int)
-            self.assertFalse(lc.is_realized())  # Still not realized
+        counter = CompileCounter()
+        opt_fn = torch.compile(fn, backend=counter)
 
-            # is_tensor() should not trigger realization
-            self.assertEqual(lc.is_tensor(), False)
-            self.assertFalse(lc.is_realized())
+        # First call with string
+        eager1 = fn(tensor_input, "hello")
+        compiled1 = opt_fn(tensor_input, "hello")
+        self.assertTrue(same(eager1, compiled1))
+        self.assertEqual(counter.frame_count, 1)
 
-            # lazy_isinstance() checks if cls is a subclass of ConstantVariable
-            # (i.e., whether this would realize to a ConstantVariable-like type)
-            self.assertTrue(lc.lazy_isinstance(ConstantVariable))
-            self.assertFalse(lc.lazy_isinstance(TensorVariable))
-            self.assertFalse(lc.is_realized())
+        # Second call with different string - should NOT recompile since
+        # type() only installs TYPE_MATCH guard
+        eager2 = fn(tensor_input, "world")
+        compiled2 = opt_fn(tensor_input, "world")
+        self.assertTrue(same(eager2, compiled2))
+        self.assertEqual(counter.frame_count, 1)  # No recompilation!
+
+        # Third call with int - should recompile due to type change
+        eager3 = fn(tensor_input, 42)
+        compiled3 = opt_fn(tensor_input, 42)
+        self.assertTrue(same(eager3, compiled3))
+        self.assertEqual(counter.frame_count, 2)  # Recompile for type change
 
     def test_isinstance_does_not_recompile_on_value_change(self):
         """Test that isinstance checks do NOT trigger recompilation on value change.
