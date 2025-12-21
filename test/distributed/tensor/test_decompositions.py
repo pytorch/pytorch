@@ -57,8 +57,21 @@ class TestDecompSharding(TestCase):
         self.assertTrue(out.max.placements, (Partial("max"), Replicate()))
 
     def test_custom_recursive_decomp(self):
-        """op1 decomps -> op2, which decomps -> matmul"""
+        """
+        op1 decomps -> op2, which decomps -> matmul
+
+        def op1(x, y):
+            return op2(x, y) + 1.0
+
+        def op2(x, y):
+            return x @ y
+
+        We also test that sharding prop caching kicks in for decompositions;
+        1) calling op1 twice should cache hit
+        2) since op1 runs op2's decomposition, calling op2 after should also cache hit
+        """
         from torch.distributed.tensor import empty as d_empty
+        from torch.distributed.tensor.debug import _get_python_sharding_prop_cache_info
 
         with torch.library._scoped_library("sharding_decomps", "FRAGMENT") as my_lib:
             my_lib.define("op1(Tensor x, Tensor y) -> Tensor")
@@ -91,8 +104,27 @@ class TestDecompSharding(TestCase):
             mesh = DeviceMesh("cpu", torch.arange(self.world_size).reshape(-1, 2))
             x = d_empty(16, 16, device_mesh=mesh, placements=[Shard(0), Shard(1)])
             y = d_empty(16, 16, device_mesh=mesh, placements=[Replicate(), Shard(0)])
+
+            # op1 1st call
             out = torch.ops.sharding_decomps.op1(x, y)
+
+            # expect matmul placements
             self.assertEqual(out.placements, (Shard(0), Partial("sum")))
+
+            # starting cache size
+            cache = _get_python_sharding_prop_cache_info()
+            cache_size = cache.currsize
+
+            # op1 2nd call
+            torch.ops.sharding_decomps.op1(x, y)
+            cache = _get_python_sharding_prop_cache_info()
+            self.assertEqual(cache_size, cache.currsize)
+
+            # op2 1st call, expect same placements + cache hit
+            out = torch.ops.sharding_decomps.op2(x, y)
+            self.assertEqual(out.placements, (Shard(0), Partial("sum")))
+            cache = _get_python_sharding_prop_cache_info()
+            self.assertEqual(cache_size, cache.currsize)
 
     def test_misc_ops_with_no_sharding_rules(self):
         """miscellaneous aten ops"""
