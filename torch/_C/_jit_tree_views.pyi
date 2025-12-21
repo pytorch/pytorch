@@ -1,4 +1,3 @@
-from __future__ import annotations
 from typing import Any, Optional
 
 # Defined in torch/csrc/jit/python/python_tree_views.cpp
