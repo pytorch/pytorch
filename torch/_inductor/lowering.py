@@ -6411,25 +6411,22 @@ def pow(a, b):
         else:
             return fallback_pow_tensor_tensor(a, b)
     
-    if isinstance(a, ir.TensorBox) and isinstance(b, Number):
-        b_dtype = ir.get_constant_dtype(b)
-        a_dtype = a.get_dtype()
-        if b_dtype != a_dtype:
-            b = ir.Constant(
-                b,
-                dtype=a_dtype,
-                device=a.get_device(),
-            )
+    a_dtype = a.get_dtype() if isinstance(a, ir.TensorBox) else None
+    b_dtype = b.get_dtype() if isinstance(b, ir.TensorBox) else None
 
-    if isinstance(b, ir.TensorBox) and isinstance(a, Number):
-        a_dtype = ir.get_constant_dtype(a)
-        b_dtype = b.get_dtype()
-        if a_dtype != b_dtype:
-            a = ir.Constant(
-                a,
-                dtype=b_dtype,
-                device=b.get_device(),
-            )
+    if (
+        a_dtype is not None
+        and b_dtype is not None
+        and is_float_dtype(a_dtype)
+        and is_float_dtype(b_dtype)
+        and a_dtype != b_dtype
+    ):
+        common_dtype = (
+            a_dtype if a_dtype.is_floating_point and a_dtype.itemsize >= b_dtype.itemsize
+            else b_dtype
+        )
+        a = to_dtype(a, common_dtype)
+        b = to_dtype(b, common_dtype)
 
     return pow_native(a, b)
 
