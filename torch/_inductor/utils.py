@@ -33,6 +33,7 @@ from collections.abc import (
     MutableSet,
 )
 from datetime import datetime
+from functools import lru_cache
 from io import StringIO
 from typing import (
     Any,
@@ -4222,3 +4223,18 @@ COLLECTIVE_OPS = OrderedSet(
 def is_collective_op(op_name: str) -> bool:
     """Check if an operation is a collective operation."""
     return op_name in COLLECTIVE_OPS
+
+
+@lru_cache
+def fb_only_cuda_options() -> list[str]:
+    if config.is_fbcode():
+        try:
+            from torch._inductor.fb.tlx_templates.registry import fb_only_cuda_options
+
+            return fb_only_cuda_options
+
+        except ImportError:
+            return []
+
+    else:
+        return []
