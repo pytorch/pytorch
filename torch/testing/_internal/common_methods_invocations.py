@@ -24902,7 +24902,11 @@ python_ref_db = [
                          'test_neg_view'),
             # FIXME: shouldn't check empty results
             DecorateInfo(unittest.skip("Can't check result for empty"), 'TestCommon', 'test_python_ref_executor'),
-            DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+            DecorateInfo(
+                unittest.skip('output is non-deterministic'),
+                'TestCommonCUDA',
+                'test_compare_cpu',
+            ),
         ),
     ),
     PythonRefInfo(
