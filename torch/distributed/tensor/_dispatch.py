@@ -10,7 +10,6 @@ import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
-from torch._logging import LazyString
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._argmin_argmax import argmin_argmax_handler
@@ -28,11 +27,7 @@ from torch.distributed.tensor._tp_conv import (
     convolution_backward_handler,
     convolution_handler,
 )
-from torch.distributed.tensor._utils import (
-    _format_implicit_redistribution_msg,
-    ExplicitRedistributionContext,
-    try_find_mesh_from_args,
-)
+from torch.distributed.tensor._utils import try_find_mesh_from_args
 from torch.distributed.tensor.placement_types import Partial, Placement, Replicate
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._python_dispatch import return_and_correct_aliasing
@@ -473,15 +468,6 @@ class OpDispatcher:
                         else contextlib.nullcontext()
                     )
 
-                    ExplicitRedistributionContext.observe_redistribution(
-                        arg_spec,
-                        # pyrefly: ignore [bad-argument-type]
-                        reshard_arg_spec,
-                        LazyString(
-                            _format_implicit_redistribution_msg,
-                            op_info.schema or suggested_input_schema.op,
-                        ),
-                    )
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
                             local_tensor,

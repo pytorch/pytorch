@@ -8,6 +8,7 @@ from typing import cast, Optional
 
 import torch
 from torch._guards import detect_fake_mode
+from torch._logging import LazyString
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
@@ -29,8 +30,10 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     _SingleDimStrategyFunc,
 )
 from torch.distributed.tensor._utils import (
+    _format_implicit_redistribution_msg,
     compute_local_shape_and_global_offset,
     compute_local_stride,
+    ExplicitRedistributionContext,
     try_find_mesh_from_args,
 )
 from torch.distributed.tensor.placement_types import _StridedShard, Shard
@@ -543,6 +546,14 @@ class ShardingPropagator:
                     )
                     if input_spec.placements != desired_spec.placements:
                         needs_redistribute = True
+                        ExplicitRedistributionContext.observe_redistribution(
+                            input_spec,
+                            expected_input_specs[idx],
+                            LazyString(
+                                _format_implicit_redistribution_msg,
+                                op_schema,
+                            ),
+                        )
 
                 suggestion_schema = None
                 if needs_redistribute:
