@@ -553,6 +553,7 @@ class FunctionalTensorMode(TorchDispatchMode):
                             for a in pytree.tree_leaves([args, kwargs]):
                                 if not isinstance(a, FunctionalTensor):
                                     continue
+                                # pyrefly: ignore[missing-attribute]
                                 curr_node = m.tracer.tensor_tracker[
                                     torch._from_functional_tensor(a.elem)
                                 ].proxy.node

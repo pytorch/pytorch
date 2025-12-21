@@ -1,9 +1,8 @@
 # Stub file for torch.fft
-from typing import Sequence
+from collections.abc import Sequence
 
 import torch
 from torch import Tensor
-
 
 # FFT operations
 def fft(
@@ -14,8 +13,6 @@ def fft(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def ifft(
     input: Tensor,
     n: int | None = None,
@@ -24,8 +21,6 @@ def ifft(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def fft2(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -34,8 +29,6 @@ def fft2(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def ifft2(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -44,8 +37,6 @@ def ifft2(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def fftn(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -54,8 +45,6 @@ def fftn(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def ifftn(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -64,7 +53,6 @@ def ifftn(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
 
 # Real FFT
 def rfft(
@@ -75,8 +63,6 @@ def rfft(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def irfft(
     input: Tensor,
     n: int | None = None,
@@ -85,8 +71,6 @@ def irfft(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def rfft2(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -95,8 +79,6 @@ def rfft2(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def irfft2(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -105,8 +87,6 @@ def irfft2(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def rfftn(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -115,8 +95,6 @@ def rfftn(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def irfftn(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -125,7 +103,6 @@ def irfftn(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
 
 # Hermitian FFT
 def hfft(
@@ -136,8 +113,6 @@ def hfft(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def ihfft(
     input: Tensor,
     n: int | None = None,
@@ -146,8 +121,6 @@ def ihfft(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def hfft2(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -156,8 +129,6 @@ def hfft2(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def ihfft2(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -166,8 +137,6 @@ def ihfft2(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def hfftn(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -176,8 +145,6 @@ def hfftn(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def ihfftn(
     input: Tensor,
     s: Sequence[int] | None = None,
@@ -186,7 +153,6 @@ def ihfftn(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
 
 # Helper functions
 def fftfreq(
@@ -198,8 +164,6 @@ def fftfreq(
     device: torch.device | str | None = None,
     requires_grad: bool = False,
 ) -> Tensor: ...
-
-
 def rfftfreq(
     n: int,
     d: float = 1.0,
@@ -209,16 +173,11 @@ def rfftfreq(
     device: torch.device | str | None = None,
     requires_grad: bool = False,
 ) -> Tensor: ...
-
-
 def fftshift(
     input: Tensor,
     dim: int | Sequence[int] | None = None,
 ) -> Tensor: ...
-
-
 def ifftshift(
     input: Tensor,
     dim: int | Sequence[int] | None = None,
 ) -> Tensor: ...
-
