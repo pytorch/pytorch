@@ -297,10 +297,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
-    # could not create a primitive descriptor for
-    # a deconvolution forward propagation primitive
-    "nn.functional.conv_transpose2d": {f32, f64},
-    "nn.functional.conv_transpose3d": {f32, f64},
     # [Begin] Incorrect XPU reference due to new driver.
     "masked.prod": {b8, i32, i64},
     "masked.amin": {i64},

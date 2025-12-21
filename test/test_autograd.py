@@ -13826,23 +13826,24 @@ class TestAutogradStreamSynchronization(TestCase):
 
         def do_test(suppress_warn, keep_grad_acc):
             def _test():
-                with warnings.catch_warnings(record=True) as warns:
-                    warnings.simplefilter("always")
+                with set_warn_always_context(True):
+                    with warnings.catch_warnings(record=True) as warns:
+                        warnings.simplefilter("always")
 
-                    with torch.Stream(0) as s0:
-                        a = torch.ones(8, 8, device=device, requires_grad=True)
-                        if keep_grad_acc:
-                            # create grad_acc under s1 and keep alive with b
-                            b = a.clone()
+                        with torch.Stream(0) as s0:
+                            a = torch.ones(8, 8, device=device, requires_grad=True)
+                            if keep_grad_acc:
+                                # create grad_acc under s1 and keep alive with b
+                                b = a.clone()
 
-                    with torch.Stream(0) as s1:
-                        s1.wait_stream(s0)
-                        c = a.sum()
+                        with torch.Stream(0) as s1:
+                            s1.wait_stream(s0)
+                            c = a.sum()
 
-                    c.backward()
+                        c.backward()
 
-                filter_str = "set_warn_on_accumulate_grad_stream_mismatch"
-                return sum([filter_str in str(w.message) for w in warns]) > 0
+                    filter_str = "set_warn_on_accumulate_grad_stream_mismatch"
+                    return sum([filter_str in str(w.message) for w in warns]) > 0
 
             if suppress_warn:
                 try:

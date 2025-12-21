@@ -40,9 +40,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.utils import _pytree as pytree
 
 
@@ -285,7 +285,6 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn1, args, True)
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
-    @skipIfRocm
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
@@ -371,7 +370,8 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": "False",
+            "benchmark_fusion": False,
+            "benchmark_epilogue_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -1847,7 +1847,7 @@ class TestPatternMatcher(TestCase):
                     count += 1
             return count
 
-        device = "cuda" if HAS_GPU else "cpu"
+        device = GPU_TYPE if HAS_GPU else "cpu"
         input_tensor = torch.randn(8, 16, device=device)
 
         with inductor_config.patch(remove_pre_grad_passes=None):
@@ -1961,6 +1961,128 @@ class TestPatternMatcher(TestCase):
         fn_replaced_result = fn_replaced(*x)
         self.assertEqual(count, 1)
         self.assertEqual(fn_result, fn_replaced_result)
+
+    def test_empty_like_pattern_matching(self):
+        def pattern(x):
+            y = torch.empty(x.shape, device=x.device, dtype=x.dtype)
+            z = y * 2
+            return x + z
+
+        def replacement(x):
+            return x * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [torch.randn(4, 4, device=GPU_TYPE)]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = my_patterns.apply(graph)
+            return count
+
+        def replacement(x):
+            return x * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [torch.randn(4, 4, device=GPU_TYPE)]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            z = y * 2
+            return x + z
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, fullgraph=True, options={"post_grad_custom_post_pass": custom_pass}
+        )
+
+        result = compiled_fn(x)
+        self.assertEqual(result, x * 3)
+        self.assertEqual(count, 1)
+
+
+class TestPatternMatcherLogging(LoggingTestCase):
+    device_type = GPU_TYPE
+
+    @make_logging_test()
+    def test_pattern_match_debug_output(self, records):
+        def pattern(x, y):
+            return x + y
+
+        def replacement(x, y):
+            return x * y
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph):
+            return my_patterns.apply(graph)
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "add"}
+        ):
+            compiled_fn = torch.compile(
+                fn, options={"post_grad_custom_post_pass": custom_pass}
+            )
+            result = compiled_fn(x, y)
+            self.assertEqual(result, x * y)
+
+        specific_record = self.getRecord(records, "Specific pattern match")
+        self.assertIn(
+            "Match(..., [], {'x': arg0_1, 'y': arg1_1})", specific_record.getMessage()
+        )
+        self.assertIn("add(arg0_1, arg1_1)", specific_record.getMessage())
+
+    @make_logging_test()
+    def test_failed_match_constant_args_format_string(self, records):
+        def pattern(x):
+            return x + 1
+
+        def replacement(x):
+            return x * 2
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph):
+            return my_patterns.apply(graph)
+
+        def fn(x):
+            return x + 2
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "add"}
+        ):
+            compiled_fn = torch.compile(
+                fn, options={"post_grad_custom_post_pass": custom_pass}
+            )
+            result = compiled_fn(x)
+            self.assertEqual(result, x + 2)
+
+        specific_record = self.getRecord(records, "Specific pattern match")
+        self.assertIn(
+            "add(arg0_1, 2) constant_args: add 2!=1 CallFunction(aten.add.Tensor, KeywordArg('x'), 1, _users=0)",
+            specific_record.getMessage(),
+        )
 
 
 if __name__ == "__main__":

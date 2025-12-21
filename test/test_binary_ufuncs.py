@@ -1149,6 +1149,16 @@ class TestBinaryUfuncs(TestCase):
         res = nom / denom
         self.assertEqual(res, expected)
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.bfloat16)
+    def test_division_by_scalar(self, device, dtype):
+        num = torch.rand(1024, device=device, dtype=dtype)
+        denom = torch.logspace(-4, 4, steps=20)
+        denom = [d.item() for d in denom]
+        res = [num / d for d in denom]
+        ref = [num * (1 / d) for d in denom]
+        self.assertEqual(res, ref, atol=0, rtol=0)
+
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
     @onlyCUDA
@@ -2899,6 +2909,18 @@ class TestBinaryUfuncs(TestCase):
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected, exact_dtype=False)
 
+        if torch.device(device).type == "cuda":
+            # test using cpu scalar with cuda.
+            x = torch.randn(10, device=device).to(dtype)
+            y = torch.tensor(2.0).to(dtype)
+            actual1 = torch.hypot(x, y)
+            actual2 = torch.hypot(y, x)
+            expected = np.hypot(x.cpu().numpy(), 2.0)
+            self.assertTrue(actual1.is_cuda)
+            self.assertTrue(actual2.is_cuda)
+            self.assertEqual(actual1, expected, exact_dtype=False)
+            self.assertEqual(actual2, expected, exact_dtype=False)
+
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
     def test_gcd(self, device, dtype):
@@ -4005,14 +4027,20 @@ class TestBinaryUfuncs(TestCase):
         def test_dx(sizes, dim, dx, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, dx=dx, dim=dim)
-            expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
+            if int(np.__version__.split(".")[0]) >= 2:
+                expected = np.trapezoid(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
+            else:
+                expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual, exact_dtype=False)
 
         def test_x(sizes, dim, x, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
-            expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
+            if int(np.__version__.split(".")[0]) >= 2:
+                expected = np.trapezoid(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
+            else:
+                expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual.cpu(), exact_dtype=False)
 

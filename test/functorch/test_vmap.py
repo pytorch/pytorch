@@ -50,6 +50,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    TEST_CUDNN_VERSION,
     tf32_on_and_off,
     with_tf32_off,
 )
@@ -3927,6 +3928,14 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def test_randomness(self, device, randomness, backend):
         if device == "cpu":
             raise unittest.SkipTest("This test is only for CUDA for now")
+
+        # xfail for cuDNN version between 9.10 and 9.13
+        if backend == SDPBackend.CUDNN_ATTENTION and randomness == "different":
+            if 91100 <= TEST_CUDNN_VERSION <= 91300:
+                raise unittest.SkipTest(
+                    "xfail on cuDNN 9.10-9.13 with CUDNN backend and randomness='different'"
+                )
+
         backend_ctx = sdpa_kernel([backend])
         with backend_ctx:
             B = 4

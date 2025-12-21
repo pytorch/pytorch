@@ -5,6 +5,7 @@
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
+#include <ATen/native/Pool.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
@@ -28,7 +29,9 @@
 #include <ATen/ops/linalg_inv_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_ex_native.h>
 #include <ATen/ops/linalg_lu_factor_native.h>
+#include <ATen/ops/linalg_lu_native.h>
 #include <ATen/ops/linalg_solve_triangular_native.h>
+#include <ATen/ops/lu_unpack.h>
 #include <ATen/ops/lu_unpack_native.h>
 #include <ATen/ops/mm_native.h>
 #include <ATen/ops/orgqr_native.h>
@@ -49,27 +52,53 @@ static auto& lib = MetalShaderLibrary::getBundledLibrary();
 #include <ATen/native/mps/LinearAlgebra_metallib.h>
 #endif
 
+// Union to hold alpha and beta scalar values in the appropriate type for Metal kernels
+union AlphaBeta {
+  std::array<int64_t, 2> i64;
+  std::array<int32_t, 2> i32;
+  std::array<float, 2> f32;
+  std::array<c10::complex<float>, 2> c64;
+};
+
+AlphaBeta make_alpha_beta(const Scalar& alpha, const Scalar& beta, ScalarType scalar_type) {
+  AlphaBeta alpha_beta{};
+  if (scalar_type == kLong) {
+    alpha_beta.i64 = {alpha.toLong(), beta.toLong()};
+  } else if (c10::isIntegralType(scalar_type, true)) {
+    alpha_beta.i32 = {alpha.toInt(), beta.toInt()};
+  } else if (c10::isComplexType(scalar_type)) {
+    alpha_beta.c64 = {alpha.toComplexFloat(), beta.toComplexFloat()};
+  } else {
+    alpha_beta.f32 = {alpha.toFloat(), beta.toFloat()};
+  }
+  return alpha_beta;
+}
+
 Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
+  // Handle conjugated inputs by creating resolved copies
+  auto self_ = self.is_conj() ? self.resolve_conj() : self;
+  auto other_ = other.is_conj() ? other.resolve_conj() : other;
+
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
   auto matmulPSO = lib.getPipelineStateForFunc("matmul_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "matmul", {self, other});
+      getMPSProfiler().beginProfileKernel(matmulPSO, "matmul", {self_, other_});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)),
-                                       static_cast<uint32_t>(self.size(1)),
+      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self_.size(0)),
+                                       static_cast<uint32_t>(self_.size(1)),
                                        static_cast<uint32_t>(output.size(1))};
       std::array<int64_t, 6> strides = {
-          self.stride(0), self.stride(1), other.stride(0), other.stride(1), output.stride(0), output.stride(1)};
+          self_.stride(0), self_.stride(1), other_.stride(0), other_.stride(1), output.stride(0), output.stride(1)};
       constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
       uint32_t gridSizeX = (output.size(1) + TILE_DIM - 1) / TILE_DIM;
-      uint32_t gridSizeY = (self.size(0) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (self_.size(0) + TILE_DIM - 1) / TILE_DIM;
 
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
-      mtl_setArgs(computeEncoder, self, other, output, strides, sizes);
+      mtl_setArgs(computeEncoder, self_, other_, output, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
@@ -78,36 +107,40 @@ Tensor& do_metal_mm(const Tensor& self, const Tensor& other, Tensor& output) {
 }
 
 Tensor& do_metal_bmm(const Tensor& batch1, const Tensor& batch2, Tensor& output) {
+  // Handle conjugated inputs by creating resolved copies
+  auto batch1_ = batch1.is_conj() ? batch1.resolve_conj() : batch1;
+  auto batch2_ = batch2.is_conj() ? batch2.resolve_conj() : batch2;
+
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
   auto matmulPSO = lib.getPipelineStateForFunc("naive_bmm_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_batch_matmul", {batch1, batch2});
+      getMPSProfiler().beginProfileKernel(matmulPSO, "naive_batch_matmul", {batch1_, batch2_});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(batch1.size(1)),
-                                       static_cast<uint32_t>(batch1.size(2)),
+      std::array<uint32_t, 4> sizes = {static_cast<uint32_t>(batch1_.size(1)),
+                                       static_cast<uint32_t>(batch1_.size(2)),
                                        static_cast<uint32_t>(output.size(2)),
                                        static_cast<uint32_t>(output.size(0))};
-      std::array<int64_t, 9> strides = {batch1.stride(2),
-                                        batch1.stride(1),
-                                        batch1.stride(0),
-                                        batch2.stride(2),
-                                        batch2.stride(1),
-                                        batch2.stride(0),
+      std::array<int64_t, 9> strides = {batch1_.stride(2),
+                                        batch1_.stride(1),
+                                        batch1_.stride(0),
+                                        batch2_.stride(2),
+                                        batch2_.stride(1),
+                                        batch2_.stride(0),
                                         output.stride(2),
                                         output.stride(1),
                                         output.stride(0)};
       constexpr uint32_t TILE_DIM = 16;
       uint32_t gridSizeX = (output.size(2) + TILE_DIM - 1) / TILE_DIM;
-      uint32_t gridSizeY = (batch1.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (batch1_.size(1) + TILE_DIM - 1) / TILE_DIM;
       uint32_t gridSizeZ = output.size(0);
 
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, gridSizeZ);
 
-      mtl_setArgs(computeEncoder, batch1, batch2, output, strides, sizes);
+      mtl_setArgs(computeEncoder, batch1_, batch2_, output, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
@@ -124,51 +157,121 @@ Tensor& do_metal_addmm(const Tensor& self,
   if (beta.isFloatingPoint() && alpha.isFloatingPoint() && beta.toDouble() == 0 && alpha.toDouble() == 1) {
     return do_metal_mm(self, other, output);
   }
+  // Handle conjugated inputs by creating resolved copies
+  auto self_ = self.is_conj() ? self.resolve_conj() : self;
+  auto other_ = other.is_conj() ? other.resolve_conj() : other;
+  auto bias_ = bias.is_conj() ? bias.resolve_conj() : bias;
+
   auto stream = getCurrentMPSStream();
   auto device = MPSDevice::getInstance()->device();
   auto matmulPSO = lib.getPipelineStateForFunc("addmm_" + mps::scalarToMetalTypeString(output));
   dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self, other});
+      getMPSProfiler().beginProfileKernel(matmulPSO, "addmm", {self_, other_});
       auto computeEncoder = stream->commandEncoder();
       [computeEncoder setComputePipelineState:matmulPSO];
-      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self.size(0)),
-                                       static_cast<uint32_t>(self.size(1)),
+      std::array<uint32_t, 3> sizes = {static_cast<uint32_t>(self_.size(0)),
+                                       static_cast<uint32_t>(self_.size(1)),
                                        static_cast<uint32_t>(output.size(1))};
-      std::array<int64_t, 8> strides = {self.stride(0),
-                                        self.stride(1),
-                                        other.stride(0),
-                                        other.stride(1),
+      std::array<int64_t, 8> strides = {self_.stride(0),
+                                        self_.stride(1),
+                                        other_.stride(0),
+                                        other_.stride(1),
                                         output.stride(0),
                                         output.stride(1),
-                                        bias.stride(0),
-                                        bias.stride(1)};
-      union {
-        std::array<int64_t, 2> i64;
-        std::array<int32_t, 2> i32;
-        std::array<float, 2> f32;
-        std::array<c10::complex<float>, 2> c64;
-      } alpha_beta{};
-      if (output.scalar_type() == kLong) {
-        alpha_beta.i64 = {alpha.toLong(), beta.toLong()};
-      } else if (c10::isIntegralType(output.scalar_type(), true)) {
-        alpha_beta.i32 = {alpha.toInt(), beta.toInt()};
-      } else if (c10::isComplexType(output.scalar_type())) {
-        alpha_beta.c64 = {alpha.toComplexFloat(), beta.toComplexFloat()};
-      } else {
-        alpha_beta.f32 = {alpha.toFloat(), beta.toFloat()};
-      }
+                                        bias_.stride(0),
+                                        bias_.stride(1)};
+      auto alpha_beta = make_alpha_beta(alpha, beta, output.scalar_type());
       constexpr uint32_t TILE_DIM = 16; // fastest performance from tests on multiple macs
       uint32_t gridSizeX = (output.size(1) + TILE_DIM - 1) / TILE_DIM;
-      uint32_t gridSizeY = (self.size(0) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (self_.size(0) + TILE_DIM - 1) / TILE_DIM;
 
       MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
       MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, 1);
-      mtl_setArgs(computeEncoder, self, other, output, bias, alpha_beta.i64, strides, sizes);
+      mtl_setArgs(computeEncoder, self_, other_, output, bias_, alpha_beta.i64, strides, sizes);
       [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
       getMPSProfiler().endProfileKernel(matmulPSO);
     }
   });
+  return output;
+}
+
+Tensor& do_metal_addbmm_or_baddbmm(const Tensor& bias,
+                                   const Tensor& batch1,
+                                   const Tensor& batch2,
+                                   const Scalar& alpha,
+                                   const Scalar& beta,
+                                   Tensor& output,
+                                   bool is_baddbmm) {
+  // Handle conjugated inputs by creating resolved copies
+  auto batch1_ = batch1.is_conj() ? batch1.resolve_conj() : batch1;
+  auto batch2_ = batch2.is_conj() ? batch2.resolve_conj() : batch2;
+  auto bias_ = bias.is_conj() ? bias.resolve_conj() : bias;
+
+  auto stream = getCurrentMPSStream();
+  auto device = MPSDevice::getInstance()->device();
+  const char* op_name = is_baddbmm ? "baddbmm" : "addbmm";
+  auto matmulPSO =
+      lib.getPipelineStateForFunc(std::string("naive_") + op_name + "_" + mps::scalarToMetalTypeString(output));
+
+  // Expand bias to match output shape for broadcasting
+  auto bias_expanded = bias_.expand_as(output);
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
+    @autoreleasepool {
+      getMPSProfiler().beginProfileKernel(
+          matmulPSO, std::string("naive_") + op_name, {batch1_, batch2_, bias_expanded});
+      auto computeEncoder = stream->commandEncoder();
+      [computeEncoder setComputePipelineState:matmulPSO];
+
+      std::array<uint32_t, 4> sizes;
+      if (is_baddbmm) {
+        sizes = {static_cast<uint32_t>(batch1_.size(1)),
+                 static_cast<uint32_t>(batch1_.size(2)),
+                 static_cast<uint32_t>(output.size(2)),
+                 static_cast<uint32_t>(output.size(0))};
+      } else {
+        sizes = {static_cast<uint32_t>(batch1_.size(1)),
+                 static_cast<uint32_t>(batch1_.size(2)),
+                 static_cast<uint32_t>(output.size(1)),
+                 static_cast<uint32_t>(batch1_.size(0))};
+      }
+
+      auto alpha_beta = make_alpha_beta(alpha, beta, output.scalar_type());
+
+      constexpr uint32_t TILE_DIM = 16;
+      uint32_t gridSizeX = (output.size(-1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeY = (batch1_.size(1) + TILE_DIM - 1) / TILE_DIM;
+      uint32_t gridSizeZ = is_baddbmm ? output.size(0) : 1;
+
+      // Unified stride layout for both baddbmm and addbmm:
+      // [0-2]: batch1 (col, row, batch)
+      // [3-5]: batch2 (col, row, batch)
+      // [6-8]: output (col, row, batch)
+      // [9-11]: bias (col, row, batch)
+      std::array<int64_t, 12> strides = {batch1_.stride(2),
+                                         batch1_.stride(1),
+                                         batch1_.stride(0),
+                                         batch2_.stride(2),
+                                         batch2_.stride(1),
+                                         batch2_.stride(0),
+                                         output.stride(-1),
+                                         output.stride(-2),
+                                         output.stride(0), // Output batch is unused for addbmm
+                                         bias_expanded.stride(-1),
+                                         bias_expanded.stride(-2),
+                                         bias_expanded.stride(0)}; // Output bias is unused for addbmm
+
+      MTLSize threadsPerThreadgroup = MTLSizeMake(TILE_DIM, TILE_DIM, 1);
+      MTLSize threadgroupsPerGrid = MTLSizeMake(gridSizeX, gridSizeY, gridSizeZ);
+
+      mtl_setArgs(computeEncoder, batch1_, batch2_, output, bias_expanded, alpha_beta.i64, strides, sizes);
+      [computeEncoder dispatchThreadgroups:threadgroupsPerGrid threadsPerThreadgroup:threadsPerThreadgroup];
+
+      getMPSProfiler().endProfileKernel(matmulPSO);
+    }
+  });
+
   return output;
 }
 
@@ -626,8 +729,8 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
   TORCH_CHECK(batch2.is_mps());
   TORCH_CHECK(result.is_mps());
 
-  TORCH_CHECK(supportedFloatingOrComplexType(batch1),
-              "MPS device does not support addbmm or baddbmm for non-float inputs");
+  TORCH_CHECK(supportedFloatingOrComplexType(batch1) || c10::isIntegralType(batch1.scalar_type(), true),
+              "MPS device does not support addbmm or baddbmm for this input type");
 
   TORCH_CHECK(batch1.dim() == 3, "batch1 must be a 3D tensor");
   TORCH_CHECK(batch2.dim() == 3, "batch2 must be a 3D tensor");
@@ -656,6 +759,11 @@ static Tensor& addbmm_or_baddbmm_out_mps_impl(const Tensor& input,
       result.zero_();
       return result;
     }
+  }
+
+  // Use Metal kernels for integer and complex types
+  if (c10::isIntegralType(batch1.scalar_type(), true) || c10::isComplexType(batch1.scalar_type())) {
+    return do_metal_addbmm_or_baddbmm(input, batch1, batch2, alpha, beta, result, opType == BADDBMM_OP_TYPE);
   }
 
   MPSStream* stream = getCurrentMPSStream();
@@ -1143,52 +1251,39 @@ static Tensor& linalg_solve_triangular_mps_impl(const Tensor& A,
   return out;
 }
 
-static void lu_unpack_mps_impl(const Tensor& LU_data,
-                               const Tensor& LU_pivots,
-                               bool unpack_data,
-                               bool unpack_pivots,
-                               const Tensor& P,
-                               const Tensor& L,
-                               const Tensor& U) {
-  const auto ndim = LU_data.dim();
-  TORCH_CHECK(ndim >= 2, "LU_data must have at least 2 dimensions");
-
-  const auto r = LU_data.size(-2);
-  const auto c = LU_data.size(-1);
-  const auto k = std::min<int64_t>(r, c);
-
-  const auto batchSize = c10::multiply_integers(LU_data.sizes().begin(), LU_data.sizes().end() - 2);
-
-  if (unpack_data) {
-    Tensor L_part = r < c ? slice(LU_data, -1, 0, k) : LU_data;
-    L.copy_(L_part.tril());
-    (ndim == 2 ? L.diagonal() : L.diagonal(0, -2, -1)).fill_(1);
-
-    Tensor U_part = r < c ? LU_data : slice(LU_data, -2, 0, k);
-    U.copy_(U_part.triu());
+static void unpack_pivots_stub_impl(TensorIterator& iter, const int64_t dim_size, const int64_t max_pivot) {
+  if (iter.numel() == 0 || dim_size == 0) {
+    return;
   }
 
-  if (unpack_pivots) {
-    // P as an identity matrix for pivots
-    P.fill_(0);
-    LU_pivots.dim() == 1 ? P.diagonal().fill_(1) : P.diagonal(0, -2, -1).fill_(1);
+  auto perm = iter.tensor(0);
+  auto pivots = iter.tensor(1);
 
-    auto stream = getCurrentMPSStream();
-    auto device = MPSDevice::getInstance()->device();
-    auto applyPivotsPSO = lib.getPipelineStateForFunc("applyPivots");
-    uint32_t maxThreadsPerGroup = [applyPivotsPSO maxTotalThreadsPerThreadgroup];
+  // TODO: Perhaps this should be disabled since it requires a sync?
+  TORCH_CHECK_TENSOR_ALL(pivots.le(max_pivot).logical_and(pivots.ge(1)),
+                         "pivots passed to lu_unpack must be between 1 and LU.size(-2) inclusive."
+                         "Did you properly pass the result of lu_factor?");
 
-    auto pivots = (LU_pivots.dim() == 1) ? LU_pivots.sub(1) : LU_pivots.view({batchSize, -1}).sub(1);
+  auto num_threads = iter.numel();
+  MPSStream* stream = getCurrentMPSStream();
 
+  UnpackPivotsParams params;
+  params.perm_batch_stride = safe_downcast<uint32_t, int64_t>((perm.dim() > 1) ? perm.stride(-2) : 0);
+  params.pivots_batch_stride = safe_downcast<uint32_t, int64_t>((pivots.dim() > 1) ? pivots.stride(-2) : 0);
+  params.dim_size = safe_downcast<uint32_t, int64_t>(dim_size);
+
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
     @autoreleasepool {
-      dispatch_sync_with_rethrow(stream->queue(), ^() {
-        auto computeEncoder = stream->commandEncoder();
-        mtl_setArgs(computeEncoder, P, pivots, r, k);
-        [computeEncoder setComputePipelineState:applyPivotsPSO];
-        mtl_dispatch1DJob(computeEncoder, applyPivotsPSO, batchSize * maxThreadsPerGroup);
-      });
+      id<MTLComputeCommandEncoder> compute_encoder = stream->commandEncoder();
+      auto pipeline_state = lib.getPipelineStateForFunc(
+          fmt::format("unpack_pivots_{}_{}", scalarToMetalTypeString(perm), scalarToMetalTypeString(pivots)));
+      getMPSProfiler().beginProfileKernel(pipeline_state, "unpack_pivots", {pivots});
+      [compute_encoder setComputePipelineState:pipeline_state];
+      mtl_setArgs(compute_encoder, perm, pivots, params);
+      mtl_dispatch1DJob(compute_encoder, pipeline_state, num_threads);
+      getMPSProfiler().endProfileKernel(pipeline_state);
     }
-  }
+  });
 }
 
 static void cholesky_stub_impl(const Tensor& out, const Tensor& info, bool upper) {
@@ -1525,17 +1620,6 @@ TORCH_IMPL_FUNC(_linalg_solve_ex_out_mps)
   mps::linalg_solve_out_mps_impl(A, B, left, check_errors, result, LU, pivots, info);
 }
 
-TORCH_IMPL_FUNC(lu_unpack_out_mps)
-(const Tensor& LU_data,
- const Tensor& LU_pivots,
- bool unpack_data,
- bool unpack_pivots,
- const Tensor& P,
- const Tensor& L,
- const Tensor& U) {
-  mps::lu_unpack_mps_impl(LU_data, LU_pivots, unpack_data, unpack_pivots, P, L, U);
-}
-
 TORCH_IMPL_FUNC(linalg_lu_factor_ex_out_mps)
 (const Tensor& A, bool pivot, bool check_errors, const Tensor& LU, const Tensor& pivots, const Tensor& info) {
   mps::linalg_lu_factor_ex_out_mps_impl(A, pivot, LU, pivots, info, check_errors);
@@ -1546,6 +1630,7 @@ TORCH_IMPL_FUNC(linalg_inv_ex_out_mps)(const Tensor& A, bool check_errors, const
 }
 
 REGISTER_DISPATCH(cholesky_stub, mps::cholesky_stub_impl)
+REGISTER_DISPATCH(unpack_pivots_stub, mps::unpack_pivots_stub_impl)
 REGISTER_DISPATCH(orgqr_stub, mps::orgqr_stub_impl);
 
 } // namespace at::native

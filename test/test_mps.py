@@ -805,6 +805,49 @@ class TestAvgPool(TestCaseMPS):
 
 
 class TestMPS(TestCaseMPS):
+    def ulpAssertAllClose(self, output, reference, n_ulps):
+        """
+        Wrapper for element-wise tolerances with known
+        uncertainty in terms of units in last place.
+        """
+        # Handle infinities: same-signed infinities are considered equal
+        both_inf = torch.isinf(output) & torch.isinf(reference)
+        matching_inf = both_inf & (torch.sign(output) == torch.sign(reference))
+
+        uncertainty = n_ulps * torch.abs(torch.nextafter(output, 2 * output) - output).to('cpu')
+        difference = torch.abs(output - reference)
+
+        condition = matching_inf | (difference <= uncertainty)
+
+        if not torch.all(condition):
+            # Mask out all infinities when computing mismatches
+            non_inf_mask = ~both_inf
+            actual_mismatches = ~condition & non_inf_mask
+
+            num_mismatched = actual_mismatches.sum().item()
+            num_elements = condition.numel()
+            mismatch_percentage = (num_mismatched / num_elements) * 100.0
+
+            masked_diff = difference.clone()
+            masked_diff[both_inf] = -float('inf')
+            greatest_diff_index = masked_diff.argmax().item()
+
+            greatest_diff_value = difference.flatten()[greatest_diff_index].item()
+            allowed_uncertainty = uncertainty.flatten()[greatest_diff_index].item()
+            diff_coords = torch.unravel_index(
+                torch.tensor(greatest_diff_index),
+                difference.shape
+            )
+            coords_str = tuple(coord.item() for coord in diff_coords)
+            error_msg = (f"Tensor-likes are not close!\n\n"
+                         f"Mismatched elements: {num_mismatched:,} / {num_elements:,} "
+                         f"({mismatch_percentage:.1f}%)\n"
+                         f"Greatest absolute difference: {greatest_diff_value:.6e}"
+                         f"  at index {coords_str}"
+                         f"  (up to {allowed_uncertainty:.3e} allowed)")
+            raise AssertionError(error_msg)
+
+
     def test_exp(self, device="mps", dtype=torch.float):
         for v in (2, -2) + ((1j, 1 + 1j) if dtype.is_complex else ()):
             b = torch.arange(18, dtype=dtype, device=device) / 3 * math.pi
@@ -844,7 +887,12 @@ class TestMPS(TestCaseMPS):
         # Mismatched elements: 3 / 4 (75.0%)
         # Greatest absolute difference: 1.1920928955078125e-07 at index (3,) (up to 1e-08 allowed)
         # Greatest relative difference: 1.0786502002702036e-07 at index (3,) (up to 1e-08 allowed)
-        self.assertEqual(output, output_cpu, atol=1e-8, rtol=1e-8)
+
+        # precise::metal::exp promises to be accurate to within 4 ulps
+        # https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf Table 8.2
+        self.ulpAssertAllClose(output.cpu(), output_cpu, n_ulps=4)
+
+
 
     def test_exp_strided_output(self):
         x = torch.rand((256, 10), device='mps')
@@ -6219,7 +6267,10 @@ class TestMPS(TestCaseMPS):
 
         log_result = torch.log1p(x)
         log_result_cpu = torch.log1p(cpu_x)
-        self.assertEqual(log_result, log_result_cpu, atol=0, rtol=2e-7)
+
+        # precise::metal::log promises to be accurate to within 4 ulps
+        # https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf Table 8.2
+        self.ulpAssertAllClose(log_result.cpu(), log_result_cpu, n_ulps=4)
 
         # Fallback to log
         cpu_x = torch.arange(-1.0, 2.0, 1e-4, dtype=dtype, requires_grad=False)
@@ -6228,7 +6279,9 @@ class TestMPS(TestCaseMPS):
         log_result = torch.log1p(x)
         log_result_cpu = torch.log1p(cpu_x)
 
-        self.assertEqual(log_result, log_result_cpu, atol=0, rtol=2e-7)
+        # precise::metal::log promises to be accurate to within 4 ulps
+        # https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf Table 8.2
+        self.ulpAssertAllClose(log_result.cpu(), log_result_cpu, n_ulps=4)
 
     def test_logaddexp(self):
         def helper(shape):
@@ -7367,7 +7420,9 @@ class TestMPS(TestCaseMPS):
     # Test inverse
     def test_inverse(self):
         def helper(n, atol=1e-5, rtol=1e-6):
-            cpu_input = torch.randn(n, n, device='cpu')
+            # Generate well-conditioned invertible matrix by adding scaled identity
+            # This ensures the matrix is not singular
+            cpu_input = torch.randn(n, n, device='cpu') + torch.eye(n, device='cpu') * 10
             mps_input = cpu_input.to('mps')
 
             cpu_result = torch.linalg.inv(cpu_input)
@@ -8245,7 +8300,7 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(x_mps.cpu(), x_cpu)
 
     def test_empty_posneginf(self):
-        # just to check that it doesnt crash
+        # just to check that it doesn't crash
         input_tensor = torch.empty(0, device="mps")
         out_pos = torch.isposinf(input_tensor)
         out_neg = torch.isposinf(input_tensor)
@@ -8253,10 +8308,98 @@ class TestMPS(TestCaseMPS):
         self.assertEqual(out_neg.numel(), 0)
 
     def test_empty_dot(self):
-        # just to check that it doesnt crash
+        # just to check that it doesn't crash
         a = torch.rand((0), device="mps")
         b = torch.rand((0), device="mps")
         self.assertEqual(a.dot(b), a.cpu().dot(b.cpu()))
+
+    def test_binary_kernels(self):
+        def check(a, b, ops="+-*/"):
+            op_funcs = {'+': lambda x, y: x + y, '-': lambda x, y: x - y,
+                        '*': lambda x, y: x * y, '/': lambda x, y: x / y}
+            for op in ops:
+                self.assertEqual(op_funcs[op](a, b), op_funcs[op](a.cpu(), b.cpu()))
+                self.assertEqual(op_funcs[op](b, a), op_funcs[op](b.cpu(), a.cpu()))
+
+        def rand(*shape, **kw):
+            return torch.rand(shape, device="mps", **kw)
+
+        def randint(*shape, **kw):
+            return torch.randint(0, 100, shape, device="mps", **kw)
+
+        # basic case
+        check(rand(100), rand(100))
+        # empty tensors
+        check(rand(0), rand(0), "+-")
+        # strided tensors
+        check(rand(100, 100).t(), rand(100, 100).t(), "+*")
+
+        # broadcasting cases
+        for sa, sb in [((100, 100), (100,)), ((100, 10, 100), (100, 1, 100)), ((100, 1, 10), (1, 100, 10))]:
+            check(rand(*sa), rand(*sb), "+*")
+
+        # scalar cases
+        a = rand(100)
+        self.assertEqual(a + 2.0, a.cpu() + 2.0)
+        self.assertEqual(a * 2.0, a.cpu() * 2.0)
+        self.assertEqual(torch.add(a, a, alpha=2.0), torch.add(a.cpu(), a.cpu(), alpha=2.0))
+
+        # cast cases
+        check(rand(100, dtype=torch.float32), rand(100, dtype=torch.float16), "+*-")
+        check(rand(100, dtype=torch.float32), rand(100, dtype=torch.bfloat16), "+*-")
+        check(randint(100, dtype=torch.int32), randint(100, dtype=torch.int64), "+*-")
+
+        # non contiguous cases/slices
+        check(rand(100, 100)[10:50, 20:80], rand(100, 100)[10:50, 20:80])
+        check(rand(100, 100)[::2, ::3], rand(100, 100)[::2, ::3], "+*")
+        check(rand(10, 20, 30).permute(2, 0, 1), rand(10, 20, 30).permute(2, 0, 1), "+*")
+        check(rand(50, 50).flip(0), rand(50, 50).flip(1), "+*")
+        check(rand(100, 100).diagonal(), rand(100, 100).diagonal(), "+*")
+        check(rand(1).expand(100, 100), rand(1), "+*-")
+
+        # integer ops
+        a_int, b_int = randint(100, dtype=torch.int32), torch.randint(1, 100, (100,), device="mps", dtype=torch.int32)
+        self.assertEqual(a_int // b_int, a_int.cpu() // b_int.cpu())
+        self.assertEqual(a_int % b_int, a_int.cpu() % b_int.cpu())
+
+        # boolean. bitwise
+        a_bool, b_bool = rand(100) > 0.5, rand(100) > 0.5
+        self.assertEqual(a_bool & b_bool, a_bool.cpu() & b_bool.cpu())
+        self.assertEqual(a_bool | b_bool, a_bool.cpu() | b_bool.cpu())
+
+        # comparisons
+        a, b = rand(100), rand(100)
+        self.assertEqual(a > b, a.cpu() > b.cpu())
+        self.assertEqual(a < b, a.cpu() < b.cpu())
+        self.assertEqual(a >= b, a.cpu() >= b.cpu())
+        self.assertEqual(a <= b, a.cpu() <= b.cpu())
+        self.assertEqual(a == b, a.cpu() == b.cpu())
+        self.assertEqual(a != b, a.cpu() != b.cpu())
+
+        # power
+        a_pow, b_pow = rand(100) + 0.5, rand(100) * 3
+        self.assertEqual(a_pow ** b_pow, a_pow.cpu() ** b_pow.cpu())
+
+        # complex
+        check(rand(100, dtype=torch.complex64), rand(100, dtype=torch.complex64))
+
+        # inplace
+        a, b = rand(100), rand(100)
+        a_cpu = a.cpu().clone()
+        a.add_(b)
+        a_cpu.add_(b.cpu())
+        self.assertEqual(a, a_cpu)
+
+        # with out parameter
+        a, b, c = rand(100), rand(100), torch.empty(100, device="mps")
+        c_cpu = torch.empty(100)
+        torch.add(a, b, out=c)
+        torch.add(a.cpu(), b.cpu(), out=c_cpu)
+        self.assertEqual(c, c_cpu)
+
+        # where
+        cond, a, b = rand(100) > 0.5, rand(100), rand(100)
+        self.assertEqual(torch.where(cond, a, b), torch.where(cond.cpu(), a.cpu(), b.cpu()))
 
 
 class TestLargeTensors(TestCaseMPS):
@@ -9667,7 +9810,7 @@ class TestSDPA(TestCaseMPS):
         memory_footprints = []
         for _ in range(100):
             output = F.scaled_dot_product_attention(query, key, value)
-            # syncronize to wait for the GPU computation to return
+            # synchronize to wait for the GPU computation to return
             torch.mps.synchronize()
             current_mem, driver_mem = get_mps_memory_usage()
             memory_footprints.append((current_mem, driver_mem))
@@ -12762,6 +12905,15 @@ class TestErrorInputs(TestCase):
             y = x[:, [1]]
             torch.mps.synchronize()
 
+    def test_embedding_bag_out_of_bounds(self, device):
+        inputs = torch.tensor([0, 1, 6], device=device)  # Note: 6 is out of bounds for weight with size 4
+        weight = torch.randn(4, 2, device=device)
+        offsets = torch.tensor([0, 3], device=device)
+        with self.assertRaisesRegex(torch.AcceleratorError, "Index 2 is out of bounds: 6, range 0 to 4"):
+            torch.nn.functional.embedding_bag(inputs, weight, offsets)
+            torch.mps.synchronize()
+
+
 class TestComplex(TestCase):
     def test_tensor_scalar_binops(self):
         # Regression test for https://github.com/pytorch/pytorch/issues/119088
@@ -12977,8 +13129,8 @@ class TestMetalLibrary(TestCaseMPS):
         idx = 25
         x[idx] = torch.nan
         lib.do_max(z0, z1, x)
-        self.assertTrue(z0.isnan().all().item(), f"results are {z0}, but all elements shold have been nan")
-        self.assertTrue((z1 == idx).all().item(), f"results are {z1}, but all elements shold have been {idx}")
+        self.assertTrue(z0.isnan().all().item(), f"results are {z0}, but all elements should have been nan")
+        self.assertTrue((z1 == idx).all().item(), f"results are {z1}, but all elements should have been {idx}")
 
     @parametrize("dtype", [torch.float32, torch.float16, torch.int32, torch.bfloat16])
     def test_atomic_add(self, dtype):
@@ -13040,6 +13192,36 @@ class TestMetalLibrary(TestCaseMPS):
         shutil.rmtree(capture_dirname)
         self.assertGreater(len(capture_listdir), 3,
                            f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
+
+    def test_metal_error_buffer(self):
+        # Test that error_buf_idx parameter works correctly
+        lib = torch.mps.compile_shader("""
+            #include <c10/metal/error.h>
+
+            kernel void check_bounds(device float* x,
+                                    constant int& limit,
+                                    device c10::metal::ErrorMessages* error_buf,
+                                    uint idx [[thread_position_in_grid]]) {
+                if (idx >= limit) {
+                    TORCH_REPORT_ERROR(error_buf, "Index ", idx, " exceeds limit ", limit);
+                    x[idx] = -1.0;
+                } else {
+                    x[idx] = idx;
+                }
+            }
+        """)
+
+        x = torch.zeros(10, device="mps")
+        # Should work without errors when limit is large enough
+        lib.check_bounds(x, 10, error_buf_idx=2)
+        self.assertEqual(x, torch.arange(10, device='mps', dtype=x.dtype))
+
+        # Test with a smaller limit that should trigger an error report
+        # The error should be raised as AcceleratorError when synchronize is called
+        y = torch.zeros(10, device="mps")
+        lib.check_bounds(y, 5, error_buf_idx=2)
+        with self.assertRaisesRegex(RuntimeError, "Index .* exceeds limit"):
+            torch.mps.synchronize()
 
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
