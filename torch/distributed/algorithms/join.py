@@ -2,7 +2,7 @@
 import warnings
 from abc import ABC, abstractmethod
 from types import TracebackType
-from typing import Any, NamedTuple
+from typing import NamedTuple
 
 import torch
 import torch.distributed as dist
