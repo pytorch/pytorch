@@ -501,7 +501,7 @@ def _register_lowering(
             args = list(args[0])
 
         if any(
-            (fn not in fallbacks or in_namespace(fn, "_c10d_functional"))
+            (fn not in fallbacks and not in_namespace(fn, "_c10d_functional"))
             for fn in aten_fn
         ):
             # explicitly assert for "out=" ops for better error messages
