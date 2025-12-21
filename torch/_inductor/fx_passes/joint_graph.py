@@ -88,7 +88,7 @@ def remove_no_ops(
             # https://github.com/pytorch/pytorch/issues/86128 causes
             # non-Tensor inputs even for ops with only Tensor inputs.
             # TODO - decompose/type promote to avoid this
-            if not all(isinstance(arg, torch.fx.Node) for arg in node.args):
+            if any(not isinstance(arg, torch.fx.Node) for arg in node.args):
                 return
 
             if not fake_tensors_eq(node.meta["val"], replacement.meta["val"]):
@@ -452,8 +452,8 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 # replace SymInt as Node before creating a new full node
                 # e.g. (1, s0) -> (1, arg0_1)
                 node_shape = node_replacements_shapes[node]
-                if not all(
-                    not isinstance(s, torch.SymInt) or s in cf.symint_nodes
+                if any(
+                    isinstance(s, torch.SymInt) and s not in cf.symint_nodes
                     for s in node_shape
                 ):
                     continue
@@ -871,7 +871,7 @@ def _other_is_broadcasted_in_dim(match):
         return True
 
     inp = match.kwargs["inp"]
-    if not all(isinstance(x, torch.fx.Node) for x in (inp, other)):
+    if any(not isinstance(x, torch.fx.Node) for x in (inp, other)):
         return False
 
     inp_example = inp.meta["val"]
@@ -879,7 +879,7 @@ def _other_is_broadcasted_in_dim(match):
     if isinstance(other_example, (torch.SymInt, torch.SymFloat)):
         return True
 
-    if not all(isinstance(x, torch.Tensor) for x in (inp_example, other_example)):
+    if any(not isinstance(x, torch.Tensor) for x in (inp_example, other_example)):
         return False
 
     inp_ndim = inp_example.ndim

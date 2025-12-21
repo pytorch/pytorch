@@ -37,7 +37,7 @@ def _is_backward(graph: torch.fx.Graph) -> bool:
         if node.op != "placeholder":
             break
         placeholders.append(node)
-    return not all(node.name.startswith("primal") for node in placeholders)
+    return any(not node.name.startswith("primal") for node in placeholders)
 
 
 def _compute_mm_arithmetic_intensity(M: int, N: int, K: int) -> float:

@@ -307,7 +307,7 @@ class IndexPropagation(DefaultHandler):
             for a in itertools.chain(args, kwargs.values())
             if isinstance(a, IndexPropVar)
         ]
-        if not all(v.is_symbolic for v in var_arguments):
+        if any(not v.is_symbolic for v in var_arguments):
             return self.fallback(name, args, kwargs)
 
         return self.propagate_sympy(name, args, kwargs)

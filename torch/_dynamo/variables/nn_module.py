@@ -664,8 +664,9 @@ class NNModuleVariable(VariableTracker):
             return invoke_and_store_as_constant(tx, fn, name, args, kwargs)
 
         def assert_all_args_kwargs_const() -> None:
-            if not all(
-                x.is_python_constant() for x in itertools.chain(args, kwargs.values())
+            if any(
+                not x.is_python_constant()
+                for x in itertools.chain(args, kwargs.values())
             ):
                 unimplemented(
                     gb_type="non-const argument in nn.Module method",

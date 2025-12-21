@@ -792,7 +792,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
         flattened = self._flatten_type_spec(raw_value)
         if not flattened:
             return None
-        if not all(isinstance(typ, type) for typ in flattened):
+        if any(not isinstance(typ, type) for typ in flattened):
             return None
         return tuple(dict.fromkeys(flattened))
 
@@ -1064,7 +1064,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
             if self._is_generator_just_started() and len(args):
                 # can't send non-None value to a just-started generator
                 # Test: GeneratorCPythonTests.test_send_non_none_to_new_gen
-                if not all(arg.is_constant_none() for arg in args):
+                if any(not arg.is_constant_none() for arg in args):
                     raise_observed_exception(TypeError, tx)
             tracer = self.inline_tracer
             tracer.push_many(args)

@@ -1697,7 +1697,7 @@ class Tensor(torch._C.TensorBase):
         if kwargs is None:
             kwargs = {}
 
-        if not all(issubclass(cls, t) for t in types):
+        if any(not issubclass(cls, t) for t in types):
             return NotImplemented
 
         with _C.DisableTorchFunctionSubclass():

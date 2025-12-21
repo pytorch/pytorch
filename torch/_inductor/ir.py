@@ -3844,8 +3844,8 @@ class Layout(OutputSpec):
 
         # Skip padding the strides for dynamic shapes based on config.pad_dynamic_shape
         # Checking both shape and strides, as there are cases where only one is dynamic
-        is_dynamic = not all(
-            isinstance(s, (int, sympy.Integer))
+        is_dynamic = any(
+            not isinstance(s, (int, sympy.Integer))
             for s in itertools.chain(in_strides, size)
         )
         if not config.pad_dynamic_shapes and is_dynamic:

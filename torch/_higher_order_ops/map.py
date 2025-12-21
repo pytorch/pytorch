@@ -91,7 +91,7 @@ def map(
     """
     flat_xs, xs_spec = pytree.tree_flatten(xs)
     flat_args, args_spec = pytree.tree_flatten(args)
-    if not all(isinstance(t, torch.Tensor) for t in flat_xs):
+    if any(not isinstance(t, torch.Tensor) for t in flat_xs):
         raise RuntimeError(f"Mapped xs can only consist of tensors. Got xs {flat_xs}.")
 
     shapes = [xs.shape for xs in flat_xs]

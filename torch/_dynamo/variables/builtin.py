@@ -1037,8 +1037,9 @@ class BuiltinVariable(VariableTracker):
                 args: Sequence[VariableTracker],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
-                if fn is AssertionError and not all(
-                    x.is_python_constant() and isinstance(x.as_python_constant(), str)
+                if fn is AssertionError and any(
+                    not x.is_python_constant()
+                    or not isinstance(x.as_python_constant(), str)
                     for x in args
                 ):
                     unimplemented(

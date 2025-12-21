@@ -189,11 +189,11 @@ class SIMDKernelFeatures:
         ]
         for node in pointwise_nodes:
             # An index can be an integer when loading a random seed.
-            if not all(
-                not isinstance(dep, MemoryDep)
-                or dep.is_contiguous()
-                or isinstance(dep.index, (sympy.Integer, int))
-                or dep.stride1_for_last_dim()
+            if any(
+                isinstance(dep, MemoryDep)
+                and not dep.is_contiguous()
+                and not isinstance(dep.index, (sympy.Integer, int))
+                and not dep.stride1_for_last_dim()
                 for dep in itertools.chain(
                     node.read_writes.reads, node.read_writes.writes
                 )

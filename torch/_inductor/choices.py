@@ -376,11 +376,9 @@ class InductorChoices:
             lower = bounds.lower
             upper = bounds.upper
 
-            if not all(
-                (
-                    (isinstance(bound, int) or bound.is_constant())
-                    and bound != torch.utils._sympy.numbers.IntInfinity()
-                )
+            if any(
+                (not isinstance(bound, int) and not bound.is_constant())
+                or bound == torch.utils._sympy.numbers.IntInfinity()
                 for bound in (lower, upper)
             ):
                 return False

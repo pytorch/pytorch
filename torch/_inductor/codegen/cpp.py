@@ -4879,9 +4879,9 @@ class CppScheduling(BaseScheduling):
 
     def _get_outer_loop_fusion_depth(self, node1, node2):
         DISABLE_OUTER_LOOP_FUSION = 0
-        if not all(
+        if any(
             type(node)
-            in (OuterLoopFusedSchedulerNode, FusedSchedulerNode, SchedulerNode)
+            not in (OuterLoopFusedSchedulerNode, FusedSchedulerNode, SchedulerNode)
             for node in (node1, node2)
         ):
             return DISABLE_OUTER_LOOP_FUSION
@@ -5349,9 +5349,9 @@ class CppScheduling(BaseScheduling):
 
             assert template_buffer.get_name() in outputs_by_name
             users = outputs_by_name[template_buffer.get_name()].users
-            return not all(
-                isinstance(user.node, BaseSchedulerNode)
-                and user.node.node in epilogue_nodes
+            return any(
+                not isinstance(user.node, BaseSchedulerNode)
+                or user.node.node not in epilogue_nodes
                 for user in users
             )
 

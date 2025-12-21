@@ -763,7 +763,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         ) is not None:
             mutated_args = node.args[inplaceable_op.mutated_arg]
 
-            if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):
+            if any((arg, node) not in copy_args_to_copy_nodes for arg in mutated_args):
                 continue
 
             if can_inplace(node, mutated_args):

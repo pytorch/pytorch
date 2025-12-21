@@ -1907,7 +1907,7 @@ def solve_min_cut(
         if node.op == "placeholder":
             return True
 
-        return not all(is_fusible(node, user) for user in node.users)
+        return any(not is_fusible(node, user) for user in node.users)
 
     def get_node_weight(node, static_lifetime_input_nodes) -> float:
         if (

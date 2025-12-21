@@ -583,7 +583,7 @@ def collect_intermediate_outputs(
 
 
 def _check_all_tensorvariable(args: Sequence[VariableTracker]) -> None:
-    if not all(type(a.realize()) is TensorVariable for a in args):
+    if any(type(a.realize()) is not TensorVariable for a in args):
         unimplemented(
             gb_type="HOP: non torch.Tensor leaf",
             context=f"args types: {[type(a.realize()) for a in args]}",
@@ -2698,8 +2698,9 @@ class AssociativeScanHigherOrderVariable(TorchHigherOrderOperatorVariable):
 
             for node in fx.graph.nodes:
                 # Check that the combine_fn is pointwise, if combine_mode='pointwise'
-                if not all(
-                    is_pointwise_use(use) or use.op == "output" for use in node.users
+                if any(
+                    not is_pointwise_use(use) and use.op != "output"
+                    for use in node.users
                 ):
                     raise RuntimeError(
                         "For combine_mode='pointwise', the combine_fn needs to be pointwise"

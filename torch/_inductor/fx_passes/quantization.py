@@ -1024,13 +1024,13 @@ def _is_input_output_same_scale_zp(check_node):
         )
         assert len(quant_nodes) == 1, "expect only 1 add node at output quant pattern"
         zero_points.append(quant_nodes[0].args[2])
-        if not all(zero_point == zero_points[0] for zero_point in zero_points):
+        if any(zero_point != zero_points[0] for zero_point in zero_points):
             return False
 
         # Step 2: Check inputs/output scale
         scales = [node.args[1] for node in dequant_nodes]
         scales.append(quant_nodes[0].args[1])
-        if not all(math.isclose(scale, scales[0], rel_tol=1e-5) for scale in scales):  # type: ignore[arg-type]
+        if any(not math.isclose(scale, scales[0], rel_tol=1e-5) for scale in scales):  # type: ignore[arg-type]
             return False
 
         return True
@@ -1114,8 +1114,8 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
         if not config.cpp.enable_concat_linear:
             return False
         assert all(k in match.kwargs for k in ("x", "w1", "w2", "w3", "scales"))
-        if not all(
-            hasattr(match.kwargs[key], "meta")
+        if any(
+            not hasattr(match.kwargs[key], "meta")
             for key in ["x", "w1", "w2", "w3", "scales"]
         ):
             return False
@@ -1152,8 +1152,8 @@ def _is_valid_concat_linear_int8_woq_optimization_pattern():
 def _is_valid_woq_optimization_pattern():
     def fn(match):
         assert all(k in match.kwargs for k in ("x", "weight", "scales"))
-        if not all(
-            hasattr(match.kwargs[key], "meta") for key in ["x", "weight", "scales"]
+        if any(
+            not hasattr(match.kwargs[key], "meta") for key in ["x", "weight", "scales"]
         ):
             return False
         x = match.kwargs["x"].meta["val"]

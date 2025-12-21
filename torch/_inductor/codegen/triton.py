@@ -2557,8 +2557,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     @property
     def has_store_with_contiguous_rdim(self) -> bool:
-        return not all(
-            is_buffer_removed(name) for name in self.stores_with_contiguous_rdim
+        return any(
+            not is_buffer_removed(name) for name in self.stores_with_contiguous_rdim
         )
 
     def dtype_to_str(self, dtype: torch.dtype) -> str:
@@ -3585,7 +3585,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if (
                 is_sympy_integer_like(index)
                 and value.shape is not None
-                and not all(str(x) == "1" for x in value.shape)
+                and any(str(x) != "1" for x in value.shape)
             ):
                 value_shape = ", ".join(map(str, value.shape))
                 indexing_str += f".broadcast_to({value_shape})"
@@ -3596,7 +3596,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if (
                 is_sympy_integer_like(index)
                 and value.shape is not None
-                and not all(str(x) == "1" for x in value.shape)
+                and any(str(x) != "1" for x in value.shape)
             ):
                 value_shape = ", ".join(map(str, value.shape))
                 indexing_str += f".broadcast_to({value_shape})"
@@ -4465,7 +4465,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if (
                 is_sympy_integer_like(index)
                 and value.shape is not None
-                and not all(str(x) == "1" for x in value.shape)
+                and any(str(x) != "1" for x in value.shape)
             ):
                 value_shape = ", ".join(map(str, value.shape))
                 indexing_str += f".broadcast_to({value_shape})"

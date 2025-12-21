@@ -110,7 +110,7 @@ def _convert_out_params(f):
             out_kwargs = tuple(kwargs.pop(o, None) for o in out_names)
             # Either all of the out kwargs are set or none of them
             is_none = out_kwargs[0] is None
-            if not all((o is None) == is_none for o in out_kwargs):
+            if any((o is None) != is_none for o in out_kwargs):
                 raise AssertionError(
                     f"all out kwargs must be set or none of them, got {out_kwargs}"
                 )

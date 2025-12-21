@@ -184,8 +184,8 @@ def aoti_compile_with_persistent_cache(
     """
     assert not dynamic, "Only support static shape for now"
     flattened_inputs = list(args) + list(kwargs.values())
-    if not all(
-        isinstance(
+    if any(
+        not isinstance(
             input,
             (
                 supported_scalar_types(),
@@ -204,8 +204,8 @@ def aoti_compile_with_persistent_cache(
         raise NotImplementedError(err_msg)
 
     for input in flattened_inputs:
-        if isinstance(input, list) and not all(
-            isinstance(item, torch.Tensor) for item in input
+        if isinstance(input, list) and any(
+            not isinstance(item, torch.Tensor) for item in input
         ):
             err_msg = f"_impl_with_aoti_compile encounters unsupported input types: {flattened_inputs}"
             log.exception(err_msg)

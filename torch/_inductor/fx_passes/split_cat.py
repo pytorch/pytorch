@@ -1297,12 +1297,12 @@ def merge_split_squeeze(
 ):
     graph = match.graph
     split = next(node for node in match.nodes if node.target is torch.split)
-    if not all(s == 1 for s in split_sizes):
+    if any(s != 1 for s in split_sizes):
         return
     if isinstance(dim, Sequence):
         return
     next_users = find_next_users(split)
-    if not all(node.target is torch.squeeze for node in next_users):
+    if any(node.target is not torch.squeeze for node in next_users):
         return
     with graph.inserting_before(match.output_node()):
         unbind = graph.call_function(
@@ -1529,7 +1529,7 @@ def merge_getitem_cat(match: Match, split_sections: list[int], dim: int):
             if (
                 split_dim != cat_dim
                 or not has_same_parent_node(cat_user)
-                or not all(len(arg.users) == 1 for arg in cat_user.args[0])  # type: ignore[union-attr]
+                or any(len(arg.users) != 1 for arg in cat_user.args[0])  # type: ignore[union-attr]
             ):
                 continue
             # find the index of getitems to be cated/stacked
@@ -1903,8 +1903,8 @@ def merge_select_cat_aten(match: Match, *args, **kwargs):
             cat_dim = get_arg_value(cat_node, 1, "dim")
             cat_inputs = get_arg_value(cat_node, 0, "tensors")
             # check all select nodes has same slice dim
-            if not all(
-                select_node.args[1] == select_nodes[0].args[1]
+            if any(
+                select_node.args[1] != select_nodes[0].args[1]
                 for select_node in select_nodes
             ):
                 continue
@@ -2004,8 +2004,8 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     unsqueeze_nodes = list(node.args[0])  # type: ignore[arg-type]
     cat_dim = get_arg_value(node, 1, "dim")
     # check the unsqueeze nodes come from the select nodes
-    if not all(
-        get_arg_value(unsqueeze_node, 0, "input").target is torch.ops.aten.select
+    if any(
+        get_arg_value(unsqueeze_node, 0, "input").target is not torch.ops.aten.select
         for unsqueeze_node in unsqueeze_nodes
     ):
         return
@@ -2014,21 +2014,21 @@ def merge_unbind_stack_aten(match: Match, *args, **kwargs):
     ]
     parent_of_select_node = get_arg_value(select_nodes[0], 0, "input")
     # check the target of select_nodes are the same
-    if not all(
-        select_node.target is torch.ops.aten.select for select_node in select_nodes
+    if any(
+        select_node.target is not torch.ops.aten.select for select_node in select_nodes
     ):
         return
     # check the select nodes come from the same parent node
-    if not all(
-        get_arg_value(select_node, 0, "input") == parent_of_select_node
+    if any(
+        get_arg_value(select_node, 0, "input") != parent_of_select_node
         for select_node in select_nodes
     ):
         return
     if len(unsqueeze_nodes) != len(select_nodes):
         return
     # check the select nodes have the same dim
-    if not all(
-        get_arg_value(select_node, 1, "dim") == cat_dim for select_node in select_nodes
+    if any(
+        get_arg_value(select_node, 1, "dim") != cat_dim for select_node in select_nodes
     ):
         return
     # check the select nodes have consecutive indices starting from 0
@@ -2942,14 +2942,14 @@ def move_view_after_cat(match: Match, *args, **kwargs):
         if len(cat_inputs) != len(split_section):
             continue
         # check if the cat inputs are all the view nodes
-        if not all(
-            view_node.target is torch.ops.aten.reshape.default
+        if any(
+            view_node.target is not torch.ops.aten.reshape.default
             for view_node in cat_inputs
         ):
             continue
         # check if the view nodes are all from getitem nodes
-        if not all(
-            view_node.args[0].target is operator.getitem for view_node in cat_inputs
+        if any(
+            view_node.args[0].target is not operator.getitem for view_node in cat_inputs
         ):
             continue
         view_indices = [view.args[0].args[1] for view in cat_inputs]

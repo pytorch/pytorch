@@ -177,7 +177,7 @@ def set_intersection(set1, *others, cls=set):
     if len(others) == 0:
         return set1.copy()
 
-    if not all(isinstance(s, Iterable) for s in others):
+    if any(not isinstance(s, Iterable) for s in others):
         raise TypeError(f"set.difference expected an iterable, got {type(others)}")
 
     for s in others:
@@ -209,7 +209,7 @@ def set_union(set1, *others, cls=None):
     if len(others) == 0:
         return set1.copy()
 
-    if not all(isinstance(s, Iterable) for s in others):
+    if any(not isinstance(s, Iterable) for s in others):
         raise TypeError(f"set.union expected an iterable, got {type(others)}")
 
     for s in others:
@@ -238,7 +238,7 @@ def set_difference(set1, *others, cls=set):
     if len(others) == 0:
         return set1.copy()
 
-    if not all(isinstance(s, Iterable) for s in others):
+    if any(not isinstance(s, Iterable) for s in others):
         raise TypeError(f"set.difference expected an iterable, got {type(others)}")
 
     for s in others:

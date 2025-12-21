@@ -127,7 +127,7 @@ def functional_call(
     if isinstance(parameter_and_buffer_dicts, dict):
         parameters_and_buffers = parameter_and_buffer_dicts
     elif isinstance(parameter_and_buffer_dicts, Sequence):
-        if not all(isinstance(d, dict) for d in parameter_and_buffer_dicts):
+        if any(not isinstance(d, dict) for d in parameter_and_buffer_dicts):
             raise ValueError(
                 "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
             )
@@ -230,7 +230,7 @@ def stack_module_state(
             "stack_module_state: Expected all models to have the same training/eval mode."
         )
     model0_typ = type(models[0])
-    if not all(type(m) is model0_typ for m in models):
+    if any(type(m) is not model0_typ for m in models):
         raise RuntimeError(
             "stack_module_state: Expected all models to be of the same class."
         )

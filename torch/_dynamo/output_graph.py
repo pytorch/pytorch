@@ -2552,9 +2552,9 @@ class OutputGraph(OutputGraphCommon):
             # TODO: This will bail here if you ever end up with a more complicated
             # computation function, like sum(list_of_ints), even though it
             # should be DCE'able
-            if not all(is_symnode_arg(a) for a in node.args):
+            if any(not is_symnode_arg(a) for a in node.args):
                 return False
-            if not all(is_symnode_arg(a) for a in node.kwargs.values()):
+            if any(not is_symnode_arg(a) for a in node.kwargs.values()):
                 return False
             return True
 

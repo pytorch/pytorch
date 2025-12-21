@@ -209,7 +209,7 @@ def associative_scan(
             raise ValueError(
                 f"Combine_mode must either 'pointwise' or 'generic', but got {cm}"
             )
-        if cm == "pointwise" and not all(l.device.type in ("cuda", "xpu") for l in lxs):
+        if cm == "pointwise" and any(l.device.type not in ("cuda", "xpu") for l in lxs):
             raise ValueError(
                 "For combine_mode='pointwise', all input tensors need to be on CUDA or XPU"
             )

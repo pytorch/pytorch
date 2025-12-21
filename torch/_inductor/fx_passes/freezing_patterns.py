@@ -143,21 +143,21 @@ def addmm_patterns_init():
         if "w3" in match.kwargs:
             weight_inputs.append("w3")
 
-        if not all(
-            match.kwargs[wgt].target is torch.ops.prims.convert_element_type.default
+        if any(
+            match.kwargs[wgt].target is not torch.ops.prims.convert_element_type.default
             for wgt in weight_inputs
         ):
             return False
 
-        if not all(
+        if any(
             next(iter(match.kwargs[wgt]._input_nodes.keys())).meta["val"].dtype
-            is torch.int8
+            is not torch.int8
             for wgt in weight_inputs
         ):
             return False
 
-        if not all(
-            match.kwargs[wgt].meta["val"].dtype is torch.bfloat16
+        if any(
+            match.kwargs[wgt].meta["val"].dtype is not torch.bfloat16
             for wgt in weight_inputs
         ):
             return False
@@ -185,9 +185,9 @@ def addmm_patterns_init():
         for equal_shape_group in equal_shape_inputs:
             inps = [match.kwargs[name] for name in equal_shape_group]
 
-            if not all(
-                inp.op == "get_attr"
-                and inp.meta["val"].shape == inps[0].meta["val"].shape
+            if any(
+                inp.op != "get_attr"
+                or inp.meta["val"].shape != inps[0].meta["val"].shape
                 for inp in inps
             ):
                 return False

@@ -137,7 +137,7 @@ def can_pad(
     if not check_dtype(mat1, mat2):
         return False
 
-    if not all(valid_shape_and_stride(t) for t in (mat1, mat2, input)):
+    if any(not valid_shape_and_stride(t) for t in (mat1, mat2, input)):
         return False
 
     # Check for zero dimensions - not safe to pad

@@ -369,7 +369,7 @@ def is_b2b_gemm_good_on(
     checks whether the sizes are good for b2b_gemm
     """
     # basic checks
-    if not all(["val" in A_node.meta, "val" in B_node.meta, "val" in C_node.meta]):
+    if any("val" not in node.meta for node in (A_node, B_node, C_node)):
         return False
     fake_tensors = (
         A_node.meta["val"],
@@ -386,7 +386,7 @@ def is_b2b_gemm_good_on(
         fake_tensors, "is_xpu"
     ):
         return False
-    if not all([len(A.shape) == 2, len(B.shape) == 2, len(C.shape) == 2]):
+    if any(len(shape) != 2 for shape in (A.shape, B.shape, C.shape)):
         return False
     if not ((A.shape[1] == B.shape[0]) and (B.shape[1] == C.shape[0])):
         return False

@@ -536,7 +536,7 @@ def combine_state_for_ensemble(
             "have the same training/eval mode."
         )
     model0_typ = type(models[0])
-    if not all(type(m) is model0_typ for m in models):
+    if any(type(m) is not model0_typ for m in models):
         raise RuntimeError(
             "combine_state_for_ensemble: Expected all models to be of the same class."
         )

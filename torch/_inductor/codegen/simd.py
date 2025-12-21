@@ -1337,8 +1337,8 @@ class SIMDScheduling(BaseScheduling):
                 #    its tiling is incompatible with native matmul tiling (z,y,x,r).
                 #    This means _split_iteration_ranges will fail, so these nodes should not be fused.
                 tiling = self.select_tiling(node1.get_nodes(), numel1, rnumel1)
-                if not all(
-                    SIMDKernel.is_compatible(
+                if any(
+                    not SIMDKernel.is_compatible(
                         tiling.values(), n2.get_ranges(), reduction_numel=rnumel1
                     )
                     for n2 in node2.get_nodes()
@@ -1414,8 +1414,8 @@ class SIMDScheduling(BaseScheduling):
         if not node1.is_reduction() and node2.is_reduction():
             assert rnumel1 == 1 and rnumel2 != 1
             if numel1 == numel2 * rnumel2:
-                if not all(
-                    SIMDKernel.is_compatible((numel2, rnumel2), n.get_ranges())
+                if any(
+                    not SIMDKernel.is_compatible((numel2, rnumel2), n.get_ranges())
                     for n in node1.get_nodes()
                 ):
                     why("nodes numel/rnumel incompatibility")
@@ -1853,7 +1853,7 @@ class SIMDScheduling(BaseScheduling):
                     if buf.has_tensor_output()
                 ]
 
-        if not all(expr_fits_within_32bit(size) for size in buf_sizes):
+        if any(not expr_fits_within_32bit(size) for size in buf_sizes):
             return False
 
         # Only install guards for 32-bit indexing as there is no correctness

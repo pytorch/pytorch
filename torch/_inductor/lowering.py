@@ -500,8 +500,9 @@ def _register_lowering(
             unpacked = True
             args = list(args[0])
 
-        if not all(
-            (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
+        if any(
+            (fn not in fallbacks or in_namespace(fn, "_c10d_functional"))
+            for fn in aten_fn
         ):
             # explicitly assert for "out=" ops for better error messages
             assert not any(x == "out" for x in kwargs), "out= ops aren't yet supported"
@@ -3983,8 +3984,8 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
                 )
             return False
 
-        if ir.try_get_name(self) in values.get_read_names() and not all(
-            indice_slice_from_randperm(indice) for indice in indices
+        if ir.try_get_name(self) in values.get_read_names() and any(
+            not indice_slice_from_randperm(indice) for indice in indices
         ):
             # Fix issue: https://github.com/pytorch/pytorch/issues/138908
             # When self and values have memory overlapping, indices may

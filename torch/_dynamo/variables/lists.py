@@ -570,7 +570,7 @@ class RangeVariable(BaseListVariable):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__iter__":
-            if not all(var.is_python_constant() for var in self.items):
+            if any(not var.is_python_constant() for var in self.items):
                 # Can't represent a `range_iterator` without well defined bounds
                 return variables.misc.DelayGraphBreakVariable(
                     msg="Cannot create range_iterator: bounds (start, stop, step) must be fully defined as concrete constants.",
@@ -931,7 +931,7 @@ class ListVariable(CommonListMethodsVariable):
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
 
-            if not all(k.is_python_constant() for k in keys):
+            if any(not k.is_python_constant() for k in keys):
                 first_non_constant_key = None
                 for k in keys:
                     if not k.is_python_constant():

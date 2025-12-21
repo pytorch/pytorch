@@ -105,10 +105,10 @@ class CUDAKernel(Kernel):
             # And if they come from the same node, whichever symbol we use is fine.
             # if in runtime the logic changes, this would trigger guard
             first_match = matches[0]
-            if not all(
-                match.node == first_match.node
-                and match.attr == first_match.attr
-                and match.dim == first_match.dim
+            if any(
+                match.node != first_match.node
+                or match.attr != first_match.attr
+                or match.dim != first_match.dim
                 for match in matches
             ):
                 raise AssertionError("All matching layout args should be identical")

@@ -793,8 +793,8 @@ def analyze_memory_coalescing(
             # n1 can can be split beyond range
 
             MIN_TILING_BLOCK = 8
-            if not all(
-                V.graph.sizevars.statically_known_lt(MIN_TILING_BLOCK, block)
+            if any(
+                not V.graph.sizevars.statically_known_lt(MIN_TILING_BLOCK, block)
                 for block in (tiling_factor, var_ranges[v] // tiling_factor)
             ):
                 continue

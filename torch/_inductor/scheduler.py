@@ -306,12 +306,12 @@ class MixOrderReduction:
         # other_ndoe. If that ascess is non-contiugous, generating
         # mix-order reduction can be inefficient especially when we
         # force XBLOCK to be 1
-        # if not all(
-        #     cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
+        # if any(
+        #     not cls.is_contiguous_load(buf, contiguous_node) for buf in common_reads
         # ):
         #     return False
-        if not all(
-            cls.is_contiguous_load(dep.name, contiguous_node)
+        if any(
+            not cls.is_contiguous_load(dep.name, contiguous_node)
             for dep in contiguous_node.read_writes.reads
         ):
             return False
@@ -5104,7 +5104,7 @@ class Scheduler:
             for node in prologue_nodes[:-1]:
                 node_outs = node.get_outputs()
                 for out in node_outs:
-                    if not all(user.node in prologue_nodes for user in out.users):
+                    if any(user.node not in prologue_nodes for user in out.users):
                         why("template prologue can only fuse nodes with a single use")
                         return False
 
@@ -5294,11 +5294,11 @@ class Scheduler:
             if not relevant_reads:
                 continue
             num_concurrent_reads += 1
-            if not all(
-                isinstance(read, MemoryDep)
-                and not free_symbol_is_type(read.index, SymT.TMP)
-                and read.index == write.index
-                and read.size == write.size
+            if any(
+                not isinstance(read, MemoryDep)
+                or free_symbol_is_type(read.index, SymT.TMP)
+                or read.index != write.index
+                or read.size != write.size
                 for read in relevant_reads
             ):
                 return False
