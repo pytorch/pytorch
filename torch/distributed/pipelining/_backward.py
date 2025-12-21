@@ -244,6 +244,7 @@ def stage_backward_weight(
             for i, grad in enumerate(grads_tuple):
                 if grad is not None:
                     valid_edges.append(GradientEdge(intermediate, i))
+                    # pyrefly: ignore [bad-argument-type]
                     valid_grad_outputs.append(grad)
 
         # Break a reference cycle caused inside stage_backward_input->get_hook->hook

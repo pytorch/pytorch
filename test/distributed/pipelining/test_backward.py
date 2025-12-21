@@ -204,7 +204,7 @@ class StageBackwardTests(TestCase):
             (
                 "size = 1",
                 lambda: MLPModule(d_hid).to(device),
-                lambda: [(torch.randn(batch_size, d_hid, device=device),)]
+                lambda: [(torch.randn(batch_size, d_hid, device=device),)],
             ),
             (
                 "1 grad, 1 None",
