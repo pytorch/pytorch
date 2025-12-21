@@ -1,11 +1,11 @@
 #  Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     ArgsType,
     KwargsType,
@@ -162,6 +162,7 @@ def _expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
     single_dim_strategy: _SingleDimStrategyFunc,
+    output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
 ) -> _ExpandedSingleDimStrategyFunc:
     """
     Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
@@ -172,12 +173,16 @@ def _expand_single_dim_strategy_to_mesh(
 
     The expanded_strategy function accesses both the args_schema/kwargs_schema, which contains TensorMeta in place of
     tensor arguments, but also the op_schema which contains OpStrategy in place of Tensor args.
+
+    Args:
+        output_tensor_meta: tensor metadata for the output(s), precomputed during sharding prop
     """
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
-    def _expanded_strategy(
+    def _create_expanded_strategy(
         op_schema: OpSchema,
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
     ) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
         def expanded_strategy(
             op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
@@ -220,23 +225,27 @@ def _expand_single_dim_strategy_to_mesh(
                 mesh,
                 op_schema,
                 cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
+                output_tensor_meta=output_tensor_meta,
             )
 
         return expanded_strategy
 
-    def _translate_foreach_op_schema(op_schema: OpSchema, index: int) -> OpSchema:
+    def _translate_foreach_op_schema(
+        op_schema: OpSchema, output_tensor_meta: Sequence[TensorMeta], index: int
+    ) -> tuple[OpSchema, TensorMeta]:
         """Translate foreach op to per-element version of schema."""
         op_parts = str(op_schema.op).split(".")
         base_op_name = op_parts[-2].replace("_foreach_", "")
         foreach_variant = op_parts[-1]
 
-        # select per-element inputs
+        # select per-element inputs, outputs
         target_args, target_kwargs = tree_map_only(
             TupleStrategy,
             lambda x: x.children[index],
             (op_schema.args_schema, op_schema.kwargs_schema),
             is_leaf=lambda x: isinstance(x, TupleStrategy),
         )
+        target_output_meta = output_tensor_meta[index]
 
         # figure out target op variant
         variant_map = {
@@ -260,11 +269,12 @@ def _expand_single_dim_strategy_to_mesh(
             else base_op.default
         )
 
-        return OpSchema(
+        op_schema = OpSchema(
             target_op,  # type: ignore[arg-type]
             args_schema=tuple(target_args),
             kwargs_schema=op_schema.kwargs_schema,
         )
+        return op_schema, target_output_meta
 
     def expanded_foreach_strategy(
         op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
@@ -284,9 +294,15 @@ def _expand_single_dim_strategy_to_mesh(
 
         child_strategies: list[StrategyType] = []
         for tensorlist_i in range(tensorlist_len):
-            per_index_schema = _translate_foreach_op_schema(op_schema, tensorlist_i)
+            per_index_schema, per_index_output_meta = _translate_foreach_op_schema(
+                op_schema,
+                output_tensor_meta,  # type: ignore[arg-type]
+                tensorlist_i,
+            )
             # TODO: enrich OpSchema._comparison_key so we can lru_cache this (for starters, it doesn't include placements)
-            per_index_strategy = _expanded_strategy(per_index_schema)
+            per_index_strategy = _create_expanded_strategy(
+                per_index_schema, per_index_output_meta
+            )
             child_strategies.append(
                 per_index_strategy(
                     op, per_index_schema.args_meta, per_index_schema.kwargs_meta
@@ -296,13 +312,10 @@ def _expand_single_dim_strategy_to_mesh(
         return TupleStrategy(children=child_strategies)
 
     # TODO maybe this could be helped by adding a new 'tag' to the OpOverload?
-    # Also, i'm guessing that i'll need more info from the registration callsite
-    # about which inputs are expected to be lists vs tensors. But maybe I can just infer it all from the runtime
-    # inputs?
     if op_schema.op.name().startswith("aten::_foreach_"):
         return expanded_foreach_strategy
 
-    return _expanded_strategy(op_schema)
+    return _create_expanded_strategy(op_schema, output_tensor_meta)
 
 
 def register_single_dim_strategy(
