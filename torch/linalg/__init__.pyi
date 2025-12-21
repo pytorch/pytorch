@@ -1,8 +1,9 @@
 # Stub file for torch.linalg
+from collections.abc import Sequence
 from typing import NamedTuple
 
 import torch
-from torch import Tensor
+from torch import SymInt, Tensor
 
 # Return type classes
 class SVDResult(NamedTuple):
@@ -53,7 +54,7 @@ def norm(
 def vector_norm(
     input: Tensor,
     ord: float | int | complex | bool | None = 2,
-    dim: int | tuple[int, ...] | list[int] | None = None,
+    dim: int | SymInt | Sequence[int | SymInt] | None = None,
     keepdim: bool = False,
     *,
     dtype: torch.dtype | None = None,
@@ -62,7 +63,7 @@ def vector_norm(
 def matrix_norm(
     input: Tensor,
     ord: float | int | str = "fro",
-    dim: tuple[int, int] | tuple[int, ...] | list[int] = (-2, -1),
+    dim: tuple[int, int] | Sequence[int | SymInt] = (-2, -1),
     keepdim: bool = False,
     *,
     dtype: torch.dtype | None = None,
