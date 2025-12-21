@@ -240,7 +240,7 @@ def handle_effects(
         if proxy_tensor_mode is not None:
             # If we discovered a new token during tracing, we are in backward.
             # Then we patch the graph, adding additional tangents_token as input to the joint graph.
-            tracer = proxy_tensor_mode.tracer  # pyrefly: ignore[missing-attribute]
+            tracer = proxy_tensor_mode.tracer
 
             from torch.fx.experimental.proxy_tensor import (
                 disable_proxy_modes_tracing,
@@ -250,7 +250,7 @@ def handle_effects(
             with disable_proxy_modes_tracing():
                 token_tensor = new_token_tensor()
 
-            token_proxy = proxy_tensor_mode.tracer.create_proxy(  # pyrefly: ignore[missing-attribute]
+            token_proxy = proxy_tensor_mode.tracer.create_proxy(
                 "placeholder", "tangents_token", (), {}, name="tangents_token"
             )
             track_tensor_tree(token_tensor, token_proxy, constant=None, tracer=tracer)
