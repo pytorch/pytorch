@@ -1,13 +1,11 @@
 #pragma once
 #include <c10/metal/common.h>
 
-
 template <unsigned N = 4, typename idx_type_t = int32_t>
 struct GridSamplerBackwardParams {
-    
   ::c10::metal::array<idx_type_t, N> grad_output_sizes;
   ::c10::metal::array<idx_type_t, N> grad_output_strides;
-  
+
   ::c10::metal::array<idx_type_t, N> input_sizes;
   ::c10::metal::array<idx_type_t, N> input_strides;
 
