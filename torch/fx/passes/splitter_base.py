@@ -2,7 +2,6 @@
 import argparse
 import copy
 import json
-import logging
 import os
 from collections import defaultdict
 from collections.abc import Iterable, Sequence
@@ -18,7 +17,7 @@ from torch.fx.passes.graph_manipulation import get_size_of_node
 from .graph_drawer import FxGraphDrawer
 from .operator_support import get_node_target, OperatorSupportBase
 from .shape_prop import ShapeProp
-from .split_utils import split_by_tags
+from .split_utils import move_non_tensor_nodes_on_boundary, split_by_tags
 from .tools_common import (
     CALLABLE_NODE_OPS,
     FxNetAccFusionsFinder,
@@ -38,7 +37,6 @@ __all__ = [
     "NodeEvent",
     "NodeEventTracker",
 ]
-_LOGGER = logging.getLogger(__name__)
 
 DEFAULT_MIN_ACC_MODULE_SIZE = 1
 DEFAULT_SKIP_FUSION = False
@@ -69,6 +67,7 @@ Different modes of the event tracker for local debugging:
 "3": In addition to events dump, track all nodes with more than 1 event recursively and dump to DUMP_PREFIX_nodex.txt
 In addition to the above local dumps, tracker is always enabled and dumps via trace_structured.
 """
+# pyrefly: ignore [bad-assignment]
 TRACKER_MODE: Literal["0", "1", "2", "3"] = os.environ.get(
     ENV_FX_NET_ACC_SPLITTER_TRACKER_MODE, "0"
 )  # type: ignore[assignment]
@@ -81,6 +80,7 @@ class _SplitterSettingBase:
         skip_fusion=DEFAULT_SKIP_FUSION,
         allow_non_tensor=DEFAULT_ALLOW_NON_TENSOR,
         max_acc_splits: int = -1,
+        move_non_tensor_nodes_on_boundary: bool = False,
     ):
         parser = argparse.ArgumentParser()
         parser.add_argument(
@@ -119,6 +119,16 @@ class _SplitterSettingBase:
             "we might not care about non-tensor data flow and we can set this option "
             "to true to disable the functionality that prevent non-tensor data flow.",
         )
+        parser.add_argument(
+            "--move-non-tensor-nodes-on-boundary",
+            "--move_non_tensor_nodes_on_boundary",
+            required=False,
+            action="store_true",
+            help="AOTI does not support non-tensor nodes on acc->acc, acc->gpu and gpu->acc boundary. "
+            "For non-tensor nodes on acc->acc boundary and acc->gpu, we move the nodes from upstream to downstream. "
+            "For non-tensor nodes on gpu->acc boundary, it is handled by the pre-split process. "
+            "(by method reduce_acc_nodes_non_tensor_input). ",
+        )
         args, _unknown = parser.parse_known_args()
 
         self.min_acc_module_size: int = (
@@ -131,6 +141,11 @@ class _SplitterSettingBase:
             args.allow_non_tensor if args.allow_non_tensor else allow_non_tensor
         )
         self.max_acc_splits: int = max_acc_splits
+        self.move_non_tensor_nodes_on_boundary: bool = (
+            args.move_non_tensor_nodes_on_boundary
+            if args.move_non_tensor_nodes_on_boundary
+            else move_non_tensor_nodes_on_boundary
+        )
 
 
 @compatibility(is_backward_compatible=False)
@@ -1091,6 +1106,8 @@ class _SplitterBase:
 
     def __call__(self) -> torch.fx.GraphModule:
         subgraphs = self.put_nodes_into_subgraphs()
+        if self.settings.move_non_tensor_nodes_on_boundary:
+            move_non_tensor_nodes_on_boundary(subgraphs)
         subgraphs = self.remove_small_acc_subgraphs(subgraphs)
         acc_subgraphs_count = len([s for s in subgraphs if s.is_acc])
         non_acc_subgraphs_count = len(subgraphs) - acc_subgraphs_count
