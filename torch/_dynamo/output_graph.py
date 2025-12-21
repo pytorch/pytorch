@@ -1704,8 +1704,8 @@ class OutputGraph(OutputGraphCommon):
                                 "Dynamo failed to construct the function defined in the compiled region with closure objects."
                             ),
                             hints=[
-                                "Define the function at module scope instead of inside another function "
-                                "Ensure that all closure variables are constants."
+                                "Define the function at module scope instead of inside another function ",
+                                "Ensure that all closure variables are constants.",
                             ],
                             from_exc=e,
                         )
