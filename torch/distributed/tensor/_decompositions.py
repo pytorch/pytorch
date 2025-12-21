@@ -111,7 +111,8 @@ class DecompShardingStrategy:
                 # immediately return; some op doesn't have a sharding strategy.
                 return None
             except (ImplicitRedistributionError, RuntimeError):
-                # I feel like we shouldn't catch RuntimeErrors? But seeing this with view strategies.
+                # I feel like we shouldn't have to catch RuntimeErrors?
+                # But seeing this with view strategies.
                 # If redistribution found, just skip this placement.
                 continue
 
@@ -144,7 +145,7 @@ class DecompShardingStrategy:
     ) -> list[Placement]:
         tensor_specs = _extract_input_specs(op_schema)
 
-        # Flatten to zip with placements, then unflatten back to original structure
+        # Unflatten specs & args to match placeholder structure
         flat_specs, spec = tree_flatten(list(tensor_specs))
         input_specs_flat = [
             DTensorSpec(interpreter.mesh, (p,), tensor_meta=s.tensor_meta)  # type: ignore[arg-type]
@@ -164,7 +165,7 @@ class DecompShardingStrategy:
         tensor_specs = _extract_input_specs(op_schema)
         placeholders = [n for n in graph.graph.nodes if n.op == "placeholder"]
 
-        # Flatten tensor_specs to match placeholders
+        # Flatten specs to match placeholders
         flat_specs, _ = tree_flatten(list(tensor_specs))
         assert len(placeholders) == len(flat_specs), (
             f"Mismatch between placeholders ({len(placeholders)}) and specs ({len(flat_specs)}). "

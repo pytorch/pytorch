@@ -465,6 +465,14 @@ class OpDispatcher:
             if isinstance(arg_spec, DTensorSpec):
                 local_tensor = cast(torch.Tensor, op_info.local_args[i])
                 if arg_spec != reshard_arg_spec:
+                    redistribute_context = (
+                        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
+                            i, arg_spec, reshard_arg_spec
+                        )
+                        if debug_mode is not None
+                        else contextlib.nullcontext()
+                    )
+
                     ExplicitRedistributionContext.observe_redistribution(
                         arg_spec,
                         # pyrefly: ignore [bad-argument-type]
@@ -474,14 +482,6 @@ class OpDispatcher:
                             op_info.schema or suggested_input_schema.op,
                         ),
                     )
-                    redistribute_context = (
-                        debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
-                            i, arg_spec, reshard_arg_spec
-                        )
-                        if debug_mode is not None
-                        else contextlib.nullcontext()
-                    )
-
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
                             local_tensor,
