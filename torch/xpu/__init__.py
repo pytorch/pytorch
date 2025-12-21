@@ -11,11 +11,7 @@ import threading
 import traceback
 from collections.abc import Callable
 from functools import lru_cache
-<<<<<<< HEAD
-from typing import Any, Optional
-=======
-from typing import Any, NewType, Optional, Union
->>>>>>> 5b3b93c1d59 ([XPU] Implement XPUGraph capture and replay)
+from typing import Any, NewType, Optional
 
 import torch
 import torch._C
