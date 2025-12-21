@@ -420,7 +420,7 @@ static PyTypeObject NamespaceBaseType = {
 ////////////////////////////////
 
 // Hash function for (PyObject* op_str, PyObject* target) pairs
-// Uses identity hashing: pointer values for the objects
+// Uses value-based hashing and comparison via Python's __hash__ and __eq__
 struct LookupKey {
   PyObject* op;
   PyObject* target; // can be nullptr for non-call_function ops
@@ -431,8 +431,20 @@ struct LookupKey {
       PyErr_Clear();
       return false;
     }
-    // For target, use identity comparison (is)
-    return target == other.target;
+    // For target, use value comparison via __eq__
+    // This is needed for custom extension ops that define __eq__
+    if (target == other.target) {
+      return true; // Fast path for identity
+    }
+    if (target == nullptr || other.target == nullptr) {
+      return target == other.target;
+    }
+    int result = PyObject_RichCompareBool(target, other.target, Py_EQ);
+    if (result < 0) {
+      PyErr_Clear();
+      return false;
+    }
+    return result != 0;
   }
 };
 
@@ -444,10 +456,19 @@ struct LookupKeyHash {
       PyErr_Clear();
       op_hash = 0;
     }
-    // Hash the target by identity (pointer)
-    size_t target_hash = std::hash<void*>()(static_cast<void*>(key.target));
+    // Hash the target by value via __hash__
+    // This is needed for custom extension ops that define __hash__
+    Py_hash_t target_hash = 0;
+    if (key.target != nullptr) {
+      target_hash = PyObject_Hash(key.target);
+      if (target_hash == -1) {
+        PyErr_Clear();
+        target_hash = 0;
+      }
+    }
     // Combine hashes
-    return static_cast<size_t>(op_hash) ^ (target_hash << 1);
+    return static_cast<size_t>(op_hash) ^
+        (static_cast<size_t>(target_hash) << 1);
   }
 };
 
