@@ -4,7 +4,7 @@ from collections.abc import Callable
 from typing import Any, overload
 
 import torch
-from torch._C._distributed_c10d import ProcessGroup
+import torch.distributed as dist
 from torch.distributed.algorithms.join import Joinable, JoinHook
 from torch.optim import Optimizer
 
@@ -84,4 +84,4 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     @property
     def join_device(self) -> torch.device: ...
     @property
-    def join_process_group(self) -> ProcessGroup: ...  # pyrefly: ignore[bad-override]
+    def join_process_group(self) -> dist.ProcessGroup: ...
