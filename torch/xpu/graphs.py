@@ -56,7 +56,7 @@ class XPUGraph(torch._C._XPUGraph):
 
     def capture_begin(
         self, pool: Optional[_POOL_HANDLE] = None) -> None:
-        r"""Begin capturing XPU work on the current sycl queue.
+        r"""Begin capturing XPU work on the current xpu stream.
 
         Typically, you shouldn't call ``capture_begin`` yourself.
         Use :class:`~torch.xpu.graph`, which call ``capture_begin`` internally.
