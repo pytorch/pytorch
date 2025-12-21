@@ -130,6 +130,7 @@ void XPUGraph::replay() {
     instantiate();
   }
 
+  // Make sure graph replay happens on the same device allocator of graph capture
   c10::OptionalDeviceGuard device_guard{capture_stream_.device()};
 
   for (auto& [generator_state, wholegraph_increments] :
