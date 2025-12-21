@@ -1071,24 +1071,29 @@ class BuiltinVariable(VariableTracker):
         obj = BuiltinVariable(fn)
         handlers: list[_HandlerCallback] = []
 
-        # Special handling for isinstance with lazy constants.
-        # isinstance only needs to know the TYPE of the value, not the specific value.
-        # LazyConstantVariable.python_type() only installs a TYPE_MATCH guard,
-        # not a CONSTANT_MATCH guard, so changing the value won't cause recompilation.
-        if fn is isinstance and len(arg_types) == 2:
-            first_arg_is_lazy = issubclass(
+        if any(issubclass(t, LazyVariableTracker) for t in arg_types):
+            # Special handling for isinstance and type with lazy constants.
+            # These only need the TYPE of the value, not the specific value.
+            # LazyConstantVariable.python_type() only installs a TYPE_MATCH guard,
+            # not a CONSTANT_MATCH guard, so changing the value won't cause recompilation.
+            first_arg_is_lazy = arg_types and issubclass(
                 arg_types[0], (LazyConstantVariable, ComputedLazyConstantVariable)
             )
             if first_arg_is_lazy and not has_kwargs:
+                if fn is isinstance and len(arg_types) == 2:
 
-                def handle_isinstance(tx, args, kwargs):
-                    # python_type() on lazy constants installs TYPE_MATCH guard,
-                    # not CONSTANT_MATCH guard, so no recompilation on value change.
-                    return obj.call_isinstance(tx, args[0], args[1])
+                    def handle_isinstance(tx, args, kwargs):
+                        return obj.call_isinstance(tx, args[0], args[1])
 
-                return handle_isinstance
+                    return handle_isinstance
 
-        if any(issubclass(t, LazyVariableTracker) for t in arg_types):
+                if fn is type and len(arg_types) == 1:
+
+                    def handle_type(tx, args, kwargs):
+                        return obj.call_type(tx, args[0])
+
+                    return handle_type
+
             # Check if we can handle this lazily (all args are lazy/computed lazy constants
             # or regular constants, and the op can be constant-folded)
             all_constant_like = all(
@@ -1110,7 +1115,20 @@ class BuiltinVariable(VariableTracker):
                 # If the result is used in a tensor operation and automatic_dynamic_shapes
                 # kicks in (making source vars symbolic), ComputedLazyCache.realize()
                 # will detect this and re-apply the operation symbolically.
-                def handle_lazy_constant(tx, args, kwargs):
+                # Check for a specific handler before creating handle_lazy_constant.
+                # This is more efficient than checking at runtime.
+                handler_name = (
+                    f"call_{fn.__name__}" if hasattr(fn, "__name__") else None
+                )
+                specific_handler = (
+                    getattr(obj, handler_name)
+                    if handler_name and hasattr(obj, handler_name)
+                    else None
+                )
+
+                def handle_lazy_constant(
+                    tx, args, kwargs, specific_handler=specific_handler
+                ):
                     from .. import config
 
                     # Check if we have a reconstruct_fn for this operation.
@@ -1118,8 +1136,14 @@ class BuiltinVariable(VariableTracker):
                     # the result at runtime (via bytecode generation).
                     reconstruct_fn = _make_binary_op_reconstruct_fn(fn)
                     if reconstruct_fn is None:
-                        # No reconstruct_fn (e.g., str.format) - fall back to
-                        # realizing lazy args so guards are properly installed.
+                        # No reconstruct_fn - check if there's a specific handler
+                        # that can work with lazy constants (e.g., call_type uses
+                        # python_type() which only installs TYPE_MATCH guards).
+                        if specific_handler is not None:
+                            result = specific_handler(tx, *args, **kwargs)
+                            if result is not None:
+                                return result
+                        # Fall back to realizing lazy args
                         return obj.call_function(
                             tx,
                             [v.realize() for v in args],
@@ -1159,16 +1183,16 @@ class BuiltinVariable(VariableTracker):
                     )
 
                 return handle_lazy_constant
-            else:
-                # Fall back to realizing lazy args.
-                # We must realize all LazyVariableTracker (including LazyConstantVariable)
-                # to avoid infinite recursion in handler dispatch - calling obj.call_function()
-                # with unrealized lazy constants would dispatch back to this same handler.
-                return lambda tx, args, kwargs: obj.call_function(
-                    tx,
-                    [v.realize() for v in args],
-                    kwargs,
-                )
+
+            # Fall back to realizing lazy args.
+            # We must realize all LazyVariableTracker (including LazyConstantVariable)
+            # to avoid infinite recursion in handler dispatch - calling obj.call_function()
+            # with unrealized lazy constants would dispatch back to this same handler.
+            return lambda tx, args, kwargs: obj.call_function(
+                tx,
+                [v.realize() for v in args],
+                kwargs,
+            )
 
         if inspect.isclass(fn) and (
             issubclass(fn, BaseException)
