@@ -2241,6 +2241,9 @@ PyObject* initModule() {
   NodeBase_init(module);
   NodeIter_init(module);
   Namespace_init(module);
+  FindNodesLookupTable_init(module);
+  NodeList_init(module);
+  GraphBase_init(module);
   ASSERT_TRUE(THPVariable_initModule(module));
   ASSERT_TRUE(THPFunction_initModule(module));
   ASSERT_TRUE(THPEngine_initModule(module));

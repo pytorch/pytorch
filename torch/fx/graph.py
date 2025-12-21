@@ -14,15 +14,14 @@ import re
 import types
 import typing
 import warnings
-from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
-from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import _fx_map_arg as map_arg, _NamespaceBase, _NodeIter
+from torch._C import _fx_map_arg as map_arg, _GraphBase, _NamespaceBase
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -203,22 +202,6 @@ class _InsertPoint:
 
     def __exit__(self, type, value, tb):
         self.graph._insert = self.orig_insert
-
-
-class _node_list:
-    def __init__(self, graph: "Graph", direction: Literal["_prev", "_next"] = "_next"):
-        assert direction in ("_next", "_prev")
-        self.graph = graph
-        self.direction = direction
-
-    def __len__(self):
-        return self.graph._len
-
-    def __iter__(self):
-        return _NodeIter(self.graph._root, self.direction == "_prev")
-
-    def __reversed__(self):
-        return _node_list(self.graph, "_next" if self.direction == "_prev" else "_prev")
 
 
 class _PyTreeInfo(NamedTuple):
@@ -1092,42 +1075,8 @@ class _ExportCodeGen(_PyTreeCodeGen):
         return f"return pytree.tree_unflatten({output}, self._out_spec)"
 
 
-class _FindNodesLookupTable:
-    """
-    Side table for the graph for the purpose of doing fast queries
-    """
-
-    def __init__(self):
-        self.table: dict[tuple[str, Optional[Target]], dict[Node, None]] = defaultdict(
-            dict
-        )
-
-    def _key(self, node) -> tuple[str, Optional[Target]]:
-        return (node.op, node.target if node.op == "call_function" else None)
-
-    def __contains__(self, node) -> bool:
-        return node in self.table[self._key(node)]
-
-    def insert(self, node: Node) -> None:
-        self.table[self._key(node)][node] = None
-
-    def remove(self, node: Node) -> None:
-        self.table[self._key(node)].pop(node)
-
-    def find_nodes(self, *, op: str, target: Optional["Target"] = None):
-        if op == "call_function":
-            assert target is not None
-            return [*self.table[(op, target)].keys()]
-
-        if target is None:
-            return [*self.table[(op, None)].keys()]
-
-        # op is call_method, get_attr, call_module
-        return [node for node in self.table[(op, None)] if node.target == target]
-
-
 @compatibility(is_backward_compatible=True)
-class Graph:
+class Graph(_GraphBase):
     """
     ``Graph`` is the main data structure used in the FX Intermediate Representation.
     It consists of a series of ``Node`` s, each representing callsites (or other
@@ -1185,40 +1134,23 @@ class Graph:
         """
         Construct an empty Graph.
         """
+        # Call the C++ base class __init__ which initializes:
+        # - _find_nodes_lookup_table
+        # - _len = 0
+        # - _root = None (will be set below)
+        super().__init__()
         self._root: Node = Node(self, "", "root", "", (), {})
         self._used_names: dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
-        self._len = 0
         self._graph_namespace = _Namespace()
         self._owning_module = owning_module
         self._tracer_cls = tracer_cls
         self._tracer_extras = tracer_extras
         self._codegen = CodeGen()
         self._co_fields: dict[str, Any] = {}
-        self._find_nodes_lookup_table = _FindNodesLookupTable()
 
-    @property
-    def owning_module(self):
-        return self._owning_module
-
-    @owning_module.setter
-    def owning_module(self, mod: Optional["GraphModule"]):
-        self._owning_module = mod
-
-    @property
-    def nodes(self) -> _node_list:
-        """
-        Get the list of Nodes that constitute this Graph.
-
-        Note that this ``Node`` list representation is a doubly-linked list. Mutations
-        during iteration (e.g. delete a Node, add a Node) are safe.
-
-        Returns:
-
-            A doubly-linked list of Nodes. Note that ``reversed`` can be called on
-            this list to switch iteration order.
-        """
-        return _node_list(self)
+    # Note: owning_module and nodes properties are implemented in C++ (_GraphBase)
+    # See torch/csrc/fx/graph.cpp for the implementation.
 
     @compatibility(is_backward_compatible=False)
     def output_node(self) -> Node:
