@@ -20,9 +20,19 @@ namespace at::native {
 
 #ifndef PYTORCH_JIT_COMPILE_SHADERS
 static auto& lib = mps::MetalShaderLibrary::getBundledLibrary();
+static auto& lib_fwd = lib;
+static auto& lib_bwd = lib;
 #else
-#include <ATen/native/mps/GridSamplerBackward_metallib.h>
+// Each of these headers defines a static MetalShaderLibrary named 'lib'.
+// To avoid naming conflicts, we wrap each include in its own namespace.
+namespace fwd {
 #include <ATen/native/mps/GridSampler_metallib.h>
+}
+namespace bwd {
+#include <ATen/native/mps/GridSamplerBackward_metallib.h>
+}
+static auto& lib_fwd = fwd::lib;
+static auto& lib_bwd = bwd::lib;
 #endif
 
 namespace mps {
@@ -216,7 +226,7 @@ static void grid_sampler_template(Tensor& output,
   dispatch_sync_with_rethrow(mpsStream->queue(), ^() {
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
-      auto pso = lib.getPipelineStateForFunc("grid_sampler_" + scalarToMetalTypeString(input));
+      auto pso = lib_fwd.getPipelineStateForFunc("grid_sampler_" + scalarToMetalTypeString(input));
 
       getMPSProfiler().beginProfileKernel(pso, op_name, {input, grid});
       [computeEncoder setComputePipelineState:pso];
@@ -323,7 +333,7 @@ static void grid_sampler_2d_backward_mps_impl(const Tensor& grad_input,
     @autoreleasepool {
       id<MTLComputeCommandEncoder> computeEncoder = mpsStream->commandEncoder();
 
-      auto pso = lib.getPipelineStateForFunc("grid_sampler_2d_backward_" + scalarToMetalTypeString(input));
+      auto pso = lib_bwd.getPipelineStateForFunc("grid_sampler_2d_backward_" + scalarToMetalTypeString(input));
       getMPSProfiler().beginProfileKernel(pso, op_name, {grad_output, input, grid});
       [computeEncoder setComputePipelineState:pso];
       mtl_setArgs(computeEncoder, grad_input, grad_grid, grad_output, input, grid, params);
