@@ -19,7 +19,7 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 """
 
 import functools
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -89,11 +89,11 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value})"
 
-    def call_function(  # pyrefly: ignore[bad-override]
+    def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
+        args: Sequence["VariableTracker"],
+        kwargs: dict[str, "VariableTracker"],
     ) -> "VariableTracker":
         # disallow creating reference-type opaque objects in the middle of the
         # program
