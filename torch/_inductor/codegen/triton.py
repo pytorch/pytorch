@@ -3346,9 +3346,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             current_load_index = self._load_index
             launch_if_last_load = DelayMaybeLine(
                 lambda: current_load_index == self._load_index,
-                f"0; {GDC_LAUNCH} # gdc launch for {result_var}",
+                f"{GDC_LAUNCH} # gdc launch for {result_var}",
             )
-            self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
+            launch_buffer.writeline(launch_if_last_load)
 
     def partial_accumulate(
         self, name: str, reduction_type, val, extra_meta: dict[str, Any]
