@@ -5,7 +5,7 @@ import math
 import warnings
 from collections.abc import Sequence
 from itertools import chain
-from typing import Any, Optional
+from typing import Any
 
 import sympy
 
@@ -250,7 +250,7 @@ def _check_input_constraints_pre_hook(self, args, kwargs):
 
 def _unlift_inputs_as_getattr(
     gm: torch.fx.GraphModule,
-    lifted_inputs: Sequence[Optional[str]],
+    lifted_inputs: Sequence[str | None],
 ) -> tuple[dict[str, torch.fx.Node], dict[str, torch.fx.Node]]:
     """
     Unlift inputs referring to params/buffers/constants as getattr nodes in the
@@ -291,7 +291,7 @@ def _unlift_inputs_as_getattr(
 
 def _insert_copy_for_mutations(
     gm: torch.fx.GraphModule,
-    mutated_outputs: Sequence[Optional[str]],
+    mutated_outputs: Sequence[str | None],
     unlifted_name_to_node: dict[str, torch.fx.Node],
     input_name_to_node: dict[str, torch.fx.Node],
 ) -> None:
@@ -346,8 +346,8 @@ def _insert_copy_for_mutations(
 
 def _get_codegen(
     in_spec: pytree.TreeSpec,
-    out_spec: Optional[pytree.TreeSpec],
-    forward_arg_names: Optional[list[str]] = None,
+    out_spec: pytree.TreeSpec | None,
+    forward_arg_names: list[str] | None = None,
 ) -> _PyTreeCodeGen:
     """
     Create the codegen for the graph module based on the in/out specs
@@ -378,11 +378,11 @@ def _get_codegen(
 
 def _unlift(
     gm: torch.fx.GraphModule,
-    lifted_inputs: Sequence[Optional[str]],
-    mutated_outputs: Sequence[Optional[str]],
+    lifted_inputs: Sequence[str | None],
+    mutated_outputs: Sequence[str | None],
     in_spec: pytree.TreeSpec,
-    out_spec: Optional[pytree.TreeSpec],
-    forward_arg_names: Optional[list[str]] = None,
+    out_spec: pytree.TreeSpec | None,
+    forward_arg_names: list[str] | None = None,
 ):
     """
     Args:
@@ -748,16 +748,31 @@ def _unlift_exported_program_lifted_states(
 ) -> torch.fx.GraphModule:
     check_guards = check_guards and _ok_to_generate_guards_fn()
 
+    source_node_dict = {
+        node.name: node for node in ep.graph.nodes if node.op != "placeholder"
+    }
+    # placeholder node name might change after deepcopy
+    placeholder_source_node_dict = {
+        node.target: node for node in ep.graph.nodes if node.op == "placeholder"
+    }
+
+    new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
+    new_gm.meta.update(ep.graph_module.meta)
+    ep = copy.copy(ep)
+    ep._graph_signature = ExportGraphSignature(
+        ep._graph_signature.input_specs, ep._graph_signature.output_specs
+    )
+    ep._graph_module = new_gm
+
     # TODO T206340015
     if ep.verifiers[0].dialect != "TRAINING":
         ep = _remove_effect_tokens(ep)
 
-    new_gm = torch.fx.GraphModule(ep.graph_module, copy.deepcopy(ep.graph))
     _register_attrs_to_new_gm(new_gm, ep.graph_signature, ep.state_dict, ep.constants)
     forward_arg_names = (
         sig.forward_arg_names if (sig := ep.module_call_graph[0].signature) else None
     )
-    lifted_inputs: list[Optional[str]] = [
+    lifted_inputs: list[str | None] = [
         (
             in_spec.target
             if in_spec.kind
@@ -772,7 +787,7 @@ def _unlift_exported_program_lifted_states(
         for in_spec in ep.graph_signature.input_specs
     ]
 
-    mutated_outputs: list[Optional[str]] = [
+    mutated_outputs: list[str | None] = [
         (
             out_spec.target
             if out_spec.kind
@@ -786,19 +801,13 @@ def _unlift_exported_program_lifted_states(
         for out_spec in ep.graph_signature.output_specs
     ]
 
-    source_node_dict = {
-        node.name: node for node in ep.graph.nodes if node.op != "placeholder"
-    }
-    # placeholder node name might change after deepcopy
-    placeholder_source_node_dict = {
-        node.target: node for node in ep.graph.nodes if node.op == "placeholder"
-    }
     for node in new_gm.graph.nodes:
         source_node = None
         if node.op == "placeholder":
             source_node = placeholder_source_node_dict.get(node.target)
         else:
-            source_node = source_node_dict.get(node.name)
+            if node.name in source_node_dict:
+                source_node = source_node_dict.get(node.name)
         node.meta["from_node"] = [
             NodeSource(
                 source_node,

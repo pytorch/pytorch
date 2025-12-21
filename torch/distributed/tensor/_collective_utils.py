@@ -74,7 +74,7 @@ def mesh_scatter(
     async_op: bool = False,
     *,
     group_src: int = 0,
-) -> Optional[Work]:
+) -> Work | None:
     """
     scatter a list of tensors to a device mesh dimension. We by default
     use the first rank of the mesh dimension as the source of truth, i.e
@@ -135,7 +135,7 @@ def mesh_broadcast(
     async_op: bool = False,
     *,
     group_src: int = 0,
-) -> Optional[Work]:
+) -> Work | None:
     """
     broadcast the tensor to a device mesh dimension. We by default
     use the first rank of the mesh dimension as the source of truth, i.e
@@ -227,7 +227,6 @@ def check_tensor_meta(
     return None
 
 
-# TODO: autoparallel depends on this function, we will keep it until we update autoparallel redistribute_cost
 def spec_to_bytes(spec: "dtensor_spec.DTensorSpec") -> int:
     assert spec.tensor_meta is not None, "spec should have tensor meta defined!"
     return spec.tensor_meta.dtype.itemsize * math.prod(spec.shape)
@@ -339,6 +338,9 @@ def redistribute_cost(
 
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
     cost = 0.0
+    comm_bytes_gb = (
+        spec_to_bytes(current_spec) / current_spec.num_shards / 1024 / 1024 / 1024
+    )
     # Transformation that considered for redistribute cost:
     # 1. allgather 2. alltoall
     # 3. allreduce 4. reduce_scatter
@@ -351,9 +353,14 @@ def redistribute_cost(
     # No redistribution needed when placements are already identical.
     # This also prevents potential failures in _gen_transform_infos for certain configurations
     # (e.g., sub-meshes) where finding a transform path between identical states may error out.
-    # TODO(zpcore): test placements with _StridedShard.
     if current_spec.placements == target_spec.placements:
         return cost
+
+    # TODO(zpcore): Support _StridedShard redistribution. Remove the temporary
+    # fix, which is to prevent StridedShard erroring out.
+    if current_spec.shard_order is None or target_spec.shard_order is None:
+        return float("inf")
+
     if _are_we_tracing():
         transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
     else:
@@ -362,13 +369,6 @@ def redistribute_cost(
         assert current_spec.tensor_meta is not None, (
             "spec should have tensor meta defined!"
         )
-        comm_bytes_gb = (
-            current_spec.tensor_meta.dtype.itemsize
-            * math.prod(transform_info.logical_shape)
-            / 1024
-            / 1024
-            / 1024
-        )
         current = transform_info.src_dst_placements[0]
         target = transform_info.src_dst_placements[1]
         if current == target:
@@ -376,13 +376,14 @@ def redistribute_cost(
         mesh_dim = transform_info.mesh_dim
         num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
         if current.is_shard() and target.is_replicate():
+            # allgather gives larger comm bytes
+            comm_bytes_gb *= num_devices_on_mesh_dim
             # add up allgather comm cost
             cost += allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim)
         elif current.is_shard() and target.is_shard():
             # should be alltoall comm, since we haven't implement it yet, add 1.0 as penalty
             # to favor allgather instead
             # TODO: add alltoall_cost
-            comm_bytes_gb /= num_devices_on_mesh_dim
             cost += allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim) + 1.0
         elif current.is_partial() and target.is_replicate():
             # add up allreduce comm cost
@@ -396,4 +397,5 @@ def redistribute_cost(
             # ban shard -> partial as it does not make sense to perform
             # this redistribute
             return float("inf")
+
     return cost

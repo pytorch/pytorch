@@ -11,9 +11,10 @@ import math
 import operator
 import os
 import textwrap
+from abc import abstractmethod
 from collections.abc import Callable, Iterable, Sequence
 from functools import lru_cache
-from typing import Any, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 from sympy.printing.precedence import PRECEDENCE
@@ -26,11 +27,15 @@ from torch._dynamo.utils import identity, preserve_rng_state
 from torch._prims_common import is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
-from torch.utils._triton import has_triton_package, has_triton_stable_tma_api
+from torch.utils._triton import (
+    get_triton_version,
+    has_triton_package,
+    has_triton_stable_tma_api,
+)
 
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
-from .. import config, ir, metrics
+from .. import config, ir, metrics, utils
 from ..async_compile import AsyncCompile
 from ..codecache import code_hash, get_path, PyCodeCache, write_atomic
 from ..debug import set_kernel_post_grad_provenance_tracing
@@ -105,9 +110,9 @@ from .wrapper import SymbolicCallArg
 
 if TYPE_CHECKING:
     from types import ModuleType
-    from typing import TypeVar
 
     from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
+    from torch.fx.experimental.symbolic_shapes import ShapeEnv
 
     from ..ir import IRNode
     from .common import BlockShapeType
@@ -187,6 +192,16 @@ def gen_common_triton_imports() -> str:
         import triton.language as tl
         """
     )
+    try:
+        import triton.language.extra.tlx  # noqa: F401
+
+        imports.splice(
+            """
+           import triton.language.extra.tlx as tlx  # noqa: F401
+           """
+        )
+    except ImportError:
+        pass
     if attr_desc := gen_attr_descriptor_import():
         imports.writeline(attr_desc)
 
@@ -273,14 +288,6 @@ class TritonSymbols:
 
         assert expr_shape is not None
 
-        # Below logic handles when index symbols does not match with convention range tree order.
-        # Mainly, it is for TMA template where TMA indices are expected to be in (x,y), not (y,x).
-        # so in such case, the get_block_shape(yindex) should be (1,YBLOCK), not (YBLOCK,1).
-        if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
-            out_shape = V.kernel.template_out_shape
-            if out_shape == ("XBLOCK", "YBLOCK") and V.kernel.tma_store:
-                expr_shape = (expr_shape[1], expr_shape[0], *expr_shape[2:])
-
         return expr_shape
 
     @classmethod
@@ -341,6 +348,10 @@ class BlockDescriptorOptions:
     broadcast_shape: Sequence[sympy.Expr]
     broadcasting_dims: list[bool]
     final_shape: Sequence[sympy.Expr]
+    # If the BlockParameters have been sorted using a particular stride order
+    # transpose load / store blocks at runtime using the information in
+    # stride_sorter.
+    stride_sorter: BlockParameters.StrideSorter
     _boundary_check: Optional[list[int]] = None
     # Can we safely lift the constructor
     # to the top of the kernel?
@@ -371,8 +382,8 @@ class BlockDescriptorOptions:
         range_trees: list[IterationRangesRoot],
         mask_vars: OrderedSet[str],
         get_max_block: Callable[[str], int],
-        can_lift=False,
-        transpose_contiguous=False,
+        stride_sorter_cls: type[BlockParameters.StrideSorter],
+        can_lift: bool = False,
     ) -> BlockDescriptorOptions:
         """Helper to create a BlockDescriptorOptions instance"""
 
@@ -385,14 +396,10 @@ class BlockDescriptorOptions:
         params.shape = lookup_size(params.shape)
         params.strides = lookup_size(params.strides)
 
-        # Strip out dimensions of stride 0.
-        # These will be restored with tl.broadcast_to.
-        broadcasting_dims = [
-            sizevars.statically_known_equals(stride, 0) for stride in params.strides
-        ]
-
         # Strip out dimensions of size 1.
-        # These will be restored by tl.reshape.
+        # Size 1 dimensions are redundant since the triton kernel shape
+        # will be e.g. [YBLOCK, XBLOCK], so tl.reshape would just remove these
+        # dimensions anyway
         singleton_dims = [
             sizevars.statically_known_equals(dim, 1) for dim in params.block_shape
         ]
@@ -400,56 +407,34 @@ class BlockDescriptorOptions:
             # Handle a pure singletons, e.g. [1, 1]
             singleton_dims[-1] = False
 
+        # Drop singleton dimensions from the block descriptor.
+        params = params.remove_dims(singleton_dims)
+
+        # Maybe reorder dimensions based on strides
+        # with tl.trans applied at load / store time
+        params, stride_sorter = params.maybe_sort_with_stride_order(
+            stride_sorter_cls=stride_sorter_cls, shape_env=V.graph._shape_env
+        )
+
+        # Strip out dimensions of stride 0.
+        # These will be restored with tl.broadcast_to.
+        broadcasting_dims = [
+            sizevars.statically_known_equals(stride, 0) for stride in params.strides
+        ]
+
         # Record the post-broadcast shape before broadcasting dims are removed.
         # The pre-broadcast shape is identical to this, except broadcasting dims are
         # replaced with 1.
-        broadcast_shape = [
-            dim
-            for dim, is_singleton in zip(params.block_shape, singleton_dims)
-            if not is_singleton
-        ]
+        broadcast_shape = params.block_shape
 
-        # Combine all removable dims.
-        removable_dims = [any(dims) for dims in zip(singleton_dims, broadcasting_dims)]
-
-        # Remove singleton_dims from broadcasting_dims so that
-        # broadcast_shape and broadcasting_dims have the same length
-        broadcasting_dims = [
-            dim
-            for dim, is_singleton in zip(broadcasting_dims, singleton_dims)
-            if not is_singleton
-        ]
-
-        def remove_dims(it):
-            """Removes any broadcasting or singleton dims from a given sequence"""
-            return [
-                item
-                for item, is_removable in zip(it, removable_dims)
-                if not is_removable
-            ]
-
-        # Drop removable dimensions from the input.
-        params = BlockParameters(
-            **{
-                key: remove_dims(val) for key, val in dataclasses.asdict(params).items()
-            },
-        )
-        # TODO: Generalize to ND tensors.
-        transpose = transpose_contiguous and params.strides[-1] != 1
-        if transpose:
-            params = params.transpose()
+        # Drop broadcasting dims from the block descriptor.
+        params = params.remove_dims(broadcasting_dims)
 
         # Compute the final shape, adjusting for special kernel types.
         final_shape = [TritonSymbols.get_block_size(tree) for tree in range_trees]
         if V.kernel.no_x_dim:
             assert range_trees[0].prefix == "x"
             final_shape.pop(0)
-
-        # Check for when BlockParams have been transposed.
-        order = list(reversed(range(len(params.shape))))
-        if transpose:
-            final_shape.reverse()
-            order.reverse()
 
         reduction_ndim = V.kernel.num_reduction_dims
         if (
@@ -460,6 +445,14 @@ class BlockDescriptorOptions:
             # Need to expand rank to match the rank used inside the reduction loop
             final_shape += [sympy.S.One] * reduction_ndim
 
+        try:
+            # Get permutation to sort strides in ascending order.
+            # This is used as the order argument in tl.make_block_ptr
+            order = utils.argsort_sym(V.graph._shape_env, params.strides)
+        except AssertionError:
+            # Symbolic shapes, failed to evaluate comparison expression
+            order = list(reversed(range(len(params.strides))))
+
         result = cls(
             params=params,
             constant_offset=V.graph.sizevars.lookup_precomputed_size(constant_offset),
@@ -468,6 +461,7 @@ class BlockDescriptorOptions:
             final_shape=final_shape,
             broadcast_shape=broadcast_shape,
             broadcasting_dims=broadcasting_dims,
+            stride_sorter=stride_sorter,
             can_lift=can_lift,
         )
         result.compute_boundary_check(get_max_block, range_trees)
@@ -567,20 +561,54 @@ class BlockDescriptorOptions:
         initial_shape: Sequence[sympy.Expr],
         final_shape: Sequence[sympy.Expr],
         allow_implicit: bool,
+        for_store: bool,
     ) -> str:
         """
         Generate a broadcast and a reshape for the block descriptor.
         This restores stride-0 dimensions which were removed from the block descriptor.
+
+        Transposes are also applied to the input using self.stride_sorter:
+        if for_store is True:
+            - First Broadcast the value. Since self.broadcast_shape is stored in
+            descending stride order, it must be reverted to the original order
+            since the input value does not have dims with descending strides
+            - After, transpose the broadcasted value so that dimensions are in
+            descending stride order
+            - Finally reshape to the block shape
+        else (for load):
+            - First broadcast the value to self.broadcast_shape (strides are descending)
+            - Then transpose the value so that dimensions no longer have descending strides
+            - Finally reshape the block to the final kernel tile shape
         """
+        broadcast_shape = self.broadcast_shape
+        broadcasting_dims = self.broadcasting_dims
+
+        # If the block parameters have been sorted by descending strides,
+        # permute the broadcasting parameters so that they are compatible
+        # with the value being stored. This is because the dimensions
+        # of the value being stored are not sorted in descending stride order,
+        # but the broadcasting parameters are based on the dims in sorted order
+        if for_store:
+            broadcast_shape = self.stride_sorter.revert(self.broadcast_shape)
+            broadcasting_dims = self.stride_sorter.revert(self.broadcasting_dims)
 
         # Reshape to add singletons.
         pre_broadcast_shape = [
             sympy.S.One if is_broadcasting else dim
-            for dim, is_broadcasting in zip(
-                self.broadcast_shape, self.broadcasting_dims
-            )
+            for dim, is_broadcasting in zip(broadcast_shape, broadcasting_dims)
         ]
         value = triton_reshape(value, initial_shape, pre_broadcast_shape)
+
+        if (
+            not self.stride_sorter.is_identity
+            and not for_store
+            and len(pre_broadcast_shape) == len(final_shape)
+        ):
+            # If all we need to do is transpose to match the final shape
+            # with implicit broadcasting then we don't need an explicit broadcast
+            # unless the caller requests it. So just test implicit broadcast support
+            # with the transposed pre broadcast shape
+            pre_broadcast_shape = self.stride_sorter.revert(pre_broadcast_shape)
 
         # Broadcast singletons.
         # For loads, we can often implicitly broadcast singleton dimensions.
@@ -597,10 +625,32 @@ class BlockDescriptorOptions:
         )
 
         if any(self.broadcasting_dims) and not supports_implicit_broadcast:
-            value = f"tl.broadcast_to({value}, {V.kernel.index_to_str(self.broadcast_shape)})"
+            value = (
+                f"tl.broadcast_to({value}, {V.kernel.index_to_str(broadcast_shape)})"
+            )
+
+        old_shape = self.broadcast_shape
+        if not self.stride_sorter.is_identity:
+            # if for_store the transform is
+            #   (non-descending strides) broadcasted kernel tile shape
+            #       -> (descending strides) block descriptor shape
+            # o/w if loading the transform is
+            #   (descending strides) ((maybe implicitly) broadcasted block shape
+            #       -> (non-descending) (maybe implicitly) broadcasted kernel tile shape
+            permute_dims = (
+                self.stride_sorter.sort_idx
+                if for_store
+                else self.stride_sorter.revert_sort_idx
+            )
+            value = f"tl.trans({value}, {permute_dims})"
+            old_shape = (
+                self.broadcast_shape
+                if for_store
+                else self.stride_sorter.revert(self.broadcast_shape)
+            )
 
         # Reshape to the final shape.
-        value = triton_reshape(value, self.broadcast_shape, final_shape)
+        value = triton_reshape(value, old_shape, final_shape)
 
         return value
 
@@ -969,8 +1019,7 @@ class TritonCSEVariable(CSEVariable):
         # We'll use this to track which masks the variable needs when used for indirect indexing
         self.mask_vars: OrderedSet[str] = OrderedSet()
         assert dtype is not None, "TritonCSEVariable must have dtype"
-        # TODO: uncomment this and fix the few failures left
-        # assert shape is not None, "TritonCSEVariable must have shape"
+        assert shape is not None, "TritonCSEVariable must have shape"
 
     def update_on_args(self, name, args, kwargs):
         for arg in args:
@@ -1646,7 +1695,23 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def tanh(x):
-        return f"libdevice.tanh({x})"
+        cse_var = V.kernel.cse.varname_map.get(x)
+        if cse_var and hasattr(cse_var, "dtype"):
+            dtype = cse_var.dtype
+        else:
+            dtype = None
+        if (
+            config.use_fast_math
+            and torch.version.hip
+            and get_triton_version() > (3, 5)
+            and dtype != torch.float64
+            and dtype is not None
+        ):
+            # Requires upstream Triton 3.6+ for latest fast_tanhf support
+            # https://github.com/triton-lang/triton/pull/8551
+            return f"libdevice.fast_tanhf({x})"
+        else:
+            return f"libdevice.tanh({x})"
 
     @staticmethod
     @maybe_upcast_float32()
@@ -1984,6 +2049,99 @@ class BlockParameters:
     strides: list[sympy.Expr] = dataclasses.field(default_factory=list)
     offsets: list[sympy.Expr] = dataclasses.field(default_factory=list)
 
+    @dataclasses.dataclass
+    class StrideSorter:
+        original_strides: list[int]
+        sort_idx: list[int]
+        revert_sort_idx: list[int] = dataclasses.field(init=False)
+
+        def __post_init__(self):
+            assert len(self.original_strides) > 0
+            assert len(self.sort_idx) == len(self.original_strides)
+
+            identity_sort_idx = list(range(len(self.original_strides)))
+            self._is_identity = self.sort_idx == identity_sort_idx
+
+            # Set revert_sort_idx
+            sorted_dims_by_strides_map = {k: i for i, k in enumerate(self.sort_idx)}
+            self.revert_sort_idx = [
+                sorted_dims_by_strides_map[i]
+                for i in range(len(sorted_dims_by_strides_map))
+            ]
+
+        @property
+        def is_identity(self):
+            return self._is_identity
+
+        @classmethod
+        @abstractmethod
+        def create(
+            cls, original_strides: list[Union[int, sympy.Expr]], shape_env: ShapeEnv
+        ) -> BlockParameters.StrideSorter:
+            """Create a `StrideSorter` that can be used to sort block parameters."""
+
+        def sort(self, attr):
+            if not self.is_identity:
+                return [attr[i] for i in self.sort_idx]
+            return attr
+
+        def revert(self, attr):
+            if not self.is_identity:
+                return [attr[i] for i in self.sort_idx]
+            return attr
+
+    @dataclasses.dataclass
+    class IdentityStrideSorter(StrideSorter):
+        def __post_init__(self):
+            super().__post_init__()
+
+        @classmethod
+        def create(
+            cls, original_strides: list[Union[int, sympy.Expr]], shape_env: ShapeEnv
+        ) -> BlockParameters.StrideSorter:
+            return cls(
+                original_strides=original_strides,
+                sort_idx=list(range(len(original_strides))),
+            )
+
+    @dataclasses.dataclass
+    class TensorDecriptorStrideSorter(StrideSorter):
+        """
+        Sorts BlockParameters dimensions with strides in descending order.
+        """
+
+        def __post_init__(self):
+            super().__post_init__()
+
+        @classmethod
+        def create(
+            cls, original_strides: list[Union[int, sympy.Expr]], shape_env: ShapeEnv
+        ) -> BlockParameters.StrideSorter:
+            """
+            If the strides are not all known constants or if the strides are already
+            sorted in descending order, return identity sort.
+
+            For example if block_shape @ strides is [ZBLOCK, XBLOCK, YBLOCK] @ [8, 1, 16]
+            The indices to sort the strides in descending order will be [2, 0, 1].
+            The indices to revert back to the original order will be [1, 2, 0].
+            """
+            identity_sort = list(range(len(original_strides)))
+            try:
+                # TODO: even if the strides are not in descending order the strides
+                # may be tensor descriptor compliant
+                # i.e. innermost stride == 1 and outer strides 16 byte aligned
+                # We should benchmark the effect of applying a transpose to these
+                # cases vs leaving them unsorted.
+                sort_idx = utils.argsort_sym(shape_env, original_strides, reverse=True)
+            except AssertionError:
+                # Symbolic shapes, failed to evaluate comparison expression
+                sort_idx = identity_sort
+
+            return cls(
+                original_strides=original_strides,
+                sort_idx=sort_idx,
+            )
+
     def __add__(self, other: BlockParameters) -> BlockParameters:
         """
         Concatenates block parameters.
@@ -1992,12 +2150,37 @@ class BlockParameters:
         a, b = tuple(dataclasses.asdict(x) for x in (self, other))
         return cls(**{key: a[key] + b[key] for key in a})
 
-    def transpose(self) -> BlockParameters:
+    def maybe_sort_with_stride_order(
+        self, stride_sorter_cls: type[StrideSorter], shape_env: ShapeEnv
+    ) -> tuple[BlockParameters, BlockParameters.StrideSorter]:
+        """
+        Sort `BlockParameter` with stride_sorter_cls. Returns block parameters
+        as well as a `StrideSorter` which contains information on how the sort
+        can be reverted.
+        """
+        stride_sorter = stride_sorter_cls.create(self.strides, shape_env=shape_env)
+        params = BlockParameters(
+            **{
+                key: stride_sorter.sort(val)
+                for key, val in dataclasses.asdict(self).items()
+            }
+        )
+        return params, stride_sorter
+
+    def remove_dims(self, removable_dims: list[bool]) -> BlockParameters:
+        """
+        Remove dimensions where removable_dims is True.
+        """
+
+        def filter_dims(it):
+            return [
+                item
+                for item, is_removable in zip(it, removable_dims)
+                if not is_removable
+            ]
+
         return BlockParameters(
-            self.shape[::-1],
-            self.block_shape[::-1],
-            self.strides[::-1],
-            self.offsets[::-1],
+            **{key: filter_dims(val) for key, val in dataclasses.asdict(self).items()},
         )
 
 
@@ -2131,8 +2314,9 @@ class TMACompatibilityChecker:
         # and that the outer strides are 16 byte aligned
         if not V.graph.sizevars.statically_known_equals(strides[-1], sympy.Integer(1)):
             log.debug(
-                "%s TMA API requires innermost stride to be 1.",
+                "%s TMA API requires innermost stride to be 1. Strides are: %s",
                 self.failed_debug_prefix,
+                strides,
             )
             return False
 
@@ -2143,8 +2327,10 @@ class TMACompatibilityChecker:
                 sympy.Integer(0),
             ):
                 log.debug(
-                    "%s TMA API requires outer strides to be 16 byte aligned.",
+                    "%s TMA API requires outer strides to be 16 byte aligned. Dtype bytes: %d, strides: %s",
                     self.failed_debug_prefix,
+                    element_size,
+                    strides,
                 )
                 return False
 
@@ -2153,6 +2339,18 @@ class TMACompatibilityChecker:
         # can be loaded / stored.
         # Start with finding the innermost block type
         innermost_block_shape = block_params.block_shape[-1]
+
+        # Pure singleton case
+        if V.graph.sizevars.statically_known_equals(
+            innermost_block_shape, sympy.Integer(1)
+        ):
+            log.debug(
+                "%s innermost block shape cannot load 16 bytes. Block shape: %s",
+                self.failed_debug_prefix,
+                block_params.block_shape,
+            )
+            return False
+
         innermost_block_type = None
         innermost_block_symt = None
         for block_type_str in innermost_block_shape.free_symbols:
@@ -2161,6 +2359,7 @@ class TMACompatibilityChecker:
                     innermost_block_type = block_type_str
                     innermost_block_symt = block_symt
                     break
+
         assert innermost_block_type and innermost_block_symt, (
             f"{innermost_block_shape} expr must contain a single block type from {TritonSymbols.block_types}"
         )
@@ -2189,8 +2388,10 @@ class TMACompatibilityChecker:
                 innermost_block_bytes, sympy.Integer(16)
             ):
                 log.debug(
-                    "%s persistent reduction innermost block shape cannot load 16 bytes.",
+                    "%s persistent reduction innermost block shape cannot load 16 bytes. Block shape: %s, persistent RBLOCK: %d",
                     self.failed_debug_prefix,
+                    block_params.block_shape,
+                    persistent_rblock,
                 )
                 return False
 
@@ -2199,17 +2400,45 @@ class TMACompatibilityChecker:
             # then the TMA API can only be used if the dtype has an 8 byte element
             # size so that 16 bytes of data can be loaded in the innermost dimension
             try:
+
+                def indexing_div_rep(
+                    x: sympy.Expr,
+                    y: sympy.Expr,
+                    z: Optional[sympy.Expr] = None,
+                ) -> sympy.Expr:
+                    div = x / y
+                    if z:
+                        div = div % z
+                    return div
+
+                solve_expr = innermost_block_shape * element_size - 16
+                # Sympy cannot handle FloorDiv and ModularIndexing well, so simplify
+                solve_expr_simplified = solve_expr.replace(
+                    FloorDiv, indexing_div_rep
+                ).replace(ModularIndexing, indexing_div_rep)
                 min_block_size = next_power_of_2(
                     int(
                         sympy.nsolve(
-                            innermost_block_shape * element_size - 16,
+                            solve_expr_simplified,
                             innermost_block_type,
                             1,
                         )
                     )
                 )
 
-                block_type_str = V.kernel.index_to_str(innermost_block_type)
+                # TODO: min block size may be too large / introduce redundancy
+                if min_block_size > self.kernel.max_block(
+                    prefix_str[innermost_block_symt]
+                ):
+                    log.debug(
+                        "%s the minimum block size to satisfy expression %s is too large: %d",
+                        self.failed_debug_prefix,
+                        solve_expr_simplified,
+                        min_block_size,
+                    )
+                    return False
+
+                block_type_str = self.kernel.index_to_str(innermost_block_type)
                 # Check block sizes if the user has provided a fixed triton config
                 if self.kernel.fixed_config:
                     if min_block_size > self.kernel.fixed_config[block_type_str]:
@@ -2232,8 +2461,9 @@ class TMACompatibilityChecker:
 
             except ValueError:
                 log.debug(
-                    "%s innermost block shape cannot load 16 bytes.",
+                    "%s innermost block shape cannot load 16 bytes. Block params: %s",
                     self.failed_debug_prefix,
+                    block_params.block_shape,
                 )
                 return False
 
@@ -2262,6 +2492,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     kexpr: Callable[[sympy.Expr], str] = texpr
     allow_block_ptr = True
     tma_compatibility_checker_cls = TMACompatibilityChecker
+    transpose_discontiguous_tensor_descriptors_override: Optional[bool] = None
 
     def __init__(
         self,
@@ -2270,10 +2501,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         optimize_mask=True,
         fixed_config: Optional[FixedTritonConfig] = None,
         hint_override: Optional[int] = None,
+        is_combo_kernel: bool = False,
         **kwargs,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
+        self.is_combo_kernel: bool = is_combo_kernel
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
@@ -2732,17 +2965,39 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     else TensorDescriptorOptions
                 )
                 nonlocal tma_compatibility_checker
+                stride_sorter_cls: type[BlockParameters.StrideSorter]
                 if config.triton.use_block_ptr:
                     can_lift = False
-                    transpose_contiguous = False
+                    stride_sorter_cls = BlockParameters.IdentityStrideSorter
                 else:
                     tma_compatibility_checker = cast(
                         TMACompatibilityChecker, tma_compatibility_checker
                     )
                     can_lift = tma_compatibility_checker.can_lift()
+
+                    if (
+                        self.transpose_discontiguous_tensor_descriptors_override
+                        is not None
+                    ):
+                        transpose_contiguous = (
+                            self.transpose_discontiguous_tensor_descriptors_override
+                        )
+                    else:
+                        transpose_contiguous = (
+                            config.triton.transpose_discontiguous_tensor_descriptor
+                        )
+
+                    # For templates:
                     # Only try transpose if we know the output shape
                     # in case we need to transpose the data.
-                    transpose_contiguous = copy_shape is not None
+                    if hasattr(self, "template_out_shape"):
+                        transpose_contiguous &= copy_shape is not None
+
+                    stride_sorter_cls = (
+                        BlockParameters.TensorDecriptorStrideSorter
+                        if transpose_contiguous
+                        else BlockParameters.IdentityStrideSorter
+                    )
 
                 options = options_class.create(
                     params=block_params,
@@ -2751,7 +3006,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     mask_vars=mask_vars,
                     get_max_block=self.max_block,
                     can_lift=can_lift,
-                    transpose_contiguous=transpose_contiguous,
+                    stride_sorter_cls=stride_sorter_cls,
                 )
                 if options_class == TensorDescriptorOptions:
                     tma_compatibility_checker = cast(
@@ -2800,8 +3055,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_shape = tuple([1] * len(self.dense_size_list()))
 
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            if self.fixed_config and not self._has_constant_xmask():
-                mask_vars = OrderedSet(["xmask"])
+            if self.fixed_config or self.is_combo_kernel:
+                mask_vars = OrderedSet(
+                    f"{tree.prefix}mask"
+                    for tree in self.range_trees
+                    if not tree.is_reduction and not self._has_constant_mask(tree)
+                )
             else:
                 mask_vars = OrderedSet()
             if self._load_mask:
@@ -3001,30 +3260,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         return block_descriptor, other
 
     def codegen_block_ptr_store_line(self, name, indexing, block_ptr, value, other=""):
-        def stringify_shape(shape):
-            return tuple(
-                symt.name if isinstance(symt, sympy.Symbol) else str(symt)
-                for symt in shape
-            )
-
-        if value.shape:
-            value_forward_shape = stringify_shape(value.shape)
-            value_reverse_shape = stringify_shape(value.shape[::-1])
-        else:
-            value_forward_shape = None
-            value_reverse_shape = None
-        final_shape = stringify_shape(indexing.final_shape)
-        # TODO: Generalize to N Dimensions
-        if (
-            value_forward_shape != final_shape
-            and value_reverse_shape == final_shape
-            and len(final_shape) == 2
-        ):
-            # TMA stores may require transposing the data to ensure we are contiguous along
-            # the final dimension. This applies to Block-pointers generally, but should only practically
-            # be reached with TMA.
-            value = f"tl.trans({value})"
-
         # Stores require an explicit broadcast. We do this in two phases:
         #  1. Broadcast the operand to the final shape of the range trees, e.g. [ZBLOCK,
         #     YBLOCK, XBLOCK]. This protects against implicit broadcasting from loads.
@@ -3040,7 +3275,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 indexing.broadcasting_dims[idx] = False
 
         value = indexing.codegen_broadcast_and_reshape(
-            value, indexing.final_shape, indexing.block_shape, False
+            value,
+            indexing.final_shape,
+            indexing.block_shape,
+            allow_implicit=False,
+            for_store=True,
         )
 
         # workaround https://github.com/triton-lang/triton/issues/2814
@@ -3232,7 +3471,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 else:
                     line = f"{block_descriptor}.load({V.kernel.index_to_str(indexing.offsets)})"
                 line = indexing.codegen_broadcast_and_reshape(
-                    line, indexing.block_shape, indexing.final_shape, True
+                    line,
+                    indexing.block_shape,
+                    indexing.final_shape,
+                    allow_implicit=True,
+                    for_store=False,
                 )
                 shape = indexing.final_shape
             elif is_sympy_integer_like(original_index):
@@ -4565,7 +4808,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 self.body.writeline(
                     f"{name} = tl.full([R0_BLOCK], {default}, tl.float32)[None, :]"
                 )
-                accumname2var[name] = self.cse.namedvar(name, dtype=torch.float)
+                accumname2var[name] = self.cse.namedvar(
+                    name, dtype=torch.float, shape=("1", "R0_BLOCK")
+                )
             self.body.writeline("split_size = min(RSPLIT_SIZE, xnumel - xoffset)")
             self.body.writeline(
                 "for _ in tl.range(0, split_size, XBLOCK, num_stages=NUM_STAGES):"
@@ -4602,6 +4847,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         self.body,
                         f"{triton_reduction_function}({var}, 0)",
                         dtype=var.dtype,
+                        shape=("R0_BLOCK",),
                     )
                     import unittest
 
@@ -4626,7 +4872,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     loop_end = (
                         "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
-                    num_stages = ", num_stages = 2" if torch.version.hip else ""
+                    # Conditionalize pipelining on HIP for Triton due to
+                    # reports of numerical inaccuracies on older Triton
+                    if torch.version.hip and get_triton_version() > (3, 2):
+                        num_stages = ", num_stages = 2"
+                    else:
+                        num_stages = ""
                     self.body.writeline(
                         f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages}):"
                     )
@@ -4840,7 +5091,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             result.writeline("args = get_args()")
             result.writeline(
-                f"ms = benchmarker.benchmark(lambda: call(args), device={V.graph.get_current_device_or_throw().type}, rep=40)"  # noqa: B950 line too long
+                f"ms = benchmarker.benchmark(lambda: call(args), device='{V.graph.get_current_device_or_throw().type}', rep=40)"  # noqa: B950 line too long
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -5446,7 +5697,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.fixed_config and f"{tree.prefix.upper()}BLOCK" in self.fixed_config:
             if self.fixed_config[f"{tree.prefix.upper()}BLOCK"] == 1:
                 return True
-        else:
+        elif not self.is_combo_kernel:
             if V.graph.sizevars.statically_known_equals(tree.numel, 1):
                 return True
 

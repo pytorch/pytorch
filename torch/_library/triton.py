@@ -126,7 +126,7 @@ def triton_op(
         mutates_args (Iterable[str] or "unknown"): The names of args that the function mutates.
             This MUST be accurate, otherwise, the behavior is undefined. If "unknown",
             it pessimistically assumes that all inputs to the operator are being mutated.
-        schema (None | str): A schema string for the operator. If None
+        schema (str | None): A schema string for the operator. If None
             (recommended) we'll infer a schema for the operator from its type
             annotations. We recommend letting us infer a schema unless you
             have a specific reason not to.

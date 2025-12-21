@@ -5,7 +5,7 @@ import copy
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Any, cast, Optional
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -74,7 +74,7 @@ class _ToTorchTensor(torch.autograd.Function):
     def forward(  # type: ignore[override]
         ctx,
         input: "DTensor",
-        grad_placements: Optional[Sequence[Placement]],
+        grad_placements: Sequence[Placement] | None,
     ):
         ctx.dtensor_spec = input._spec
         ctx.grad_placements = grad_placements
@@ -135,11 +135,11 @@ class _FromTorchTensor(torch.autograd.Function):
         device_mesh: DeviceMesh,
         placements: tuple[Placement, ...],
         run_check: bool,
-        shape: Optional[torch.Size] = None,
-        stride: Optional[tuple[int, ...]] = None,
+        shape: torch.Size | None = None,
+        stride: tuple[int, ...] | None = None,
     ) -> "DTensor":
-        ctx.previous_placement = placements
-        ctx.previous_device_mesh = device_mesh
+        ctx.forward_input_placements = placements
+        ctx.forward_input_device_mesh = device_mesh
 
         if shape and stride:
             tensor_shape, tensor_stride = shape, stride
@@ -200,22 +200,40 @@ class _FromTorchTensor(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: "DTensor"):  # type: ignore[override]
-        previous_placement = ctx.previous_placement
-        previous_device_mesh = ctx.previous_device_mesh
+        forward_input_placements = ctx.forward_input_placements
+        forward_input_device_mesh = ctx.forward_input_device_mesh
 
         # reshard to the placement when creating DistributedTensor
         # so that the gradient layout matches, and we could return
         # local gradients directly
-        if grad_output.placements != previous_placement:
+        if grad_output.placements != forward_input_placements:
             current_spec = grad_output._spec
+
+            # for backward shard -> partial, we do shard -> replicate
+            # for backward replicate -> partial, we do replicate -> replicate / skip transformation
+            # TODO: for backward partial -> partial, right now we keep it unchanged,
+            # but this might need revisit
+            normalized_placements: list[Placement] = []
+            for current, target in zip(
+                current_spec.placements, forward_input_placements
+            ):
+                if (
+                    current.is_shard() or current.is_replicate()
+                ) and target.is_partial():
+                    normalized_placements.append(Replicate())
+                else:
+                    normalized_placements.append(target)
+
             target_spec = DTensorSpec(
-                previous_device_mesh,
-                previous_placement,
+                forward_input_device_mesh,
+                tuple(normalized_placements),
                 tensor_meta=grad_output._spec.tensor_meta,
             )
             local_tensor = grad_output._local_tensor
             output = redistribute_local_tensor(
-                local_tensor, current_spec, target_spec, is_backward=True
+                local_tensor,
+                current_spec,
+                target_spec,
             )
             # TODO: return the redistributed local tensor directly without
             # differentiable backward. see if this make sense for all cases.
@@ -359,12 +377,12 @@ class DTensor(torch.Tensor):
     @staticmethod
     def from_local(
         local_tensor: torch.Tensor,
-        device_mesh: Optional[DeviceMesh] = None,
-        placements: Optional[Sequence[Placement]] = None,
+        device_mesh: DeviceMesh | None = None,
+        placements: Sequence[Placement] | None = None,
         *,
         run_check: bool = False,
-        shape: Optional[torch.Size] = None,
-        stride: Optional[tuple[int, ...]] = None,
+        shape: torch.Size | None = None,
+        stride: tuple[int, ...] | None = None,
     ) -> "DTensor":
         """
         Create a :class:`DTensor` from a local torch.Tensor on each rank
@@ -430,10 +448,15 @@ class DTensor(torch.Tensor):
             placements = list(placements)
             for idx, placement in enumerate(placements):
                 # normalize shard dim to be positive
-                if placement.is_shard():
-                    placement = cast(Shard, placement)
+                if isinstance(placement, Shard | _StridedShard):
                     if placement.dim < 0:
-                        placements[idx] = Shard(placement.dim + local_tensor.ndim)
+                        normalized_dim = placement.dim + local_tensor.ndim
+                        if type(placement) is _StridedShard:
+                            placements[idx] = _StridedShard(
+                                normalized_dim, split_factor=placement.split_factor
+                            )
+                        elif type(placement) is Shard:
+                            placements[idx] = Shard(normalized_dim)
 
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd
@@ -448,7 +471,7 @@ class DTensor(torch.Tensor):
         )
 
     def to_local(
-        self, *, grad_placements: Optional[Sequence[Placement]] = None
+        self, *, grad_placements: Sequence[Placement] | None = None
     ) -> torch.Tensor:
         """
         Get the local tensor of this DTensor on its current rank. For sharding it returns
@@ -486,12 +509,12 @@ class DTensor(torch.Tensor):
 
     def redistribute(
         self,
-        device_mesh: Optional[DeviceMesh] = None,
-        placements: Optional[Sequence[Placement]] = None,
+        device_mesh: DeviceMesh | None = None,
+        placements: Sequence[Placement] | None = None,
         *,
         async_op: bool = False,
-        forward_dtype: Optional[torch.dtype] = None,
-        backward_dtype: Optional[torch.dtype] = None,
+        forward_dtype: torch.dtype | None = None,
+        backward_dtype: torch.dtype | None = None,
     ) -> "DTensor":
         """
         ``redistribute`` performs necessary collective operations that redistribute the current
@@ -560,6 +583,10 @@ class DTensor(torch.Tensor):
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
                 placements[i] = Shard(placement.dim + self.ndim)
+            elif isinstance(placement, _StridedShard) and placement.dim < 0:
+                placements[i] = _StridedShard(
+                    placement.dim + self.ndim, split_factor=placement.split_factor
+                )
         placements = tuple(placements)
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
@@ -568,7 +595,7 @@ class DTensor(torch.Tensor):
         )
 
     def full_tensor(
-        self, *, grad_placements: Optional[Sequence[Placement]] = None
+        self, *, grad_placements: Sequence[Placement] | None = None
     ) -> torch.Tensor:
         """
         Return the full tensor of this DTensor. It will perform necessary collectives
@@ -691,10 +718,10 @@ class DTensor(torch.Tensor):
 
 def distribute_tensor(
     tensor: torch.Tensor,
-    device_mesh: Optional[DeviceMesh] = None,
-    placements: Optional[Sequence[Placement]] = None,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
     *,
-    src_data_rank: Optional[int] = 0,
+    src_data_rank: int | None = 0,
 ) -> DTensor:
     """
     Distribute a leaf ``torch.Tensor`` (i.e. nn.Parameter/buffers) to the ``device_mesh`` according
@@ -796,11 +823,16 @@ def distribute_tensor(
     # distribute the tensor according to the placements.
     placements = list(placements)
     for idx, placement in enumerate(placements):
-        if isinstance(placement, Shard):
+        if isinstance(placement, Shard | _StridedShard):
             placement_dim = (
                 placement.dim + tensor.ndim if placement.dim < 0 else placement.dim
             )
-            if isinstance(placement, _StridedShard):
+            if isinstance(placement, Shard):
+                local_tensor = Shard._make_shard_tensor(
+                    placement_dim, local_tensor, device_mesh, idx, src_data_rank
+                )
+                placements[idx] = Shard(placement_dim)
+            else:
                 local_tensor = _StridedShard._make_shard_tensor(
                     placement_dim,
                     local_tensor,
@@ -812,11 +844,6 @@ def distribute_tensor(
                 placements[idx] = _StridedShard(
                     placement_dim, split_factor=placement.split_factor
                 )
-            else:
-                local_tensor = Shard._make_shard_tensor(
-                    placement_dim, local_tensor, device_mesh, idx, src_data_rank
-                )
-                placements[idx] = Shard(placement_dim)
         elif isinstance(placement, Replicate):
             local_tensor = Replicate._make_replicate_tensor(
                 local_tensor, device_mesh, idx, src_data_rank
@@ -858,7 +885,7 @@ def distribute_tensor(
 def _shard_tensor(
     full_tensor: torch.Tensor,
     placements: Sequence[Shard],
-    device_mesh: Optional[DeviceMesh] = None,
+    device_mesh: DeviceMesh | None = None,
 ) -> "DTensor":
     """
     Locally shards a full tensor based on indicated sharding arrangement, and
@@ -894,10 +921,10 @@ def _shard_tensor(
 
 def distribute_module(
     module: nn.Module,
-    device_mesh: Optional[DeviceMesh] = None,
-    partition_fn: Optional[Callable[[str, nn.Module, DeviceMesh], None]] = None,
-    input_fn: Optional[Callable[[nn.Module, Any, DeviceMesh], None]] = None,
-    output_fn: Optional[Callable[[nn.Module, Any, DeviceMesh], None]] = None,
+    device_mesh: DeviceMesh | None = None,
+    partition_fn: Callable[[str, nn.Module, DeviceMesh], None] | None = None,
+    input_fn: Callable[[nn.Module, Any, DeviceMesh], None] | None = None,
+    output_fn: Callable[[nn.Module, Any, DeviceMesh], None] | None = None,
 ) -> nn.Module:
     """
     This function expose three functions to control the parameters/inputs/outputs of the module:
@@ -1050,8 +1077,8 @@ def distribute_module(
 def _dtensor_init_helper(  # type: ignore[no-untyped-def]
     init_op,
     size: torch.Size,
-    device_mesh: Optional[DeviceMesh] = None,
-    placements: Optional[Sequence[Placement]] = None,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
     **kwargs,
 ) -> DTensor:
     # if device_mesh is None, use the one from mesh resources
@@ -1071,7 +1098,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
 
     # get local tensor shape
     local_shape, _ = compute_local_shape_and_global_offset(
-        size, device_mesh, placements
+        size, device_mesh, placements, skip_offset=True
     )
 
     # initialize the local tensor
@@ -1116,11 +1143,11 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
 
 def ones(  # type: ignore[no-untyped-def]
     *size,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
     requires_grad: bool = False,
-    device_mesh: Optional[DeviceMesh] = None,
-    placements: Optional[Sequence[Placement]] = None,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
 ) -> DTensor:
     """
     Returns a :class:`DTensor` filled with the scalar value 1, with the shape defined
@@ -1159,11 +1186,11 @@ def ones(  # type: ignore[no-untyped-def]
 
 def empty(  # type: ignore[no-untyped-def]
     *size,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
     requires_grad: bool = False,
-    device_mesh: Optional[DeviceMesh] = None,
-    placements: Optional[Sequence[Placement]] = None,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
 ) -> DTensor:
     """
     Returns a :class:`DTensor` filled with uninitialized data. The shape of the :class:`DTensor`
@@ -1204,11 +1231,11 @@ def full(  # type: ignore[no-untyped-def]
     size,
     fill_value,
     *,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
     requires_grad: bool = False,
-    device_mesh: Optional[DeviceMesh] = None,
-    placements: Optional[Sequence[Placement]] = None,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
 ) -> DTensor:
     """
     Returns a :class:`DTensor` filled with ``fill_value`` according to ``device_mesh`` and
@@ -1250,10 +1277,10 @@ def full(  # type: ignore[no-untyped-def]
 def rand(  # type: ignore[no-untyped-def]
     *size,
     requires_grad: bool = False,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device_mesh: Optional[DeviceMesh] = None,
-    placements: Optional[Sequence[Placement]] = None,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
 ) -> DTensor:
     """
     Returns a :class:`DTensor` filled with random numbers from a uniform distribution
@@ -1294,10 +1321,10 @@ def rand(  # type: ignore[no-untyped-def]
 def randn(  # type: ignore[no-untyped-def]
     *size,
     requires_grad: bool = False,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device_mesh: Optional[DeviceMesh] = None,
-    placements: Optional[Sequence[Placement]] = None,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
 ) -> DTensor:
     """
     Returns a :class:`DTensor` filled with random numbers from a normal distribution
@@ -1338,10 +1365,10 @@ def randn(  # type: ignore[no-untyped-def]
 def zeros(  # type: ignore[no-untyped-def]
     *size,
     requires_grad: bool = False,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device_mesh: Optional[DeviceMesh] = None,
-    placements: Optional[Sequence[Placement]] = None,
+    device_mesh: DeviceMesh | None = None,
+    placements: Sequence[Placement] | None = None,
 ) -> DTensor:
     """
     Returns a :class:`DTensor` filled with the scalar value 0.

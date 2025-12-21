@@ -1,5 +1,6 @@
 #include <ATen/native/mps/kernels/EmbeddingBag.h>
 #include <c10/metal/atomic.h>
+#include <c10/metal/error.h>
 #include <c10/metal/utils.h>
 #include <metal_array>
 #include <metal_stdlib>
@@ -152,6 +153,7 @@ void embedding_bag_impl(
     device I* bag_size,
     device I* max_indices,
     constant EmbeddingBagParams<uint32_t>& params,
+    device ErrorMessages* error_buf,
     uint tid) {
   auto num_indices = params.num_indices;
   auto num_bags = params.num_bags;
@@ -159,6 +161,7 @@ void embedding_bag_impl(
   auto padding_idx = params.padding_idx;
   auto use_per_sample_weights = params.use_per_sample_weights;
   auto per_sample_weights_stride = params.per_sample_weights_stride;
+  const auto num_weights = params.num_weights;
   constant auto& output_strides = params.output_strides;
   constant auto& weight_strides = params.weight_strides;
   constant auto& max_indices_strides = params.max_indices_strides;
@@ -167,10 +170,10 @@ void embedding_bag_impl(
   auto feature_idx = tid % feature_size;
 
   uint32_t offsets_end = min(bag_idx + 1, num_bags - 1);
-  bool is_last_bag = bag_idx + 1 == num_bags;
+  const bool is_last_bag = bag_idx + 1 == num_bags;
   uint32_t indices_start = static_cast<uint32_t>(offsets[bag_idx]);
-  uint32_t indices_end = is_last_bag * (num_indices) +
-      (!is_last_bag) * (static_cast<uint32_t>(offsets[offsets_end]));
+  uint32_t indices_end =
+      is_last_bag ? num_indices : static_cast<uint32_t>(offsets[offsets_end]);
 
   auto out_val = ReductionOpInit<M, T>()();
 
@@ -180,6 +183,17 @@ void embedding_bag_impl(
   for (uint32_t indices_idx = indices_start; indices_idx < indices_end;
        indices_idx++) {
     I weight_idx = indices[indices_idx];
+    if (weight_idx < 0 || static_cast<uint32_t>(weight_idx) > num_weights) {
+      TORCH_REPORT_ERROR(
+          error_buf,
+          "Index ",
+          indices_idx,
+          " is out of bounds: ",
+          weight_idx,
+          ", range 0 to ",
+          num_weights);
+      return;
+    }
     bool pad = (weight_idx == padding_idx);
     auto weight_val = static_cast<opmath_t<T>>(
         weight
@@ -223,6 +237,7 @@ void embedding_bag_impl(
       bag_size,                    \
       max_indices,                 \
       params,                      \
+      error_buf,                   \
       tid)
 
 template <typename T, typename I>
@@ -236,6 +251,7 @@ kernel void embedding_bag(
     device I* bag_size [[buffer(6)]],
     device I* max_indices [[buffer(7)]],
     constant EmbeddingBagParams<uint32_t>& params [[buffer(8)]],
+    device ErrorMessages* error_buf [[buffer(9)]],
     uint tid [[thread_position_in_grid]]) {
   switch (params.mode) {
     case EmbeddingBagMode::SUM:
@@ -424,6 +440,7 @@ kernel void embedding_bag_per_sample_weights_backward(
       device I * bag_size [[buffer(6)]],                                    \
       device I * max_indices [[buffer(7)]],                                 \
       constant EmbeddingBagParams<uint32_t> & params [[buffer(8)]],         \
+      device ErrorMessages * error_buf [[buffer(9)]],                       \
       uint tid [[thread_position_in_grid]]);                                \
                                                                             \
   template [[host_name("embedding_bag_backward_" #T "_" #I)]]               \

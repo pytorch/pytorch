@@ -53,7 +53,7 @@ import threading
 from collections import defaultdict
 from collections.abc import Callable, Generator, Sequence
 from types import TracebackType
-from typing import Any, Optional, Union
+from typing import Any, Optional, ParamSpec, TypeVar, Union
 
 
 try:
@@ -84,6 +84,9 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils.checkpoint import get_device_states, set_device_states
 
+
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
 
 not_implemented_log = torch._logging.getArtifactLogger(__name__, "not_implemented")
 
@@ -227,58 +230,58 @@ def _map_to_rank_local_val(val: Any, rank: int) -> Any:
     return val
 
 
-def _collect_cuda_rng_states() -> dict[int, torch.Tensor]:
+def _collect_accelerator_rng_states() -> dict[int, torch.Tensor]:
     """
-    Collects RNG state from all available CUDA devices.
+    Collects RNG state from all available acceleator devices.
 
     Returns:
-        List of RNG state tensors, one for each CUDA device.
-        Returns empty list if CUDA is not available.
+        List of RNG state tensors, one for each accelerator device.
+        Returns empty list if accelerator is not available.
     """
-    if not torch.cuda.is_available():
+    if not torch.accelerator.is_available():
         return {}
 
-    if torch.cuda.is_available():
-        device_idx = torch.cuda.current_device()
-
-        with torch.cuda.device(device_idx):
-            return {device_idx: torch.cuda.get_rng_state()}
+    if torch.accelerator.is_available():
+        device_idx = torch.accelerator.current_device_index()
+        with torch.accelerator.device_index(device_idx):
+            return {device_idx: torch.get_device_module().get_rng_state()}
 
     return {}
 
 
-def _set_cuda_rng_states(rng_states: dict[int, torch.Tensor]) -> None:
+def _set_accelerator_rng_states(rng_states: dict[int, torch.Tensor]) -> None:
     """
-    Sets RNG state for all CUDA devices from a list of states.
+    Sets RNG state for all accelerator devices from a list of states.
 
     Args:
         rng_states: List of RNG state tensors to restore.
     """
-    if not torch.cuda.is_available():
+    if not torch.accelerator.is_available():
         return
 
-    for device_idx, device_rng_state in rng_states.items():
-        with torch.cuda.device(device_idx):
-            torch.cuda.set_rng_state(device_rng_state)
+    if torch.accelerator.is_available():
+        for device_idx, device_rng_state in rng_states.items():
+            with torch.accelerator.device_index(device_idx):
+                torch.get_device_module().set_rng_state(device_rng_state)
 
 
 def _get_rng_state() -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
     """
-    Gets CPU and CUDA rng states from all devices.
+    Gets CPU and accelerator (e.g., CUDA, XPU device) rng states from all devices.
     """
-    return (torch.get_rng_state(), _collect_cuda_rng_states())
+    return (torch.get_rng_state(), _collect_accelerator_rng_states())
 
 
 def _set_rng_state(
-    cpu_state: torch.Tensor, cuda_states: dict[int, torch.Tensor]
+    cpu_state: torch.Tensor, accelerator_states: dict[int, torch.Tensor]
 ) -> None:
     """
-    Sets CPU and CUDA rng states for all devices. If the list of cuda states
-    is shorter than the number of devices only the first len(cuda_states) devices
-    will get their rng state set.
+    Sets CPU and accelerator (e.g., CUDA, XPU device) rng states for all devices. If
+    the list of accelerator states is shorter than the number of devices only the
+    first len(accelerator_states) devices will get their rng state set.
     """
     torch.set_rng_state(cpu_state)
-    _set_cuda_rng_states(cuda_states)
+    _set_accelerator_rng_states(accelerator_states)
 
 
 def _combine_int_rank_results(rank_results: dict[int, int]) -> int | torch.SymInt:
@@ -299,6 +302,14 @@ def _combine_any_rank_results(rank_results: dict[int, Any]) -> Any:
 
     if isinstance(any_v, int):
         return _combine_int_rank_results(rank_results)
+
+    if isinstance(any_v, torch.device):
+        assert all(v.type == any_v.type for v in rank_results.values()), (
+            "device type should be the same"
+        )
+        # Just use the first device - the device type is what matters,
+        # and LocalTensorMode runs on a single physical device anyway
+        return any_v
 
     assert all(v == any_v for v in rank_results.values()), (
         "Non Tensor or int rank results must be equal for all ranks"
@@ -355,7 +366,8 @@ def _for_each_rank_run_func(
     for r in sorted(ranks):
         if use_per_rank_rng:
             assert lm is not None
-            _set_rng_state(*lm._per_rank_rng_states[r])
+            if r in lm._per_rank_rng_states:
+                _set_rng_state(*lm._per_rank_rng_states[r])
         else:
             assert global_rng_state is not None
             _set_rng_state(*global_rng_state)
@@ -421,7 +433,7 @@ class LocalIntNode:
     def __init__(self, local_ints: dict[int, int]):
         self._local_ints = local_ints
 
-    def maybe_as_int(self) -> Optional[int]:
+    def maybe_as_int(self) -> int | None:
         return None
 
     def is_int(self) -> bool:
@@ -680,28 +692,33 @@ class _LocalOffsetBasedRNGTracker:
                 coord = (rank // num_chunks_after) % mesh_dim_size
                 mesh_coords.append(coord)
 
-            # compute local shape and global offset for this rank
-            local_shape, global_offset = _compute_local_shape_and_global_offset(
-                spec.shape, spec.mesh.shape, mesh_coords, spec.placements
+            # compute shard offset based on placements
+            from torch.distributed.tensor._random import (
+                _calc_first_shard_size,
+                _calc_shard_info,
+                _calc_shard_linear_idx,
             )
 
-            # compute shard offset based on placements
-            shard_offset = 1
-            for idx, placement in enumerate(spec.placements):
-                if isinstance(placement, Shard):
-                    shard_dim = placement.dim
-                    shard_offset *= global_offset[shard_dim] + 1
+            # Compute shard index and total number of shards on each tensor dim
+            shard_idx_by_dim, total_num_shards_by_dim = _calc_shard_info(
+                mesh_coords, spec
+            )
+
+            # compute shard linear index
+            shard_linear_idx = _calc_shard_linear_idx(
+                shard_idx_by_dim, total_num_shards_by_dim
+            )
 
             # get current offset for this rank
             current_offset = int(
                 state._per_rank_states[rank][8:].view(dtype=torch.int64).item()
             )
 
+            local_shape = _calc_first_shard_size(spec)
             # compute local size
             local_size = prod(local_shape)
 
             # compute new offset (must be multiple of 4)
-            shard_linear_idx = shard_offset - 1
             offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
             state._per_rank_offsets[rank] = current_offset + offset_incr
 
@@ -753,20 +770,20 @@ class _LocalOffsetBasedRNGTracker:
         if self.distribute_region_enabled:
             # sync to rank 0's state if no explicit generator
             if generator is None:
-                rank_0_state = lm._per_rank_rng_states[0]
-                rank_0_cpu, rank_0_cuda = rank_0_state
+                any_rank_state = lm._any_local_rng_state()
+                any_rank_cpu, any_rank_cuda = any_rank_state
 
                 if self._device.type == "cuda":
-                    assert self._device.index in rank_0_cuda
-                    rank_0_device_state = rank_0_cuda[self._device.index]
+                    assert self._device.index in any_rank_cuda
+                    any_rank_device_state = any_rank_cuda[self._device.index]
                 else:
-                    rank_0_device_state = rank_0_cpu
+                    any_rank_device_state = any_rank_cpu
 
                 from torch.distributed.tensor._random import _PhiloxState
 
-                rank_0_philox = _PhiloxState(rank_0_device_state)
-                state.seed = rank_0_philox.seed
-                state.offset = rank_0_philox.offset
+                any_rank_philox = _PhiloxState(any_rank_device_state)
+                state.seed = any_rank_philox.seed
+                state.offset = any_rank_philox.offset
 
             old_offset = state.offset
             self._set_pre_op_offset(state, spec)
@@ -906,6 +923,9 @@ class LocalTensor(torch.Tensor):
                 "Internal local_tensors require grad, but we will ignore those autograd graph. "
                 "Make a custom autograd function and make sure you detach the inner tensors."
             )
+
+        if len(local_tensors) == 0:
+            raise ValueError("LocalTensor cannot be empty!")
 
         (shape, strides, device, dtype, layout, extra_dispatch_keys) = (
             _compute_local_tensor_meta(local_tensors)
@@ -1113,18 +1133,24 @@ class LocalTensor(torch.Tensor):
             self._size = shape
 
 
-_GLOBAL_LOCAL_TENSOR_MODE: list["LocalTensorMode"] = []
+# If set to `True` the LocalTensorMode stack will be created for the whole process,
+# otherwise it will be created for each thread.
+_PROCESS_MODE: bool = True
+_PROCESS_LOCAL_TENSOR_MODE: list["LocalTensorMode"] = []
 # When running under local runner each thread must create its own local tensor mode
 # so that they do not interfere with each other.
 _THREAD_LOCAL_TENSOR_MODE: threading.local = threading.local()
 
 
 def get_local_tensor_mode_list() -> list["LocalTensorMode"]:
+    global _PROCESS_MODE
+    if _PROCESS_MODE:
+        global _PROCESS_LOCAL_TENSOR_MODE
+        return _PROCESS_LOCAL_TENSOR_MODE
+    global _THREAD_LOCAL_TENSOR_MODE
     if not hasattr(_THREAD_LOCAL_TENSOR_MODE, "value"):
         _THREAD_LOCAL_TENSOR_MODE.value = []
-    if len(_THREAD_LOCAL_TENSOR_MODE.value) > 0:
-        return _THREAD_LOCAL_TENSOR_MODE.value
-    return _GLOBAL_LOCAL_TENSOR_MODE
+    return _THREAD_LOCAL_TENSOR_MODE.value
 
 
 class LocalTensorMode(TorchDispatchMode):
@@ -1146,15 +1172,17 @@ class LocalTensorMode(TorchDispatchMode):
     """
 
     # What ranks this local tensor mode is operating over
-    def __init__(self, ranks: Union[int, frozenset[int]]):
+    def __init__(self, ranks: int | frozenset[int]):
         if isinstance(ranks, int):
             # assume is world size
             self.ranks = frozenset(range(ranks))
         else:
             assert isinstance(ranks, frozenset)
             self.ranks = ranks
-        self._disable = False
+        self._disable = True
         self._old_get_coordinate = None
+        self._old_get_rank = None
+        self._old_get_local_rank = None
         self._old_torch_manual_seed: Any = None
         self._old_torch_initial_seed: Any = None
         self._per_rank_rng_states: dict[
@@ -1162,10 +1190,8 @@ class LocalTensorMode(TorchDispatchMode):
         ] = {}
 
     def __enter__(self) -> "LocalTensorMode":
-        self._disable = False
-        self._patch_device_mesh()
-        self._patch_random_functions()
         get_local_tensor_mode_list().append(self)
+        self.enable_()
 
         # _distribute_region will compute correct per-shard offsets
         # but we want all ranks to start with the same state
@@ -1185,10 +1211,14 @@ class LocalTensorMode(TorchDispatchMode):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
-        self._disable = True
-        self._unpatch_device_mesh()
-        self._unpatch_random_functions()
-        get_local_tensor_mode_list().pop()
+        local_tensor_mode_list = get_local_tensor_mode_list()
+        local_tensor_mode_list.pop()
+        self.disable_()
+        if len(local_tensor_mode_list) > 0:
+            if local_tensor_mode_list[-1]._disable:
+                local_tensor_mode_list[-1].disable_()
+            else:
+                local_tensor_mode_list[-1].enable_()
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def __torch_dispatch__(
@@ -1230,7 +1260,7 @@ class LocalTensorMode(TorchDispatchMode):
         for a in flat_args:
             if isinstance(a, LocalTensor):
                 assert a._ranks <= self.ranks, (
-                    f"Input LocalTensor {a} and LocalTensorMode must be configured for the same ranks"
+                    f"Input LocalTensor {a} must be configured for a subset of the LocalTensorMode ranks {self.ranks}"
                 )
 
         if func.overloadpacket == torch.ops.aten.dim:
@@ -1284,8 +1314,6 @@ class LocalTensorMode(TorchDispatchMode):
                 return _c10d._local_functional_reduce_scatter_tensor(*args, **kwargs)
             elif func is torch.ops._c10d_functional.all_to_all_single.default:
                 return _c10d._local_functional_all_to_all_single(*args, **kwargs)
-            elif func is torch.ops._c10d_functional.wait_tensor.default:
-                return _c10d._local_functional_wait_tensor(*args, **kwargs)
             else:
                 with LocalTensorMode(self.ranks):
                     return func._op_dk(
@@ -1303,6 +1331,22 @@ class LocalTensorMode(TorchDispatchMode):
 
         return _for_each_rank_run_func(func, self.ranks, args, kwargs, alias=True)
 
+    def disable_(self):
+        if self._disable:
+            return
+
+        self._unpatch_device_mesh()
+        self._unpatch_random_functions()
+        self._disable = True
+
+    def enable_(self):
+        if not self._disable:
+            return
+
+        self._patch_device_mesh()
+        self._patch_random_functions()
+        self._disable = False
+
     @contextlib.contextmanager
     def disable(self) -> Generator[None, None, None]:
         """
@@ -1310,14 +1354,21 @@ class LocalTensorMode(TorchDispatchMode):
         rank specific computations and merge results back before enabling LocalTensorMode back.
         """
 
-        old = self._disable
-        self._disable = True
-        self._unpatch_device_mesh()
+        # don't unpatch again if already disabled
+        if self._disable:
+            try:
+                yield
+            finally:
+                # re-disable if the yield messed
+                # with the state
+                self.disable_()
+            return
+
+        self.disable_()
         try:
             yield
         finally:
-            self._disable = old
-            self._patch_device_mesh()
+            self.enable_()
 
     def rank_map(self, cb: Callable[[int], Tensor]) -> LocalTensor:
         """
@@ -1345,16 +1396,33 @@ class LocalTensorMode(TorchDispatchMode):
             # pyrefly: ignore [bad-argument-type, bad-argument-count]
             return LocalTensor(results)
 
+    def _any_local_rng_state(self) -> tuple[torch.Tensor, dict[int, torch.Tensor]]:
+        return self._per_rank_rng_states[next(iter(self.ranks))]
+
     def _patch_device_mesh(self) -> None:
         assert self._old_get_coordinate is None
+        assert self._old_get_rank is None
+        assert self._old_get_local_rank is None
         self._old_get_coordinate = DeviceMesh.get_coordinate  # type: ignore[assignment]
+        self._old_get_rank = DeviceMesh.get_rank  # type: ignore[assignment]
+        self._old_get_local_rank = DeviceMesh.get_local_rank  # type: ignore[assignment]
         DeviceMesh.get_coordinate = _LocalDeviceMesh.get_coordinate  # type: ignore[method-assign]
+        DeviceMesh.get_rank = _LocalDeviceMesh.get_rank  # type: ignore[method-assign]
+        DeviceMesh.get_local_rank = _LocalDeviceMesh.get_local_rank  # type: ignore[method-assign]
 
     def _unpatch_device_mesh(self) -> None:
         assert self._old_get_coordinate is not None
+        assert self._old_get_rank is not None
+        assert self._old_get_local_rank is not None
         DeviceMesh.get_coordinate = self._old_get_coordinate
+        DeviceMesh.get_rank = self._old_get_rank
+        DeviceMesh.get_local_rank = self._old_get_local_rank
         # pyrefly: ignore [bad-assignment]
         self._old_get_coordinate = None
+        # pyrefly: ignore [bad-assignment]
+        self._old_get_rank = None
+        # pyrefly: ignore [bad-assignment]
+        self._old_get_local_rank = None
 
     def _patch_random_functions(self) -> None:
         import torch.random
@@ -1403,12 +1471,12 @@ class _LocalRandom:
 
             for rank in sorted(lm.ranks):
                 rank_seed = seed.node._local_ints[rank]
-                _manual_seed_impl(rank_seed, update_local_tensor_states=False)
+                _manual_seed_impl(rank_seed)
                 lm._per_rank_rng_states[rank] = _get_rng_state()
             return torch.random.default_generator
         from torch.random import _manual_seed_impl
 
-        result = _manual_seed_impl(seed, update_local_tensor_states=False)
+        result = _manual_seed_impl(seed)
 
         if lm is not None and len(lm._per_rank_rng_states) > 0:
             cpu_state, cuda_states = _get_rng_state()
@@ -1438,6 +1506,9 @@ class _LocalRandom:
         return torch.random.default_generator.initial_seed()
 
 
+# Save the original get_coordinate method before any patching
+
+
 class _LocalDeviceMesh:
     """
     Holds implementations of DeviceMesh functionality that must be patched while running
@@ -1445,7 +1516,7 @@ class _LocalDeviceMesh:
     """
 
     @staticmethod
-    def get_coordinate(self: DeviceMesh) -> Optional[list[int] | None]:
+    def get_coordinate(self: DeviceMesh) -> list[int] | None:
         # NB: In order to support submeshes the code below recreates for each
         # rank submesh with the same mesh dimensions as current mesh. We are
         # doing this because when submesh is created it is created for a particular
@@ -1467,6 +1538,35 @@ class _LocalDeviceMesh:
         # their meshes formed from root mesh and selecting the same dimensions
         # as the current mesh.
         return out  # type: ignore[return-value]
+
+    @staticmethod
+    def get_rank(self) -> int | SymInt:
+        lm = enabled_local_tensor_mode()
+        assert lm is not None, "Unexpectedly not in LocalTensorMode"
+        return torch.SymInt(LocalIntNode(local_ints={r: r for r in lm.ranks}))
+
+    @staticmethod
+    def get_local_rank(self, mesh_dim: int | str | None = None) -> int | SymInt:
+        lm = enabled_local_tensor_mode()
+        assert lm is not None, "Unexpectedly not in LocalTensorMode"
+
+        if self.ndim > 1 and mesh_dim is None:
+            raise RuntimeError(
+                f"Found the DeviceMesh have {self.ndim} dimensions",
+                "Optional kwarg `mesh_dim` needs to be specified when device_mesh.ndim > 1.",
+            )
+        elif mesh_dim is None:
+            mesh_dim = 0
+
+        if isinstance(mesh_dim, str):
+            mesh_dim = self._mesh_dim_names.index(mesh_dim)
+
+        # Compute local rank for each global rank
+        # get_coordinate returns a list of SymInt, one per mesh dimension
+        # We need to extract the coordinate for the specified mesh_dim
+        coords = _LocalDeviceMesh.get_coordinate(self)
+        assert coords is not None
+        return coords[mesh_dim]
 
 
 def reconcile_args(args: Any, kwargs: dict[str, Any] | None = None) -> Any:
@@ -1496,7 +1596,7 @@ def reconcile_args(args: Any, kwargs: dict[str, Any] | None = None) -> Any:
     return pytree.tree_unflatten(reconciled_args, args_spec)
 
 
-def local_tensor_mode() -> Optional[LocalTensorMode]:
+def local_tensor_mode() -> LocalTensorMode | None:
     """
     Returns the current active LocalTensorMode if one exists.
 
@@ -1513,7 +1613,7 @@ def local_tensor_mode() -> Optional[LocalTensorMode]:
     return None
 
 
-def enabled_local_tensor_mode() -> Optional[LocalTensorMode]:
+def enabled_local_tensor_mode() -> LocalTensorMode | None:
     """
     Returns the current active LocalTensorMode only if it's enabled.
 
@@ -1529,7 +1629,7 @@ def enabled_local_tensor_mode() -> Optional[LocalTensorMode]:
     return None
 
 
-def maybe_run_for_local_tensor(func: Callable[..., Any]) -> Callable[..., Any]:
+def maybe_run_for_local_tensor(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Decorator that ensures a function is executed for each local tensor shard
     when running under LocalTensorMode. If not in LocalTensorMode, the function
@@ -1552,7 +1652,7 @@ def maybe_run_for_local_tensor(func: Callable[..., Any]) -> Callable[..., Any]:
     """
 
     @functools.wraps(func)
-    def wrapper(*args, **kwargs):  # type: ignore[no-untyped-def]
+    def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         if not (lm := enabled_local_tensor_mode()):
             return func(*args, **kwargs)
         ret = None
@@ -1674,12 +1774,16 @@ class LocalRunnerMode:
             threading.Thread(target=self._run, args=(i,), name="LocalRunnerMode")
             for i in range(concurrency)
         ]
+        self._process_mode = True
 
     def __enter__(self) -> "LocalRunnerMode":
         global _LOCAL_RUNNER_MODE
         assert _LOCAL_RUNNER_MODE is None, "LocalRunnerMode is already running"
         _LOCAL_RUNNER_MODE = self
 
+        global _PROCESS_MODE
+        self._process_mode = _PROCESS_MODE
+        _PROCESS_MODE = False
         for r in self._runners:
             r.start()
         return self
@@ -1694,6 +1798,9 @@ class LocalRunnerMode:
             r.join()
         global _LOCAL_RUNNER_MODE
         _LOCAL_RUNNER_MODE = None
+
+        global _PROCESS_MODE
+        _PROCESS_MODE = self._process_mode
 
     def _run(self, id: int) -> None:
         LocalRunnerMode.runner_context.id = id
@@ -1779,7 +1886,7 @@ class _LocalPhiloxState:
         return LocalTensor(self._per_rank_states)  # type: ignore[name-defined]
 
     @property
-    def offset(self) -> Union[int, SymInt]:
+    def offset(self) -> int | SymInt:
         from torch.distributed.tensor._random import _PhiloxState
 
         offsets = {}
@@ -1793,7 +1900,7 @@ class _LocalPhiloxState:
         return SymInt(LocalIntNode(offsets))
 
     @offset.setter
-    def offset(self, offset: Union[int, SymInt]) -> None:
+    def offset(self, offset: int | SymInt) -> None:
         from torch.distributed.tensor._random import _PhiloxState
 
         if isinstance(offset, SymInt) and isinstance(offset.node, LocalIntNode):
@@ -1808,7 +1915,7 @@ class _LocalPhiloxState:
                 rank_philox.offset = offset_int
 
     @property
-    def seed(self) -> Union[int, SymInt]:
+    def seed(self) -> int | SymInt:
         from torch.distributed.tensor._random import _PhiloxState
 
         seeds = {}
@@ -1821,7 +1928,7 @@ class _LocalPhiloxState:
         return SymInt(LocalIntNode(seeds))
 
     @seed.setter
-    def seed(self, seed: Union[int, SymInt]) -> None:
+    def seed(self, seed: int | SymInt) -> None:
         from torch.distributed.tensor._random import _PhiloxState
 
         if isinstance(seed, SymInt) and isinstance(seed.node, LocalIntNode):
