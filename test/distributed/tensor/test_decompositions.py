@@ -177,10 +177,8 @@ class TestDecompSharding(TestCase):
         out = aten.expand_copy.default(input, [-1, 16])
         self.assertEqual(out.placements, (Partial("min"),))
 
-        # index_add
-        # this crashes, I think because the decomposition is index_put(accumulate=True),
-        # and the index_put sharding strategy doesn't consider the accumulate flag
-        # (shouldn't be shardable if accumulate=True)
+        # # index_add
+        # # index_put decomp errors; https://github.com/pytorch/pytorch/issues/170934
         # check_no_strategy(aten.index_add.default)
         # input = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
         # index = d_ones(16, device_mesh=mesh, placements=[Shard(0)]).int()

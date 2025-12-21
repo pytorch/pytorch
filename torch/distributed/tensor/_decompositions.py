@@ -93,7 +93,9 @@ class DecompShardingStrategy:
             lambda x: isinstance(x, DTensorSpec),
             (op_schema.args_schema, op_schema.kwargs_schema),
         ):
-            # factory method, don't handle yet
+            # this case means we likely recursively traced a decomposition,
+            # into a factory method that takes no DTensor args (e.g. torch.ones).
+            # Just error out saying no sharding strategy is registered.
             return None
 
         graph = _trace_decomposition(op_schema)
