@@ -1385,7 +1385,8 @@ struct IValuePacker<std::vector<T>> {
     }
     std::vector<T> result;
     auto lst = t.toList();
-    for (const at::IValue& elt : lst) {
+    for (size_t i = 0; i < lst.size(); ++i) {
+      const at::IValue& elt = lst.get(i);
       result.emplace_back(IValuePacker<T>::unpack(elt));
     }
     return result;
@@ -1457,24 +1458,30 @@ struct IValuePacker<InputMetadata> {
     auto tuple = std::make_tuple(
         pack_TensorOptions(t.options()),
         t.shape_as_dim_vector().vec(),
-        t.is_tensor_subclass());
+        t.is_tensor_subclass(),
+        t.grad_dtype());
     return tuple;
   }
   static InputMetadata unpack(const at::IValue& t) {
-    auto tuple = t.to<
-        std::tuple<packed_tensoroptions_t, std::vector<at::SymInt>, bool>>();
+    auto tuple = t.to<std::tuple<
+        packed_tensoroptions_t,
+        std::vector<at::SymInt>,
+        bool,
+        std::optional<c10::ScalarType>>>();
 
     return InputMetadata(
         unpack_TensorOptions(std::get<0>(tuple)),
         SymIntSmallVec(std::get<1>(tuple)),
         std::get<2>(tuple),
-        false);
+        false,
+        std::get<3>(tuple));
   }
   static at::TypePtr packed_type() {
     return at::TupleType::create(
         {IValuePacker<at::TensorOptions>::packed_type(),
          IValuePacker<std::vector<at::SymInt>>::packed_type(),
-         at::BoolType::get()});
+         at::BoolType::get(),
+         IValuePacker<std::optional<at::ScalarType>>::packed_type()});
   }
 };
 

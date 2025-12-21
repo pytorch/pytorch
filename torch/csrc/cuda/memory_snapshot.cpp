@@ -1,6 +1,7 @@
 #include <ATen/Context.h>
 #include <ATen/record_function.h>
 #include <c10/cuda/CUDACachingAllocator.h>
+#include <c10/util/Exception.h>
 #include <torch/csrc/cuda/memory_snapshot.h>
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/serialization/pickler.h>
@@ -208,7 +209,8 @@ void _record_memory_history(
     bool record_cpp_context,
     bool clearHistory,
     bool compileContext,
-    bool globalRecordAnnotations) {
+    bool globalRecordAnnotations,
+    const std::vector<std::string>& skip_actions) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
@@ -226,7 +228,12 @@ void _record_memory_history(
 
   setRecordFunctionCallbacks(enabled, compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled, recorder, trace_alloc_max_entries, when, clearHistory);
+      enabled,
+      recorder,
+      trace_alloc_max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 static void checkOptionIn(
@@ -244,7 +251,8 @@ void _record_memory_history(
     size_t max_entries,
     bool clearHistory,
     bool compileContext,
-    bool globalRecordAnnotations) {
+    bool globalRecordAnnotations,
+    const std::vector<std::string>& skip_actions) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -281,7 +289,12 @@ void _record_memory_history(
   setRecordFunctionCallbacks(
       enabled.has_value(), compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled.has_value(), recorder, max_entries, when, clearHistory);
+      enabled.has_value(),
+      recorder,
+      max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 std::string _memory_snapshot_pickled() {
@@ -310,6 +323,7 @@ std::string _memory_snapshot_pickled() {
   IValue is_expandable_s = "is_expandable";
   IValue time_us_s = "time_us";
   IValue compile_contexts_s = "compile_context";
+  IValue user_metadata_s = "user_metadata";
 
   auto empty_frames = new_list();
 
@@ -413,7 +427,7 @@ std::string _memory_snapshot_pickled() {
       case TraceEntry::SEGMENT_MAP:
         return segment_map_s;
     }
-    throw std::runtime_error("unreachable");
+    TORCH_CHECK(false, "unreachable");
   };
 
   for (const auto& traceInfo : snapshot.device_traces) {
@@ -427,6 +441,7 @@ std::string _memory_snapshot_pickled() {
       trace_entry.insert(size_s, (int64_t)te.size_);
       trace_entry.insert(stream_s, int64_t(te.stream_));
       trace_entry.insert(compile_contexts_s, te.compile_context_);
+      trace_entry.insert(user_metadata_s, te.user_metadata_);
       if (te.context_) {
         auto sc = getFromContext(te.context_);
         frame_tracebacks.push_back(sc);
@@ -458,6 +473,8 @@ std::string _memory_snapshot_pickled() {
   IValue release_lock_on_malloc_s = "release_lock_on_cudamalloc";
   IValue pinned_use_host_register_s = "pinned_use_cuda_host_register";
   IValue roundup_power2_divisions_s = "roundup_power2_divisions";
+  IValue graph_capture_record_stream_reuse_s =
+      "graph_capture_record_stream_reuse";
 
   allocator_settings.insert(
       last_allocator_settings_s,
@@ -478,6 +495,9 @@ std::string _memory_snapshot_pickled() {
   allocator_settings.insert(
       pinned_use_host_register_s,
       snapshot.config_metadata.pinned_use_host_register);
+  allocator_settings.insert(
+      graph_capture_record_stream_reuse_s,
+      snapshot.config_metadata.graph_capture_record_stream_reuse);
   unsigned int roundup_key = 1;
   auto roundup_settings = new_dict();
   for (const auto& v : snapshot.config_metadata.roundup_power2_divisions) {

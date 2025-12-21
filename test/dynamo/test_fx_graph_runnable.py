@@ -3,19 +3,72 @@ import io
 import logging
 import subprocess
 import sys
-import tempfile
 import unittest
 
 import torch
 import torch._logging.structured
 import torch.distributed as dist
+from torch._inductor.codecache import WritableTempFile
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_utils import IS_FBCODE, IS_SANDCASTLE
+from torch.utils._triton import has_triton
 
 
 if torch.distributed.is_available():
     from torch.distributed._tensor import DeviceMesh, DTensor, Replicate, Shard
     from torch.testing._internal.distributed.fake_pg import FakeStore
+
+if has_triton():
+    import triton
+    import triton.language as tl
+
+    def init_to_zero(name):
+        return lambda nargs: nargs[name].zero_()
+
+    @triton.jit
+    def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+
+        x = tl.load(x_ptr + offsets, mask=mask)
+        y = tl.load(y_ptr + offsets, mask=mask)
+        output = x + y
+        tl.atomic_add(output_ptr + offsets, output, mask=mask)
+
+    @triton.autotune(
+        configs=[
+            triton.Config(
+                {"BLOCK_SIZE": 1024},
+                num_warps=4,
+                num_stages=2,
+                pre_hook=init_to_zero("output_ptr"),
+            )
+        ],
+        pre_hook=init_to_zero("output_ptr"),
+        post_hook=init_to_zero("output_ptr"),
+        key=["n_elements"],
+    )
+    @triton.jit
+    def add_kernel_autotune(
+        x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+
+        x = tl.load(x_ptr + offsets, mask=mask)
+        y = tl.load(y_ptr + offsets, mask=mask)
+        output = x + y
+        tl.atomic_add(output_ptr + offsets, output, mask=mask)
+
+
+from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import requires_gpu
 
 
 class FxGraphRunnableArtifactFilter(logging.Filter):
@@ -79,11 +132,11 @@ class FxGraphRunnableTest(TestCase):
         self.assertTrue(payload, "Expected fx_graph_runnable payload but got nothing")
         self.assertIn("def forward", payload)  # sanity-check for actual FX code
 
-        with tempfile.NamedTemporaryFile("w", suffix=".py") as tmp:
+        with WritableTempFile("w", suffix=".py") as tmp:
             tmp.write(payload)
             tmp.flush()
             res = subprocess.run(
-                [sys.executable, tmp.name], capture_output=True, text=True, timeout=30
+                [sys.executable, tmp.name], capture_output=True, text=True, timeout=45
             )
 
             self.assertEqual(
@@ -98,6 +151,41 @@ class FxGraphRunnableTest(TestCase):
             return x + 1
 
         torch.compile(f)(torch.randn(4))
+        self._exec_and_verify_payload()
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    def test_user_defined_triton_kernel_autotune(self):
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
+            n_elements = output.numel()
+
+            def grid(
+                meta,
+            ):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            add_kernel_autotune[grid](x, y, output, n_elements)
+            return output
+
+        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+
+        torch.compile(add)(x, y)
+        self._exec_and_verify_payload()
+
+    @unittest.skipUnless(has_triton(), "Triton not available")
+    @requires_gpu
+    def test_user_defined_triton_kernel(self):
+        def add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+            output = torch.ones(x.shape, device=x.device, dtype=x.dtype)
+            n_elements = x.numel()
+            add_kernel[n_elements,](x, y, output, n_elements, BLOCK_SIZE=4)
+            return output
+
+        x = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+        y = torch.ones((4096,), device=GPU_TYPE, dtype=torch.float16)
+
+        torch.compile(add)(x, y)
         self._exec_and_verify_payload()
 
     def test_two_inputs_matmul(self):
@@ -273,6 +361,40 @@ class FxGraphRunnableTest(TestCase):
         finally:
             dist.destroy_process_group()
 
+        self._exec_and_verify_payload()
+
+    def test_metrics_context(self):
+        """
+        When TORCH_COMPILE_DEBUG is set, provenance_tracking_level is set to 1, and
+        the generated fx_graph_runnable crashed with,
+        RuntimeError: Cannot add inductor_provenance outside of a MetricsContext
+        """
+        import torch._inductor.config as inductor_config
+
+        def f(x):
+            return x * 2 + 1
+
+        # Enable provenance tracking to trigger the code path that adds metrics
+        with inductor_config.patch(
+            {"trace.enabled": True, "trace.provenance_tracking_level": 1}
+        ):
+            x = torch.randn(4, 4)
+            torch.compile(f)(x)
+            self._exec_and_verify_payload()
+
+    @torch._dynamo.config.patch(assume_static_by_default=False)
+    def test_dynamic_expression(self):
+        """
+        Test not emitting something like "s27*s53**2 = 36"
+        """
+
+        def f(x):
+            return torch.ops.aten._adaptive_avg_pool2d(
+                x, (6, 6)
+            ), torch.ops.aten._adaptive_avg_pool2d(x + 1, (2, 5))
+
+        x = torch.randn(2, 4, 16, 16)
+        torch.compile(f)(x)
         self._exec_and_verify_payload()
 
 

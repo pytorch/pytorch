@@ -51,7 +51,7 @@ std::vector<Tensor> foreach_tensor_list_op(
       Op<opmath_t>(),
       alpha.to<opmath_t>());
 
-  return tensor_lists[2];
+  return std::move(tensor_lists[2]);
 }
 
 template <typename T, template <class> class Op>

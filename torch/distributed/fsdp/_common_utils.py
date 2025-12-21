@@ -7,11 +7,11 @@ import logging
 import traceback
 import warnings
 import weakref
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from enum import auto, Enum
 from functools import partial
 from itertools import chain
-from typing import Any, Callable, cast, no_type_check, Optional, TYPE_CHECKING
+from typing import Any, cast, no_type_check, Optional, TYPE_CHECKING
 
 import torch
 import torch.distributed as dist
@@ -65,6 +65,7 @@ class _FSDPDeviceHandle:
         if backend is None:
             try:
                 self.__backend = getattr(torch, device.type)
+                # pyrefly: ignore [read-only]
                 self.__device = device
             except AttributeError as exc:
                 raise AttributeError(
@@ -112,10 +113,10 @@ class _FSDPState(_State):
         self._ignored_params: set[nn.Parameter] = set()
         # Buffer names are cleaned (without wrapper prefixes)
         self._ignored_buffer_names: set[str] = set()
-        self.process_group: Optional[dist.ProcessGroup] = None
+        self.process_group: dist.ProcessGroup | None = None
         self.rank: int = -1
         self.world_size: int = -1
-        self._device_mesh: Optional[DeviceMesh] = None
+        self._device_mesh: DeviceMesh | None = None
         self.sharding_strategy = ShardingStrategy.FULL_SHARD
         self._use_orig_params: bool = False
         self.training_state = TrainingState.IDLE
@@ -123,17 +124,17 @@ class _FSDPState(_State):
         self._state_dict_type: StateDictType = StateDictType.FULL_STATE_DICT
         self._state_dict_config: StateDictConfig = FullStateDictConfig()
         self._optim_state_dict_config: OptimStateDictConfig = FullOptimStateDictConfig()
-        self._is_root: Optional[bool] = None
-        self._handle: Optional[flat_param_file.FlatParamHandle] = None
+        self._is_root: bool | None = None
+        self._handle: flat_param_file.FlatParamHandle | None = None
         self._fully_sharded_module_to_handle: dict[
-            nn.Module, Optional[flat_param_file.FlatParamHandle]
+            nn.Module, flat_param_file.FlatParamHandle | None
         ] = {}
-        self.compute_device: Optional[torch.device] = None
+        self.compute_device: torch.device | None = None
         self._gradient_predivide_factor: int = 0
         self._gradient_postdivide_factor: int = 0
-        self._comm_hook: Optional[Callable] = None
-        self._comm_hook_state: Optional[Any] = None
-        self._unshard_event: Optional[torch.Event] = None
+        self._comm_hook: Callable | None = None
+        self._comm_hook_state: Any | None = None
+        self._unshard_event: torch.Event | None = None
         # Abstract device handle for fsdp compute device. For now,
         # the compute device must implement cuda semantics used by fsdp
         self._device_handle: _FSDPDeviceHandle = _UninitializedDeviceHandle()
@@ -141,10 +142,10 @@ class _FSDPState(_State):
         # Save these static lists to avoid the repeated tree traversals
         self._all_fsdp_states: list[_FSDPState] = []
         self._all_handles: list[flat_param_file.FlatParamHandle] = []
-        self._fsdp_extension: Optional[FSDPExtensions] = None
+        self._fsdp_extension: FSDPExtensions | None = None
 
 
-def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
+def _get_module_fsdp_state(module: nn.Module) -> _FSDPState | None:
     state = _get_module_state(module)
     if state is None or not isinstance(state, _FSDPState):
         return None
@@ -153,7 +154,7 @@ def _get_module_fsdp_state(module: nn.Module) -> Optional[_FSDPState]:
 
 def _get_module_fsdp_state_if_fully_sharded_module(
     module: nn.Module,
-) -> Optional[_FSDPState]:
+) -> _FSDPState | None:
     state = _get_module_fsdp_state(module)
     if state is None:
         return None
@@ -202,9 +203,10 @@ def _module_handle(state: _FSDPState, module: nn.Module) -> Optional["FlatParamH
         # handles, meaning no entry in `_fully_sharded_module_to_handles`
         if state._handle is None:
             return None
-        assert module in state._fully_sharded_module_to_handle, (
-            f"Expects a fully sharded module but got {module} on rank {state.rank}"
-        )
+        if module not in state._fully_sharded_module_to_handle:
+            raise AssertionError(
+                f"Expects a fully sharded module but got {module} on rank {state.rank}"
+            )
         return state._fully_sharded_module_to_handle[module]
     else:
         # NOTE: This assumes `module` is a `FullyShardedDataParallel` instance.
@@ -257,9 +259,10 @@ def _named_parameters_with_duplicates(
     This API is required as some modules overwrite `named_parameters()` but do not support
     `remove_duplicate`.
     """
-    assert "remove_duplicate" not in kwargs, (
-        "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
-    )
+    if "remove_duplicate" in kwargs:
+        raise AssertionError(
+            "_named_parameters_with_duplicates cannot be used with `remove_duplicate` argument."
+        )
     kwargs["remove_duplicate"] = False
     try:
         ret = list(module.named_parameters(**kwargs))
@@ -333,7 +336,8 @@ def _get_param_to_fqns(
                     warnings.warn(
                         "FlatParameter is being traversed more than once. "
                         "This case should only happen when using "
-                        "DistributedModelParallel with FullyShardedDataParallel."
+                        "DistributedModelParallel with FullyShardedDataParallel.",
+                        stacklevel=2,
                     )
                     param_to_fqns[param] = global_fqns
                 elif not dedup_shared_params:
@@ -367,7 +371,7 @@ def _log_post_backward_hook(
 @no_type_check
 def _get_handle_fqns_from_root(
     state: _FSDPState, handle: "FlatParamHandle"
-) -> Optional[list[str]]:
+) -> list[str] | None:
     if handle is None:
         return None
     param_to_fqn = state._exec_order_data.param_to_fqn
@@ -380,7 +384,7 @@ def _apply_to_modules(
     root_module: torch.nn.Module,
     module_fn: Callable,
     return_fn: Callable,
-    filter_fqns: Optional[list[str]] = None,
+    filter_fqns: list[str] | None = None,
     *args,
     **kwargs,
 ):

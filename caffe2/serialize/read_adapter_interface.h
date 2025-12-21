@@ -5,6 +5,7 @@
 
 #include "c10/macros/Export.h"
 
+
 namespace caffe2::serialize {
 
 // this is the interface for the (file/stream/memory) reader in

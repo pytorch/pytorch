@@ -24,13 +24,13 @@ from torchgen.model import (
     OperatorName,
     OptionalType,
     Type,
+    Variant,
 )
 from torchgen.utils import FileManager, mapMaybe
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing import Optional
 
 
 base_type_to_c_type = {
@@ -392,11 +392,26 @@ def gen_static_dispatch_backend_call_signature(
 
 def gen_static_dispatch_backend_call(
     f: NativeFunction,
-    backend_index: Optional[BackendIndex] = None,
+    backend_index: BackendIndex | None = None,
 ) -> str:
     sig = DispatcherSignature.from_schema(f.func)
     cpp_sig = gen_static_dispatch_backend_call_signature(sig, f)
+
     if backend_index is None:
+        # Check if this is a symint function and if the function only has method variants
+        if sig.symint and f.func.has_symint():
+            has_function_variant = Variant.function in f.variants
+
+            if not has_function_variant:
+                # Functions with both function and method variants can use the at::{*}_symint version
+                # (e.g., narrow -> at::narrow_symint), BUT
+                # Method-only functions with symint parameters should use at::symint:: namespace
+                # Remove the _symint suffix since at::symint:: namespace uses the base name
+                # (e.g., new_empty -> at::symint::new_empty<c10::SymInt>)
+                base_name = cpp_sig.name()
+                base_name = base_name.removesuffix("_symint")  # Remove "_symint" suffix
+                return f"at::symint::{base_name}<c10::SymInt>"
+
         return f"at::{cpp_sig.name()}"
     else:
         return f"at::{backend_index.dispatch_key.lower()}::{cpp_sig.name()}"
@@ -405,7 +420,7 @@ def gen_static_dispatch_backend_call(
 def get_backend_index_for_aoti(
     func: NativeFunction,
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
     extend_aoti_c_shim: bool,
 ) -> BackendIndex | None:
@@ -447,7 +462,7 @@ def get_backend_index_for_aoti(
 def get_header_for_aoti(
     func: NativeFunction,
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
     extend_aoti_c_shim: bool,
 ) -> str | None:
@@ -474,7 +489,7 @@ def gen_c_shim(
     func: NativeFunction,
     version_info: dict[str, list[str]],
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
     extend_aoti_c_shim: bool,
@@ -512,7 +527,7 @@ def gen_c_shim(
 class ShimGenerator:
     inductor_fallback_ops: dict[str, dict[str, list[str]]]
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup]
-    dispatch_key: Optional[DispatchKey]
+    dispatch_key: DispatchKey | None
     backend_indices: dict[DispatchKey, BackendIndex]
     header: bool  # True to generate .h and False to generate .cpp
     extend_aoti_c_shim: bool
@@ -539,7 +554,7 @@ def gen_aoti_c_shim(
     native_functions: Sequence[NativeFunction],
     inductor_fallback_ops: dict[str, dict[str, list[str]]],
     func_group_mapping: dict[OperatorName, NativeFunctionsGroup],
-    dispatch_key: Optional[DispatchKey],
+    dispatch_key: DispatchKey | None,
     backend_indices: dict[DispatchKey, BackendIndex],
     header: bool,
     extend_aoti_c_shim: bool,
@@ -630,7 +645,7 @@ def gen_aoti_c_shim(
 
 def gen_aoti_c_shim_files(
     aoti_fm: FileManager,
-    aoti_backends: set[Optional[DispatchKey]],
+    aoti_backends: set[DispatchKey | None],
     native_functions: Sequence[NativeFunction],
     backend_indices: dict[DispatchKey, BackendIndex],
     structured_native_functions: Sequence[NativeFunctionsGroup],
@@ -662,7 +677,7 @@ def gen_aoti_c_shim_files(
         # Use "aten" as the device name when dispatch_key is Generic
         device_name = "aten" if dispatch_key is None else dispatch_key.lower()
 
-        # header files were checked in for ABI-compatiblilty checking
+        # header files were checked in for ABI-compatibility checking
         header_file_name = f"c_shim_{device_name}.h"
         new_header = gen_aoti_c_shim(
             fallback_native_functions,
@@ -744,7 +759,7 @@ https://github.com/pytorch/pytorch/pull/154848 as an example.
             f"c_shim_{device_name}.cpp",
             lambda: gen_aoti_c_shim(
                 fallback_native_functions,
-                inductor_fallback_ops,
+                fallback_ops_dict,
                 structured_func_group_dict,
                 dispatch_key,
                 backend_indices,

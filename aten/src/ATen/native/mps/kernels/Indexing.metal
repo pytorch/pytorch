@@ -1,32 +1,10 @@
 #include <c10/metal/atomic.h>
+#include <c10/metal/error.h>
 #include <c10/metal/indexing.h>
 #include <metal_stdlib>
 
 using namespace metal;
 using namespace c10::metal;
-
-namespace c10 {
-namespace metal {
-// There are no atomic 64-bit add in Metal yet, but this implements a consistent
-// add I.e. if multiple threads are modify the same 64-bit value, results stored
-// at the address will eventually be equal to its original value plus sum of all
-// operands
-template <>
-struct AtomicType<long> {
-  using type = ::metal::atomic<uint>;
-  static inline void atomic_add(device type* data, long offset, long value) {
-    const auto value_bits = as_type<ulong>(value);
-    const uint low = static_cast<uint>(value_bits);
-    uint high = static_cast<uint>(value_bits >> 32);
-    auto ptr = data + (offset << 1);
-    auto old_low = atomic_fetch_add_explicit(ptr, low, memory_order_relaxed);
-    high += (old_low + low < old_low) ? 1 : 0;
-    atomic_fetch_add_explicit(ptr + 1, high, memory_order_relaxed);
-  }
-};
-
-} // namespace metal
-} // namespace c10
 
 struct IndexAB {
   constant int64_t* indexArray;
@@ -54,10 +32,24 @@ OffsetT index_apply_indices(
     constant IndexAB* indices,
     constant int64_t* sizes,
     constant int64_t* strides,
-    uint num_indices) {
+    uint num_indices,
+    thread bool& error,
+    device ErrorMessages* error_buf) {
   OffsetT rc = offs.x;
   for (uint i = 0; i < num_indices; i++) {
     auto idx = indices[i].indexArray[offs.y];
+    if (idx < -sizes[i] || idx >= sizes[i]) {
+      TORCH_REPORT_ERROR(
+          error_buf,
+          "index ",
+          idx,
+          " is out of bounds for dimension ",
+          i,
+          " with size ",
+          sizes[i]);
+      error = true;
+      break;
+    }
     if (idx < 0) {
       idx += sizes[i];
     }
@@ -78,6 +70,7 @@ kernel void index_select(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
+    device ErrorMessages* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
   const auto ndim = ndim_nindices_numel.x;
   const auto num_indices = ndim_nindices_numel.y;
@@ -88,8 +81,19 @@ kernel void index_select(
       indices_strides,
       ndim,
       thread_index);
+  bool error = false;
   auto input_offs = index_apply_indices<OffsetT>(
-      offs.yz, indices, index_sizes, index_strides, num_indices);
+      offs.yz,
+      indices,
+      index_sizes,
+      index_strides,
+      num_indices,
+      error,
+      error_buffer);
+  if (error) {
+    output[offs.x / sizeof(T)] = 0;
+    return;
+  }
   output[offs.x / sizeof(T)] = input[input_offs / sizeof(T)];
 }
 
@@ -105,7 +109,9 @@ inline void index_put_impl(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
+    device ErrorMessages* error_buffer,
     uint thread_index) {
+  bool error = false;
   const auto ndim = ndim_nindices_numel.x;
   const auto num_indices = ndim_nindices_numel.y;
   const auto offs = index_get_offsets(
@@ -116,7 +122,16 @@ inline void index_put_impl(
       ndim,
       thread_index);
   auto output_offs = index_apply_indices<OffsetT>(
-      offs.xz, indices, index_sizes, index_strides, num_indices);
+      offs.xz,
+      indices,
+      index_sizes,
+      index_strides,
+      num_indices,
+      error,
+      error_buffer);
+  if (error) {
+    return;
+  }
   output[output_offs / sizeof(T)] = input[offs.y / sizeof(T)];
 }
 
@@ -132,6 +147,7 @@ kernel void index_put(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
+    device ErrorMessages* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
   index_put_impl(
       output,
@@ -144,6 +160,7 @@ kernel void index_put(
       index_sizes,
       index_strides,
       ndim_nindices_numel,
+      error_buffer,
       thread_index);
 }
 
@@ -159,8 +176,9 @@ kernel void index_put_serial(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
+    device ErrorMessages* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
-  (void)thread_index; // Suppress unused vairable varning
+  (void)thread_index; // Suppress unused variable warning
   for (uint idx = 0; idx < ndim_nindices_numel.z; ++idx) {
     index_put_impl(
         output,
@@ -173,6 +191,7 @@ kernel void index_put_serial(
         index_sizes,
         index_strides,
         ndim_nindices_numel,
+        error_buffer,
         idx);
   }
 }
@@ -189,6 +208,7 @@ kernel void index_put_accumulate(
     constant int64_t* index_sizes,
     constant int64_t* index_strides,
     constant uint4& ndim_nindices_numel,
+    device ErrorMessages* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
   const auto ndim = ndim_nindices_numel.x;
   const auto num_indices = ndim_nindices_numel.y;
@@ -199,8 +219,18 @@ kernel void index_put_accumulate(
       indices_strides,
       ndim,
       thread_index);
+  bool error = false;
   auto output_offs = index_apply_indices<OffsetT>(
-      offs.xz, indices, index_sizes, index_strides, num_indices);
+      offs.xz,
+      indices,
+      index_sizes,
+      index_strides,
+      num_indices,
+      error,
+      error_buffer);
+  if (error) {
+    return;
+  }
   AtomicType<T>::atomic_add(
       reinterpret_cast<device AtomicType_t<T>*>(output),
       output_offs / sizeof(T),
@@ -220,6 +250,7 @@ kernel void index_put_accumulate(
           constant int64_t* index_sizes,                            \
           constant int64_t* index_strides,                          \
           constant uint4& ndim_nindices_numel,                      \
+          device ErrorMessages* error_buffer,                       \
           uint thread_index [[thread_position_in_grid]])
 
 #define REGISTER_INDEX_OP_ALL_DTYPES(OP_NAME) \
@@ -234,15 +265,15 @@ REGISTER_INDEX_OP_ALL_DTYPES(put_serial);
 
 REGISTER_INDEX_OP(put_accumulate, float, float);
 REGISTER_INDEX_OP(put_accumulate, half, half);
+REGISTER_INDEX_OP(put_accumulate, bfloat, bfloat);
 REGISTER_INDEX_OP(put_accumulate, long, long);
 REGISTER_INDEX_OP(put_accumulate, int, int);
 REGISTER_INDEX_OP(put_accumulate, short, short);
 REGISTER_INDEX_OP(put_accumulate, char, char);
 REGISTER_INDEX_OP(put_accumulate, uchar, uchar);
 REGISTER_INDEX_OP(put_accumulate, bool, bool);
-#if __METAL_VERSION__ >= 310
-REGISTER_INDEX_OP(put_accumulate, bfloat, bfloat);
-#endif
+REGISTER_INDEX_OP(put_accumulate, float2, float2);
+REGISTER_INDEX_OP(put_accumulate, half2, half2);
 
 template <typename StridesT, typename DataT>
 kernel void kernel_index_offsets(
@@ -381,6 +412,7 @@ kernel void index_copy_strided(
     constant long* input_strides,
     constant long* output_strides,
     constant long* source_strides,
+    constant long& indices_stride,
     uint thread_index [[thread_position_in_grid]]) {
   int pos[max_ndim];
   pos_from_thread_index(int(thread_index), pos, sizes, ndim);
@@ -397,7 +429,7 @@ kernel void index_copy_strided(
   // find the last index in the indices array that equals this coordinate
   int last_matching_index = -1;
   for (uint i = 0; i < indices_numel; i++) {
-    if (indices[i] == orig_dim) {
+    if (indices[i * indices_stride] == orig_dim) {
       last_matching_index = int(i);
     }
   }
@@ -436,6 +468,7 @@ kernel void index_copy_strided(
       constant long*,                                           \
       constant long*,                                           \
       constant long*,                                           \
+      constant long&,                                           \
       uint);
 
 #define REGISTER_MASKED_FILL_SCALAR(SIZE, DTYPE)                            \
@@ -477,10 +510,8 @@ INSTANTIATE_INDEX_COPY(char, long);
 INSTANTIATE_INDEX_COPY(uchar, int);
 INSTANTIATE_INDEX_COPY(uchar, long);
 
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_INDEX_COPY(bfloat, int);
 INSTANTIATE_INDEX_COPY(bfloat, long);
-#endif
 INSTANTIATE_INDEX_COPY(float2, int);
 INSTANTIATE_INDEX_COPY(float2, long);
 INSTANTIATE_INDEX_COPY(half2, int);

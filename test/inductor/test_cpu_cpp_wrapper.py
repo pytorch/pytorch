@@ -171,7 +171,8 @@ if RUN_CPU:
         BaseTest("test_add_complex4"),
         BaseTest("test_add_complex4", test_build_separate=True),
         BaseTest("test_as_strided"),  # buffer reuse
-        BaseTest("test_bernoulli1"),
+        BaseTest("test_bernoulli1_combo_kernels_False"),
+        BaseTest("test_bernoulli1_combo_kernels_True"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm1", test_build_separate=True),
@@ -268,7 +269,7 @@ if RUN_CPU:
             "test_multi_threading",
             condition=not IS_WINDOWS,
             # Two threads compile, so we expect the output code to be printed twice.
-            code_string_count={"py::gil_scoped_release release;": 2},
+            code_string_count={"py::gil_scoped_release_simple release;": 2},
         ),
         BaseTest("test_profiler_mark_wrapper_call"),
         BaseTest(

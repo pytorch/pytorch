@@ -12,7 +12,7 @@ import collections
 import contextlib
 import copy
 import re
-from typing import Callable, Optional, Union
+from collections.abc import Callable
 
 import torch
 
@@ -44,7 +44,7 @@ def default_convert(data):
         >>> default_convert(np.array([0, 1]))
         tensor([0, 1])
         >>> # Example with NamedTuple
-        >>> Point = namedtuple('Point', ['x', 'y'])
+        >>> Point = namedtuple("Point", ["x", "y"])
         >>> default_convert(Point(0, 0))
         Point(x=0, y=0)
         >>> default_convert(Point(np.array(0), np.array(0)))
@@ -118,7 +118,7 @@ default_collate_err_msg_format = (
 def collate(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     r"""
     General collate function that handles collection type of element within each batch.
@@ -196,16 +196,19 @@ def collate(
         return elem_type(
             *(
                 collate(samples, collate_fn_map=collate_fn_map)
-                for samples in zip(*batch)
+                for samples in zip(*batch, strict=False)
             )
         )
     elif isinstance(elem, collections.abc.Sequence):
         # check to make sure that the elements in batch have consistent size
         it = iter(batch)
         elem_size = len(next(it))
+        # pyrefly: ignore [not-iterable]
         if not all(len(elem) == elem_size for elem in it):
             raise RuntimeError("each element in list of batch should be of equal size")
-        transposed = list(zip(*batch))  # It may be accessed twice, so we use a list.
+        transposed = list(
+            zip(*batch, strict=False)
+        )  # It may be accessed twice, so we use a list.
 
         if isinstance(elem, tuple):
             return [
@@ -243,7 +246,7 @@ def collate(
 def collate_tensor_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     elem = batch[0]
     out = None
@@ -275,7 +278,7 @@ def collate_tensor_fn(
 def collate_numpy_array_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     elem = batch[0]
     # array of string classes and object
@@ -288,7 +291,7 @@ def collate_numpy_array_fn(
 def collate_numpy_scalar_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     return torch.as_tensor(batch)
 
@@ -296,7 +299,7 @@ def collate_numpy_scalar_fn(
 def collate_float_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     return torch.tensor(batch, dtype=torch.float64)
 
@@ -304,7 +307,7 @@ def collate_float_fn(
 def collate_int_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     return torch.tensor(batch)
 
@@ -312,12 +315,12 @@ def collate_int_fn(
 def collate_str_fn(
     batch,
     *,
-    collate_fn_map: Optional[dict[Union[type, tuple[type, ...]], Callable]] = None,
+    collate_fn_map: dict[type | tuple[type, ...], Callable] | None = None,
 ):
     return batch
 
 
-default_collate_fn_map: dict[Union[type, tuple[type, ...]], Callable] = {
+default_collate_fn_map: dict[type | tuple[type, ...], Callable] = {
     torch.Tensor: collate_tensor_fn
 }
 with contextlib.suppress(ImportError):
@@ -366,13 +369,13 @@ def default_collate(batch):
         >>> default_collate([0, 1, 2, 3])
         tensor([0, 1, 2, 3])
         >>> # Example with a batch of `str`s:
-        >>> default_collate(['a', 'b', 'c'])
+        >>> default_collate(["a", "b", "c"])
         ['a', 'b', 'c']
         >>> # Example with `Map` inside the batch:
-        >>> default_collate([{'A': 0, 'B': 1}, {'A': 100, 'B': 100}])
+        >>> default_collate([{"A": 0, "B": 1}, {"A": 100, "B": 100}])
         {'A': tensor([  0, 100]), 'B': tensor([  1, 100])}
         >>> # Example with `NamedTuple` inside the batch:
-        >>> Point = namedtuple('Point', ['x', 'y'])
+        >>> Point = namedtuple("Point", ["x", "y"])
         >>> default_collate([Point(0, 0), Point(1, 1)])
         Point(x=tensor([0, 1]), y=tensor([0, 1]))
         >>> # Example with `Tuple` inside the batch:

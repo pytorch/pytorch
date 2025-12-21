@@ -119,7 +119,7 @@ class Vectorized<int64_t> {
       const Vectorized<int64_t>& a,
       const Vectorized<int64_t>& b,
       const Vectorized<int64_t>& mask) {
-    // the mask used here returned by comparision of vec256
+    // the mask used here returned by comparison of vec256
 
     return {
         vec_sel(a._vec0, b._vec0, mask._vecb0),

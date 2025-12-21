@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any, TYPE_CHECKING
 from warnings import warn
 
 from tools.testing.target_determination.heuristics.interface import (
@@ -15,6 +15,10 @@ from tools.testing.target_determination.heuristics.utils import (
     query_changed_files,
 )
 from tools.testing.test_run import TestRun
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 REPO_ROOT = Path(__file__).parents[3]
@@ -107,6 +111,7 @@ class Filepath(HeuristicInterface):
     # Heuristic based on folders in the file path.  Takes each folder of each
     # changed file and attempts to find matches based on those folders
     def __init__(self, **kwargs: dict[str, Any]) -> None:
+        # pyrefly: ignore [missing-attribute]
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:

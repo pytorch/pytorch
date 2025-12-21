@@ -2,7 +2,6 @@
 from __future__ import annotations
 
 import atexit
-import contextlib
 import functools
 import json
 import logging
@@ -14,7 +13,7 @@ from concurrent.futures import Future, ThreadPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from time import time, time_ns
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.device_interface import get_registered_device_interfaces
@@ -38,7 +37,11 @@ from torch._inductor.codecache import (
     StaticAutotunerFuture,
     torch_key,
 )
-from torch._inductor.compile_worker.subproc_pool import AnyPool, SubprocPool
+from torch._inductor.compile_worker.subproc_pool import (
+    AnyPool,
+    SubprocException,
+    SubprocPool,
+)
 from torch._inductor.compile_worker.tracked_process_pool import (
     TrackedProcessPoolExecutor,
 )
@@ -49,12 +52,15 @@ from torch._inductor.runtime.compile_tasks import (
 )
 from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
+from torch._utils_internal import log_triton_builds
 from torch.hub import _Faketqdm, tqdm
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch._inductor.runtime.hints import HalideMeta
     from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 
@@ -143,6 +149,7 @@ def shutdown_compile_workers() -> None:
     """Shut down all outstanding compile-worker pools."""
     for pool in _pool_set:
         pool.shutdown()
+    AsyncCompile._ready_future = None
     after_fork()
 
 
@@ -222,18 +229,6 @@ class CompiledTritonKernels:
             del CompiledTritonKernels._cache[key]
 
 
-@contextlib.contextmanager
-def async_compile_pool_manager():
-    """
-    Context manager to quiesce the subproc pool at the end of compilation, i.e.,
-    when dynamo is done.
-    """
-    try:
-        yield
-    finally:
-        AsyncCompile.quiesce()
-
-
 class AsyncCompile:
     """
     Utilities to compile in thread pools or subprocess pools (in the case of Triton).
@@ -269,7 +264,9 @@ class AsyncCompile:
         pool: AnyPool
         if config.worker_start_method == "subprocess":
             # Wrapper around ProcessPoolExecutor forks in a new process we control
-            pool = SubprocPool(get_compile_threads())
+            pool = SubprocPool(
+                get_compile_threads(), quiesce=config.quiesce_async_compile_pool
+            )
         else:
             if config.worker_start_method == "spawn":
                 # Avoid creating pools in the spawned subprocs themselves:
@@ -303,8 +300,8 @@ class AsyncCompile:
 
     @classmethod
     def wait_pool_ready(cls, timeout=120) -> None:
-        if cls.use_process_pool():
-            assert cls._ready_future is not None
+        cls.use_process_pool()
+        if cls._ready_future is not None:
             cls._ready_future.result(timeout=timeout)
 
     @classmethod
@@ -324,20 +321,6 @@ class AsyncCompile:
         if not cls._ready_future:
             cls._ready_future = cls.process_pool().submit(cls._get_ready)
         return cls._ready_future.done()
-
-    @classmethod
-    def quiesce(cls) -> None:
-        """
-        If using a SubprocPool, signal the sidecar process to shut down its
-        ProcessPoolExecutor.
-        """
-        # Don't inadvertently create a process pool if it doesn't already exist:
-        if not cls.process_pool.cache_info().currsize:
-            return
-        if config.quiesce_async_compile_pool:
-            pool = cls.process_pool()
-            if isinstance(pool, SubprocPool):
-                pool.quiesce()
 
     @classmethod
     def wakeup(cls) -> None:
@@ -449,11 +432,17 @@ class AsyncCompile:
             )
 
             def get_result() -> CachingAutotuner:
-                kernel, elapsed_us = task.result()
+                try:
+                    kernel, elapsed_us = task.result()
+                except SubprocException as e:
+                    raise e.with_name(kernel_name) from e
+
                 # Now that we've compiled, we should clear the future
                 # so it can't be used again
                 kernel.set_compile_info(compile_id, is_backward)
                 CompiledTritonKernels.remove_future(source_code)
+
+                kernel.restore_after_unpickle(old_values=None)
 
                 kernel.precompile(
                     warm_cache_only=False,
@@ -479,28 +468,40 @@ class AsyncCompile:
                 log_waitcounter=True,
                 waitcounter_name_override="compile_triton",
             ):
-                start_ns = time_ns()
-                _set_triton_ptxas_path()
-                kernel = load_kernel()
-                kernel.set_compile_info(compile_id, is_backward)
-                kernel.precompile(
-                    warm_cache_only=False,
-                    static_triton_bundle_key=CompiledTritonKernels.key(source_code),
-                )
-                elapsed_us = (time_ns() - start_ns) // 1000
-                get_metrics_context().add_top_n(
-                    "triton_kernel_compile_times_us", kernel_name, elapsed_us
-                )
-                info = kernel.autotune_cache_info or {}
-                info["compile_time_us"] = elapsed_us
-                _add_triton_kernel_info(kernel_name, info)
-                return kernel
+                fail = None
+                try:
+                    start_ns = time_ns()
+                    _set_triton_ptxas_path()
+                    kernel = load_kernel()
+                    kernel.set_compile_info(compile_id, is_backward)
+                    kernel.precompile(
+                        warm_cache_only=False,
+                        static_triton_bundle_key=CompiledTritonKernels.key(source_code),
+                    )
+                    elapsed_us = (time_ns() - start_ns) // 1000
+                    get_metrics_context().add_top_n(
+                        "triton_kernel_compile_times_us", kernel_name, elapsed_us
+                    )
+                    info = kernel.autotune_cache_info or {}
+                    info["compile_time_us"] = elapsed_us
+                    _add_triton_kernel_info(kernel_name, info)
+                    return kernel
+                except Exception as e:
+                    fail = str(e)
+                    raise
+                finally:
+                    log_triton_builds(fail=fail)
 
     def multi_kernel(self, *args, **kwargs) -> Any:
         from torch._inductor.codegen.multi_kernel import MultiKernelCall
 
         # no need to call this in parallel since the sub-kernels are already parallel tasks
         return MultiKernelCall(*args, **kwargs)
+
+    def size_hint_multi_kernel(self, *args, **kwargs) -> Any:
+        from torch._inductor.codegen.multi_kernel import SizeHintMultiKernelCall
+
+        return SizeHintMultiKernelCall(*args, **kwargs)
 
     def cpp(self, source_code: str):
         kernel_code_log.info("CPP Kernel:\n%s", source_code)
@@ -560,6 +561,81 @@ class AsyncCompile:
                 meta, source_code, submit_fn=self.submit
             )
             return LambdaFuture(get_result)
+
+    def cutedsl(self, kernel_name: str, source_code: str):
+        """
+        Compile CuteDSL (CUTLASS Python DSL) kernels.
+
+        Args:
+            kernel_name: Name of the kernel to be defined
+            source_code: Source code of the CuteDSL kernel, as a string
+
+        Note:
+            CuteDSL currently requires source files to do its compilation, there we
+            use the PyCodeCache to write the source code to a file and load it.
+        """
+        from torch._inductor.codegen.cutedsl.cutedsl_kernel import (
+            CuteDSLKernelWrapper,
+            MAIN_SUFFIX,
+        )
+
+        kernel_code_log.info("CuteDSL Kernel:\n%s", source_code)
+
+        def task():
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            # Find our special entry point named function
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find CuteDSL main kernel function '{main_func_name}'. Available callables: {available}"
+                )
+
+            return CuteDSLKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+
+        if get_compile_threads() <= 1:
+            return task()
+        else:
+            future = self.submit(task)
+            return LambdaFuture(lambda: future.result())
+
+    def pallas(self, kernel_name: str, source_code: str):
+        """
+        Compile Pallas (JAX experimental) kernels.
+
+        Args:
+            kernel_name: Name of the kernel to be defined
+            source_code: Source code of the Pallas kernel, as a string
+
+        Note:
+            Pallas kernels are Python code that uses JAX and Pallas APIs.
+            We use the PyCodeCache to write the source code to a file and load it.
+        """
+        from torch._inductor.codegen.pallas import MAIN_SUFFIX, PallasKernelWrapper
+
+        kernel_code_log.info("Pallas Kernel:\n%s", source_code)
+
+        def task():
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            # Find our special entry point named function
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find Pallas main kernel function '{main_func_name}'. Available callables: {available}"
+                )
+
+            return PallasKernelWrapper(getattr(mod, main_func_name), kernel_path=path)
+
+        if get_compile_threads() <= 1:
+            return task()
+        else:
+            future = self.submit(task)
+            return LambdaFuture(lambda: future.result())
 
     def wait(self, scope: dict[str, Any]) -> None:
         if get_compile_threads() > 1:

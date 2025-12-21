@@ -28,7 +28,6 @@
 #include <c10/util/irange.h>
 
 #include <algorithm>
-#include <ciso646>
 #include <functional>
 #include <numeric>
 #include <utility>
@@ -77,6 +76,12 @@ Tensor toNonOptPrimal(const std::optional<Tensor>& t) {
     return t->_fw_primal(/* level */ 0);
   }
   return Tensor();
+}
+
+void update_wrapped_number(Tensor& input, Tensor& output) {
+  if (input.unsafeGetTensorImpl()->is_wrapped_number()) {
+    output.unsafeGetTensorImpl()->set_wrapped_number(true);
+  }
 }
 
 void copy_range(variable_list& out, IndexRange range, const Tensor& t) {
@@ -1078,7 +1083,7 @@ std::vector<Tensor> cat_tensors_backward(
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
     if (shape.size() == 1) {
-      if (TORCH_GUARD_SIZE_OBLIVIOUS(shape[0].sym_eq(0))) {
+      if (TORCH_GUARD_OR_FALSE(shape[0].sym_eq(0))) {
         grad_inputs[i] = at::zeros({0}, grad_val.options());
         continue;
       }
@@ -2176,7 +2181,7 @@ Tensor _nested_split_with_sizes_backward(
     const Tensor& nt_sizes,
     const at::TensorOptions& options) {
   // add 1 to account for batch dim
-  dim = at::maybe_wrap_dim(dim, static_cast<int64_t>(nt_sizes.size(1)) + 1);
+  dim = at::maybe_wrap_dim(dim, nt_sizes.size(1) + 1);
   // it's possible some of the grads are not defined (represents tensors of all
   // 0s). Since at::cat can't handle those, let's define them
   std::vector<Tensor> grads_all_defined;
@@ -2187,10 +2192,9 @@ Tensor _nested_split_with_sizes_backward(
       const auto& length = split_sizes[i].guard_int(__FILE__, __LINE__);
       auto nt_split_size = nt_sizes.clone();
       auto nt_split_size_ptr = nt_split_size.data_ptr<int64_t>();
-      for (int64_t j : c10::irange(static_cast<int64_t>(nt_sizes.size(0)))) {
+      for (int64_t j : c10::irange(nt_sizes.size(0))) {
         // subtract 1 to account for batch dim
-        nt_split_size_ptr
-            [j * static_cast<int64_t>(nt_sizes.size(1)) + (dim - 1)] = length;
+        nt_split_size_ptr[j * nt_sizes.size(1) + (dim - 1)] = length;
       }
       Tensor zeros_buffer = at::zeros(
           {at::native::get_numel_from_nested_size_tensor(nt_split_size)},
@@ -3327,7 +3331,14 @@ std::tuple<Tensor, Tensor> atan2_backward(
   if (!grad.defined()) {
     return std::tuple<Tensor, Tensor>{Tensor(), Tensor()};
   }
-  auto recip = (self * self + other * other).reciprocal();
+  auto denom = self * self + other * other;
+  auto recip = denom.reciprocal();
+  if (at::areAnyTensorSubclassLike({self, other, denom, recip}) ||
+      at::GradMode::is_enabled()) {
+    recip = recip.masked_fill(denom == 0, 0);
+  } else {
+    recip.masked_fill_(denom == 0, 0);
+  }
   return std::tuple<Tensor, Tensor>{
       output_mask[0] ? grad * other * recip : Tensor(),
       output_mask[1] ? grad * -self * recip : Tensor()};
@@ -3452,8 +3463,11 @@ std::tuple<Tensor, Tensor, Tensor> linalg_svd_jvp(
   const auto V = Vh.mH();
 
   // dP = U^H dA V
-  auto dP = m >= n ? at::matmul(U.mH(), at::matmul(dA, V))
-                   : at::matmul(at::matmul(U.mH(), dA), V);
+  // U^H (dA V) is O(km(n + k))
+  // (U^H dA) V is O(kn(m + k))
+  // So prefer U^H (dA V) if m < n
+  auto dP = m < n ? at::matmul(U.mH(), at::matmul(dA, V))
+                  : at::matmul(at::matmul(U.mH(), dA), V);
 
   auto dS =
       is_complex ? at::real(dP.diagonal(0, -2, -1)) : dP.diagonal(0, -2, -1);
@@ -4566,7 +4580,7 @@ std::tuple<Tensor, Tensor> linalg_solve_triangular_backward(
   if (!grad.defined() || (!A_requires_grad && !B_requires_grad)) {
     return std::make_tuple(Tensor{}, Tensor{});
   }
-  // We always need to comput G_B
+  // We always need to compute G_B
   const Tensor A_H = A.mH();
   const Tensor G_B =
       at::linalg_solve_triangular(A_H, grad, !upper, left, unitriangular);
@@ -6501,7 +6515,7 @@ Tensor rms_norm_jvp(
   Tensor rstd_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
       input_t._is_zerotensor()) {
-    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
+    rstd_t = -rstd_p.pow(3) * input_t * input_p;
   } else {
     rstd_t = input_t * input_p;
     rstd_t *= -rstd_p.pow(3);
@@ -6512,7 +6526,7 @@ Tensor rms_norm_jvp(
   Tensor result_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
       input_t._is_zerotensor()) {
-    result_t = (input_t)*rstd_p + (input_p)*rstd_t;
+    result_t = input_t * rstd_p + input_p * rstd_t;
   } else {
     result_t = input_t * rstd_p;
     auto temp = input_p * rstd_t;
@@ -6556,7 +6570,7 @@ Tensor rms_norm_rstd_jvp(
   Tensor rstd_t;
   if (areAnyTensorSubclassLike({input_t, input_p, rstd_p}) ||
       input_t._is_zerotensor()) {
-    rstd_t = -rstd_p.pow(3) * (input_t) * (input_p);
+    rstd_t = -rstd_p.pow(3) * input_t * input_p;
   } else {
     rstd_t = input_t * input_p;
     rstd_t *= -rstd_p.pow(3);

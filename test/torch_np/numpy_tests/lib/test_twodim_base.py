@@ -1,8 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
-"""Test functions for matrix module
+"""Test functions for matrix module"""
 
-"""
 import functools
 from unittest import expectedFailure as xfail, skipIf as skipif
 

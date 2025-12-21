@@ -1,6 +1,5 @@
 # Owner(s): ["module: dynamo"]
 
-import unittest
 from contextlib import contextmanager
 from importlib import import_module
 
@@ -11,19 +10,18 @@ from torch._inductor import config
 from torch._inductor.compiler_bisector import CompilerBisector
 from torch._inductor.test_case import TestCase
 from torch.library import _scoped_library, Library
-from torch.testing._internal.inductor_utils import HAS_CUDA
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 aten = torch.ops.aten
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 f32 = torch.float32
 i64 = torch.int64
 i32 = torch.int32
 
 
-@requires_cuda
+@requires_cuda_and_triton
 class TestCompilerBisector(TestCase):
     test_ns = "_test_bisector"
 
@@ -97,6 +95,39 @@ class TestCompilerBisector(TestCase):
         self.assertEqual(out.bisect_number, 1)
         self.assertTrue("aten.exponential" in out.debug_info)
 
+    def test_pre_grad(self):
+        import operator
+
+        from torch._inductor import config
+
+        # similar setup to test_joint_graph (see below)
+        def pass_fn(graph: torch.fx.Graph):
+            nodes = graph.find_nodes(op="call_function", target=operator.add)
+            assert len(nodes) == 1
+            args = list(nodes[0].args)
+            args[1] = 2
+            nodes[0].args = tuple(args)
+
+        def foo(x):
+            return x + 1
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            inp = torch.rand([10])
+
+            out = foo(inp)
+            out_c = torch.compile(foo)(inp)
+
+            return torch.allclose(out, out_c)
+
+        with config.patch(pre_grad_custom_pass=pass_fn):
+            out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "pre_grad_passes")
+        self.assertEqual(out.bisect_number, 0)
+        self.assertTrue("pre_grad_custom_pass" in out.debug_info)
+
     def test_joint_graph(self):
         from torch._inductor import config
 
@@ -108,8 +139,6 @@ class TestCompilerBisector(TestCase):
             args = list(nodes[0].args)
             args[1] = 2
             nodes[0].args = tuple(args)
-
-        config.joint_custom_post_pass = pass_fn
 
         def foo(x):
             return x + 1
@@ -124,7 +153,8 @@ class TestCompilerBisector(TestCase):
 
             return torch.allclose(out, out_c)
 
-        out = CompilerBisector.do_bisect(test_fn)
+        with config.patch(joint_custom_post_pass=pass_fn):
+            out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "inductor")
         self.assertEqual(out.subsystem, "joint_graph_passes")
         self.assertEqual(out.bisect_number, 4)
@@ -186,7 +216,7 @@ class TestCompilerBisector(TestCase):
                 torch._dynamo.reset()
 
                 try:
-                    torch.testing.assert_allclose(torch.compile(op)(x), op(x))
+                    torch.testing.assert_close(torch.compile(op)(x), op(x))
                 except Exception:
                     return False
                 return True
@@ -242,6 +272,59 @@ class TestCompilerBisector(TestCase):
         out = CompilerBisector.do_bisect(test_fn)
         self.assertEqual(out.backend, "eager")
         self.assertEqual(out.subsystem, None)
+
+    @config.patch(
+        {
+            "test_configs.bisect_pre_grad_graph": True,
+            "test_configs.bisect_keep_custom_backend_for_inductor": True,
+        }
+    )
+    def test_bisect_pre_grad_graph(self):
+        def f(x):
+            for _ in range(5):
+                x = x + 1
+            return x.relu()
+
+        class MyBackend:
+            def __call__(self, gm, example_inputs):
+                node_idx = 0
+
+                def node_to_graph_id(node):
+                    nonlocal node_idx
+                    out = 0 if node_idx < 3 else 1
+                    node_idx += 1
+                    return out
+
+                split_gm = torch.fx.passes.split_module.split_module(
+                    gm, None, node_to_graph_id, keep_original_order=True
+                )
+
+                for name, submod in split_gm.named_modules():
+                    if "submod_" in name:
+                        # the test case is simple enough that using
+                        # the original example_inputs works for sub
+                        # moule
+                        submod.forward = torch._inductor.standalone_compile(
+                            submod,
+                            example_inputs,
+                            dynamic_shapes="from_example_inputs",
+                            options={},
+                        )
+
+                return split_gm
+
+        def test_fn():
+            torch._dynamo.reset()
+
+            x = torch.randn(1024, device="cuda")
+            with config.patch("triton.inject_relu_bug_TESTING_ONLY", "accuracy"):
+                opt_f = torch.compile(f, backend=MyBackend())
+                return torch.allclose(opt_f(x), f(x))
+
+        out = CompilerBisector.do_bisect(test_fn)
+        self.assertEqual(out.backend, "inductor")
+        self.assertEqual(out.subsystem, "pre_grad_graph")
+        self.assertEqual(out.bisect_number, 1)
 
 
 if __name__ == "__main__":

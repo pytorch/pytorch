@@ -34,7 +34,7 @@ jobs:
       id-token: write
     strategy:
       matrix:
-        cuda_version: ["129", "128", "126"]
+        cuda_version: ["130", "129", "128", "126"]
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

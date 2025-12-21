@@ -16,6 +16,8 @@ Key classes:
 - BuckTargetWriter: Manages Buck build system integration
 """
 
+from __future__ import annotations
+
 import atexit
 import copy
 import cProfile
@@ -31,9 +33,8 @@ import sys
 import tempfile
 import textwrap
 from collections import Counter
-from collections.abc import Sequence
 from importlib import import_module
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TYPE_CHECKING, TypeVar
 
 import torch
 import torch._prims_common as utils
@@ -42,13 +43,18 @@ from torch import Tensor
 from torch._dynamo.testing import rand_strided
 from torch._inductor.cpp_builder import normalize_path_separator
 from torch._prims_common import is_float_dtype
-from torch.hub import tqdm
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.storage import UntypedStorage
 from torch.utils._content_store import ContentStoreReader, ContentStoreWriter
 
 from . import config
-from .utils import clone_inputs, get_debug_dir
+from .utils import clone_inputs, get_debug_dir, warn_once
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from torch.hub import tqdm
+    from torch.storage import UntypedStorage
 
 
 log = logging.getLogger(__name__)
@@ -258,7 +264,7 @@ def _cuda_system_info_comment() -> str:
     try:
         cuda_version_out = subprocess.check_output(["nvcc", "--version"])
         cuda_version_lines = cuda_version_out.decode().split("\n")
-        comment = "".join([f"# {s} \n" for s in cuda_version_lines if s not in [""]])
+        comment = "".join([f"# {s} \n" for s in cuda_version_lines if s != ""])
         model_str += f"{comment}\n"
     except (FileNotFoundError, subprocess.CalledProcessError):
         model_str += "# nvcc not found\n"
@@ -335,7 +341,7 @@ def helper_for_dump_minify(contents: str) -> None:
 
     except OSError as e:
         log.exception("")
-        raise NotImplementedError("Could not write to {minified_repro_path}") from e
+        raise NotImplementedError(f"Could not write to {minified_repro_path}") from e
 
 
 class AccuracyError(Exception):
@@ -449,7 +455,7 @@ def cast_dtype_args_to_fp64(model: torch.fx.GraphModule) -> torch.fx.GraphModule
     for node in model.graph.nodes:
         if (
             node.op == "call_function"
-            and node.target == torch.ops.prims.convert_element_type.default
+            and node.target is torch.ops.prims.convert_element_type.default
         ):
             assert len(node.args) == 2
             if is_float_dtype(node.args[1]) and node.args[1] != torch.float64:
@@ -534,10 +540,10 @@ def backend_accuracy_fails(
 
 
 def _stride_or_default(
-    stride: Optional["torch._prims_common.StrideType"],
+    stride: Optional[torch._prims_common.StrideType],
     *,
-    shape: "torch._prims_common.ShapeType",
-) -> "torch._prims_common.StrideType":
+    shape: torch._prims_common.ShapeType,
+) -> torch._prims_common.StrideType:
     return stride if stride is not None else utils.make_contiguous_strides_for(shape)
 
 
@@ -561,7 +567,7 @@ class NopInputReader:
         storage_hash: Optional[str],
         nbytes: int,
         *,
-        device: Optional["torch._prims_common.DeviceLikeType"] = None,
+        device: Optional[torch._prims_common.DeviceLikeType] = None,
         dtype_hint: Optional[torch.dtype] = None,
     ) -> None:
         self.total += 1
@@ -592,7 +598,7 @@ class InputReader:
         storage_hash: Optional[str],
         nbytes: int,
         *,
-        device: Optional["torch._prims_common.DeviceLikeType"] = None,
+        device: Optional[torch._prims_common.DeviceLikeType] = None,
         dtype_hint: Optional[torch.dtype] = None,
     ) -> UntypedStorage:
         if self.pbar is not None:
@@ -611,7 +617,7 @@ class InputReader:
                     # way would be very mysterious!  Would have been better
                     # not to store device in the serialized format...
                 return storage
-        log.warning("could not load %s, generating random data instead", storage_hash)
+        warn_once(f"could not load {storage_hash}, generating random data instead")
         shape = (nbytes // dtype_hint.itemsize,)
         stride = _stride_or_default(None, shape=shape)
         return rand_strided(shape, stride, dtype_hint, device).untyped_storage()
@@ -619,8 +625,8 @@ class InputReader:
     def tensor(
         self,
         storage: UntypedStorage,
-        shape: "torch._prims_common.ShapeType",
-        stride: Optional["torch._prims_common.StrideType"] = None,
+        shape: torch._prims_common.ShapeType,
+        stride: Optional[torch._prims_common.StrideType] = None,
         *,
         storage_offset: Optional[int] = None,
         dtype: Optional[torch.dtype] = None,
@@ -698,7 +704,7 @@ class InputWriter:
         self,
         untyped_storage: UntypedStorage,
         *,
-        device_hint: Optional["torch._prims_common.DeviceLikeType"] = None,
+        device_hint: Optional[torch._prims_common.DeviceLikeType] = None,
         dtype_hint: Optional[torch.dtype] = None,
     ) -> str:
         ws = StorageWeakRef(untyped_storage)
@@ -841,9 +847,7 @@ def aot_graph_input_parser(
         )
         return sym_shapes_dict.get(symint, default_sym_shape)  # type: ignore[return-value]
 
-    def gen_tensor(
-        shape: "torch._prims_common.ShapeType", dtype: torch.dtype
-    ) -> Tensor:
+    def gen_tensor(shape: torch._prims_common.ShapeType, dtype: torch.dtype) -> Tensor:
         # Resolve symbolic shapes to concrete values
         resolved_shape = []
         dynamic_dims = []
@@ -875,6 +879,7 @@ def aot_graph_input_parser(
             data_type, shape_str = match.groups()
             shape = tuple(shape_str.split(","))
             dtype = dtype_map[data_type]
+            # pyrefly: ignore [bad-argument-type]
             kwargs[param] = gen_tensor(shape, dtype)
 
         match = re.search(sym_shape_regex, annotation)
@@ -888,6 +893,7 @@ def aot_graph_input_parser(
             attr_name, data_type, shape_str, _ = match.groups()
             shape = tuple(shape_str.split(","))
             dtype = dtype_map[data_type]
+            # pyrefly: ignore [bad-argument-type]
             setattr(container, attr_name, gen_tensor(shape, dtype))
 
     return kwargs

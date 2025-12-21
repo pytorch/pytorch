@@ -8,9 +8,9 @@ import operator
 import types
 import warnings
 from collections import defaultdict
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, Callable, final, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, final, NamedTuple, TYPE_CHECKING
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -91,7 +91,7 @@ __all__ = [
 ]
 
 
-PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
+PassType = Callable[[torch.fx.GraphModule], PassResult | None]
 
 
 @dataclasses.dataclass
@@ -100,7 +100,7 @@ class ModuleCallSignature:
     outputs: list[ArgumentSpec]
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
-    forward_arg_names: Optional[list[str]] = None
+    forward_arg_names: list[str] | None = None
 
     def replace_all_uses_with(self, original_node, new_node):
         for i in self.inputs:
@@ -114,7 +114,7 @@ class ModuleCallSignature:
 @dataclasses.dataclass
 class ModuleCallEntry:
     fqn: str
-    signature: Optional[ModuleCallSignature] = None
+    signature: ModuleCallSignature | None = None
 
 
 def _disable_prexisiting_fake_mode(fn):
@@ -127,9 +127,9 @@ def _disable_prexisiting_fake_mode(fn):
 
 
 def _fx_collection_equivalence_fn(
-    spec1_type: Optional[type],
+    spec1_type: type | None,
     spec1_context: pytree.Context,
-    spec2_type: Optional[type],
+    spec2_type: type | None,
     spec2_context: pytree.Context,
 ) -> bool:
     """Treat containers and their immutable variants as the same type. Otherwise
@@ -281,7 +281,7 @@ def _split_decomp_table_to_cia_and_python_decomp(
     for op in list(decomp_table.keys()):
         # TODO we are silently allowing non-safe(non-functional) ops through a crack
         # due to core aten decomp table having non-functional entries. Once we have
-        # a tigher check around core aten decomp, we should warn users about them.
+        # a tighter check around core aten decomp, we should warn users about them.
         # Tracking issue: (https://github.com/pytorch/pytorch/issues/135759)
 
         # if it is a valid CIA op we can mess with in export, we check if it is:
@@ -330,7 +330,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     *,
     cia_to_decomp: dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: dict[torch._ops.OperatorBase, Callable],
-    joint_loss_index: Optional[int],
+    joint_loss_index: int | None,
     decompose_custom_triton_ops,
 ):
     from torch._export.passes.lift_constants_pass import _materialize_and_lift_constants
@@ -391,7 +391,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # aot_export expect the return type to always be a tuple.
         assert out_spec is not None
         if out_spec.type not in (list, tuple):
-            out_spec = pytree.TreeSpec(tuple, None, [out_spec])
+            out_spec = pytree.treespec_tuple([out_spec])
 
         mod.graph._codegen = _PyTreeCodeGen(
             _PyTreeInfo(
@@ -532,16 +532,16 @@ def _decompose_and_get_gm_with_new_signature_constants(
         _verify_stack_trace(gm)
         _verify_placeholder_names(gm, new_graph_signature)
 
-        gm, new_graph_signature = _remove_unneccessary_copy_op_pass(
+        gm, new_graph_signature = _remove_unnecessary_copy_op_pass(
             gm, new_graph_signature
         )
 
-        # When we apply parameterixzation rule to unwrap
+        # When we apply parameterization rule to unwrap
         # subclasses, the state dict will now have different
         # desugared parameters. We need to manually filter those
         # and update the ep.state_dict. Ideally, we should just return
         # the state dict of ep.module but ep.module only stores params
-        # buffers that participate in forward. If we undo this behaviour,
+        # buffers that participate in forward. If we undo this behavior,
         # it would break some downstream users.
         new_state_dict = {
             **ep.state_dict,
@@ -590,7 +590,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             ep.graph_module,
             fake_args,
             decompositions=python_decomp_table,
-            trace_joint=True if joint_loss_index is not None else False,
+            trace_joint=joint_loss_index is not None,
             output_loss_index=(
                 joint_loss_index if joint_loss_index is not None else None
             ),
@@ -653,7 +653,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         shape_env = _get_shape_env(gm)
         if shape_env is not None:
             with _set_node_metadata_hook(
-                gm, functools.partial(_node_metadata_hook, stack_trace=stack_trace)
+                gm,
+                functools.partial(
+                    _node_metadata_hook, metadata={"stack_trace": stack_trace}
+                ),
             ):
                 insert_deferred_runtime_asserts(
                     gm,
@@ -778,7 +781,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     return gm, new_graph_signature, ep.state_dict
 
 
-def _remove_unneccessary_copy_op_pass(
+def _remove_unnecessary_copy_op_pass(
     gm: torch.fx.GraphModule, new_graph_signature: ExportGraphSignature
 ) -> tuple[torch.fx.GraphModule, ExportGraphSignature]:
     """
@@ -789,13 +792,13 @@ def _remove_unneccessary_copy_op_pass(
             if node.op == "output":
                 args, _ = pytree.tree_flatten(node.args)
                 for out in args:
-                    if (
-                        isinstance(out, torch.fx.Node)
-                        and out.name in new_graph_signature.buffers_to_mutate
+                    if isinstance(out, torch.fx.Node) and (
+                        out.name in new_graph_signature.buffers_to_mutate
+                        or out.name in new_graph_signature.parameters_to_mutate
                     ):
                         if (
                             out.op == "call_function"
-                            and out.target == torch.ops.aten.copy.default
+                            and out.target is torch.ops.aten.copy.default
                         ):
                             out.replace_all_uses_with(out.args[1])  # type: ignore[arg-type]
                             gm.graph.erase_node(out)
@@ -814,7 +817,7 @@ def _common_getitem_elimination_pass(
             node_id: dict[torch.fx.Node, str] = {}
             getitems: dict[str, torch.fx.Node] = {}
             for node in list(module.graph.nodes):
-                if node.op == "call_function" and node.target == operator.getitem:
+                if node.op == "call_function" and node.target is operator.getitem:
                     source, idx = node.args
                     new_id = f"{node_id[source]}.{idx}"
                     if new_id in getitems:
@@ -891,7 +894,7 @@ def _get_updated_module_call_graph(
                     user_input_counter += 1
 
     # For all the parameters and buffers, we first see
-    # if they are result of paramerizaitons and if they
+    # if they are result of parametrizations and if they
     # are, we log them and error later
     old_param_to_desugared = defaultdict(list)
     for name, target in new_graph_params_buffers.items():
@@ -954,7 +957,7 @@ def _decompose_exported_program(
     *,
     cia_to_decomp: dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: dict[torch._ops.OperatorBase, Callable],
-    joint_loss_index: Optional[int],
+    joint_loss_index: int | None,
     decompose_custom_triton_ops: bool,
 ):
     (
@@ -1035,7 +1038,7 @@ class ExportedProgram:
     _module_call_graph: list[ModuleCallEntry]
     """Call graph information tracking module hierarchy and signatures."""
 
-    _example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]]
+    _example_inputs: tuple[tuple[Any, ...], dict[str, Any]] | None
     """Example inputs used during export, stored as (args, kwargs) tuple."""
 
     _constants: dict[str, _ConstantAttributeType]
@@ -1044,18 +1047,20 @@ class ExportedProgram:
     _verifiers: list[type[Verifier]]
     """List of verifier classes used to validate the exported program."""
 
+    _guards_code: list[str]
+
     def __init__(
         self,
-        root: Union[torch.nn.Module, dict[str, Any]],
+        root: torch.nn.Module | dict[str, Any],
         graph: torch.fx.Graph,
         graph_signature: ExportGraphSignature,
-        state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]],
+        state_dict: dict[str, torch.Tensor | torch.nn.Parameter],
         range_constraints: "dict[sympy.Symbol, Any]",
         module_call_graph: list[ModuleCallEntry],
-        example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]] = None,
-        constants: Optional[dict[str, _ConstantAttributeType]] = None,
+        example_inputs: tuple[tuple[Any, ...], dict[str, Any]] | None = None,
+        constants: dict[str, _ConstantAttributeType] | None = None,
         *,
-        verifiers: Optional[list[type[Verifier]]] = None,
+        verifiers: list[type[Verifier]] | None = None,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -1080,6 +1085,8 @@ class ExportedProgram:
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
         self.validate()
+
+        self._guards_code = _convert_guards_to_code(self._graph_module)
 
     @property
     @compatibility(is_backward_compatible=False)
@@ -1219,8 +1226,8 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def call_spec(self):
         class CallSpec(NamedTuple):
-            in_spec: Optional[pytree.TreeSpec]
-            out_spec: Optional[pytree.TreeSpec]
+            in_spec: pytree.TreeSpec | None
+            out_spec: pytree.TreeSpec | None
 
         if len(self.module_call_graph) == 0:
             return CallSpec(in_spec=None, out_spec=None)
@@ -1376,13 +1383,20 @@ class ExportedProgram:
         )
         return string
 
-    def module(self) -> torch.fx.GraphModule:
+    def module(self, check_guards=True) -> torch.fx.GraphModule:
         """
         Returns a self contained GraphModule with all the parameters/buffers inlined.
+
+        - When `check_guards=True` (default), a `_guards_fn` submodule is generated
+          and a call to a `_guards_fn` submodule is inserted right after placeholders
+          in the graph. This module checks guards on inputs.
+        - When `check_guards=False`, a subset of these checks are performed by a
+          forward pre-hook on the graph module. No `_guards_fn` submodule is generated.
+
         """
         from ._unlift import _unlift_exported_program_lifted_states
 
-        module = _unlift_exported_program_lifted_states(self)
+        module = _unlift_exported_program_lifted_states(self, check_guards=check_guards)
 
         def _train(self, mode: bool = True):
             raise NotImplementedError("Calling train() is not supported yet.")
@@ -1407,7 +1421,7 @@ class ExportedProgram:
     @_disable_prexisiting_fake_mode
     def run_decompositions(
         self,
-        decomp_table: Optional[dict[torch._ops.OperatorBase, Callable]] = None,
+        decomp_table: dict[torch._ops.OperatorBase, Callable] | None = None,
         decompose_custom_triton_ops: bool = False,
     ) -> "ExportedProgram":
         """
@@ -1486,6 +1500,7 @@ class ExportedProgram:
         transformed_gm = res.graph_module if res is not None else self.graph_module
         assert transformed_gm is not None
 
+        # pyrefly: ignore [missing-attribute]
         if transformed_gm is self.graph_module and not res.modified:
             return self
 
@@ -1564,6 +1579,7 @@ class ExportedProgram:
             verifiers=self.verifiers,
         )
         transformed_ep.graph_module.meta.update(self.graph_module.meta)
+        # pyrefly: ignore [missing-attribute]
         transformed_ep.graph_module.meta.update(res.graph_module.meta)
         return transformed_ep
 
@@ -1634,7 +1650,7 @@ def _get_shape_env(gm):
 
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
-    old_range_constraints: "Optional[dict[sympy.Symbol, Any]]" = None,
+    old_range_constraints: "dict[sympy.Symbol, Any] | None" = None,
 ) -> "dict[sympy.Symbol, Any]":
     assert old_range_constraints is not None
 
@@ -1668,9 +1684,36 @@ def _create_graph_module_for_export(root, graph):
             "Unable to execute the generated python source code from "
             "the graph. The graph module will no longer be directly callable, "
             "but you can still run the ExportedProgram, and if needed, you can "
-            "run the graph module eagerly using torch.fx.Interpreter."
+            "run the graph module eagerly using torch.fx.Interpreter.",
+            stacklevel=2,
         )
         gm = torch.fx.GraphModule(root, torch.fx.Graph())
         gm._graph = graph
 
     return gm
+
+
+def _convert_guards_to_code(graph_module):
+    shape_env = _get_shape_env(graph_module)
+    if shape_env is None:
+        return []
+
+    local_vars = {
+        var
+        for var, sources in shape_env.var_to_sources.items()
+        if all(
+            not isinstance(source, torch._dynamo.source.ConstantSource)
+            for source in sources
+        )
+    }
+    py_printer = torch.fx.experimental.symbolic_shapes.ShapeGuardPythonPrinter(
+        shape_env.var_to_sources, lambda s: s.name, shape_env.var_to_sources
+    )
+    ret = [
+        py_printer.doprint(guard.expr)
+        for guard in shape_env.guards
+        if guard.expr.free_symbols.issubset(local_vars)
+    ]
+    # TODO Figure out how to resolve guards containing weight sizes.
+    # This is not a big deal as _guards_code is mostly empty today.
+    return [guard for guard in ret if "L['self']" not in guard]

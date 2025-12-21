@@ -12,7 +12,8 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 from collections.abc import Iterator
 
 import torch
@@ -509,7 +510,7 @@ if __name__ == '__main__':
         # Test without setting env var should run everything.
         env = dict(os.environ)
         for k in ['CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
-            if k in env.keys():
+            if k in env:
                 del env[k]
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
         self.assertIn(f'Ran {test_bases_count} test', stderr.decode('ascii'))
@@ -2351,7 +2352,7 @@ class TestImports(TestCase):
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
 
-    # The test is flaky on ROCm and has been open and close multiple times
+    # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
     @skipIfRocm
     def test_circular_dependencies(self) -> None:
@@ -2366,12 +2367,14 @@ class TestImports(TestCase):
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
+                           "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
                            "torch.distributed.examples",  # requires CUDA and torchvision
                            "torch.distributed.tensor.examples",  # example scripts
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
+                           "torch._inductor.kernel.vendored_templates.cutedsl_grouped_gemm",  # depends on cutlass
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac

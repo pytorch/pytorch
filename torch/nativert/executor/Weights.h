@@ -20,10 +20,12 @@ using WeightVersion = int;
  */
 class Weights {
  public:
-  explicit Weights(
+  Weights(
       const Graph* graph,
       const std::optional<std::unordered_map<std::string, c10::IValue>>&
-          stateDict = std::nullopt);
+          stateDict = std::nullopt,
+      const std::optional<std::unordered_map<std::string, c10::IValue>>&
+          constants = std::nullopt);
 
   // Arguments
   // - pytorchStreamReader: the reader for the model archive
@@ -43,7 +45,11 @@ class Weights {
       const std::unordered_map<std::string, std::string>& constantPaths,
       std::string_view constantPathPrefix,
       std::function<bool(const std::string&)> skipSizeCheck = {},
-      std::function<bool(const std::string&)> skipDtypeCheck = {});
+      std::function<bool(const std::string&)> skipDtypeCheck = {},
+      std::shared_ptr<std::unordered_map<
+          std::string,
+          std::shared_ptr<torch::nativert::TensorMeta>>> maybeNewWeightsMeta =
+          nullptr);
 
   at::Tensor at(const std::string& name) const;
   at::Tensor& at(const std::string& name);
@@ -64,6 +70,10 @@ class Weights {
    * Replace the value stored at the weight with name "name".
    */
   void setValue(const std::string& name, const at::Tensor& newValue);
+  void setValue(
+      const std::string& name,
+      const at::Tensor& newValue,
+      bool skipDeviceCheck);
 
   /*
    * Update the value stored at the weight with name "name".
@@ -75,6 +85,10 @@ class Weights {
       const std::unordered_map<std::string, at::Tensor>& newValues);
 
   void validateValue(const std::string& name, const at::Tensor& newValue) const;
+  void validateValue(
+      const std::string& name,
+      const at::Tensor& newValue,
+      bool skipDeviceCheck) const;
 
   void validateAllWeightsLoaded();
 
@@ -127,8 +141,8 @@ class Weights {
   // every instance of Weight has a unique version number
   static WeightVersion globalVersion_;
 
-  std::function<bool(const std::string&)> skipSizeCheck_ = {};
-  std::function<bool(const std::string&)> skipDtypeCheck_ = {};
+  std::function<bool(const std::string&)> skipSizeCheck_;
+  std::function<bool(const std::string&)> skipDtypeCheck_;
 
   // save the names of unused weights
   std::unordered_set<std::string> unusedWeights_;

@@ -366,13 +366,13 @@ class TestFFTThreadSafe(TestCase):
 
         [x.join() for x in t]
         # Make sure all threads returned the correct value
-        for i in range(self.threads):
+        for _ in range(self.threads):
             # under torch.dynamo `assert_array_equal` fails with relative errors of
             # about 1.5e-14. Hence replace it with `assert_allclose(..., rtol=2e-14)`
             assert_allclose(
                 q.get(timeout=5),
                 expected,
-                atol=2e-14
+                atol=2e-14,
                 # msg="Function returned wrong value in multithreaded context",
             )
 

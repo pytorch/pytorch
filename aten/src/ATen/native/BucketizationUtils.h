@@ -70,7 +70,7 @@ inline void searchsorted_maybe_trim_input_tensors(
     const Tensor& raw_boundaries) {
   Tensor trimmed_sorter;
   Tensor raw_sorter;
-  return searchsorted_maybe_trim_input_tensors(
+  searchsorted_maybe_trim_input_tensors(
       trimmed_input,
       trimmed_boundaries,
       trimmed_sorter,

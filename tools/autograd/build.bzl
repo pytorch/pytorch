@@ -12,3 +12,9 @@ def define_targets(rules):
             "//torchgen",
         ],
     )
+
+    rules.filegroup(
+        name = "deprecated_yaml",
+        srcs = ["deprecated.yaml"],
+        visibility = ["//:__subpackages__"],
+    )

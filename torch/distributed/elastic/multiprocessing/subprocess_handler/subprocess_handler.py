@@ -9,7 +9,9 @@ import os
 import signal
 import sys
 from subprocess import Popen
-from typing import Any, Optional
+from typing import Any
+
+from torch.numa.binding import maybe_wrap_command_args_with_numa_binding, NumaOptions
 
 
 __all__ = ["SubprocessHandler"]
@@ -36,24 +38,33 @@ class SubprocessHandler:
         entrypoint: str,
         args: tuple,
         env: dict[str, str],
-        stdout: Optional[str],
-        stderr: Optional[str],
+        stdout: str | None,
+        stderr: str | None,
         local_rank_id: int,
+        numa_options: NumaOptions | None,
     ):
-        self._stdout = open(stdout, "w") if stdout else None
-        self._stderr = open(stderr, "w") if stderr else None
+        self._stdout = open(stdout, "w") if stdout else None  # noqa: SIM115
+        self._stderr = open(stderr, "w") if stderr else None  # noqa: SIM115
         # inherit parent environment vars
         env_vars = os.environ.copy()
         env_vars.update(env)
 
         args_str = (entrypoint, *[str(e) for e in args])
+        args_str = maybe_wrap_command_args_with_numa_binding(
+            args_str,
+            gpu_index=local_rank_id,
+            numa_options=numa_options,
+        )
+
         self.local_rank_id = local_rank_id
+
         self.proc: Popen = self._popen(args_str, env_vars)
 
     def _popen(self, args: tuple, env: dict[str, str]) -> Popen:
         kwargs: dict[str, Any] = {}
         if not IS_WINDOWS:
             kwargs["start_new_session"] = True
+
         return Popen(
             # pyre-fixme[6]: Expected `Union[typing.Sequence[Union[_PathLike[bytes],
             #  _PathLike[str], bytes, str]], bytes, str]` for 1st param but got
@@ -65,7 +76,7 @@ class SubprocessHandler:
             **kwargs,
         )
 
-    def close(self, death_sig: Optional[signal.Signals] = None) -> None:
+    def close(self, death_sig: signal.Signals | None = None) -> None:
         if not death_sig:
             death_sig = _get_default_signal()
         if IS_WINDOWS:

@@ -34,7 +34,7 @@ class LayerNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(normalized_shape))
         self.eps = eps
         self.data_format = data_format
-        if self.data_format not in [torch.contiguous_format]:
+        if self.data_format != torch.contiguous_format:
             raise NotImplementedError
         self.normalized_shape = (normalized_shape,)
 
@@ -110,7 +110,7 @@ class DownSampling(nn.Module):
 
 @torch.no_grad()
 def init_weights(m):
-    if type(m) == nn.Conv2d or type(m) == nn.Linear:
+    if type(m) is nn.Conv2d or type(m) is nn.Linear:
         nn.init.ones_(m.weight)
         if m.bias is not None:
             nn.init.zeros_(m.bias)

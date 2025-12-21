@@ -27,13 +27,16 @@ from torch.utils._pytree import tree_map
 PRUNE_ALL = 1
 KEEP_ELLIPSES = 2
 KEEP_NAME_AND_ELLIPSES = 3
+IGNORE = 4
 
 PRUNE_FUNCTIONS = {
     "torch/utils/_pytree.py(...): tree_map": KEEP_NAME_AND_ELLIPSES,
     "torch/profiler/profiler.py(...): start": KEEP_ELLIPSES,
     "torch/profiler/profiler.py(...): stop_trace": KEEP_ELLIPSES,
     "torch/profiler/profiler.py(...): _transit_action": KEEP_ELLIPSES,
+    "<built-in method __enter__ of torch._C.DisableTorchFunctionSubclass object at 0xXXXXXXXXXXXX>": PRUNE_ALL,
     "<built-in method __exit__ of torch._C.DisableTorchFunctionSubclass object at 0xXXXXXXXXXXXX>": PRUNE_ALL,
+    "<built-in function all>": IGNORE,
     "cudaStreamIsCapturing": PRUNE_ALL,
     # These show up only on CUDA, prune them so the CUDA and CPU expected results can be the same
     "cudaGetDeviceCount": PRUNE_ALL,
@@ -117,6 +120,8 @@ class ProfilerTree:
                 if prune_level is None:
                     out.append((depth, name))
                     flatten(node.children, depth + 1, out)
+                elif prune_level == IGNORE:
+                    flatten(node.children, depth, out)
                 elif prune_level == KEEP_NAME_AND_ELLIPSES:
                     out.append((depth, name))
                     if node.children:
@@ -190,6 +195,16 @@ class ProfilerTree:
                 f"{kernel_pattern.replace('[a-zA-Z0-9]+', '...')}<...>(...)",
                 name,
             )
+
+        # HACK: this patches around the fact that PyBind11 improperly sets the
+        # __qualname__ attribute on functions and methods; see
+        # https://github.com/pybind/pybind11/issues/5774.  This should be removed if
+        # that issue is fixed.
+        name = re.sub(
+            r"pybind11_builtins\.pybind11_detail_function_record_v[^ .]+",
+            "PyCapsule",
+            name,
+        )
 
         return re.sub("object at 0x[0-9a-fA-F]+>", "object at 0xXXXXXXXXXXXX>", name)
 
@@ -614,8 +629,7 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
-                              aten::reshape
-                                aten::view
+                              aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided
@@ -661,8 +675,7 @@ class TestProfilerTree(TestCase):
                           torch/nn/modules/module.py(...): __getattr__
                           <built-in function linear>
                             aten::linear
-                              aten::reshape
-                                aten::view
+                              aten::view
                               aten::t
                                 aten::transpose
                                   aten::as_strided
@@ -712,10 +725,9 @@ class TestProfilerTree(TestCase):
               <built-in method add of type object at 0xXXXXXXXXXXXX>
                 test_profiler_tree.py(...): __torch_function__
                   torch/_tensor.py(...): __torch_function__
-                    <built-in function all>
-                      torch/_tensor.py(...): <genexpr>
-                        <built-in function issubclass>
-                      torch/_tensor.py(...): <genexpr>
+                    torch/_tensor.py(...): <genexpr>
+                      <built-in function issubclass>
+                    torch/_tensor.py(...): <genexpr>
                     <built-in method add of type object at 0xXXXXXXXXXXXX>
                       aten::add
                     torch/_tensor.py(...): _convert
@@ -752,20 +764,22 @@ class TestProfilerTree(TestCase):
               torch/profiler/profiler.py(...): __enter__
                 ...
               aten::add
-                torch/_library/simple_registry.py(...): find_torch_dispatch_rule
-                  torch/_library/simple_registry.py(...): find
-                  torch/_library/simple_registry.py(...): find
-                    <built-in method get of dict object at 0xXXXXXXXXXXXX>
-                test_profiler_tree.py(...): __torch_dispatch__
-                  torch/utils/_pytree.py(...): tree_map
-                    ...
-                  torch/utils/_pytree.py(...): tree_map
-                    ...
-                  torch/_ops.py(...): __call__
-                    <built-in method  of PyCapsule object at 0xXXXXXXXXXXXX>
-                      aten::add
-                  torch/utils/_pytree.py(...): tree_map
-                    ...
+                PythonSubclass
+                  torch/_library/simple_registry.py(...): find_torch_dispatch_rule
+                    torch/_library/simple_registry.py(...): find
+                      <built-in method get of dict object at 0xXXXXXXXXXXXX>
+                    torch/_library/simple_registry.py(...): find
+                      <built-in method get of dict object at 0xXXXXXXXXXXXX>
+                  test_profiler_tree.py(...): __torch_dispatch__
+                    torch/utils/_pytree.py(...): tree_map
+                      ...
+                    torch/utils/_pytree.py(...): tree_map
+                      ...
+                    torch/_ops.py(...): __call__
+                      <built-in method  of PyCapsule object at 0xXXXXXXXXXXXX>
+                        aten::add
+                    torch/utils/_pytree.py(...): tree_map
+                      ...
               torch/profiler/profiler.py(...): __exit__
                 torch/profiler/profiler.py(...): stop
                   ...""",

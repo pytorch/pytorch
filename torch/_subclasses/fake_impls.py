@@ -5,8 +5,9 @@ import itertools
 import math
 import operator
 import sys
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, Union
+from typing import Optional, Union
 
 import torch
 import torch._custom_op
@@ -15,11 +16,12 @@ import torch._prims_common as utils
 from torch._dispatch.python import no_python_dispatcher
 from torch._ops import OpOverload
 from torch._prims_common import (
-    contiguous_for_memory_format_or_false,
+    canonicalize_dim,
     elementwise_dtypes,
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     is_boolean_dtype,
     is_contiguous,
+    is_contiguous_for_memory_format_or_false,
     is_contiguous_or_false,
     is_float_dtype,
     is_integer_dtype,
@@ -71,15 +73,25 @@ _like_tensor_constructors = ordered_set(
     aten.ones_like.default,
     aten.ones_like.out,
     aten.rand_like.default,
+    aten.rand_like.generator,
     aten.rand_like.out,
+    aten.rand_like.generator_out,
     aten.randn_like.default,
+    aten.randn_like.generator,
     aten.randn_like.out,
+    aten.randn_like.generator_out,
     aten.randint_like.default,
+    aten.randint_like.generator,
     aten.randint_like.Tensor,
+    aten.randint_like.Tensor_generator,
     aten.randint_like.Tensor_out,
+    aten.randint_like.Tensor_generator_out,
     aten.randint_like.out,
+    aten.randint_like.generator_out,
     aten.randint_like.low_dtype,
+    aten.randint_like.low_generator_dtype,
     aten.randint_like.low_dtype_out,
+    aten.randint_like.low_generator_dtype_out,
     aten.zeros_like.default,
     aten.zeros_like.out,
     aten.new_empty.default,
@@ -156,8 +168,7 @@ def _is_op_registered_to_fake_rule(op):
 
 
 def _deregister_op_impl(op):
-    if op in op_implementations_dict:
-        del op_implementations_dict[op]
+    op_implementations_dict.pop(op, None)
     for check, impl in op_implementations_checks:
         if check is op:
             op_implementations_checks.remove((check, impl))
@@ -210,6 +221,34 @@ def non_kwarg_is_pinned(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
         r = func(inp)
     return r
+
+
+# Legacy profiler ops return Tensors but don't follow tensor constructor patterns
+# They take string arguments and should not have device/dtype parameters added
+@register_op_impl(torch.ops.profiler._record_function_enter.default)
+def _record_function_enter(fake_mode, func, name: str, args=None):
+    # Call the real implementation to get a real handle tensor
+    with in_kernel_invocation_manager(fake_mode):
+        real_handle = func(name, args)
+    # Create a meta tensor with the same properties as the real handle
+    meta_handle = torch.empty_like(real_handle, device="meta")
+    # Wrap it as a FakeTensor
+    return FakeTensor(fake_mode, meta_handle, torch.device("cpu"))
+
+
+@register_op_impl(torch.ops.profiler._record_function_exit.default)
+def _record_function_exit(fake_mode, func, handle):
+    # Exit doesn't return anything and doesn't need to do anything for fake tensors
+    # Just return None (the actual return type is void)
+    pass
+
+
+@register_op_impl(torch.ops.profiler._record_function_enter_new.default)
+def _record_function_enter_new(fake_mode, func, name: str, args=None):
+    # Call the real implementation - returns a custom class, not a tensor
+    # Just pass through without wrapping
+    with in_kernel_invocation_manager(fake_mode):
+        return func(name, args)
 
 
 @register_op_impl(aten.to.prim_Device)
@@ -514,6 +553,8 @@ def _compute_stride(old_shape, old_stride, new_shape, size_oblivious=False):
 def _view_has_unbacked_input(a, shape):
     from torch.fx.experimental.symbolic_shapes import has_hint
 
+    shape = utils.extract_shape_from_varargs(shape, validate=False)
+
     return (
         any(not has_hint(s) for s in a.size())
         or any(not has_hint(s) for s in a.stride())
@@ -590,6 +631,21 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
     raise ValueError(msg)
 
 
+@register_op_impl(aten._reshape_copy.default)
+def _reshape_copy(fake_mode, func, a, *shape):
+    if a.is_sparse or a.is_mkldnn:
+        return NotImplemented
+
+    shape = utils.infer_size(*shape, a.numel())
+    if is_contiguous_or_false(a):
+        view = _view_meta(fake_mode, func, a, *shape)
+        return view.clone(memory_format=torch.contiguous_format)
+    else:
+        return _view_meta(
+            fake_mode, func, a.clone(memory_format=torch.contiguous_format), *shape
+        )
+
+
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
 def _view_meta(fake_mode, func, a, *shape):
@@ -599,6 +655,18 @@ def _view_meta(fake_mode, func, a, *shape):
         return _view_unbacked_meta(a, shape)
     else:
         return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
+
+
+@register_op_impl(aten.view_copy.default)
+def _view_meta_copy(fake_mode, func, a, *shape, out=None):
+    result = _view_meta(fake_mode, func, a, *shape)
+    if out is not None:
+        return result
+
+    return pytree.tree_map(
+        lambda x: x.clone(memory_format=torch.contiguous_format),
+        result,
+    )
 
 
 @register_op_impl(aten.repeat_interleave.Tensor)
@@ -730,6 +798,89 @@ def _padded_dense_to_jagged_forward(fake_mode, func, padded, offsets, total_L=No
 
     output_shape = (total_L, *padded.shape[2:])
     return padded.new_empty(output_shape)
+
+
+def _compute_slice_index(size, index):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_and
+
+    if guard_or_false(sym_and(index >= 0, index <= size)):
+        return index
+    elif guard_or_false(sym_and(index < 0, index >= -size)):
+        return index + size
+    elif guard_or_false(index < -size):
+        return 0
+    elif guard_or_false(index > size):
+        return size
+    return None
+
+
+@register_op_impl(torch.ops.aten.slice.Tensor)
+def slice_forward(
+    fake_mode,
+    func,
+    self,
+    dim: int = 0,
+    start: Optional[int] = None,
+    end: Optional[int] = None,
+    step: int = 1,
+):
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        statically_known_true,
+    )
+
+    shape_env = fake_mode.shape_env
+
+    ndim = self.dim()
+    if ndim == 0:
+        raise RuntimeError("slice() cannot be applied to a 0-dim tensor.")
+    dim = canonicalize_dim(self.dim(), dim)
+    sizes = list(self.size())
+    strides = list(self.stride())
+
+    if step <= 0:
+        raise RuntimeError("slice step must be positive")
+
+    # start, end
+    start_index = 0 if start is None else _compute_slice_index(sizes[dim], start)
+    end_index = (
+        sizes[dim]
+        if statically_known_true(end == sys.maxsize) or end is None
+        else _compute_slice_index(sizes[dim], end)
+    )
+
+    # size
+    new_size = None
+    if start_index is not None and end_index is not None:
+        if guard_or_false(end_index >= start_index):
+            new_size = (end_index - start_index + step - 1) // step
+        elif guard_or_false(start_index >= end_index):
+            new_size = 0
+
+    # create unbacked if case unknown
+    if new_size is None:
+        new_size = shape_env.create_unbacked_symint()
+        torch._check(new_size >= 0)
+        torch._check(new_size <= sizes[dim])
+
+    # stride
+    new_stride = strides[dim] * step
+
+    # storage offset
+    if start_index is not None:
+        storage_offset = self.storage_offset() + start_index * strides[dim]
+    else:
+        storage_offset = shape_env.create_unbacked_symint()
+        torch._check(storage_offset >= 0)
+
+    sizes[dim] = new_size
+    strides[dim] = new_stride
+    if self.is_quantized:
+        raise NotImplementedError(
+            "Slice decomposition for quantized tensors aren't implemented"
+        )
+    else:
+        return self.as_strided(sizes, strides, storage_offset)
 
 
 @register_op_impl(torch.ops.aten.masked_select.default)
@@ -1007,8 +1158,6 @@ def conv(fake_mode, func, *args, **kwargs):
             # TODO: We can make this a little more faithful with best effort
             # channels last detection (but only if it's statically obvious!)
             mem_fmt = None
-        elif k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
-            mem_fmt = None
         else:
             if func is aten.convolution.default:
                 conv_backend = torch._C._select_conv_backend(**kwargs)
@@ -1025,15 +1174,40 @@ def conv(fake_mode, func, *args, **kwargs):
                     groups=kwargs["groups"],
                     bias_sizes=kwargs["bias_sizes"],
                 )
+            # Expand 1d -> 2d.
+            # Note: Avoid expanding before calling _select_conv_backend,
+            # as the function handles 2D expansion internally.
+            if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+                # Note: Using input.to(memory_format=contiguous) does not work.
+                kwargs["input"] = kwargs["input"].contiguous().unsqueeze(2)
+                kwargs["weight"] = kwargs["weight"].unsqueeze(2)
+                if len(kwargs["stride"]) == 1:
+                    kwargs["stride"].insert(0, 1)
+                    kwargs["padding"].insert(0, 0)
+                    kwargs["dilation"].insert(0, 1)
+                    kwargs["output_padding"].insert(0, 0)
             mem_fmt = torch._C._conv_determine_backend_memory_format(
                 kwargs["input"], kwargs["weight"], conv_backend
             )
+            # revert 2d -> 1d
+            if k == 3 and not kwargs["input"].is_mkldnn and not kwargs["input"].is_xpu:
+                kwargs["input"] = kwargs["input"].squeeze(2)
+                kwargs["weight"] = kwargs["weight"].squeeze(2)
+                if len(kwargs["stride"]) == 2:
+                    kwargs["stride"].pop(0)
+                    kwargs["padding"].pop(0)
+                    kwargs["dilation"].pop(0)
+                    kwargs["output_padding"].pop(0)
 
     def convert(t, mem_fmt):
         if t is None:
             return t
         if mem_fmt is not None:
-            t = t.to(memory_format=mem_fmt)
+            # channels last only support 4d, try to expand dim then convert it back later.
+            if t.dim() == 3 and mem_fmt == torch.channels_last:
+                t = t.unsqueeze(2).to(memory_format=mem_fmt).squeeze(2)
+            else:
+                t = t.to(memory_format=mem_fmt)
         return FakeTensor(fake_mode, t, device)
 
     with in_kernel_invocation_manager(fake_mode):
@@ -1200,11 +1374,13 @@ def make_fast_binary_impl(
                 # Use elementwise_dtypes for the tricky case
                 has_different_input_dtypes = True
                 continue
-            if common_device == cpu and not op.device.type == "cpu":
+            if common_device == cpu and op.device.type != "cpu":
                 common_device = op.device
-            # Slightly simplified here as target_dtype cannot vary
             if common_dtype is None:
-                common_dtype = op.dtype
+                if type_promotion_kind != ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
+                    has_different_input_dtypes = True
+                else:
+                    common_dtype = op.dtype
             elif common_dtype != op.dtype:
                 has_different_input_dtypes = True
 
@@ -1242,13 +1418,13 @@ def make_fast_binary_impl(
                     continue
                 definitely_contiguous = (
                     definitely_contiguous
-                    and contiguous_for_memory_format_or_false(
+                    and is_contiguous_for_memory_format_or_false(
                         op, memory_format=torch.contiguous_format
                     )
                 )
                 definitely_channels_last = (
                     definitely_channels_last
-                    and contiguous_for_memory_format_or_false(
+                    and is_contiguous_for_memory_format_or_false(
                         op, memory_format=torch.channels_last
                     )
                 )

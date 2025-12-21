@@ -5,6 +5,7 @@
 #include "c10/macros/Macros.h"
 #include "caffe2/serialize/read_adapter_interface.h"
 
+
 namespace caffe2::serialize {
 
 // this is a reader implemented by std::istream

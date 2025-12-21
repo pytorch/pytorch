@@ -121,7 +121,7 @@ inline int64_t legacy_cat_wrap_dim_symint(
     const std::vector<std::vector<c10::SymInt>>& tensor_sizes) {
   for (auto& sizes : tensor_sizes) {
     if (sizes.size() == 1) {
-      if (TORCH_GUARD_SIZE_OBLIVIOUS(sizes[0].sym_eq(0))) {
+      if (TORCH_GUARD_OR_FALSE(sizes[0].sym_eq(0))) {
         continue;
       }
     }
@@ -135,7 +135,7 @@ inline int64_t legacy_cat_wrap_dim(
     const MaterializedITensorListRef& tensors) {
   for (const Tensor& tensor : tensors) {
     if (tensor.dim() == 1) {
-      if (TORCH_GUARD_SIZE_OBLIVIOUS(tensor.sym_sizes()[0].sym_eq(0))) {
+      if (TORCH_GUARD_OR_FALSE(tensor.sym_sizes()[0].sym_eq(0))) {
         continue;
       }
     }

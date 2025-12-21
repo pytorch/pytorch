@@ -31,23 +31,6 @@ if [[ "$PACKAGE_TYPE" != libtorch ]]; then
   export PATH="\${python_path}/bin:\$PATH"
 fi
 
-EXTRA_CONDA_FLAGS=""
-NUMPY_PIN=""
-PROTOBUF_PACKAGE="defaults::protobuf"
-
-if [[ "\$python_nodot" = *310* ]]; then
-  # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
-  # we set a lower boundary here just to be safe
-  NUMPY_PIN=">=1.21.2"
-  PROTOBUF_PACKAGE="protobuf>=3.19.0"
-fi
-
-if [[ "\$python_nodot" = *39* ]]; then
-  # There's an issue with conda channel priority where it'll randomly pick 1.19 over 1.20
-  # we set a lower boundary here just to be safe
-  NUMPY_PIN=">=1.20"
-fi
-
 # Move debug wheels out of the package dir so they don't get installed
 mkdir -p /tmp/debug_final_pkgs
 mv /final_pkgs/debug-*.zip /tmp/debug_final_pkgs || echo "no debug packages to move"
@@ -65,21 +48,24 @@ fi
 
 if [[ "$PACKAGE_TYPE" != libtorch ]]; then
   if [[ "\$BUILD_ENVIRONMENT" != *s390x* ]]; then
-    if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-      pkg_no_python="$(ls -1 /final_pkgs/torch_no_python* | sort |tail -1)"
-      pkg_torch="$(ls -1 /final_pkgs/torch-* | sort |tail -1)"
-      # todo: after folder is populated use the pypi_pkg channel instead
-      pip install "\$pkg_no_python" "\$pkg_torch" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}_pypi_pkg"
-      retry pip install -q numpy protobuf typing-extensions
+    pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
+
+    # numpy tests:
+    # We test 1 version no numpy. 1 version with numpy 1.x and rest with numpy 2.x
+    if [[ "\$python_nodot" = *311* ]]; then
+      retry pip install -q numpy==1.23.5 protobuf typing-extensions
+    elif [[ "\$python_nodot" = *312* ]]; then
+      retry pip install -q protobuf typing-extensions
     else
-      pip install "\$pkg" --index-url "https://download.pytorch.org/whl/\${CHANNEL}/${DESIRED_CUDA}"
       retry pip install -q numpy protobuf typing-extensions
     fi
+
   else
     pip install "\$pkg"
     retry pip install -q numpy protobuf typing-extensions
   fi
 fi
+
 if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   pkg="\$(ls /final_pkgs/*-latest.zip)"
   unzip "\$pkg" -d /tmp

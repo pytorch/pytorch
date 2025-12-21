@@ -75,29 +75,7 @@ def setup_torchbench_cwd():
     return original_dir
 
 
-def process_hf_reformer_output(out):
-    assert isinstance(out, list)
-    # second output is unstable
-    return [elem for i, elem in enumerate(out) if i != 1]
-
-
-def process_hf_whisper_output(out):
-    out_ret = []
-    for i, elem in enumerate(out):
-        if i == 0:
-            if elem is not None:
-                assert isinstance(elem, dict)
-                out_ret.append({k: v for k, v in elem.items() if k != "logits"})
-        elif i != 1:
-            out_ret.append(elem)
-
-    return out_ret
-
-
-process_train_model_output = {
-    "hf_Reformer": process_hf_reformer_output,
-    "hf_Whisper": process_hf_whisper_output,
-}
+process_train_model_output = {}
 
 
 class TorchBenchmarkRunner(BenchmarkRunner):
@@ -147,6 +125,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["device"]["cuda"]
 
     @property
+    def skip_models_for_xpu(self):
+        return self._skip["device"]["xpu"]
+
+    @property
     def skip_models_for_freezing_cuda(self):
         return self._skip["freezing"]["cuda"]
 
@@ -191,6 +173,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._config["dtype"]["force_fp16_for_bf16_models"]
 
     @property
+    def amp_dtype_bfloat16(self):
+        return self._config["dtype"]["amp_dtype_bfloat16"]
+
+    @property
     def skip_accuracy_checks_large_models_dashboard(self):
         if self.args.dashboard or self.args.accuracy:
             return self._accuracy["skip"]["large_models"]
@@ -227,12 +213,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
             "drq",
             "hf_Reformer",
             "DALLE2_pytorch",
-            "hf_BigBird",
             "detectron2_maskrcnn_r_50_fpn",
             "detectron2_maskrcnn_r_101_fpn",
             "vision_maskrcnn",
             "doctr_reco_predictor",
-            "hf_T5_generate",
         }
 
     def load_model(
@@ -382,6 +366,20 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         if self.args.trace_on_xla:
             # work around for: https://github.com/pytorch/xla/issues/4174
             import torch_xla  # noqa: F401
+
+        # Turning off kv cache for torchbench models. This is not the right
+        # thing to do, but the torchbench models are way outdated, and since we
+        # are using torchbench pt2 dashboard to track regressions (rather than
+        # improving performance), we are just setting the kv cache to false.
+        # Real transformers benchmarks will be added soon using a different
+        # infra.
+        if (
+            model_name.startswith("hf")
+            and hasattr(model, "config")
+            and hasattr(model.config, "use_cache")
+        ):
+            model.config.use_cache = False
+
         self.validate_model(model, example_inputs)
         return device, benchmark.name, model, example_inputs, batch_size
 

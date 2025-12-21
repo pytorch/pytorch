@@ -78,7 +78,7 @@ class TestModuleContainers(JitTestCase):
                     x = mod(x)
                     values.append(x)
 
-                for key in self.moduledict.keys():
+                for key in self.moduledict:
                     names.append(key)
 
                 return x, names
@@ -279,34 +279,34 @@ class TestModuleContainers(JitTestCase):
                 self.moduledict = CustomModuleDict({"submod": self.submod})
 
             def forward(self, inputs):
-                assert (
-                    self.modulelist[0] is self.submod
-                ), "__getitem__ failing for ModuleList"
+                assert self.modulelist[0] is self.submod, (
+                    "__getitem__ failing for ModuleList"
+                )
                 assert len(self.modulelist) == 1, "__len__ failing for ModuleList"
                 for module in self.modulelist:
                     assert module is self.submod, "__iter__ failing for ModuleList"
 
-                assert (
-                    self.sequential[0] is self.submod
-                ), "__getitem__ failing for Sequential"
+                assert self.sequential[0] is self.submod, (
+                    "__getitem__ failing for Sequential"
+                )
                 assert len(self.sequential) == 1, "__len__ failing for Sequential"
                 for module in self.sequential:
                     assert module is self.submod, "__iter__ failing for Sequential"
 
-                assert (
-                    self.moduledict["submod"] is self.submod
-                ), "__getitem__ failing for ModuleDict"
+                assert self.moduledict["submod"] is self.submod, (
+                    "__getitem__ failing for ModuleDict"
+                )
                 assert len(self.moduledict) == 1, "__len__ failing for ModuleDict"
 
                 # note: unable to index moduledict with a string variable currently
                 i = 0
-                for key in self.moduledict:
+                for _ in self.moduledict:
                     i += 1
                 assert i == len(self.moduledict), "iteration failing for ModuleDict"
 
                 assert "submod" in self.moduledict, "__contains__ fails for ModuleDict"
 
-                for key in self.moduledict.keys():
+                for key in self.moduledict:
                     assert key == "submod", "keys() fails for ModuleDict"
 
                 for item in self.moduledict.items():
@@ -439,9 +439,9 @@ class TestModuleContainers(JitTestCase):
                 self.moduledict = CustomModuleDict()
 
             def forward(self, inputs):
-                assert (
-                    "submod" not in self.moduledict
-                ), "__contains__ fails for ModuleDict"
+                assert "submod" not in self.moduledict, (
+                    "__contains__ fails for ModuleDict"
+                )
                 return inputs
 
         m = MyModule()

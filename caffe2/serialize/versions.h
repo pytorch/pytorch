@@ -1,6 +1,7 @@
 #pragma once
 #include <cstdint>
 
+
 namespace caffe2::serialize {
 
 constexpr uint64_t kMinSupportedFileFormatVersion = 0x1L;

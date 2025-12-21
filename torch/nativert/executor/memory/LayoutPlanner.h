@@ -51,7 +51,10 @@ class LayoutPlanner {
           kernelSchemas,
       const std::vector<bool>& persistentValues,
       const torch::nativert::LayoutPlannerSettings& settings);
-  ~LayoutPlanner();
+#if !defined(_MSC_VER)
+  TORCH_API // TODO Doesn't work on msvc.
+#endif
+      ~LayoutPlanner();
 
   LayoutPlanner(LayoutPlanner&& other) = delete;
   LayoutPlanner(const LayoutPlanner& other) = delete;

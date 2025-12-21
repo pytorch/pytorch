@@ -92,6 +92,9 @@ class CppCompileError(RuntimeError):
         if isinstance(output, bytes):
             output = output.decode("utf-8")
 
+        self.cmd = cmd
+        self.output = output
+
         super().__init__(
             textwrap.dedent(
                 """
@@ -107,6 +110,9 @@ class CppCompileError(RuntimeError):
             .strip()
             .format(cmd=" ".join(cmd), output=output)
         )
+
+    def __reduce__(self) -> tuple[type, tuple[list[str], str]]:
+        return (self.__class__, (self.cmd, self.output))
 
 
 class CUDACompileError(CppCompileError):
@@ -126,6 +132,7 @@ class TritonMissing(ShortenTraceback):
 class GPUTooOldForTriton(ShortenTraceback):
     def __init__(
         self,
+        # pyrefly: ignore [not-a-type]
         device_props: _CudaDeviceProperties,
         first_useful_frame: Optional[types.FrameType],
     ) -> None:

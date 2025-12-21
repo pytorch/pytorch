@@ -32,7 +32,7 @@ from torch.testing._internal.common_distributed import (
     sm_is_or_higher_than,
 )
 from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -133,7 +133,11 @@ class TestFullyShardCompile(FSDPTest):
             device_type.type,
             self.rank % torch.get_device_module(device_type).device_count(),
         )
-        if not sm_is_or_higher_than(device, 8, 0):
+        if (
+            device_type.type == "cuda"
+            and not torch.version.hip
+            and not sm_is_or_higher_than(device, 8, 0)
+        ):
             self.skipTest("bf16 requires sm >= 8.0")
 
     def test_dynamo_trace_use_training_state(self):
@@ -299,12 +303,20 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
 
     def _reinplace_all_gather_with_optional_checks(self, fwd_fullgraph):
         def _run_with_checks(graph, orig_fn):
-            self.assertGreater(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor.default
-                ),
-                0,
-            )
+            if self.world_size > 1:
+                self.assertGreater(
+                    _count_op_in_graph(
+                        graph, torch.ops._c10d_functional.all_gather_into_tensor.default
+                    ),
+                    0,
+                )
+            elif self.world_size == 1:
+                self.assertEqual(
+                    _count_op_in_graph(
+                        graph, torch.ops._c10d_functional.all_gather_into_tensor.default
+                    ),
+                    0,
+                )
 
             orig_fn(graph)
 
@@ -315,12 +327,22 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
                 0,
             )
 
-            self.assertGreater(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor_out.default
-                ),
-                0,
-            )
+            if self.world_size > 1:
+                self.assertGreater(
+                    _count_op_in_graph(
+                        graph,
+                        torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    ),
+                    0,
+                )
+            else:
+                self.assertEqual(
+                    _count_op_in_graph(
+                        graph,
+                        torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    ),
+                    0,
+                )
 
         if fwd_fullgraph:
             return mock.patch.object(
@@ -460,7 +482,6 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         return file_check
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_compiled_autograd_ctx(self):
         self.skipTestForOldSm()
@@ -549,7 +570,7 @@ Unsupported Tensor.backward() call
 
   Developer debug context: call_method TensorVariable() backward () {}
 
- For more details about this graph break, please visit: https://pytorch-labs.github.io/compile-graph-break-site/gb/gb0123.html""",  # noqa: B950
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0123.html""",  # noqa: B950
                     )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
@@ -625,14 +646,12 @@ Unsupported Tensor.backward() call
 
         return model_init_fn, input_creation_fn
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fwd_fullgraph=True
         )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
@@ -641,7 +660,6 @@ Unsupported Tensor.backward() call
             fwd_fullgraph=True,
         )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_inductor(self):
         self.skipTestForOldSm()
@@ -713,7 +731,6 @@ Unsupported Tensor.backward() call
 
         return model_init_fn, input_creation_fn
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager(self):
         # TODO: fix fwd_fullgraph=False case
@@ -726,7 +743,6 @@ Unsupported Tensor.backward() call
                 fwd_fullgraph=fwd_fullgraph,
             )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager_decomp_partition(self):
         # TODO: fix fwd_fullgraph=False case
@@ -848,19 +864,16 @@ Unsupported Tensor.backward() call
                     pass
                 file_check.run(bwd_code)
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
         self._test_nested_fully_shard_backend_inductor_fullgraph_True()
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @torch._inductor.config.patch("graph_partition", True)
     def test_nested_fully_shard_backend_inductor_fullgraph_True_graph_partition(self):
         self._test_nested_fully_shard_backend_inductor_fullgraph_True()
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_False(self):
         self.skipTestForOldSm()
@@ -938,7 +951,6 @@ Unsupported Tensor.backward() call
         else:
             return contextlib.nullcontext()
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
         # TODO: fix fwd_fullgraph=False case
@@ -957,7 +969,6 @@ Unsupported Tensor.backward() call
                     fwd_fullgraph=fwd_fullgraph,
                 )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
@@ -1093,7 +1104,6 @@ Unsupported Tensor.backward() call
                 file_check.run(bwd_code)
 
     @unittest.skip('"Traceable FSDP2" is not being maintained anymore.')
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
@@ -1101,7 +1111,6 @@ Unsupported Tensor.backward() call
         self._test_transformer_backend_inductor_fullgraph_True()
 
     @unittest.skip('"Traceable FSDP2" is not being maintained anymore.')
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
@@ -1110,7 +1119,6 @@ Unsupported Tensor.backward() call
         self._test_transformer_backend_inductor_fullgraph_True()
 
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)

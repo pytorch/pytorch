@@ -7,7 +7,7 @@
 
 // Required for checking whether Triton kernels are available
 #include <ATen/core/dispatch/Dispatcher.h>
-
+#include <c10/util/Exception.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
@@ -23,6 +23,9 @@
 #include <ATen/Parallel.h>
 #endif
 
+#if AT_USE_EIGEN_SPARSE()
+#include <ATen/native/sparse/eigen/SparseBlasImpl.h>
+#endif
 
 namespace at::native::sparse::impl {
 
@@ -245,10 +248,7 @@ Tensor& _compressed_row_strided_addmm_out(
         try {
           return triton_kernel.call(self, mat1, mat2, beta, alpha, result);
         } catch (std::runtime_error& e) {
-          const std::string msg = e.what();
-          if (msg != std::string("Unable to cast NotImplemented to Tensor")) {
-            throw std::runtime_error(msg);
-          }
+          TORCH_CHECK(e.what() == std::string("Unable to cast NotImplemented to Tensor"), e.what());
         } /* else triton_kernel returned NotImplemented, continue
              with the generic method below */
       }
@@ -442,13 +442,15 @@ void add_out_sparse_csr(
     const Tensor& mat2,
     const Scalar& alpha,
     const Tensor& result) {
-#if !AT_MKL_ENABLED()
-  TORCH_CHECK(
-      false,
-      "Calling add on a sparse CPU tensor requires compiling PyTorch with MKL. ",
-      "Please use PyTorch built MKL support.");
-#else
+#if AT_USE_MKL_SPARSE()
   sparse::impl::mkl::add_out_sparse_csr(mat1, mat2, alpha, result);
+#elif AT_USE_EIGEN_SPARSE()
+  sparse::impl::eigen::add_out_sparse(mat1, mat2, alpha, result);
+#else
+  TORCH_CHECK(
+    false,
+    "Calling add on a sparse CPU tensor requires compiling PyTorch with MKL. ",
+    "Please use PyTorch built MKL support.");
 #endif
 }
 
@@ -459,7 +461,7 @@ void triangular_solve_out_sparse_csr(
     bool upper,
     bool transpose,
     bool unitriangular) {
-#if !AT_MKL_ENABLED()
+#if !AT_USE_MKL_SPARSE()
   TORCH_CHECK(
       false,
       "Calling triangular_solve on a sparse CPU tensor requires compiling PyTorch with MKL. ",

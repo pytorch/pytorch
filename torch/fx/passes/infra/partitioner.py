@@ -20,10 +20,21 @@ class Partition:
     def __init__(
         self,
         id: Optional[int] = None,
-        nodes: Optional[Iterable[tuple[Node, Optional[int]]]] = None,
+        nodes: Optional[Iterable[Node]] = None,
+        node_orders: Optional[Iterable[int]] = None,
     ):
         self.id = id
-        self.nodes = dict(nodes) if nodes is not None else {}
+        self.nodes: dict[Node, Optional[int]] = {}
+        if nodes is not None:
+            if node_orders is None:
+                self.nodes = dict.fromkeys(nodes, None)
+            else:
+                nodes_list = list(nodes)
+                node_orders_list = list(node_orders)
+                assert len(nodes_list) == len(node_orders_list), (
+                    "nodes and node_orders must have the same length"
+                )
+                self.nodes = dict(zip(nodes_list, node_orders_list))
 
     def __repr__(self) -> str:
         return str(self.nodes)
@@ -179,7 +190,7 @@ class CapabilityBasedPartitioner:
                 # Iterate through all the users of this node and update the partition map to indicate
                 # that there is a path from the partition id of this node to the target partition id.
                 for user_node in node.users:
-                    target_id = assignment.get(user_node, None)
+                    target_id = assignment.get(user_node)
                     if target_id is not None:
                         partition_map[id].add(target_id)
                         partition_map[id].update(partition_map[target_id])
@@ -191,7 +202,10 @@ class CapabilityBasedPartitioner:
                 assignment.pop(node)
             elif id not in partitions_by_id:
                 assignment[node] = id
-                partitions_by_id[id] = Partition(id=id, nodes=[(node, node_order)])
+                assert node_order is not None
+                partitions_by_id[id] = Partition(
+                    id=id, nodes=[node], node_orders=[node_order]
+                )
                 partition_users[id] = set(node.users)
                 _update_partition_map(node, id)
             else:
@@ -253,9 +267,9 @@ class CapabilityBasedPartitioner:
 
             # node has tuple outputs, re-assign all following getitem node into node's partition
             if is_tuple_output:
-                id = assignment.get(node, None)  # type: ignore[arg-type]
+                id = assignment.get(node)  # type: ignore[arg-type]
                 for user in node.users:
-                    if assignment.get(user, None) != id:  # type: ignore[arg-type]
+                    if assignment.get(user) != id:  # type: ignore[arg-type]
                         nodes_reassignment[user] = id  # type: ignore[assignment]
         for node, id in nodes_reassignment.items():
             merge_single_node(node, None, id)

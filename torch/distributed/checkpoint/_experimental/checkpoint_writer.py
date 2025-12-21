@@ -12,7 +12,7 @@ import os
 from concurrent.futures import Future
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import torch
 
@@ -72,8 +72,8 @@ class CheckpointWriter:
         self,
         config: CheckpointWriterConfig,
         rank_info: RankInfo,
-        barrier: Optional[Barrier] = None,
-        commit_hook: Optional[WriterHook] = None,
+        barrier: Barrier | None = None,
+        commit_hook: WriterHook | None = None,
     ):
         """
         Initialize a CheckpointWriter.
@@ -94,16 +94,16 @@ class CheckpointWriter:
 
     def write(
         self,
-        state_dict: STATE_DICT,
         path: str,
+        state_dict: STATE_DICT,
         **kwargs: dict[str, Any],
-    ) -> Optional[Future[None]]:
+    ) -> Future[None] | None:
         """
         Writes the state_dict to storage.
 
         Args:
-            state_dict (STATE_DICT): The state_dict to write.
             path (str): The path to write the checkpoint to.
+            state_dict (STATE_DICT): The state_dict to write.
             **kwargs: Additional keyword arguments passed to hooks.
 
         Returns:

@@ -192,7 +192,7 @@ class Trainer:
         self.hybrid_module = HybridModel(
             self.remote_em_rref,
             self.remote_net_rref,
-            self.trainer_group if ddp_mode in (DdpMode.INSIDE,) else None,
+            self.trainer_group if ddp_mode == DdpMode.INSIDE else None,
         )
         self.ddp_params, self.non_ddp_params = (
             self.hybrid_module.ddp_params,
@@ -238,7 +238,9 @@ class Trainer:
             sparse_microbatch = torch.split(sparse_features, 2)
             values_microbatch = torch.split(values, 2)
             batches = []
-            for d, s, v in zip(dense_microbatch, sparse_microbatch, values_microbatch):
+            for d, s, v in zip(
+                dense_microbatch, sparse_microbatch, values_microbatch, strict=True
+            ):
                 feature_set = FeatureSet(dense_features=d, sparse_features=s, values=v)
                 batches.append(feature_set)
 
@@ -253,7 +255,11 @@ class Trainer:
             else:
                 input_batches = batches
 
-        with self.hybrid_module.join() if simulate_uneven_inputs else contextlib.nullcontext():
+        with (
+            self.hybrid_module.join()
+            if simulate_uneven_inputs
+            else contextlib.nullcontext()
+        ):
             for b in input_batches:
                 with dist_autograd.context() as context_id:
                     output = self.hybrid_module.forward(b)
@@ -261,8 +267,7 @@ class Trainer:
                     dist_autograd.backward(context_id, [loss])
                     grads_dict = dist_autograd.get_gradients(context_id)
                     gLogger.info(
-                        "Loss is %s for mini batch: %s. "
-                        "Grads dict has %s entries: %s",
+                        "Loss is %s for mini batch: %s. Grads dict has %s entries: %s",
                         loss,
                         mini_batch,
                         len(grads_dict),
@@ -460,7 +465,7 @@ class DdpUnderDistAutogradTest(RpcAgentTestFixture):
                     )
 
         # Destroy process groups
-        for idx, trainer_rref in enumerate(trainer_rrefs):
+        for trainer_rref in trainer_rrefs:
             _remote_method_async(Trainer.destroy_pg, trainer_rref).wait()
 
         # Send shutdown signals.

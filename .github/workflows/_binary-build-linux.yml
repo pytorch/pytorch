@@ -26,13 +26,6 @@ on:
         default: 240
         type: number
         description: timeout for the job
-      use_split_build:
-        description: |
-          [Experimental] Build a libtorch only wheel and build pytorch such that
-          are built from the libtorch wheel.
-        required: false
-        type: boolean
-        default: false
       ALPINE_IMAGE:
         required: false
         type: string
@@ -117,7 +110,6 @@ jobs:
       PR_NUMBER: ${{ github.event.pull_request.number }}
       PYTORCH_FINAL_PACKAGE_DIR: /artifacts
       SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
-      USE_SPLIT_BUILD: ${{ inputs.use_split_build }}
     steps:
       - name: Make the env permanent during this workflow (but not the secrets)
         shell: bash
@@ -142,7 +134,6 @@ jobs:
             echo "PR_NUMBER=${{ env.PR_NUMBER }}"
             echo "PYTORCH_FINAL_PACKAGE_DIR=${{ env.PYTORCH_FINAL_PACKAGE_DIR }}"
             echo "SHA1=${{ env.SHA1 }}"
-            echo "USE_SPLIT_BUILD=${{ env.use_split_build }}"
           } >> "${GITHUB_ENV} }}"
 
       - name: List the env
@@ -165,6 +156,10 @@ jobs:
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/setup-linux
 
+      - name: Login to ECR
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/ecr-login
+
       - name: Chown workspace
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/chown-workspace
@@ -175,9 +170,6 @@ jobs:
         shell: bash
         run: |
           set -eux
-
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
 
           if [[ ${{ inputs.build_environment }} == 'linux-aarch64-binary-manywheel' ]] || [[ ${{ inputs.build_environment }} == 'linux-s390x-binary-manywheel' ]] ; then
             rm -rf "${RUNNER_TEMP}/artifacts"
@@ -261,7 +253,6 @@ jobs:
             -e PYTORCH_ROOT \
             -e SKIP_ALL_TESTS \
             -e PYTORCH_EXTRA_INSTALL_REQUIREMENTS \
-            -e USE_SPLIT_BUILD \
             --tty \
             --detach \
             -v "${GITHUB_WORKSPACE}/pytorch:/pytorch" \
@@ -270,11 +261,8 @@ jobs:
             "${DOCKER_IMAGE}"
           )
           docker exec -t -w "${PYTORCH_ROOT}" "${container_name}" bash -c "bash .circleci/scripts/binary_populate_env.sh"
-          if [[ ${BUILD_ENVIRONMENT} == *"aarch64"* ]]; then
-            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/aarch64_linux/aarch64_ci_build.sh"
-          else
-            docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
-          fi
+          # Unified build script for all architectures (x86_64, aarch64, s390x)
+          docker exec -t "${container_name}" bash -c "source ${BINARY_ENV_FILE} && bash /pytorch/.ci/${{ inputs.PACKAGE_TYPE }}/build.sh"
 
       - name: Chown artifacts
         if: ${{ steps.filter.outputs.is-test-matrix-empty == 'False' && inputs.build_environment != 'linux-s390x-binary-manywheel' }}

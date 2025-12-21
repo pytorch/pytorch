@@ -9,7 +9,8 @@ from pathlib import Path
 
 from setuptools import setup
 
-from torch.utils.cpp_extension import BuildExtension, CUDAExtension
+import torch
+from torch.utils.cpp_extension import BuildExtension, CUDAExtension, SyclExtension
 
 
 ROOT_DIR = Path(__file__).parent
@@ -40,10 +41,17 @@ def get_extension():
         "cxx": ["-fdiagnostics-color=always"],
     }
 
-    sources = list(CSRC_DIR.glob("**/*.cu"))
+    if torch.cuda.is_available():
+        sources = list(CSRC_DIR.glob("**/*.cu"))
+        extension = CUDAExtension
+    elif torch.xpu.is_available():
+        sources = list(CSRC_DIR.glob("**/*.sycl"))
+        extension = SyclExtension
+    else:
+        raise AssertionError("Expected CUDA or XPU device backend, found none")
 
     return [
-        CUDAExtension(
+        extension(
             "python_agnostic._C",
             sources=sorted(str(s) for s in sources),
             py_limited_api=True,

@@ -3,8 +3,8 @@
 NUMA Binding Utilities
 ======================
 
-.. automodule:: torch.distributed.numa
+.. automodule:: torch.numa
    :members:
 
-.. automodule:: torch.distributed.numa.binding
+.. automodule:: torch.numa.binding
    :members:

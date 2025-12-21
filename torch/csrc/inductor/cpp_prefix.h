@@ -14,7 +14,7 @@
 // Because AOTInductor generated code will copy-paste this cpp_prefix.h for
 // the CPU backend, we have to make sure the used headers are implemented
 // in a header-only way, i.e. all the function and class definitions are
-// in .h files instead of .cpp files, to avoid ABI backward-compatiblity
+// in .h files instead of .cpp files, to avoid ABI backward-compatibility
 // breakage.
 
 #include <ATen/NumericUtils.h>
@@ -74,13 +74,88 @@ template <typename T, int N>
 struct IsVecMaskType<at::vec::VecMask<T, N>> : std::true_type {};
 #endif
 
+template <typename T>
+struct GetScalarType {
+  using type = T;
+};
+
+#if INDUCTOR_USE_VECTOR_TYPES()
+template <typename T>
+struct GetScalarType<at::vec::Vectorized<T>> {
+  using type = T;
+};
+template <typename T, int N>
+struct GetScalarType<at::vec::VectorizedN<T, N>> {
+  using type = T;
+};
+#endif
+
+template <typename T, uint64_t kChunkSize>
+struct CascadeSumHelper {
+  // A data struct to help cascade summation:
+  std::vector<T> sum_stk{};
+  uint64_t depth{0}; // depth of sum_stk.
+  uint64_t num_chunks{0}; // number of chunks stored in sum_stk.
+  uint64_t index{0}; // index of the current data.
+  CascadeSumHelper() = default;
+  CascadeSumHelper(uint64_t N) {
+    uint64_t m = (N + kChunkSize - 1) / kChunkSize; // div up
+    depth = m > 0
+        ? static_cast<std::uint64_t>(ceil(log2(static_cast<double>(m))))
+        : 0;
+    if constexpr (IsVecType<T>::value) {
+      sum_stk.assign(
+          std::max(depth, static_cast<uint64_t>(1)),
+          T(typename T::value_type(0)));
+    } else {
+      sum_stk.assign(std::max(depth, static_cast<uint64_t>(1)), T(0));
+    }
+  }
+};
+
+template <typename T, uint64_t kChunkSize = 0>
+inline T cascade_sum_combine(T& data, CascadeSumHelper<T, kChunkSize>* c) {
+  // Note: In order to be consistent with other reductions in inductor,
+  // the returned value may be wrong and cascade_sum_final must be executed to
+  // get the final correct result. Inductor uses the reduction suffix to ensure
+  // that cascade_sum_final is called in the end.
+  c->sum_stk[0] = c->sum_stk[0] + data;
+  // Use cascade summation to improve numerical stability.
+  // https://en.wikipedia.org/wiki/Pairwise_summation
+  if (c->depth > 0) {
+    c->index++;
+    if (c->index == kChunkSize) {
+      c->num_chunks += 1;
+      c->index = 0;
+      uint64_t mask = c->num_chunks;
+      uint64_t j = 1;
+      for (; j < c->depth && (mask & 1) == 0; ++j) {
+        c->sum_stk[j] = c->sum_stk[j] + c->sum_stk[j - 1];
+        c->sum_stk[j - 1] = T(0);
+        mask >>= 1;
+      }
+      return c->sum_stk[j - 1];
+    }
+  }
+  return c->sum_stk[0];
+}
+
+template <typename T, uint64_t kChunkSize = 0>
+inline T cascade_sum_final(CascadeSumHelper<T, kChunkSize>* c) {
+  T result = c->sum_stk[0];
+  for (const auto i : c10::irange(1, c->depth)) {
+    result = result + c->sum_stk[i];
+  }
+  return result;
+}
+
 template <typename T, uint64_t kChunkSize>
 struct WelfordHelper {
   // A data struct to help welford reduction:
   // 1. Save the reciprocal of weights to avoid redundant divisions.
   // 2. Save the welford stack, which is used to combine welford reduction
   //    with cascade summation to improve numerical stability.
-  static std::vector<typename T::value_type> weight_recps;
+  static std::vector<typename GetScalarType<T>::type> weight_recps;
   std::vector<Welford<T>> welford_stk{};
   uint64_t depth{0}; // depth of welford_stk.
   uint64_t num_chunks{0}; // number of chunks stored in welford_stk.
@@ -95,9 +170,9 @@ struct WelfordHelper {
 };
 
 template <typename T, uint64_t kChunkSize>
-std::vector<typename T::value_type> WelfordHelper<T, kChunkSize>::weight_recps =
-    []() {
-      using scalar_t = typename T::value_type;
+std::vector<typename GetScalarType<T>::type>
+    WelfordHelper<T, kChunkSize>::weight_recps = []() {
+      using scalar_t = typename GetScalarType<T>::type;
       std::vector<scalar_t> temp(kChunkSize);
       for (const auto i : c10::irange(kChunkSize)) {
         temp[i] = scalar_t(static_cast<double>(1) / static_cast<double>(i + 1));
@@ -143,21 +218,19 @@ Welford<T> welford_combine(
   // stability.
   // https://en.wikipedia.org/wiki/Algorithms_for_calculating_variance
   // https://en.wikipedia.org/wiki/Pairwise_summation
-  if constexpr (IsVecType<T>::value) {
-    if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
-      w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
-      w->num_chunks += 1;
-      acc.mean = T(0);
-      acc.m2 = T(0);
-      acc.weight = T(0);
-      acc.index = 0;
-      uint64_t mask = w->num_chunks;
-      for (uint64_t j = 1; j < w->depth && (mask & 1) == 0; ++j) {
-        w->welford_stk[j] =
-            welford_combine(w->welford_stk[j], w->welford_stk[j - 1]);
-        w->welford_stk[j - 1] = Welford<T>();
-        mask >>= 1;
-      }
+  if (w != nullptr && w->depth > 0 && acc.index == kChunkSize) {
+    w->welford_stk[0] = welford_combine(w->welford_stk[0], acc);
+    w->num_chunks += 1;
+    acc.mean = T(0);
+    acc.m2 = T(0);
+    acc.weight = T(0);
+    acc.index = 0;
+    uint64_t mask = w->num_chunks;
+    for (uint64_t j = 1; j < w->depth && (mask & 1) == 0; ++j) {
+      w->welford_stk[j] =
+          welford_combine(w->welford_stk[j], w->welford_stk[j - 1]);
+      w->welford_stk[j - 1] = Welford<T>();
+      mask >>= 1;
     }
   }
   // Add a single data point
@@ -165,22 +238,18 @@ Welford<T> welford_combine(
   auto new_weight = acc.weight + T(1);
   auto delta = data - acc.mean;
   T new_mean;
-  if constexpr (!IsVecType<T>::value) {
-    new_mean = acc.mean + delta / new_weight;
-  } else {
-    // use new_index to fecth 1 / new_weight to avoid divisions
-    new_mean = acc.mean +
-        ((w == nullptr || acc.index >= w->weight_recps.size())
-             ? delta / new_weight
-             : delta * T(w->weight_recps[acc.index]));
-  }
+  // use new_index to fecth 1 / new_weight to avoid divisions
+  new_mean = acc.mean +
+      ((w == nullptr || acc.index >= w->weight_recps.size())
+           ? delta / new_weight
+           : delta * T(w->weight_recps[acc.index]));
   auto new_delta = data - new_mean;
   auto result =
       Welford<T>{new_mean, acc.m2 + delta * new_delta, new_weight, new_index};
   return result;
 }
 
-template <typename T, uint64_t kChunkSize = 0>
+template <typename T, uint64_t kChunkSize>
 Welford<T> welford_combine(Welford<T>& acc, WelfordHelper<T, kChunkSize>* w) {
   for (const auto i : c10::irange(w->depth)) {
     acc = welford_combine(acc, w->welford_stk[i]);
@@ -197,7 +266,7 @@ struct IndexValue {
 };
 
 #if INDUCTOR_USE_VECTOR_TYPES()
-template <typename T, uint64_t kChunkSize>
+template <typename T, uint64_t kChunkSize = 0>
 Welford<T> welford_combine(
     Welford<T>& acc,
     T& data,
@@ -211,22 +280,74 @@ Welford<T> welford_combine(
       out.index};
 }
 
+template <typename T, uint64_t kChunkSize = 0>
+inline T cascade_sum_combine(
+    T& data,
+    int64_t tail_size,
+    CascadeSumHelper<T, kChunkSize>* c) {
+  auto out = c->sum_stk[0] + data;
+  c->sum_stk[0] = T::set(c->sum_stk[0], out, tail_size);
+  if (c->depth > 0) {
+    c->index++;
+    if (c->index == kChunkSize) {
+      c->num_chunks += 1;
+      c->index = 0;
+      uint64_t mask = c->num_chunks;
+      uint64_t j = 1;
+      for (; j < c->depth && (mask & 1) == 0; ++j) {
+        c->sum_stk[j] = c->sum_stk[j] + c->sum_stk[j - 1];
+        c->sum_stk[j - 1] = T(0);
+        mask >>= 1;
+      }
+      return c->sum_stk[j - 1];
+    }
+  }
+  return c->sum_stk[0];
+}
+
 template <typename T>
-T max_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T max_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = at::vec::maximum(a, b);
   return T::set(a, out, tail_size);
 }
 
+template <>
+inline at::vec::VecMask<float, 1> max_masked_reduce(
+    const at::vec::VecMask<float, 1>& a,
+    const at::vec::VecMask<float, 1>& b,
+    const int64_t tail_size) {
+  auto out = a | b;
+  return at::vec::VecMask<float, 1>::set(a, out, tail_size);
+}
+
 template <typename T>
-T min_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T min_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = at::vec::minimum(a, b);
   return T::set(a, out, tail_size);
 }
 
+template <>
+inline at::vec::VecMask<float, 1> min_masked_reduce(
+    const at::vec::VecMask<float, 1>& a,
+    const at::vec::VecMask<float, 1>& b,
+    const int64_t tail_size) {
+  auto out = a & b;
+  return at::vec::VecMask<float, 1>::set(a, out, tail_size);
+}
+
 template <typename T>
-T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+inline T sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = a + b;
   return T::set(a, out, tail_size);
+}
+
+template <>
+inline at::vec::VecMask<float, 1> sum_masked_reduce(
+    const at::vec::VecMask<float, 1>& a,
+    const at::vec::VecMask<float, 1>& b,
+    const int64_t tail_size) {
+  auto out = a | b;
+  return at::vec::VecMask<float, 1>::set(a, out, tail_size);
 }
 
 template <typename T>
@@ -238,6 +359,12 @@ T prod_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
 template <typename T>
 T xor_sum_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
   auto out = a ^ b;
+  return T::set(a, out, tail_size);
+}
+
+template <typename T>
+T any_masked_reduce(const T& a, const T& b, const int64_t tail_size) {
+  auto out = a | b;
   return T::set(a, out, tail_size);
 }
 #endif
@@ -573,8 +700,8 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
     case 4:
       return vec_t(_mm256_permute2f128_ps(x, x, SHUFFLE_MASK(1, 1, 1, 1)));
   }
-  throw std::runtime_error(
-      "Unhandled vec_shuffle_down value " + std::to_string(n));
+
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
 }
 #endif
 
@@ -598,8 +725,8 @@ inline at::vec::Vectorized<float> vec_shuffle_down(
       return vec_t(_mm512_permutexvar_ps(
           _mm512_set_epi32(8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8, 8), x));
   }
-  throw std::runtime_error(
-      "Unhandled vec_shuffle_down value " + std::to_string(n));
+
+  TORCH_CHECK(false, "Unhandled vec_shuffle_down value ", n);
 }
 #endif
 
@@ -775,14 +902,16 @@ template <typename T, int NI, int NV>
 void atomic_add_vec(
     T* addr,
     at::vec::VectorizedN<int64_t, NI> index,
-    at::vec::VectorizedN<T, NV> offset) {
+    at::vec::VectorizedN<T, NV> offset,
+    std::optional<int64_t> tail_size = std::nullopt) {
   constexpr int len = at::vec::VectorizedN<int64_t, NI>::size();
   static_assert(len <= at::vec::VectorizedN<T, NV>::size());
   __at_align__ std::array<T, len> tmpbuf;
   __at_align__ std::array<int64_t, len> tmpidx;
   offset.store(tmpbuf.data(), len);
   index.store(tmpidx.data(), len);
-  for (int i = 0; i < len; i++) {
+  int size = tail_size.has_value() ? tail_size.value() : len;
+  for (int i = 0; i < size; i++) {
     atomic_add(addr + tmpidx[i], tmpbuf[i]);
   }
 }

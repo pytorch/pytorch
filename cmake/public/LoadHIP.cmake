@@ -6,7 +6,7 @@ set(PYTORCH_FOUND_HIP FALSE)
 # In the latter case, if /opt/rocm does not exist emit status
 # message and return.
 if(DEFINED ENV{ROCM_PATH})
-  set(ROCM_PATH $ENV{ROCM_PATH})
+  file(TO_CMAKE_PATH "$ENV{ROCM_PATH}" ROCM_PATH)
   if(NOT EXISTS ${ROCM_PATH})
     message(FATAL_ERROR
       "ROCM_PATH environment variable is set to ${ROCM_PATH} but does not exist.\n"
@@ -31,7 +31,7 @@ if(NOT DEFINED ENV{MAGMA_HOME})
   set(MAGMA_HOME ${ROCM_PATH}/magma)
   set(ENV{MAGMA_HOME} ${ROCM_PATH}/magma)
 else()
-  set(MAGMA_HOME $ENV{MAGMA_HOME})
+  file(TO_CMAKE_PATH "$ENV{MAGMA_HOME}" MAGMA_HOME)
 endif()
 
 # MIOpen isn't a part of HIP-SDK for Windows and hence, may have a different
@@ -83,8 +83,18 @@ find_package_and_print_version(HIP 1.0 MODULE)
 if(HIP_FOUND)
   set(PYTORCH_FOUND_HIP TRUE)
   find_package_and_print_version(hip REQUIRED CONFIG)
+  if(HIP_VERSION)
+    # Check if HIP_VERSION contains a dash (e.g., "7.1.25421-32f9fa6ca5")
+    # and strip everything after it to get clean numeric version
+    string(FIND "${HIP_VERSION}" "-" DASH_POS)
+    if(NOT DASH_POS EQUAL -1)
+      string(SUBSTRING "${HIP_VERSION}" 0 ${DASH_POS} HIP_VERSION_CLEAN)
+      set(HIP_VERSION "${HIP_VERSION_CLEAN}")
+  endif()
+  message("HIP version: ${HIP_VERSION}")
+endif()
 
-  # The rocm-core package was only introduced in ROCm 6.4, so we make it optional.
+# The rocm-core package was only introduced in ROCm 6.4, so we make it optional.
   find_package(rocm-core CONFIG)
 
   # Some old consumer HIP SDKs do not distribute rocm_version.h, so we allow

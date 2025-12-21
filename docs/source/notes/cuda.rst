@@ -1,6 +1,6 @@
 .. meta::
    :description: A guide to torch.cuda, a PyTorch module to run CUDA operations
-   :keywords: memory management, PYTORCH_CUDA_ALLOC_CONF, optimize PyTorch, CUDA
+   :keywords: memory management, PYTORCH_ALLOC_CONF, optimize PyTorch, CUDA
 
 .. _cuda-semantics:
 
@@ -254,7 +254,7 @@ To toggle the reduced precision reduction flags in C++, one can do
 
 .. _fp16accumulation:
 
-Full FP16 Accmumulation in FP16 GEMMs
+Full FP16 Accumulation in FP16 GEMMs
 -------------------------------------
 
 Certain GPUs have increased performance when doing _all_ FP16 GEMM accumulation
@@ -488,7 +488,7 @@ underlying allocation patterns produced by your code.
 
 .. _cuda-memory-envvars:
 
-Optimizing memory usage  with ``PYTORCH_CUDA_ALLOC_CONF``
+Optimizing memory usage  with ``PYTORCH_ALLOC_CONF``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 
 Use of a caching allocator can interfere with memory checking tools such as
@@ -496,8 +496,9 @@ Use of a caching allocator can interfere with memory checking tools such as
 ``PYTORCH_NO_CUDA_MEMORY_CACHING=1`` in your environment to disable caching.
 
 The behavior of the caching allocator can be controlled via the environment variable
-``PYTORCH_CUDA_ALLOC_CONF``.
-The format is ``PYTORCH_CUDA_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
+``PYTORCH_ALLOC_CONF``. ``PYTORCH_CUDA_ALLOC_CONF`` is its alias and is provided only
+for backward compatibility.
+The format is ``PYTORCH_ALLOC_CONF=<option>:<value>,<option2>:<value2>...``
 Available options:
 
 * ``backend`` allows selecting the underlying allocator implementation.
@@ -608,6 +609,21 @@ Available options:
   for processing events. This avoids any slow path associated with querying/processing of
   events in the fast allocation path. This feature is disabled by default.
 
+* `pinned_reserve_segment_size_mb` option is a size in MB to reserve for pinned memory
+  segment. This allocates a large segment of pinned memory upfront and then uses to allocate
+  small size requests. This helps reduce the number of expensive device library calls.
+
+* ``graph_capture_record_stream_reuse`` (experimental, default: `False`)
+  If set to `True`, the CUDA caching allocator will attempt to reclaim device memory during
+  CUDA Graph capture by using the graph topology (instead of CUDA events) to determine
+  when a freed block is safe to reuse. This can reduce peak memory during long captures that free
+  and reallocate buffers across multiple streams, especially when the capture DAG frequently
+  reaches joined frontiers.
+
+* ``per_process_memory_fraction`` option limits the amount of memory that can be allocated
+  on all the CUDA devices to a specified fraction of the available memory. This is a value
+  between 0 and 1. Attempting to allocate more memory will raise an out of memory error.
+
 .. note::
 
     Some stats reported by the
@@ -684,7 +700,7 @@ Mixing different CUDA system allocators in the same program
 -----------------------------------------------------------
 Depending on your use case, :meth:`~torch.cuda.change_current_allocator` may not be what you
 want to use, since it swaps the CUDA allocator for the entire program (similar to
-``PYTORCH_CUDA_ALLOC_CONF=backend:cudaMallocAsync``). For instance, if the swapped allocator doesn't
+``PYTORCH_ALLOC_CONF=backend:cudaMallocAsync``). For instance, if the swapped allocator doesn't
 have caching mechanism, you will lose all the benefits of PyTorch's CUDACachingAllocator. Instead,
 you can selectively mark a region of PyTorch code to use a custom allocator using
 :class:`torch.cuda.MemPool`. This will let you use multiple CUDA system allocators in the same
@@ -894,6 +910,130 @@ APIs can be used for debugging purposes:
 
 .. _NCCL has specific requirements:
     https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/bufferreg.html#memory-allocator
+
+
+Tuning NVLink Performance with Custom Memory Allocator on H100/H200 GPUs
+------------------------------------------------------------------------
+In rare cases, performance of NVLink on H100/H200 GPUs can be influenced by the physical memory
+layout of data, creating an opportunity for developers to tune their applications for optimal
+throughput.
+
+An example of how physical memory layout of data affects performance is when communication
+kernels issue unbalanced NVLink read/write operations. In the following figure, we can see
+that each warp accesses memory addresses with a consistent strided pattern in each single wave.
+We can have a more balanced load by tuning the stride size in the workload or we can implement
+a custom CUDA allocator.
+
+.. code::
+
+  _______________________________  _______________________________      _______________________________
+  | Warp 0 Reading | No-reading |  | Warp 1 Reading | No-reading |  ...  Warp N Reading | No-reading |
+  _______________________________  _______________________________      _______________________________
+  <----------------------------->
+          Stride size
+
+Such an allocator can maintain contiguous virtual memory addresses for the kernel while strategically
+arranging the mapping to physical memory addresses (e.g., through shuffling). This technique allows
+developers to explore different physical access patterns to find the most efficient one, unlocking
+higher performance without modifying the kernel's logic. A practical implementation of such an allocator
+can be achieved using PyTorch’s custom allocator support as mentioned before, where the malloc and free
+functions are:
+
+.. code:: C++
+
+  // assuming a system with 8 GPUs
+  struct CustomAllocInfo {
+    void** devPtr;  // This will be the usable virtual memory address
+    CUdeviceptr dptr;
+    size_t totalSize;  // Total size of the allocated memory
+    size_t padded_size;
+    int device_id;
+    std::vector<CUmemGenericAllocationHandle> handles;  // Handles to physical memory allocations
+  };
+
+  // loop over pages
+  cudaError_t customCudaMalloc(CustomAllocInfo* info) {
+      if (!info) return cudaErrorInvalidValue;
+
+      CUdeviceptr dptr;
+
+      // Handles to redundant physical memory allocations which help truncate stride pattern in physical memory
+      std::vector<CUmemGenericAllocationHandle> handles_redundant;
+
+      size_t granularity = 0;
+      CUmemAllocationProp prop = {};
+
+      int currentDev = info->device_id;
+      size_t totalSize = info->totalSize;
+
+      prop.type = CU_MEM_ALLOCATION_TYPE_PINNED;
+      prop.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
+      prop.location.id = currentDev;
+      cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM);
+      size_t padded_size = ROUND_UP(totalSize, granularity);
+
+      info->padded_size = padded_size;
+
+      // loop over pages
+      size_t iter_granularity = granularity * 64; // 64 * granularity with shift_size = 2 works
+      uint32_t iteration_count = (totalSize + iter_granularity - 1) / iter_granularity;
+
+      cuMemAddressReserve(&dptr, padded_size, 0ULL, 0ULL, 0ULL);
+
+      const int shift_size = 2;
+      for (size_t i = 0; i < iteration_count; i+=shift_size) {
+
+          CUmemGenericAllocationHandle allocHandle[shift_size];
+          for (int shift = 0; (shift < shift_size)&&(i+shift < iteration_count); shift++){
+              CHECK_CUDA(cuMemCreate(&allocHandle[shift], iter_granularity, &prop, 0));
+              info->handles.push_back(allocHandle[shift]);
+          }
+
+          for (int shift = 0; (shift < shift_size)&&(i+shift < iteration_count); shift++){
+
+              // mapping makes the shift (shift -> (shift+1)%shift_size  )
+              CHECK_CUDA(cuMemMap(dptr + (i+shift) * iter_granularity, iter_granularity, 0, allocHandle[(shift+1)%shift_size], 0));
+
+              setupMultiGPUAccess(dptr + (i+shift) * iter_granularity, iter_granularity, {0, 1, 2, 3, 4, 5, 6, 7}); // Enable access for all 8 GPUs
+          }
+
+          // std::cout << "Here we allocate one redundant page (2MB)..." << std::endl;
+          // this is an extra optimization on top of the swizzling. It helps "break"
+          // the physical access pattern even more. It can be left out if workload is already
+          // performing at SOL with just swizzling.
+          CUmemGenericAllocationHandle allocHandle_redundant;
+          CHECK_CUDA(cuMemCreate(&allocHandle_redundant, granularity, &prop, 0));
+          handles_redundant.push_back(allocHandle_redundant);
+      }
+
+      *info->devPtr = (void*)dptr;
+      info->dptr = dptr;
+
+      // Release each redundant allocation
+      for (auto handle : handles_redundant) {
+          // std::cout << "Here we release one redundant page (2MB)..." << std::endl;
+          CHECK_CUDA(cuMemRelease(handle));
+      }
+
+      return cudaSuccess;
+  }
+
+  void customCudaFree(CustomAllocInfo* info) {
+      if (!info) return;
+
+      // CHECK_CUDA(cudaSetDevice(info->device_id));
+
+      CHECK_CUDA(cuMemUnmap(info->dptr, info->padded_size));
+
+      // Unmap and release each allocation
+      for (auto handle : info->handles) {
+          CHECK_CUDA(cuMemRelease(handle));
+      }
+
+      // Unreserve the virtual address space
+      // CHECK_CUDA(cuMemAddressFree((CUdeviceptr)*info->devPtr, info->padded_size));
+      CHECK_CUDA(cuMemAddressFree(info->dptr, info->padded_size));
+  }
 
 
 cuBLAS workspaces
@@ -1584,6 +1724,16 @@ and can be used to share memory across graphs as shown::
     static_in_2.copy_(real_data_2)
     g1.replay()
     g2.replay()
+
+It's also safe to share a memory pool across separate graphs that do not depend
+on each other's outputs, provided they never run concurrently.
+Be aware that replaying one graph can clobber another graph's outputs when
+they share a pool, unless :meth:`~torch.Tensor.clone` is called on the outputs
+beforehand.
+This pattern is frequently used in inference servers that accept variable batch
+sizes at runtime.
+vLLM is a notable example; see `here <https://github.com/vllm-project/vllm/blob/938a81692ea318e59ead4750e7e7425bfd6a4896/vllm/platforms/interface.py#L508-L515>`__
+and `here <https://github.com/vllm-project/vllm/blob/938a81692ea318e59ead4750e7e7425bfd6a4896/vllm/compilation/cuda_graph.py#L86-L89>`__.
 
 With :func:`torch.cuda.make_graphed_callables`, if you want to graph several
 callables and you know they'll always run in the same order (and never concurrently)

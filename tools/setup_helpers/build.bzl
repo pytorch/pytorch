@@ -4,7 +4,7 @@ def define_targets(rules):
         srcs = ["generate_code.py"],
         visibility = ["//:__pkg__"],
         deps = [
-            rules.requirement("pyyaml"),
+            rules.requirement("PyYAML"),
             "//tools/autograd",
             "//torchgen",
         ],
@@ -13,5 +13,8 @@ def define_targets(rules):
     rules.py_binary(
         name = "gen_version_header",
         srcs = ["gen_version_header.py"],
-        visibility = ["//:__pkg__"],
+        visibility = [
+            "//:__pkg__",
+            "//torch/headeronly:__pkg__",
+        ],
     )

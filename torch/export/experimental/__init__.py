@@ -50,9 +50,9 @@ def _remove_detach_pass(
             if node.op != "call_function":
                 continue
             if (
-                node.target == torch.ops.aten.detach.default
+                node.target is torch.ops.aten.detach.default
                 and len(node.users) == 1
-                and next(iter(node.users)).target == torch.ops.aten.detach.default
+                and next(iter(node.users)).target is torch.ops.aten.detach.default
             ):
                 next(iter(node.users)).replace_all_uses_with(node)
 
@@ -86,14 +86,10 @@ def _export_forward_backward(
 
 def _sticky_export(
     forward_func: typing.Callable[_InputT, _RetT],
-    dynamic_shapes_callback: typing.Optional[
-        typing.Callable[
-            _InputT,
-            typing.Union[
-                list[typing.Any], dict[str, typing.Any], tuple[typing.Any, ...]
-            ],
-        ]
-    ] = None,
+    dynamic_shapes_callback: typing.Callable[
+        _InputT, list[typing.Any] | dict[str, typing.Any] | tuple[typing.Any, ...]
+    ]
+    | None = None,
 ) -> typing.Callable[_InputT, _RetT]:
     """
     Lazily export the model on first forward call.
@@ -293,6 +289,7 @@ class _ExportPackage:
                     if isinstance(fn, torch.nn.Module):
                         dynamic_shapes = v(fn, *args, **kwargs)  # type: ignore[arg-type]
                     else:
+                        # pyrefly: ignore [invalid-param-spec]
                         dynamic_shapes = v(*args, **kwargs)
                 except AssertionError:
                     continue
@@ -340,6 +337,7 @@ class _ExportPackage:
         assert not hasattr(fn, "_define_overload")
         _exporter_context._define_overload = _define_overload  # type: ignore[attr-defined]
 
+        # pyrefly: ignore [bad-return]
         return _exporter_context
 
     @property
@@ -360,8 +358,9 @@ class _ExportPackage:
             "aot_inductor.package": True,
             "aot_inductor.package_cpp_only": True,
             "always_keep_tensor_constants": True,
-            "aot_inductor.package_constants_in_so": False,
-            "aot_inductor.compile_standalone": standalone,
+            # we'll change this back to False once we enable weight deduping for standalone mode
+            "aot_inductor.package_constants_in_so": standalone,
+            "aot_inductor_mode.compile_standalone": standalone,
         }
         aoti_files_map = {}
         model_names = []
@@ -375,6 +374,7 @@ class _ExportPackage:
                 kwargs=ep.example_inputs[1],
                 options=options,
             )
+            # pyrefly: ignore [unsupported-operation]
             aoti_files_map[name] = aoti_files
 
         from torch._inductor.package import package
@@ -395,7 +395,7 @@ class _ExportPackage:
         ):
             zip_ref.extractall(base_directory)
 
-        example_inputs_map: typing.Optional[dict[str, int]] = (
+        example_inputs_map: dict[str, int] | None = (
             {} if package_example_inputs else None
         )
         use_cuda = False
@@ -416,13 +416,15 @@ class _ExportPackage:
                     path = Path(base_directory) / f"{name}_input_{i}.pt"
                     torch.save(t, path)
 
-        cmake_file_str = _get_make_file(package_name, model_names, use_cuda)
+        # Detect if ROCm is being used
+        is_hip = torch.version.hip is not None
+        cmake_file_str = _get_make_file(package_name, model_names, use_cuda, is_hip)
 
         with open(Path(base_directory) / "CMakeLists.txt", "w") as file:
             file.write(cmake_file_str)
 
         main_file_str = _get_main_cpp_file(
-            package_name, model_names, use_cuda, example_inputs_map
+            package_name, model_names, use_cuda, example_inputs_map, is_hip
         )
         with open(Path(base_directory) / "main.cpp", "w") as file:
             file.write(main_file_str)

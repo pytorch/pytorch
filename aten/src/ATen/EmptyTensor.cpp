@@ -1,9 +1,6 @@
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/EmptyTensor.h>
-#include <ATen/detail/CUDAHooksInterface.h>
-#include <ATen/detail/XPUHooksInterface.h>
 #include <ATen/Context.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 #include <c10/core/CPUAllocator.h>
 #include <c10/util/safe_numerics.h>
 
@@ -31,7 +28,9 @@ c10::Allocator* GetCPUAllocatorMaybePinned(bool pin_memory) {
       return at::globalContext().getPinnedMemoryAllocator(opt_device_type);
     } else {
       TORCH_CHECK(
-          false, "Need to provide pin_memory allocator to use pin memory.")
+          false,
+          "pin_memory=True requires a CUDA or other accelerator backend; "
+          "no pinned memory allocator is available on this system.")
     }
   }
 

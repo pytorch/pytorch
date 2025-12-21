@@ -1,3 +1,4 @@
+include(CMakePushCheckState)
 # Push host architecture when cross-compiling otherwise check would fail
 # when cross-compiling for arm64 on x86_64
 cmake_push_check_state(RESET)

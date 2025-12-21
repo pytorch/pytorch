@@ -95,6 +95,9 @@ endif()
 if(USE_ASAN AND TARGET Sanitizer::undefined)
   list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::undefined)
 endif()
+if(USE_LSAN AND TARGET Sanitizer::leak)
+  list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::leak)
+endif()
 if(USE_TSAN AND TARGET Sanitizer::thread)
   list(APPEND TORCH_PYTHON_LINK_LIBRARIES Sanitizer::thread)
 endif()
@@ -265,7 +268,7 @@ add_custom_command(
     OUTPUT
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi"
     COMMAND
-    ${CMAKE_COMMAND} -E env PYTHONPATH="${TORCH_ROOT}"
+    ${CMAKE_COMMAND} -E env --modify PYTHONPATH=path_list_prepend:"${TORCH_ROOT}" --
     "${Python_EXECUTABLE}" ${TORCH_SRC_DIR}/utils/data/datapipes/gen_pyi.py
     DEPENDS
     "${TORCH_SRC_DIR}/utils/data/datapipes/datapipe.pyi.in"
@@ -304,11 +307,6 @@ if(USE_NCCL AND NOT WIN32)
     list(APPEND TORCH_PYTHON_SRCS
       ${TORCH_SRC_DIR}/csrc/cuda/python_nccl.cpp)
     list(APPEND TORCH_PYTHON_COMPILE_DEFINITIONS USE_NCCL)
-endif()
-
-if(NOT MSVC)
-  # cudaProfilerInitialize must go away
-  set_source_files_properties(${TORCH_SRC_DIR}/csrc/cuda/shared/cudart.cpp PROPERTIES COMPILE_FLAGS "-Wno-deprecated-declarations")
 endif()
 
 # coreml
@@ -487,7 +485,8 @@ add_custom_target(
   "${Python_EXECUTABLE}" "${TOOLS_PATH}/generate_torch_version.py"
     --is-debug=${TORCH_VERSION_DEBUG}
     --cuda-version=${CUDA_VERSION}
-    --hip-version=${HIP_VERSION}
+    --hip-version=${HIP_VERSION_CLEAN}
+    --rocm-version=${ROCM_VERSION_DEV}
     --xpu-version=${SYCL_COMPILER_VERSION}
   BYPRODUCTS ${TORCH_SRC_DIR}/version.py
   COMMENT "Regenerating version file..."

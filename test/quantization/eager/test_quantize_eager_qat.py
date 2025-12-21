@@ -241,16 +241,16 @@ class _ReferenceConvBnNd(torch.nn.Conv2d, torch.nn.modules.conv._ConvNd):
         Args: `mod` a float module, either produced by torch.ao.quantization utilities
         or directly from user
         """
-        assert type(mod) == cls._FLOAT_MODULE, (
+        assert type(mod) is cls._FLOAT_MODULE, (
             "qat."
             + cls.__name__
             + ".from_float only works for "
             + cls._FLOAT_MODULE.__name__
         )
         if not qconfig:
-            assert hasattr(
-                mod, "qconfig"
-            ), "Input float module must have qconfig defined"
+            assert hasattr(mod, "qconfig"), (
+                "Input float module must have qconfig defined"
+            )
             assert mod.qconfig, "Input float module must have a valid qconfig"
             qconfig = mod.qconfig
         conv, bn = mod[0], mod[1]
@@ -565,7 +565,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
 
     def test_train_save_load_eval(self):
         r"""Test QAT flow of creating a model, doing QAT and saving the quantized state_dict
-        During eval, we first call prepare_qat and conver on the model and then load the state_dict
+        During eval, we first call prepare_qat and convert on the model and then load the state_dict
         and compare results against original model
         """
         for qengine in supported_qengines:
@@ -1264,8 +1264,8 @@ class TestQuantizeEagerQATNumerics(QuantizationTestCase):
         mp = prepare_qat(m)
         mp(data)
         mq = convert(mp)
-        self.assertTrue(type(mq[1]) == nnq.Linear)
-        self.assertTrue(type(mq[2]) == nn.Identity)
+        self.assertTrue(type(mq[1]) is nnq.Linear)
+        self.assertTrue(type(mq[2]) is nn.Identity)
 
     @skipIfNoXNNPACK
     @override_qengines

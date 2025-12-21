@@ -2382,9 +2382,9 @@ class TestLikeFuncs(TestCase):
         # Regression test for gh-19860
         a = np.arange(16).reshape(2, 8)
         b = a[:, ::2]  # Ensure b is not contiguous.
-        kwargs = {"fill_value": ""} if likefunc == np.full_like else {}
+        kwargs = {"fill_value": ""} if likefunc is np.full_like else {}
         result = likefunc(b, dtype=dtype, **kwargs)
-        if dtype == str:
+        if dtype is str:
             assert result.strides == (16, 4)
         else:
             # dtype is bytes
@@ -2733,10 +2733,18 @@ class TestMoveaxis(TestCase):
         assert_raises(np.AxisError, np.moveaxis, x, 3, 0)  # 'source.*out of bounds',
         assert_raises(np.AxisError, np.moveaxis, x, -4, 0)  # 'source.*out of bounds',
         assert_raises(
-            np.AxisError, np.moveaxis, x, 0, 5  # 'destination.*out of bounds',
+            np.AxisError,
+            np.moveaxis,
+            x,
+            0,
+            5,  # 'destination.*out of bounds',
         )
         assert_raises(
-            ValueError, np.moveaxis, x, [0, 0], [0, 1]  # 'repeated axis in `source`',
+            ValueError,
+            np.moveaxis,
+            x,
+            [0, 0],
+            [0, 1],  # 'repeated axis in `source`',
         )
         assert_raises(
             ValueError,  # 'repeated axis in `destination`',

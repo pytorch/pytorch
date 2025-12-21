@@ -173,6 +173,9 @@ We also provide other storage layers, including ones to interact with HuggingFac
 .. autoclass:: torch.distributed.checkpoint.HuggingFaceStorageWriter
   :members:
 
+.. autoclass:: torch.distributed.checkpoint.QuantizedHuggingFaceStorageReader
+  :members:
+
 We provide default implementations of `LoadPlanner` and `SavePlanner` that
 can handle all of torch.distributed constructs such as FSDP, DDP, ShardedTensor and DistributedTensor.
 

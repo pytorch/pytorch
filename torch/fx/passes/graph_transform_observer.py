@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 import os
-from typing import Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Optional, TypeVar
 
 from torch.fx import Graph, Node
 from torch.fx._compatibility import compatibility
@@ -43,7 +44,8 @@ class GraphTransformObserver:
         self.log_url = log_url
 
         self.active = (
-            self.log_url is not None or inductor_config.trace.provenance_tracking
+            self.log_url is not None
+            or inductor_config.trace.provenance_tracking_level == 1
         )
 
         if self.active:
@@ -191,6 +193,12 @@ class GraphTransformObserver:
                 return
 
             assert isinstance(new_node, Node)
+
+            # replace hook is called once for each user of old
+            # this avoids adding duplicated source nodes
+            added_nodes = {s.name for s in new_node.meta.get("from_node", [])}
+            if old.name in added_nodes:
+                return
 
             action = [NodeSourceAction.REPLACE]
             if new_node.name in self.created_nodes:

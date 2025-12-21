@@ -25,6 +25,7 @@ if not c10d.is_available() or not c10d.is_gloo_available():
 
 import test_c10d_common
 from test_c10d_common import (
+    FFTModel,
     gpus_for_rank,
     LOOPBACK,
     ModuleForDdpCommHook,
@@ -53,12 +54,10 @@ from torch.testing._internal.common_distributed import (
     verify_ddp_error_logged,
 )
 from torch.testing._internal.common_utils import (
-    MI300_ARCH,
     retry_on_connect_failures,
     run_tests,
     skip_but_pass_in_sandcastle,
     skipIfRocm,
-    skipIfRocmArch,
     TestCase,
 )
 
@@ -134,6 +133,32 @@ def simple_reduce_tests(rank, world_size):
             ),
         )
 
+    # Extend tests for cfloat dtype
+    tests.extend(
+        (
+            (
+                c10d.ReduceOp.SUM,
+                torch.tensor([complex(rank + 1.0, rank + 1.0)], dtype=torch.cfloat),
+                torch.tensor(
+                    [
+                        complex(
+                            world_size * (world_size + 1) / 2,
+                            world_size * (world_size + 1) / 2,
+                        )
+                    ],
+                    dtype=torch.cfloat,
+                ),
+            ),
+            (
+                c10d.ReduceOp.AVG,
+                torch.tensor([complex(rank + 1.0, rank + 1.0)], dtype=torch.cfloat),
+                torch.tensor(
+                    [complex(float((world_size + 1) / 2), float((world_size + 1) / 2))],
+                    dtype=torch.cfloat,
+                ),
+            ),
+        )
+    )
     return tests
 
 
@@ -372,6 +397,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 self.assertEqual(
                     torch.tensor([i * num + j], dtype=torch.float32), output[1]
                 )
+
+            # Run with 1 input tensor of cfloat dtype
+            x = fn(torch.tensor([complex(self.rank, self.rank)], dtype=torch.cfloat))
+            output = broadcast([x], i, 0)
+            self.assertEqual(
+                torch.tensor([complex(i, i)], dtype=torch.cfloat), output[0]
+            )
 
         # Test overloaded convenience function
         x = torch.tensor([self.rank + 1.0])
@@ -1013,6 +1045,47 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self.assertEqual(pg.options._timeout, timedelta(seconds=23))
 
     @requires_gloo()
+    def test_gloo_set_pg_timeout_api(self):
+        """
+        Test _set_pg_timeout API for Gloo backend (issue #165422).
+        This test demonstrates that dynamically changing timeout via _set_pg_timeout
+        actually affects operation timeouts by:
+        1. verifying operations complete successfully with normal timeout
+        2. setting a very short timeout via _set_pg_timeout
+        3. demonstrating that operations timeout with the new short timeout value
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=50),
+        )
+
+        pg = dist.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device("cpu"))
+        self.assertEqual(backend.options._timeout, timedelta(seconds=50))
+
+        # operations work normally with default timeout
+        tensor = torch.rand(10)
+        pg.allreduce(tensor).wait()
+
+        # change timeout to a very short value using _set_pg_timeout
+        # this is the API from issue #165422
+        c10d.distributed_c10d._set_pg_timeout(timedelta(milliseconds=1), pg)
+        self.assertEqual(backend.options._timeout, timedelta(milliseconds=1))
+
+        # demonstrate that the new timeout is actually enforced
+        # only rank 0 participates - this will cause a timeout
+        if self.rank == 0:
+            t1 = torch.zeros([1], dtype=torch.float32)
+            with self.assertRaisesRegex(RuntimeError, "Timed out waiting 1ms"):
+                pg.allreduce([t1]).wait()
+
+        dist.destroy_process_group()
+
+    @requires_gloo()
     def test_scatter_stress(self):
         inputs = [
             [torch.tensor([i + self.rank]) for _ in range(self.world_size)]
@@ -1155,7 +1228,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_gather_noncontiguous_input(self):
         # Take a column of 2D tensor, such that memory is not dense
-        self._test_gather_basics(lambda t: t.expand(2, 2).contiguous()[:, 0])
+        self._test_gather_basics(lambda t: t.expand(2, 2).tril().contiguous()[:, 0])
 
     def _test_gather_stress(self, inputs, fn):
         store = c10d.FileStore(self.file_name, self.world_size)
@@ -1199,7 +1272,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self._test_gather_stress(inputs, lambda t: t.clone())
 
     @skip_if_lt_x_gpu(2)
-    @skipIfRocmArch(MI300_ARCH)
+    @skipIfRocm
     @requires_gloo()
     def test_gather_stress_cuda(self):
         inputs = [torch.tensor([i + self.rank]).cuda() for i in range(1000)]
@@ -1289,7 +1362,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_allgather_noncontiguous_input(self):
         # Take a column of 2D tensor, such that memory is not dense
-        self._test_allgather_basics(lambda t: t.expand(2, 2).contiguous()[:, 0])
+        self._test_allgather_basics(lambda t: t.expand(2, 2).tril().contiguous()[:, 0])
 
     @requires_gloo()
     def test_allgather_inference_mode(self):
@@ -1425,7 +1498,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
     @requires_gloo()
     def test_reduce_checks(self):
         store = c10d.FileStore(self.file_name, self.world_size)
-        pg = pg = self._create_process_group_gloo(
+        pg = self._create_process_group_gloo(
             store, self.rank, self.world_size, self.opts()
         )
 
@@ -1604,6 +1677,22 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         torch.cuda.current_stream().synchronize()
 
         work.wait()
+
+    @requires_gloo()
+    def test_send_recv_complex(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        pg = self._create_process_group_gloo(
+            store, self.rank, self.world_size, self.opts()
+        )
+        # Generate the same random tensor
+        torch.manual_seed(0)
+        send_tensor = torch.rand(10, 10, dtype=torch.cfloat)
+        if self.rank == 0:
+            pg.send([send_tensor], 1, 0).wait()
+        if self.rank == 1:
+            recv_tensor = torch.rand(10, 10, dtype=torch.cfloat)
+            pg.recv([recv_tensor], 0, 0).wait()
+            self.assertEqual(send_tensor, recv_tensor)
 
 
 class DistributedDataParallelTest(
@@ -2270,6 +2359,24 @@ class DistributedDataParallelTest(
 
         self._run_and_verify_sparse_gradients(vanilla_model, ddp_model)
 
+    @requires_gloo()
+    def test_ddp_complex_params(self):
+        process_group = self._get_process_group()
+        N, C, H, W = 1, 16, 64, 64
+        ddp_model = DistributedDataParallel(
+            FFTModel(hin=H, win=W, n_features=C),
+            process_group=process_group,
+        )
+        optimizer = torch.optim.Adam(ddp_model.parameters(), lr=0.001)
+
+        inp = torch.ones((N, C, H, W), dtype=torch.float32)
+
+        # train step
+        out = ddp_model(inp)
+        loss = torch.sum(out)
+        loss.backward()
+        optimizer.step()
+
 
 class ReducerModule(nn.Module):
     def __init__(self) -> None:
@@ -2289,7 +2396,9 @@ class ReducerModule(nn.Module):
 
 class ReducerTest(TestCase):
     def setUp(self):
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        super().setUp()
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
         world_size = 1
         self.store = c10d.FileStore(self.file.name, world_size)
         c10d.init_process_group(
@@ -2449,7 +2558,7 @@ class ProcessGroupGlooFRTest(ProcessGroupGlooTest):
 
     def _verify_trace(self, t, is_json):
         ver = t["version"]
-        self.assertEqual(ver, "2.9")
+        self.assertEqual(ver, "2.10")
         pg_config = t["pg_config"]
         self.assertEqual(len(pg_config), 1)
         default_pg_info = pg_config["0"]

@@ -26,6 +26,7 @@ if [[ "${SHARD_NUMBER:-2}" == "2" ]]; then
     time python test/run_test.py --verbose -i distributed/test_c10d_spawn_gloo
     time python test/run_test.py --verbose -i distributed/test_c10d_spawn_nccl
     time python test/run_test.py --verbose -i distributed/test_compute_comm_reordering
+    time python test/run_test.py --verbose -i distributed/test_aten_comm_compute_reordering
     time python test/run_test.py --verbose -i distributed/test_store
     time python test/run_test.py --verbose -i distributed/test_symmetric_memory
     time python test/run_test.py --verbose -i distributed/test_pg_wrapper
@@ -45,6 +46,7 @@ if [[ "${SHARD_NUMBER:-2}" == "2" ]]; then
     # DTensor tests
     time python test/run_test.py --verbose -i distributed/tensor/test_random_ops
     time python test/run_test.py --verbose -i distributed/tensor/test_dtensor_compile
+    time python test/run_test.py --verbose -i distributed/tensor/test_utils.py
 
     # DeviceMesh test
     time python test/run_test.py --verbose -i distributed/test_device_mesh

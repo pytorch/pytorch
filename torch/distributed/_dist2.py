@@ -1,7 +1,4 @@
 """
-Experimental Object Oriented Distributed API - torch.distributed._dist2
-=======================================================================
-
 This is an experimental new API for PyTorch Distributed. This is actively in development and subject to change or deletion entirely.
 
 This is intended as a proving ground for more flexible and object oriented distributed APIs.
@@ -10,7 +7,7 @@ This is intended as a proving ground for more flexible and object oriented distr
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Protocol, Union
+from typing import Protocol
 
 import torch
 from torch._C._distributed_c10d import (
@@ -74,7 +71,8 @@ def _gloo_factory(
 ) -> ProcessGroup:
     from torch.distributed import ProcessGroupGloo
 
-    assert len(kwargs) == 0, "Gloo backend received unexpected kwargs"
+    if len(kwargs) != 0:
+        raise AssertionError("Gloo backend received unexpected kwargs")
 
     backend_class = ProcessGroupGloo(store, rank, world_size, timeout)
     backend_class._set_sequence_number_for_group()
@@ -129,7 +127,7 @@ register_backend("nccl", _nccl_factory)
 def new_group(
     backend: str,
     timeout: timedelta,
-    device: Union[str, torch.device],
+    device: str | torch.device,
     **kwargs: object,
 ) -> ProcessGroup:
     """

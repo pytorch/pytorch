@@ -18,6 +18,9 @@ namespace c10 {
 struct IValue;
 class OperatorHandle;
 struct TensorImpl;
+namespace impl {
+struct PyObjectSlot;
+} // namespace impl
 } // namespace c10
 
 namespace torch::jit {
@@ -126,9 +129,12 @@ struct C10_API PyInterpreterVTable {
 
   // Run Py_INCREF on a PyObject.
   virtual void incref(PyObject* pyobj) const = 0;
-  // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call
-  // See NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
-  virtual void decref(PyObject* pyobj, bool has_pyobj_slot) const = 0;
+  // Run Py_DECREF on a PyObject.  We DO NOT assume the GIL is held on call.
+  virtual void decref(PyObject* pyobj) const = 0;
+  // Run PyUnstable_TryIncRef on a PyObject if it's not NULL.
+  virtual bool try_incref(const c10::impl::PyObjectSlot& pyobj_slot) const = 0;
+  // Run Py_REFCNT on a PyObject.
+  virtual size_t refcnt(PyObject* pyobj) const = 0;
 
   // Perform a detach by deferring to the __torch_dispatch__ implementation of
   // detach, which will also arrange for the PyObject to get copied in this
@@ -168,6 +174,9 @@ struct C10_API PyInterpreterVTable {
 
   virtual bool is_contiguous(const TensorImpl* self, at::MemoryFormat)
       const = 0;
+  virtual c10::SymBool sym_is_contiguous(
+      const TensorImpl* self,
+      at::MemoryFormat) const = 0;
   virtual bool is_strides_like(const TensorImpl* self, at::MemoryFormat)
       const = 0;
   virtual bool is_non_overlapping_and_dense(const TensorImpl* self) const = 0;
@@ -238,26 +247,6 @@ struct C10_API PyInterpreter {
   // destructors would be disarmed here only begin the destruction process
   // on process shutdown (long after the dlclose has occurred).
   void disarm() noexcept;
-};
-
-// PyInterpreterStatus describes what the state of its interpreter tag
-// is, relative to the thread currently holding the GIL.
-enum class PyInterpreterStatus {
-  // We just allocated the Tensor, it hasn't escaped to other threads,
-  // we know that it definitely hasn't been tagged to be associated
-  // with an interpreter.
-  DEFINITELY_UNINITIALIZED,
-  // We queried the interpreter field and it looked uninitialized.  But
-  // another thread may have raced with us to tag it with some other
-  // interpreter id.  So we will have to do a CEX to make sure we can
-  // actually nab it.
-  MAYBE_UNINITIALIZED,
-  // We queried the interpreter field and it was tagged to belong to us.
-  // This means we have sole write access (as we hold the GIL for this
-  // interpreter)
-  TAGGED_BY_US,
-  // Someone else tagged this.  We can't use this TensorImpl from Python.
-  TAGGED_BY_OTHER,
 };
 
 } // namespace c10::impl

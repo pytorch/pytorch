@@ -101,7 +101,10 @@ template <
     typename Function,
     typename Accessor,
     size_t... Is>
-ReturnType unpack(Function function, Accessor accessor, Indices<Is...>) {
+ReturnType unpack(
+    Function function,
+    Accessor accessor,
+    Indices<Is...> /*unused*/) {
   return ReturnType(function(accessor.template operator()<Ts>(Is)...));
 }
 

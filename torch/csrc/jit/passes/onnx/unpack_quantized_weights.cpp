@@ -21,83 +21,6 @@ using namespace ::c10::onnx;
 
 }
 
-// Get the scale of the input to quantized op. There are two cases here
-// 1. For ops with output_scale specified in op signature, we get the output
-// scale
-// 2. For ops with no output scale in op signature (like quantized::relu)
-// we traverse up the graph to get the scale from its input until we hit a node
-// where scale is explicitly specified.
-double getScaleFromInput(Node* input_node) {
-  std::optional<IValue> scale;
-  std::string input_name = input_node->kind().toQualString();
-  std::unordered_set<std::string> noscale_ops = {
-      "quantized::max_pool2d",
-      "aten::max_pool2d",
-      "aten::relu",
-      "prim::ListUnpack",
-      "aten::split_with_sizes",
-      "quantized::nchw2nhwc",
-      "quantized::nhwc2nchw",
-      "aten::slice",
-      "aten::avg_pool2d",
-      "quantized::cat",
-      "prim::ListConstruct",
-      "aten::upsample_nearest2d",
-      "aten::sigmoid",
-      "aten::reshape"};
-  if (input_name == "aten::quantize_per_tensor") {
-    TORCH_CHECK(
-        input_node->inputs().size() > 1,
-        "aten::quantize_per_tensor expected scale to be 2nd input");
-    scale = toIValue(input_node->inputs()[1]);
-    return scale.value().toDouble();
-  } else if (input_name == "quantized::linear") {
-    // %r = quantized::linear(%input, %packed_weight, %w_scale, %w_zero_point)
-    TORCH_CHECK(
-        input_node->inputs().size() > 2,
-        "quantized::linear expected scale to be 3rd input");
-    scale = toIValue(input_node->inputs()[2]);
-    return scale.value().toDouble();
-  } else if (input_name == "quantized::conv2d") {
-    // %r = quantized::conv2d(%input, %packed_weight, %w_scale, %w_zero_point)
-    TORCH_CHECK(
-        input_node->inputs().size() > 2,
-        "quantized::conv2d expected scale to be 3rd input");
-    auto num_inputs = input_node->inputs().size();
-    scale = toIValue(input_node->inputs()[num_inputs - 2]);
-    return scale.value().toDouble();
-  } else if (input_name == "quantized::conv2d_relu") {
-    // %r = quantized::conv2d_relu(%input, %packed_weight, %w_scale,
-    // %w_zero_point)
-    TORCH_CHECK(
-        input_node->inputs().size() > 2,
-        "quantized::conv2d_relu expected scale to be 3rd input");
-    auto num_inputs = input_node->inputs().size();
-    scale = toIValue(input_node->inputs()[num_inputs - 2]);
-    return scale.value().toDouble();
-  } else if (input_name == "quantized::add") {
-    // %r = quantized::add(%input_a, %input_b, %w_scale, %w_zero_point)
-    TORCH_CHECK(
-        input_node->inputs().size() > 2,
-        "quantized::add expected scale to be 3rd input");
-    scale = toIValue(input_node->inputs()[2]);
-    return scale.value().toDouble();
-  } else if (input_name == "aten::sigmoid") {
-    // For the _caffe2::Int8Sigmoid op output scale is 1.0/256
-    // And output zero_point is set to 0 (quint8 type).
-    return 1.0L / 256;
-  }
-  // For the ops below the scale is not part of the op signature, so we traverse
-  // up the graph to get the scale from its input when defined in the graph.
-  else if (noscale_ops.find(input_name) != noscale_ops.end()) {
-    return getScaleFromInput(input_node->inputs()[0]->node());
-  }
-  TORCH_INTERNAL_ASSERT(
-      false,
-      "Unrecognized quantized operator while trying to compute q_scale for operator ",
-      input_name);
-}
-
 static std::vector<Node*> CreateQuantizedWeights(
     std::shared_ptr<Graph>& graph,
     const at::Tensor& weight,
@@ -315,7 +238,7 @@ static void unpackQuantizedWeightsHelper(
         auto config_vals = elements[1].to<std::vector<int64_t>>();
         auto tensors = elements[2].to<std::vector<std::optional<at::Tensor>>>();
 
-        std::optional<at::Tensor> weight = tensors[1];
+        const std::optional<at::Tensor>& weight = tensors[1];
         TORCH_INTERNAL_ASSERT(
             weight, "Weight should always be present in serialized qconv.");
         unpacked_weight = *weight;
@@ -373,7 +296,7 @@ static void unpackQuantizedWeightsHelper(
         TORCH_INTERNAL_ASSERT(version == "2", "Unknown serialization version");
         std::vector<at::Tensor> non_optional = elements[1].toTensorVector();
 
-        at::Tensor conv_params_packed = non_optional[0];
+        const at::Tensor& conv_params_packed = non_optional[0];
         unpacked_weight = non_optional[1];
 
         const int64_t kSpatialDim = conv_params_packed[0].item<int64_t>();

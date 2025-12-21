@@ -2,8 +2,8 @@
 # mypy: allow-untyped-defs
 import functools
 import logging
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.nn as nn
@@ -45,14 +45,14 @@ class FSDPStateContext:
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
         # only a submodule runs forward (e.g. encoder-only for eval)
-        self.iter_forward_root: Optional[FSDPState] = None
+        self.iter_forward_root: FSDPState | None = None
         # Final callback should only be queued once per backward
         self.post_backward_final_callback_queued: bool = False
         # Whether to finalize backward in this backward's final callback
         self.is_last_backward: bool = True
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
-        self.post_optim_event: Optional[torch.Event] = None
+        self.post_optim_event: torch.Event | None = None
 
 
 def disable_if_config_true(func):
@@ -73,8 +73,8 @@ def disable_if_config_true(func):
 class FSDPState(_State):
     def __init__(self) -> None:
         super().__init__()
-        self._fsdp_param_group: Optional[FSDPParamGroup] = None
-        self._is_root: Optional[bool] = None  # root set during lazy init
+        self._fsdp_param_group: FSDPParamGroup | None = None
+        self._is_root: bool | None = None  # root set during lazy init
         self._state_ctx = FSDPStateContext()
         self._comm_ctx = FSDPCommContext()
         self._training_state: TrainingState = TrainingState.IDLE
@@ -83,7 +83,7 @@ class FSDPState(_State):
         self._modules_to_run_forward: set[nn.Module] = set()
         # ``False`` when user set reshard_after_forward
         # through ``fully_shard`` or ``set_reshard_after_forward``
-        self._auto_reshard_after_forward: Optional[bool] = True
+        self._auto_reshard_after_forward: bool | None = True
 
     # Define a separate init since `__init__` is called in the contract
     def init(
@@ -96,6 +96,7 @@ class FSDPState(_State):
         for module in modules:
             _insert_module_state(module, self)
         self._modules = modules
+        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(device.type)
         self._mp_policy = mp_policy
@@ -202,7 +203,8 @@ class FSDPState(_State):
 
     def _init_fqns(self) -> None:
         """Sets module and parameter FQN attributes for debugging."""
-        assert self._is_root
+        if not self._is_root:
+            raise AssertionError("Expected _is_root to be True")
         root_module = self._modules[0]
         param_to_fsdp_param: dict[nn.Parameter, FSDPParam] = {}
         module_to_fsdp_param_group: dict[nn.Module, FSDPParamGroup] = {}
@@ -221,7 +223,10 @@ class FSDPState(_State):
                 if module_fqn is None:
                     module_to_fsdp_param_group[module]._module_fqn = module_name
                 else:
-                    assert isinstance(module_fqn, str), f"{module_fqn}"
+                    if not isinstance(module_fqn, str):
+                        raise AssertionError(
+                            f"Expected module_fqn to be str, got {type(module_fqn)}: {module_fqn}"
+                        )
                     module_fqn += f", {module_name}"
                     module_to_fsdp_param_group[module]._module_fqn = module_fqn
 
@@ -230,7 +235,7 @@ class FSDPState(_State):
         self, module: nn.Module, args: tuple[Any, ...], kwargs: dict[str, Any]
     ) -> tuple[tuple[Any, ...], dict[str, Any]]:
         # When composing with module-hook-based activation checkpointing, the
-        # the pre-backward hook is responsible for the unshard
+        # pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:
             return args, kwargs
         self._training_state = TrainingState.FORWARD
@@ -351,7 +356,7 @@ class FSDPState(_State):
         )
 
 
-def _get_module_fsdp_state(module: nn.Module) -> Optional[FSDPState]:
+def _get_module_fsdp_state(module: nn.Module) -> FSDPState | None:
     state = _get_module_state(module)
     if isinstance(state, FSDPState):
         return state

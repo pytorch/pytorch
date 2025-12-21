@@ -2,23 +2,16 @@
 
 import copy
 import math
-import pathlib
-import sys
 from typing import Any
 
-
-REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent.parent.parent
-
-sys.path.insert(0, str(REPO_ROOT))
-from tools.flight_recorder.components.builder import build_db
-from tools.flight_recorder.components.config_manager import JobConfig
-from tools.flight_recorder.components.types import COLLECTIVES, MatchInfo, MatchState
-from tools.flight_recorder.components.utils import match_one_event
-
-
-# Make sure to remove REPO_ROOT after import is done
-sys.path.remove(str(REPO_ROOT))
-
+from torch.distributed.flight_recorder.components.builder import build_db
+from torch.distributed.flight_recorder.components.config_manager import JobConfig
+from torch.distributed.flight_recorder.components.types import (
+    COLLECTIVES,
+    MatchInfo,
+    MatchState,
+)
+from torch.distributed.flight_recorder.components.utils import match_one_event
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -141,6 +134,19 @@ class FlightRecorderEventTest(TestCase):
         )
         self.assertEqual(
             match_one_event(e11, e12, membership, "0").state,
+            MatchState.FULLY_MATCHED,
+        )
+        e13 = create_one_event(
+            "gather",
+            ("0", "default"),
+            [[4, 4]],
+            [[4, 4]],
+            "completed",
+            1,
+            output_dtypes="",
+        )
+        self.assertEqual(
+            match_one_event(e11, e13, membership, "0").state,
             MatchState.FULLY_MATCHED,
         )
 

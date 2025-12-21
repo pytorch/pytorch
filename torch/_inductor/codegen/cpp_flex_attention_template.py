@@ -792,7 +792,7 @@ class CppFlexAttentionTemplate(CppTemplate):
             return ""
 
         if start_offset == -1:
-            start_offset = getattr(self, len_attr)
+            start_offset = self.len_score_other
 
         length = getattr(self, len_attr)
         for i in range(length):
@@ -986,7 +986,7 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         num_threads = parallel_num_threads()
         assert isinstance(self.output_node, ir.IRNode)
-        buf_out: ir.IRNode = TensorBox.create(self.output_node)
+        buf_out = TensorBox.create(self.output_node)
         if template_buffer_node is not None:
             buf_out = template_buffer_node
         options = dict(
@@ -995,9 +995,9 @@ class CppFlexAttentionTemplate(CppTemplate):
             value=value,
             kv_num_blocks=self.input_nodes[3],
             kv_indices=self.input_nodes[4],
-            full_kv_num_blocks=self.input_nodes[5]
-            if not self.no_full_kv_block
-            else None,
+            full_kv_num_blocks=(
+                self.input_nodes[5] if not self.no_full_kv_block else None
+            ),
             full_kv_indices=self.input_nodes[6] if not self.no_full_kv_block else None,
             score_mod_other_buffers=self.score_mod_other_buffers,
             mask_mod_other_buffers=self.mask_mod_other_buffers,

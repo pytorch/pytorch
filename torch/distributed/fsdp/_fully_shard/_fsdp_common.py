@@ -3,7 +3,7 @@ import math
 import traceback
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -15,39 +15,32 @@ from torch.distributed.tensor._dtensor_spec import DTensorSpec
 
 _compiled_autograd_enabled: bool = False
 
-if torch._running_with_deploy():
 
-    def detect_compiled_autograd():
-        pass
-
-    def compiled_autograd_enabled():
-        return False
-
-else:
-
-    def detect_compiled_autograd():
-        assert not torch.compiler.is_compiling(), (
+def detect_compiled_autograd():
+    if torch.compiler.is_compiling():
+        raise AssertionError(
             "`detect_compiled_autograd()` is designed to be called in eager mode"
         )
-        global _compiled_autograd_enabled
-        import torch._dynamo.compiled_autograd as ca
+    global _compiled_autograd_enabled
+    import torch._dynamo.compiled_autograd as ca
 
-        _compiled_autograd_enabled = (
-            ca.compiled_autograd_enabled
-            or ca.compiled_autograd_enabled_force_eager
-            or ca.in_compiled_autograd_region
-        )
+    _compiled_autograd_enabled = (
+        ca.compiled_autograd_enabled
+        or ca.compiled_autograd_enabled_force_eager
+        or ca.in_compiled_autograd_region
+    )
 
-    def compiled_autograd_enabled():
-        global _compiled_autograd_enabled
-        return _compiled_autograd_enabled
+
+def compiled_autograd_enabled():
+    global _compiled_autograd_enabled
+    return _compiled_autograd_enabled
 
 
 @dataclass
 class DataParallelMeshInfo:
     mesh: DeviceMesh
-    shard_mesh_dim: Optional[int] = None
-    replicate_mesh_dim: Optional[int] = None
+    shard_mesh_dim: int | None = None
+    replicate_mesh_dim: int | None = None
 
     def __post_init__(self):
         if self.shard_mesh_dim is None and self.replicate_mesh_dim is None:
@@ -80,7 +73,7 @@ class DDPMeshInfo(DataParallelMeshInfo):
 
 @dataclass
 class HSDPMeshInfo(FSDPMeshInfo, DDPMeshInfo):
-    def __post_init__(self):
+    def __post_init__(self):  # pylint:disable=useless-parent-delegation
         # Calls `FSDPMeshInfo` -> `DDPMeshInfo` -> `DataParallelMeshInfo`
         super().__post_init__()
 
@@ -133,6 +126,7 @@ def _get_dim_chunked_size(
     if chunk.numel() > 0:
         return chunk.size()
     # For 0 numel, we need to preserve nonzero-sized dims for DTensor APIs
+    # pyrefly: ignore [bad-return]
     return unchunked_size[:dim] + torch.Size([0]) + unchunked_size[dim + 1 :]
 
 
@@ -146,11 +140,14 @@ def _from_local_no_grad(
     """
 
     if not compiled_autograd_enabled():
+        # pyrefly: ignore [bad-argument-type]
         return DTensor(
             # Use the local tensor directly instead of constructing a new tensor
             # variable, e.g. with `view_as()`, since this is not differentiable
+            # pyrefly: ignore [bad-argument-count]
             local_tensor,
             sharding_spec,
+            # pyrefly: ignore [unexpected-keyword]
             requires_grad=local_tensor.requires_grad,
         )
     else:
@@ -164,7 +161,7 @@ def _from_local_no_grad(
 
 
 def _to_dtype_if_needed(
-    tensor: torch.Tensor, dtype: Optional[torch.dtype]
+    tensor: torch.Tensor, dtype: torch.dtype | None
 ) -> torch.Tensor:
     if dtype is not None and tensor.dtype != dtype:
         return tensor.to(dtype)
@@ -179,3 +176,7 @@ def _cast_fp_tensor(dtype: torch.dtype, x: torch.Tensor) -> torch.Tensor:
     ):
         return x
     return x.to(dtype)
+
+
+def is_bw() -> bool:
+    return torch._C._current_graph_task_id() != -1

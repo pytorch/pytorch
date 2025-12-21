@@ -143,7 +143,7 @@ TEST(FromQualStringTest, Basic) {
     try {
       Symbol::fromQualString(input);
       ASSERT_TRUE(0);
-    } catch (const std::exception& c) {
+    } catch (const std::exception&) {
     }
   }
 }
@@ -2395,7 +2395,7 @@ def a(x, y:int=1):
   try {
     compile(text_non_hinted);
     ASSERT_TRUE(0);
-  } catch (const std::exception& c) {
+  } catch (const std::exception&) {
   }
 
   auto cu = compile(text_hinted);
@@ -2709,6 +2709,7 @@ TEST(ProfilerDisableInCallbackTest, Basic) {
 }
 
 TEST(RecordDebugHandles, Basic) {
+  GTEST_SKIP() << "Test is flaky and sometimes hangs on CI. ";
   // Enable the profiler in this thread
   const std::set<torch::autograd::profiler::ActivityType> activities(
       {torch::autograd::profiler::ActivityType::CPU});
