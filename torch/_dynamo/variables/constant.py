@@ -188,7 +188,7 @@ class ConstantVariable(VariableTracker):
                     f"not {arg.python_type_name()}",
                 )
         return ConstantVariable.create(
-            self.value[arg.as_python_constant()],
+            self.value[arg.as_python_constant()],  # pyrefly: ignore[bad-index]
         )
 
     def sq_item_impl(
