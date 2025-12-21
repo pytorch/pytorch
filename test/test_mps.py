@@ -11249,7 +11249,7 @@ class TestConvolutionMPS(TestCaseMPS):
                     input = torch.arange(1., 11, device="mps").view(1, 1, 2, 5)
                     grid = torch.tensor(
                         [[[-0.9, -4.1], [0, 0.2000], [1, -1], [-0.333, 1e-6], [0.5, 1.0]],
-                        [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-6], [1.5, 0.5]]], device="mps").view(1, 2, 5, 2)
+                         [[-1.0, -0.5], [0, 0.3333], [1, -1], [-0.200, 1e-6], [1.5, 0.5]]], device="mps").view(1, 2, 5, 2)
                     if mode == 'bilinear':
                         if padding_mode == 'zeros':
                             if align_corners:
@@ -11344,7 +11344,7 @@ class TestConvolutionMPS(TestCaseMPS):
                     else:
                         raise AssertionError(f"missing groundtruth test for interpolation mode '{mode}'")
                     output = F.grid_sample(input, grid, mode=mode, padding_mode=padding_mode,
-                                        align_corners=align_corners)
+                                           align_corners=align_corners)
                     self.assertEqual(output, groundtruth, atol=1e-5, rtol=0,
                                      msg=f"groundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
