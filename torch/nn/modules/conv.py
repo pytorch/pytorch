@@ -30,6 +30,16 @@ __all__ = [
     "LazyConvTranspose3d",
 ]
 
+# 通用卷積概念 (Convolution Notes)
+# Groups Note (分組卷積)
+# groups 控制輸入通道與輸出通道之間的連接方式。in_channels 和 out_channels 都必須能被 groups 整除。
+# 當 groups=1 (預設值): 這是標準卷積。所有的輸入通道都會參與運算，對所有輸出通道產生貢獻（全連接的概念）。
+# 當 groups=2: 相當於將輸入通道切成兩半，用兩個並行的卷積層分別處理（每個只看一半的輸入，產生一半的輸出），最後再將結果拼接 (Concatenate) 起來。這常用於減少參數量或模仿早期像 AlexNet 分散在兩顆 GPU 運算的架構。
+# 當 groups=in_channels: 這被稱為 Depthwise Convolution (深度卷積)。每個輸入通道只跟「自己那一組」濾波器進行卷積，互不干擾。這是 MobileNet 等輕量化網路的核心技術。
+
+# Depthwise Separable Note (深度可分離卷積)
+# 當 groups 等於輸入通道數，且輸出通道數是輸入通道數的整數倍 (K) 時，這種操作被稱為「深度卷積 (Depthwise Convolution)」。通常後面會接一個 1x1 的 Pointwise Convolution，合稱為 深度可分離卷積 (Depthwise Separable Convolution)，能大幅降低運算量。
+
 convolution_notes = {
     "groups_note": r"""* :attr:`groups` controls the connections between inputs and outputs.
       :attr:`in_channels` and :attr:`out_channels` must both be divisible by
@@ -374,7 +384,8 @@ class Conv1d(_ConvNd):
     def forward(self, input: Tensor) -> Tensor:
         return self._conv_forward(input, self.weight, self.bias)
 
-
+# 二維卷積 (Class Conv2d) 這是影像處理最常用的層。
+# Docstring Overview (功能概述) : 對由多個輸入平面（Feature Maps）組成的訊號應用 2D 卷積。 這裡特別提到數學上的運算其實是 互相關 (Cross-correlation) 而非嚴格定義的卷積（Convolution），因為 PyTorch 沒有對 kernel 進行 180 度翻轉，但這在深度學習中通常混用統稱卷積，因為權重是學出來的，翻不翻轉沒差別。
 class Conv2d(_ConvNd):
     __doc__ = (
         r"""Applies a 2D convolution over an input signal composed of several input
@@ -432,6 +443,10 @@ class Conv2d(_ConvNd):
         ``padding='valid'`` is the same as no padding. ``padding='same'`` pads
         the input so the output has the shape as the input. However, this mode
         doesn't support any stride values other than 1.
+    # Note:
+    #     padding='valid' means no padding is applied, resulting in smaller output dimensions.
+    #     padding='same' automatically calculates padding to keep output shape equal to input shape.
+    #     (Constraints: this mode requires stride=1 and dilation=1 to work correctly).
 
     Note:
         This module supports complex data types i.e. ``complex32, complex64, complex128``.
@@ -497,6 +512,12 @@ class Conv2d(_ConvNd):
     """
     )
 
+    # Parameters (參數詳解)
+    # 解釋 __init__ 中的參數意義：
+    # stride (步幅): 控制卷積核滑動的步長。數值越大，輸出尺寸越小（下採樣）。
+    # padding (填充): 'valid': 不填充，輸出會變小。 / 'same': 自動填充使輸出尺寸等於輸入尺寸（但在 stride=1 時才有效）。
+    # dilation (膨脹/空洞): 預設為 1 (標準卷積)。 / 若設為 2，3x3 的 kernel 視野 (Receptive Field) 會變成像 5x5 那麼大，但參數量不變。常用於語意分割 (Semantic Segmentation) 以擴大感受野。
+    # Point: Padding 增加會讓輸出變大；Stride 增加會讓輸出變小；Dilation 增加會讓 Kernel 實際覆蓋範圍變大，導致輸出變小。
     def __init__(
         self,
         in_channels: int,
