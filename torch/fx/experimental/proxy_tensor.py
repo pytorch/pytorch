@@ -3063,7 +3063,7 @@ def get_proxy_mode() -> ProxyTorchDispatchMode | None:
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
     if not (pre_dispatch_mode is None or mode is None):
         raise AssertionError(f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}")
-    return pre_dispatch_mode or mode  # pyrefly: ignore[bad-return]
+    return pre_dispatch_mode or mode
 
 
 def handle_sym_dispatch(
@@ -3150,8 +3150,7 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
     fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-    if fake_mode and fake_mode.shape_env:  # pyrefly: ignore[missing-attribute]
-        # pyrefly: ignore[bad-argument-type]
+    if fake_mode and fake_mode.shape_env:
         if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
             if not isinstance(out_proxy, Proxy):
                 raise AssertionError(f"Expected Proxy, got {out_proxy}")

@@ -172,7 +172,7 @@ class ConstantVariable(VariableTracker):
             container_name = "string" if isinstance(self.value, str) else "bytes"
             arg = validate_sequence_index(tx, arg, container_name)
         return ConstantVariable.create(
-            self.value[arg.as_python_constant()],
+            self.value[arg.as_python_constant()],  # pyrefly: ignore[bad-index]
         )
 
     def sq_item_impl(
