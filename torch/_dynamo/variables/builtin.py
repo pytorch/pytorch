@@ -1115,20 +1115,8 @@ class BuiltinVariable(VariableTracker):
                 # If the result is used in a tensor operation and automatic_dynamic_shapes
                 # kicks in (making source vars symbolic), ComputedLazyCache.realize()
                 # will detect this and re-apply the operation symbolically.
-                # Check for a specific handler before creating handle_lazy_constant.
-                # This is more efficient than checking at runtime.
-                handler_name = (
-                    f"call_{fn.__name__}" if hasattr(fn, "__name__") else None
-                )
-                specific_handler = (
-                    getattr(obj, handler_name)
-                    if handler_name and hasattr(obj, handler_name)
-                    else None
-                )
 
-                def handle_lazy_constant(
-                    tx, args, kwargs, specific_handler=specific_handler
-                ):
+                def handle_lazy_constant(tx, args, kwargs):
                     from .. import config
 
                     # Check if we have a reconstruct_fn for this operation.
@@ -1136,14 +1124,9 @@ class BuiltinVariable(VariableTracker):
                     # the result at runtime (via bytecode generation).
                     reconstruct_fn = _make_binary_op_reconstruct_fn(fn)
                     if reconstruct_fn is None:
-                        # No reconstruct_fn - check if there's a specific handler
-                        # that can work with lazy constants (e.g., call_type uses
-                        # python_type() which only installs TYPE_MATCH guards).
-                        if specific_handler is not None:
-                            result = specific_handler(tx, *args, **kwargs)
-                            if result is not None:
-                                return result
-                        # Fall back to realizing lazy args
+                        # No reconstruct_fn - fall back to realizing lazy args.
+                        # Note: Special handlers like call_isinstance and call_type
+                        # are already handled above in the first_arg_is_lazy path.
                         return obj.call_function(
                             tx,
                             [v.realize() for v in args],
