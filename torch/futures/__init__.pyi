@@ -10,7 +10,6 @@ __all__ = ["Future", "collect_all", "wait_all"]
 T = TypeVar("T")
 S = TypeVar("S")
 
-
 class Future(_CFuture[T], Generic[T]):
     """
     Wrapper around a ``torch._C.Future`` which encapsulates an asynchronous
@@ -28,7 +27,5 @@ class Future(_CFuture[T], Generic[T]):
     def set_result(self, result: T) -> None: ...
     def set_exception(self, result: BaseException) -> None: ...
 
-
 def collect_all(futures: list[Future[T]]) -> Future[list[Future[T]]]: ...
 def wait_all(futures: list[Future[T]]) -> list[T]: ...
-
