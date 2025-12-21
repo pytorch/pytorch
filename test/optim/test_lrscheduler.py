@@ -2129,7 +2129,7 @@ class TestLRScheduler(TestCase):
             self.opt, mode="max", factor=0.5, patience=10
         )
         scheduler_copy.load_state_dict(scheduler.state_dict())
-        for key in scheduler.__dict__:
+        for key in scheduler.__dict__.keys():
             if key not in {"optimizer", "is_better"}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
@@ -2140,7 +2140,7 @@ class TestLRScheduler(TestCase):
 
         scheduler_copy = LambdaLR(self.opt, lr_lambda=lambda x: x)
         scheduler_copy.load_state_dict(state)
-        for key in scheduler.__dict__:
+        for key in scheduler.__dict__.keys():
             if key not in {"optimizer", "lr_lambdas"}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
@@ -2151,7 +2151,7 @@ class TestLRScheduler(TestCase):
 
         scheduler_copy = LambdaLR(self.opt, lr_lambda=self.LambdaLRTestObject(-1))
         scheduler_copy.load_state_dict(state)
-        for key in scheduler.__dict__:
+        for key in scheduler.__dict__.keys():
             if key not in {"optimizer"}:
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
 
@@ -2176,7 +2176,7 @@ class TestLRScheduler(TestCase):
             scheduler.step()
         scheduler_copy = constr2()
         scheduler_copy.load_state_dict(scheduler.state_dict())
-        for key in scheduler.__dict__:
+        for key in scheduler.__dict__.keys():
             if key != "optimizer":
                 self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
         self.assertEqual(scheduler.get_last_lr(), scheduler_copy.get_last_lr())
@@ -2328,7 +2328,7 @@ class TestLRScheduler(TestCase):
     ):
         for batch_num in range(batch_iterations):
             if verbose:
-                if "momentum" in self.opt.param_groups[0]:
+                if "momentum" in self.opt.param_groups[0].keys():
                     print(
                         "batch{}:\tlr={},momentum={}".format(
                             batch_num,
@@ -2336,7 +2336,7 @@ class TestLRScheduler(TestCase):
                             self.opt.param_groups[0]["momentum"],
                         )
                     )
-                elif use_beta1 and "betas" in self.opt.param_groups[0]:
+                elif use_beta1 and "betas" in self.opt.param_groups[0].keys():
                     print(
                         "batch{}:\tlr={},beta1={}".format(
                             batch_num,
@@ -2364,7 +2364,7 @@ class TestLRScheduler(TestCase):
                     rtol=0,
                 )
 
-                if use_beta1 and "betas" in param_group:
+                if use_beta1 and "betas" in param_group.keys():
                     self.assertEqual(
                         momentum_target[batch_num],
                         param_group["betas"][0],
@@ -2376,7 +2376,7 @@ class TestLRScheduler(TestCase):
                         atol=1e-5,
                         rtol=0,
                     )
-                elif "momentum" in param_group:
+                elif "momentum" in param_group.keys():
                     self.assertEqual(
                         momentum_target[batch_num],
                         param_group["momentum"],
@@ -2678,6 +2678,53 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+    def test_polylr_closed_form_total_iters_zero_division(self):
+        # PolynomialLR with total_iters=0 should not crash in closed form mode.
+        # Older versions of PolynomialLR did not support 'end_lr', so we try
+        # the new signature first and fall back to the old one if needed.
+
+        model = torch.nn.Linear(1, 1)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.1)
+
+        # Try constructor 
+        try:
+            sched = torch.optim.lr_scheduler.PolynomialLR(
+                optimizer,
+                total_iters=0,
+                power=1.0,
+                end_lr=0.0,
+            )
+            expected_end_lr = 0.0
+        except TypeError:
+            # Fallback for older PyTorch versions:
+            # PolynomialLR implicitly decays to 0.0.
+            sched = torch.optim.lr_scheduler.PolynomialLR(
+                optimizer,
+                total_iters=0,
+                power=1.0,
+            )
+            expected_end_lr = 0.0
+
+        # Closed form stepping should not crash with ZeroDivisionError
+        # when total_iters=0.
+        try:
+            with warnings.catch_warnings(record=True):
+                sched.step(epoch=0)
+        except ZeroDivisionError as e:
+            raise AssertionError(
+                "PolynomialLR raised ZeroDivisionError in closed-form mode when "
+                "total_iters=0. The scheduler must clamp safely instead of "
+                "dividing by zero."
+            ) from e
+
+        # LR must remain finite and numeric.
+        lr = optimizer.param_groups[0]["lr"]
+        assert math.isfinite(lr), "PolynomialLR produced non-finite LR."
+
+        # And LR should equal end_lr for total_iters=0.
+        assert abs(lr - expected_end_lr) < 1e-12, (
+            "PolynomialLR(total_iters=0) must return end_lr in closed-form mode."
+        )
 
 instantiate_parametrized_tests(TestLRScheduler)
 
