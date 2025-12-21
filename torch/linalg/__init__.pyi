@@ -1,9 +1,8 @@
 # Stub file for torch.linalg
-from typing import NamedTuple, overload
+from typing import NamedTuple
 
 import torch
 from torch import Tensor
-
 
 # Return type classes
 class SVDResult(NamedTuple):
@@ -11,31 +10,25 @@ class SVDResult(NamedTuple):
     S: Tensor
     Vh: Tensor
 
-
 class EigResult(NamedTuple):
     eigenvalues: Tensor
     eigenvectors: Tensor
-
 
 class EighResult(NamedTuple):
     eigenvalues: Tensor
     eigenvectors: Tensor
 
-
 class QRResult(NamedTuple):
     Q: Tensor
     R: Tensor
-
 
 class LUResult(NamedTuple):
     LU: Tensor
     pivots: Tensor
 
-
 class SlogdetResult(NamedTuple):
     sign: Tensor
     logabsdet: Tensor
-
 
 class LstsqResult(NamedTuple):
     solution: Tensor
@@ -43,11 +36,9 @@ class LstsqResult(NamedTuple):
     rank: Tensor
     singular_values: Tensor
 
-
 class CholeskyResult(NamedTuple):
     L: Tensor
     info: Tensor
-
 
 # Norms
 def norm(
@@ -59,19 +50,15 @@ def norm(
     dtype: torch.dtype | None = None,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def vector_norm(
     input: Tensor,
-    ord: float | int | complex | bool = 2,
+    ord: float | int | complex | bool | None = 2,
     dim: int | tuple[int, ...] | list[int] | None = None,
     keepdim: bool = False,
     *,
     dtype: torch.dtype | None = None,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def matrix_norm(
     input: Tensor,
     ord: float | int | str = "fro",
@@ -82,7 +69,6 @@ def matrix_norm(
     out: Tensor | None = None,
 ) -> Tensor: ...
 
-
 # Decompositions
 def svd(
     input: Tensor,
@@ -91,70 +77,50 @@ def svd(
     driver: str | None = None,
     out: tuple[Tensor, Tensor, Tensor] | None = None,
 ) -> SVDResult: ...
-
-
 def svdvals(
     input: Tensor,
     *,
     driver: str | None = None,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def eig(input: Tensor, *, out: tuple[Tensor, Tensor] | None = None) -> EigResult: ...
-
-
 def eigvals(input: Tensor, *, out: Tensor | None = None) -> Tensor: ...
-
-
 def eigh(
     input: Tensor,
     UPLO: str = "L",
     *,
     out: tuple[Tensor, Tensor] | None = None,
 ) -> EighResult: ...
-
-
 def eigvalsh(
     input: Tensor,
     UPLO: str = "L",
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def qr(
     input: Tensor,
     mode: str = "reduced",
     *,
     out: tuple[Tensor, Tensor] | None = None,
 ) -> QRResult: ...
-
-
 def lu(
     input: Tensor,
     *,
     pivot: bool = True,
     out: tuple[Tensor, Tensor, Tensor] | None = None,
 ) -> tuple[Tensor, Tensor, Tensor]: ...
-
-
 def lu_factor(
     input: Tensor,
     *,
     pivot: bool = True,
     out: tuple[Tensor, Tensor] | None = None,
 ) -> LUResult: ...
-
-
 def cholesky(
     input: Tensor,
     *,
     upper: bool = False,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def cholesky_ex(
     input: Tensor,
     *,
@@ -163,17 +129,12 @@ def cholesky_ex(
     out: tuple[Tensor, Tensor] | None = None,
 ) -> CholeskyResult: ...
 
-
 # Matrix properties
 def det(input: Tensor, *, out: Tensor | None = None) -> Tensor: ...
-
-
-def slogdet(input: Tensor, *, out: tuple[Tensor, Tensor] | None = None) -> SlogdetResult: ...
-
-
+def slogdet(
+    input: Tensor, *, out: tuple[Tensor, Tensor] | None = None
+) -> SlogdetResult: ...
 def logdet(input: Tensor) -> Tensor: ...
-
-
 def matrix_rank(
     input: Tensor,
     *,
@@ -182,34 +143,23 @@ def matrix_rank(
     hermitian: bool = False,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def cond(
     input: Tensor,
     p: float | int | str | None = None,
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def matrix_power(input: Tensor, n: int, *, out: Tensor | None = None) -> Tensor: ...
-
-
 def matrix_exp(input: Tensor) -> Tensor: ...
-
 
 # Inverses and solvers
 def inv(input: Tensor, *, out: Tensor | None = None) -> Tensor: ...
-
-
 def inv_ex(
     input: Tensor,
     *,
     check_errors: bool = False,
     out: tuple[Tensor, Tensor] | None = None,
 ) -> tuple[Tensor, Tensor]: ...
-
-
 def pinv(
     input: Tensor,
     *,
@@ -218,8 +168,6 @@ def pinv(
     hermitian: bool = False,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def solve(
     input: Tensor,
     other: Tensor,
@@ -227,8 +175,6 @@ def solve(
     left: bool = True,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def solve_ex(
     input: Tensor,
     other: Tensor,
@@ -237,8 +183,6 @@ def solve_ex(
     check_errors: bool = False,
     out: tuple[Tensor, Tensor] | None = None,
 ) -> tuple[Tensor, Tensor]: ...
-
-
 def lstsq(
     input: Tensor,
     b: Tensor,
@@ -246,8 +190,6 @@ def lstsq(
     *,
     driver: str | None = None,
 ) -> LstsqResult: ...
-
-
 def solve_triangular(
     input: Tensor,
     B: Tensor,
@@ -257,8 +199,6 @@ def solve_triangular(
     unitriangular: bool = False,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def lu_solve(
     LU: Tensor,
     pivots: Tensor,
@@ -268,8 +208,6 @@ def lu_solve(
     adjoint: bool = False,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def cholesky_solve(
     input: Tensor,
     input2: Tensor,
@@ -278,14 +216,9 @@ def cholesky_solve(
     out: Tensor | None = None,
 ) -> Tensor: ...
 
-
 # Products
 def matmul(input: Tensor, other: Tensor, *, out: Tensor | None = None) -> Tensor: ...
-
-
 def multi_dot(tensors: list[Tensor], *, out: Tensor | None = None) -> Tensor: ...
-
-
 def cross(
     input: Tensor,
     other: Tensor,
@@ -293,27 +226,19 @@ def cross(
     dim: int = -1,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def householder_product(
     input: Tensor,
     tau: Tensor,
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def tensordot(
     a: Tensor,
     b: Tensor,
     dims: int | tuple[list[int], list[int]],
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def tensorinv(input: Tensor, ind: int = 2, *, out: Tensor | None = None) -> Tensor: ...
-
-
 def tensorsolve(
     input: Tensor,
     other: Tensor,
@@ -321,10 +246,7 @@ def tensorsolve(
     *,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
-
 def vander(x: Tensor, N: int | None = None, *, increasing: bool = False) -> Tensor: ...
-
 
 # Misc
 def diagonal(
@@ -334,11 +256,7 @@ def diagonal(
     dim1: int = -2,
     dim2: int = -1,
 ) -> Tensor: ...
-
-
 def trace(input: Tensor) -> Tensor: ...
-
-
 def vecdot(
     x: Tensor,
     y: Tensor,
@@ -346,4 +264,3 @@ def vecdot(
     dim: int = -1,
     out: Tensor | None = None,
 ) -> Tensor: ...
-
