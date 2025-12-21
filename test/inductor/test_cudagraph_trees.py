@@ -320,9 +320,14 @@ if HAS_CUDA_AND_TRITON:
             with capture_stderr() as captured_output:
                 foo(torch.rand([10], device="cuda"), torch.rand([10], device="cuda"))
 
-            FileCheck().check("cudagraph partition due to dynamic shape ops").check(
-                "x + y"
-            ).run(captured_output[0])
+            if config.graph_partition:
+                FileCheck().check("cudagraph partition due to dynamic shape ops").check(
+                    "x + y"
+                ).run(captured_output[0])
+            else:
+                FileCheck().check(
+                    "skipping cudagraphs due to graph with symbolic shapes inputs"
+                ).run(captured_output[0])
 
         @parametrize("backend", ("inductor", "cudagraphs"))
         @torch._dynamo.config.patch("cudagraph_backend_keep_input_mutation", True)
@@ -556,21 +561,28 @@ if HAS_CUDA_AND_TRITON:
             mask = torch.tensor([True, False, True, False], device="cuda")
             values = torch.randn(2, 8, device="cuda")
 
-            # Check that we partition (unsafe op runs inline, cudagraphable parts are partitioned)
-            _, code = run_and_get_code(fn_c, x, mask, values)
-            self.assertGreaterEqual(get_num_partitions(code), 1)
+            if config.graph_partition:
+                # Check that we partition (unsafe op runs inline, cudagraphable parts are partitioned)
+                _, code = run_and_get_code(fn_c, x, mask, values)
+                self.assertGreaterEqual(get_num_partitions(code), 1)
 
-            # Verify correctness
-            for _ in range(3):
-                x = torch.randn(4, 8, device="cuda")
-                mask = torch.tensor([True, False, True, False], device="cuda")
-                values = torch.randn(2, 8, device="cuda")
-                out = fn_c(x, mask, values)
-                expected = fn(x, mask, values)
-                self.assertEqual(out, expected)
+                # Verify correctness
+                for _ in range(3):
+                    x = torch.randn(4, 8, device="cuda")
+                    mask = torch.tensor([True, False, True, False], device="cuda")
+                    values = torch.randn(2, 8, device="cuda")
+                    out = fn_c(x, mask, values)
+                    expected = fn(x, mask, values)
+                    self.assertEqual(out, expected)
 
-            # Should not skip cudagraphs entirely
-            self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+                # Should not skip cudagraphs entirely
+                self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
+            else:
+                # Without partitioning, cudagraphs are skipped due to the unsafe op
+                with capture_stderr() as captured_output:
+                    fn_c(x, mask, values)
+                FileCheck().check("skipping cudagraphs due to").run(captured_output[0])
+                self.assertGreater(counters["inductor"]["cudagraph_skips"], 0)
 
         def test_function_compiled_multiple_times(self):
             def foo(x):
@@ -1401,7 +1413,6 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(samples, samples_compiled)
             self.assertEqual(num_skipped, counters["inductor"]["cudagraph_skips"])
 
-        @skipIfRocm
         def test_checkpointing_resets_persistent_refs(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -1703,7 +1714,6 @@ if HAS_CUDA_AND_TRITON:
             del x
             self.assertEqual(all_live_block_count(), 0)
 
-        @skipIfRocm
         @unittest.skipUnless(IS_X86 and IS_LINUX, "cpp contexts are linux only")
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         def test_workspace_allocation_error(self):
@@ -1728,14 +1738,20 @@ if HAS_CUDA_AND_TRITON:
                 except Exception as e:
                     thrown = True
                     if not IS_ARM64:
+                        # CUDA uses gemm/gemm_internal_cublas, ROCm uses bgemm_internal_cublaslt
                         self.assertTrue(
                             "at::cuda::blas::gemm<float, float>" in str(e)
                             or "at::cuda::blas::gemm_internal_cublas<float, float>"
                             in str(e)
+                            or "at::cuda::blas::bgemm_internal_cublaslt<float, float>"
+                            in str(e)
                         )
+                        # CUDA uses getCurrentCUDABlasHandle/getNewWorkspace,
+                        # ROCm uses getNewCUDABlasLtWorkspace/getCUDABlasLtWorkspace
                         self.assertTrue(
                             "getCurrentCUDABlasHandle" in str(e)
                             or "getNewWorkspace" in str(e)
+                            or "CUDABlasLtWorkspace" in str(e)
                         )
 
                 self.assertTrue(thrown)
@@ -2248,9 +2264,14 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(foo(torch.tensor(3, device="cuda")), 3)
                 self.assertEqual(foo(torch.tensor(6, device="cuda")), 6)
 
-            FileCheck().check("cudagraph partition due to non gpu ops").run(
-                captured_output[0]
-            )
+            if config.graph_partition:
+                FileCheck().check("cudagraph partition due to non gpu ops").run(
+                    captured_output[0]
+                )
+            else:
+                FileCheck().check(
+                    "skipping cudagraphs due to disabling cudagraphs due to incompatible op"
+                ).run(captured_output[0])
 
         @torch._dynamo.config.patch("compiled_autograd", True)
         def test_compiled_autograd_static_input_params(self):
@@ -2287,9 +2308,14 @@ if HAS_CUDA_AND_TRITON:
                     foo(torch.tensor([1, 0, 0], device="cuda")), torch.tensor([[0]])
                 )
 
-            FileCheck().check("cudagraph partition due to unbacked binding ops").check(
-                "foo"
-            ).run(captured_output[0])
+            if config.graph_partition:
+                FileCheck().check(
+                    "cudagraph partition due to unbacked binding ops"
+                ).check("foo").run(captured_output[0])
+            else:
+                FileCheck().check(
+                    "skipping cudagraphs due to disabling cudagraphs due to incompatible op"
+                ).run(captured_output[0])
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         def test_incompatible_cudagraph_ops_nonzero_graph_breaks(self):
@@ -2302,7 +2328,11 @@ if HAS_CUDA_AND_TRITON:
             foo(torch.tensor([1, 0, 2], device="cuda"))
             foo(torch.tensor([1, 0, 0], device="cuda"))
 
-            self.assertEqual(counters["inductor"]["cudagraph_partitions"], 9)
+            if config.graph_partition:
+                self.assertEqual(counters["inductor"]["cudagraph_partitions"], 9)
+            else:
+                # Without graph partitioning, cudagraphs are skipped entirely
+                self.assertEqual(counters["inductor"]["cudagraph_skips"], 3)
 
         @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
         def test_incompatible_cudagraph_ops_nonzero_backend(self):
@@ -4227,7 +4257,11 @@ if HAS_CUDA_AND_TRITON:
                         "def triton_poi_fused_add_", 1, exactly=True
                     ).run(code[0])
 
+        @unittest.skipUnless(
+            config.graph_partition, "Test requires graph_partition to be enabled"
+        )
         @config.patch("graph_partition", True)
+        @skipIfRocm
         def test_graph_partition_user_defined_triton_kernel_reuse(self):
             from torch.testing._internal.triton_utils import add_kernel
 

@@ -17,17 +17,14 @@ from triton.experimental.gluon.language.nvidia.blackwell import (
     fence_async_shared,
 )
 
-import triton.profiler.language as pl
-
-
-{%- if not USE_UPDATE_TENSOR_DESCRIPTOR %}
-@gluon.jit
-def to_ragged_indices(slice_off, slice_size, row):
-    billion = 0x40000000  # == 2**30
-    x = billion - slice_size + row
-    y = slice_off + slice_size
-    return billion, y, x
+{%- if USE_RAGGED_TENSOR_DESCRIPTOR %}
+from triton.experimental.gluon.tools.ragged_tma import (
+    create_ragged_descriptor_device_2d,
+    store_ragged,
+)
 {%- endif %}
+
+import triton.profiler.language as pl
 
 
 @aggregate
@@ -353,23 +350,11 @@ def store_partition(pargs: PartitionArgs):
         num_n_tiles = gl.cdiv(n_size, BLOCK_N)
         num_tiles = num_m_tiles * num_n_tiles
 
-{%- if USE_UPDATE_TENSOR_DESCRIPTOR %}
-        if num_tiles > 0:
-            with pl.scope("store_update_descriptor"):
-                tma.update_tensor_descriptor(
-                    c_desc,
-                    base=pargs.c_ptr
-                    + m_start_offset * pargs.c_stride_0
-                    + n_start_offset * pargs.c_stride_1,
-                    shape=[m_size, n_size],
-                )
-{%- endif %}
-
         while tidx >= iterated_tiles and tidx < iterated_tiles + num_tiles:
             gidx = tidx - iterated_tiles
             tile_m_idx = gidx % num_m_tiles
             tile_n_idx = gidx // num_m_tiles
-{%- if USE_UPDATE_TENSOR_DESCRIPTOR %}
+{%- if not USE_RAGGED_TENSOR_DESCRIPTOR %}
             m_offset = tile_m_idx * BLOCK_M
             n_offset = tile_n_idx * BLOCK_N
  {%- else %}
@@ -409,12 +394,12 @@ def store_partition(pargs: PartitionArgs):
 
             with pl.scope("store_fence_and_tma"):
                 fence_async_shared()
-{%- if USE_UPDATE_TENSOR_DESCRIPTOR %}
+{%- if not USE_RAGGED_TENSOR_DESCRIPTOR %}
                 tma.async_copy_shared_to_global(c_desc, [m_offset, n_offset], c_smem)
 {%- else %}
-                c0, c1, c2 = to_ragged_indices(m_start_offset, m_size, m_tile_offset)
+                # Reshape to 4D for ragged descriptor and use store_ragged
                 c_smem_4d = c_smem.reshape([1, 1, BLOCK_M, BLOCK_N])
-                tma.async_copy_shared_to_global(c_desc, [c0, c1, c2, n_offset], c_smem_4d)
+                store_ragged(c_desc, m_start_offset, m_size, [m_tile_offset, n_offset], c_smem_4d, ragged_dim=0)
 {%- endif %}
 
             tidx += pargs.NUM_BLOCKS
@@ -480,7 +465,7 @@ def grouped_mm_kernel(
         layout=b_layout,
     )
 
-{%- if USE_UPDATE_TENSOR_DESCRIPTOR %}
+{%- if not USE_RAGGED_TENSOR_DESCRIPTOR %}
     c_desc = tma.make_tensor_descriptor(
         c_ptr,
         shape=[M, N],
@@ -489,17 +474,14 @@ def grouped_mm_kernel(
         layout=c_layout,
     )
 {%- else %}
-    billion: gl.constexpr = 0x40000000  # == 2**30
-    max_int: gl.constexpr = 0x7fff0000
-
-    # C tensor ragged descriptor: prepend 2 transformation dimensions
-    # Use 4D layout to match the 4D block_shape
-    c_desc = tma.make_tensor_descriptor(
+    # C tensor ragged descriptor using ragged_tma utilities
+    c_desc = create_ragged_descriptor_device_2d(
         c_ptr,
-        shape=[max_int, max_int, billion, N],
-        strides=[2**34 - c_stride_0, c_stride_0, c_stride_0, c_stride_1],
-        block_shape=[1, 1, BLOCK_M, BLOCK_N],
+        dim0=M, dim1=N,
+        stride0=c_stride_0, stride1=c_stride_1,
+        block0=BLOCK_M, block1=BLOCK_N,
         layout=c_layout_ragged,
+        ragged_dim=0,
     )
 {%- endif %}
 

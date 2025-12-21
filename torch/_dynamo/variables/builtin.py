@@ -880,10 +880,17 @@ class BuiltinVariable(VariableTracker):
                         return ConstantVariable.create(op.__name__ != "is_")
                     if left is right:
                         return ConstantVariable.create(op(left, right))
-                    if (
-                        istype(left, variables.ExceptionVariable)
-                        and istype(right, variables.ExceptionVariable)
-                        and left.exc_type is not right.exc_type
+
+                    # In CPython, exceptions compare equal only when they are the same object
+                    # (identity-based). In Dynamo, a single exception object cannot be represented
+                    # by multiple distinct ExceptionVariables. Therefore, the following scenarios
+                    # are impossible:
+                    # + is(a, b) == True but should be False => impossible, since a and b would be
+                    #   the same underlying object.
+                    # + is(a, b) == False but should be True => impossible, since Dynamo cannot
+                    #   create two different ExceptionVariables for the same exception instance.
+                    if istype(left, variables.ExceptionVariable) and istype(
+                        right, variables.ExceptionVariable
                     ):
                         return ConstantVariable.create(op(left, right))
                     return None
@@ -1018,7 +1025,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if inspect.isclass(fn) and (
-            issubclass(fn, Exception)
+            issubclass(fn, BaseException)
             # GeneratorExit doesn't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
@@ -1780,6 +1787,7 @@ class BuiltinVariable(VariableTracker):
                 for i in [a, b]
             ):
                 if any(isinstance(val, FakeItemVariable) for val in [a, b]):
+                    # type: ignore[arg-type]
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
                 if b.is_python_constant():
@@ -1797,7 +1805,9 @@ class BuiltinVariable(VariableTracker):
                     if isinstance(x, variables.UnspecializedPythonVariable)
                 )
                 return variables.UnspecializedPythonVariable.from_tensor_variable(
-                    result, raw_res, need_unwrap
+                    result,  # type: ignore[arg-type]
+                    raw_res,
+                    need_unwrap,
                 )
             # otherwise return tensor
             else:
@@ -2654,6 +2664,7 @@ class BuiltinVariable(VariableTracker):
                     ],
                 )
             if obj.is_tensor():
+                # pyrefly: ignore[missing-attribute]
                 fake_val = obj.as_proxy().node.meta["example_value"]
                 if (
                     isinstance(fake_val, torch.Tensor)
@@ -2723,6 +2734,7 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
+                variables.TracebackVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})

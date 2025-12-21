@@ -1359,7 +1359,7 @@ class UserMethodVariable(UserFunctionVariable):
         self,
         fn: Callable[..., Any],
         obj: VariableTracker,
-        source_fn: Callable[..., Any] | None = None,
+        source_fn: Source | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(fn=fn, **kwargs)  # type: ignore[arg-type]
@@ -1878,7 +1878,17 @@ class SkipFunctionVariable(VariableTracker):
                 )
             )
         elif self.value is torch._dynamo.step_unsupported:
-            raise StepUnsupported
+            try:
+                unimplemented(
+                    gb_type="Call to `torch._dynamo.step_unsupported()`",
+                    context="",
+                    explanation="User-inserted step_unsupported.",
+                    hints=[
+                        "Remove the `torch._dynamo.step_unsupported()` call.",
+                    ],
+                )
+            except Unsupported as e:
+                raise StepUnsupported(e.msg) from None
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
@@ -2545,16 +2555,6 @@ class PolyfilledFunctionVariable(VariableTracker):
         return self.fn
 
 
-class TracebackVariable(VariableTracker):
-    # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(  # type: ignore[empty-body]
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker: ...
-
-
 class SysFunctionVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -2564,12 +2564,8 @@ class SysFunctionVariable(VariableTracker):
         if len(tx.exn_vt_stack):
             exn = tx.exn_vt_stack[-1]
             typ = exn.exc_type  # type: ignore[union-attr]
-            tb = None
-            items = [
-                VariableTracker.build(tx, typ),
-                exn,
-                VariableTracker.build(tx, tb),
-            ]
+            tb = exn.var_getattr(tx, "__traceback__")
+            items = [VariableTracker.build(tx, typ), exn, tb]
         else:
             items = [
                 variables.ConstantVariable(None),

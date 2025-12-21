@@ -167,7 +167,7 @@ class Unsupported(TorchDynamoException):
         msg: str,
         *,
         case_name: Optional[str] = None,
-        real_stack: None | StackSummary = None,
+        real_stack: StackSummary | None = None,
     ) -> None:
         super().__init__(msg)
         if not real_stack:
@@ -265,7 +265,9 @@ class RecompileLimitExceeded(Unsupported):
 
 # debug exception thrown when tracing torch._dynamo.step_unsupported()
 class StepUnsupported(TorchDynamoException):
-    def __init__(self) -> None:
+    def __init__(self, msg: str) -> None:
+        super().__init__(msg)
+        self.msg = msg
         self.real_stack = torch._guards.TracingContext.extract_stack()
 
 
@@ -396,11 +398,14 @@ def raise_observed_exception(
     args: Optional[list[Any]] = None,
     kwargs: Optional[dict[str, Any]] = None,
 ) -> NoReturn:
+    from .symbolic_convert import ExceptionVals
     from .variables import BuiltinVariable
 
     # CPython here raises an exception. Since there is no python code, we have to manually setup the exception
     # stack and raise the exception.
     exception_vt = BuiltinVariable(exc_type).call_function(tx, args or [], kwargs or {})  # type: ignore[arg-type]
+    assert isinstance(exception_vt, ExceptionVals)
+    tx._attach_traceback_to_exception(exception_vt)
     tx.exn_vt_stack.set_current_exception(exception_vt)  # type: ignore[arg-type]
     raised_exc = get_dynamo_observed_exception(exc_type)
     # Store the original exception arguments for better error messages
@@ -502,12 +507,11 @@ def format_graph_break_message(
   Explanation: {explanation}
 {hints_str}
 
-  Developer debug context: {context}
-"""
+  Developer debug context: {context}"""
     documentation_link = get_gbid_documentation_link(gb_type)
 
     if documentation_link:
-        msg += f"\n For more details about this graph break, please visit: {documentation_link}"
+        msg += f"\n\n For more details about this graph break, please visit: {documentation_link}"
 
     return msg
 

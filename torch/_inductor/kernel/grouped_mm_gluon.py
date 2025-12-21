@@ -107,7 +107,7 @@ def compute_stages(
     return variants[0] if variants else (1, 1)
 
 
-def get_grouped_mm_kernel(use_update_tensor_descriptor=False):
+def get_grouped_mm_kernel(use_ragged_tensor_descriptor=True):
     import importlib.util
     import os
     import sys
@@ -127,26 +127,27 @@ def get_grouped_mm_kernel(use_update_tensor_descriptor=False):
         make_tensor_descriptor,
     )
 
-    # Check if update_tensor_descriptor is available
-    has_update_tensor_descriptor = False
+    # Check if ragged TMA utilities are available
+    has_ragged_tma = False
     try:
-        from triton.experimental.gluon.language.nvidia.blackwell.tma import (
-            update_tensor_descriptor,
+        from triton.experimental.gluon.tools.ragged_tma import (
+            create_ragged_descriptor_device_2d,
+            store_ragged,
         )
-        has_update_tensor_descriptor = True
+
+        has_ragged_tma = True
     except ImportError:
         pass
 
-    # Use the specified mode if feature is available, otherwise fall
-    # back to ragged
-    USE_UPDATE_TENSOR_DESCRIPTOR = use_update_tensor_descriptor and has_update_tensor_descriptor
+    # Use ragged TMA if requested and available, otherwise fall back to update_tensor_descriptor
+    USE_RAGGED_TENSOR_DESCRIPTOR = use_ragged_tensor_descriptor and has_ragged_tma
 
     # Load the template from the same directory as this script
     template_dir = Path(__file__).parent
     env = Environment(loader=FileSystemLoader(template_dir))
     template = env.get_template("grouped_mm_kernel_gluon.jinja")
     context = {
-        "USE_UPDATE_TENSOR_DESCRIPTOR": USE_UPDATE_TENSOR_DESCRIPTOR,
+        "USE_RAGGED_TENSOR_DESCRIPTOR": USE_RAGGED_TENSOR_DESCRIPTOR,
     }
     rendered = template.render(**context)
 
@@ -166,8 +167,8 @@ def get_grouped_mm_kernel(use_update_tensor_descriptor=False):
     return mod.grouped_mm_kernel
 
 
-grouped_mm_kernel_ragged = get_grouped_mm_kernel(use_update_tensor_descriptor=False)
-grouped_mm_kernel_update = get_grouped_mm_kernel(use_update_tensor_descriptor=True)
+grouped_mm_kernel_ragged = get_grouped_mm_kernel(use_ragged_tensor_descriptor=True)
+grouped_mm_kernel_default = get_grouped_mm_kernel(use_ragged_tensor_descriptor=False)
 
 
 def grouped_mm(
@@ -222,7 +223,9 @@ def grouped_mm(
     b_layout = gl.NVMMASharedLayout.get_default_for(B_BLOCK_SHAPE, gl.bfloat16)
     c_layout = gl.NVMMASharedLayout.get_default_for([BLOCK_M, BLOCK_N], gl.bfloat16)
     # 4D layout for ragged descriptor path
-    c_layout_ragged = gl.NVMMASharedLayout.get_default_for([1, 1, BLOCK_M, BLOCK_N], gl.bfloat16)
+    c_layout_ragged = gl.NVMMASharedLayout.get_default_for(
+        [1, 1, BLOCK_M, BLOCK_N], gl.bfloat16
+    )
 
     M, N = C.shape[0], C.shape[1]
     K = A.shape[1]
@@ -413,6 +416,7 @@ def autotune_grouped_mm(A, B, C, offs, configs, flops, kernel):
         ) = config
 
         try:
+
             def make_fn(
                 BLOCK_M,
                 BLOCK_N,
@@ -669,18 +673,61 @@ if __name__ == "__main__":
         # fixme: remove this!
         us_cute = None
 
+        print("Autotuning Gluon grouped_mm (default)...")
+        best_ms_default, best_config_default, best_fn_default = autotune_grouped_mm(
+            A, B, C, offs, configs, flops, grouped_mm_kernel_default
+        )
+
         print("Autotuning Gluon grouped_mm (ragged TMA)...")
         best_ms_ragged, best_config_ragged, best_fn_ragged = autotune_grouped_mm(
             A, B, C, offs, configs, flops, grouped_mm_kernel_ragged
         )
 
-        print("Autotuning Gluon grouped_mm (update_tensor_descriptor)...")
-        best_ms_update, best_config_update, best_fn_update = autotune_grouped_mm(
-            A, B, C, offs, configs, flops, grouped_mm_kernel_update
-        )
-
+        us_gluon_default = float("inf")
         us_gluon_ragged = float("inf")
-        us_gluon_update = float("inf")
+
+        if best_config_default is not None:
+            (
+                BLOCK_M,
+                BLOCK_N,
+                BLOCK_K,
+                num_load_buffers,
+                num_acc_buffers,
+                num_load_warps,
+                num_compute_warps,
+                num_store_warps,
+                num_load_thread_registers,
+                num_compute_thread_registers,
+                maxnreg,
+                occupancy,
+            ) = best_config_default
+
+            us_gluon_default = best_ms_default * 1e3
+            tflops_per_sec = flops * 1e-12 / (us_gluon_default * 1e-6)
+            print(
+                f"{"Gluon grouped_mm (default)":<36} {us_gluon_default:>9.2f} us {tflops_per_sec:>8.2f} TFLOPS"
+            )
+
+            # Print config
+            print(
+                f"  Best config: BLOCK_M={BLOCK_M}, BLOCK_N={BLOCK_N}, BLOCK_K={BLOCK_K}, "
+                f"num_load_buffers={num_load_buffers}, num_acc_buffers={num_acc_buffers}, num_load_warps={num_load_warps}, num_compute_warps={num_compute_warps}, num_store_warps={num_store_warps}, num_load_thread_registers={num_load_thread_registers}, num_compute_thread_registers={num_compute_thread_registers}, maxnreg={maxnreg}, occupancy={occupancy}"
+            )
+
+            # Verify correctness with best config
+            try:
+                C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
+                best_fn_default()
+                torch.testing.assert_close(C, C_ref, rtol=1e-2, atol=1e-2)
+                print("  ✓ Correctness check passed")
+            except AssertionError:
+                print("  ✗ Correctness check FAILED")
+            finally:
+                if "C_ref" in locals():
+                    del C_ref
+        else:
+            us_gluon_default = None
+            print(f"{"Gluon grouped_mm (default)":<36} No valid config found")
 
         if best_config_ragged is not None:
             (
@@ -725,49 +772,6 @@ if __name__ == "__main__":
             us_gluon_ragged = None
             print(f"{"Gluon grouped_mm (ragged)":<36} No valid config found")
 
-        if best_config_update is not None:
-            (
-                BLOCK_M,
-                BLOCK_N,
-                BLOCK_K,
-                num_load_buffers,
-                num_acc_buffers,
-                num_load_warps,
-                num_compute_warps,
-                num_store_warps,
-                num_load_thread_registers,
-                num_compute_thread_registers,
-                maxnreg,
-                occupancy,
-            ) = best_config_update
-
-            us_gluon_update = best_ms_update * 1e3
-            tflops_per_sec = flops * 1e-12 / (us_gluon_update * 1e-6)
-            print(
-                f"{"Gluon grouped_mm (update_desc)":<36} {us_gluon_update:>9.2f} us {tflops_per_sec:>8.2f} TFLOPS"
-            )
-
-            # Print config
-            print(
-                f"  Best config: BLOCK_M={BLOCK_M}, BLOCK_N={BLOCK_N}, BLOCK_K={BLOCK_K}, "
-                f"num_load_buffers={num_load_buffers}, num_acc_buffers={num_acc_buffers}, num_load_warps={num_load_warps}, num_compute_warps={num_compute_warps}, num_store_warps={num_store_warps}, num_load_thread_registers={num_load_thread_registers}, num_compute_thread_registers={num_compute_thread_registers}, maxnreg={maxnreg}, occupancy={occupancy}"
-            )
-
-            # Verify correctness with best config
-            try:
-                C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
-                best_fn_update()
-                torch.testing.assert_close(C, C_ref, rtol=1e-2, atol=1e-2)
-                print("  ✓ Correctness check passed")
-            except AssertionError:
-                print("  ✗ Correctness check FAILED")
-            finally:
-                if "C_ref" in locals():
-                    del C_ref
-        else:
-            us_gluon_update = None
-            print(f"{"Gluon grouped_mm (update_desc)":<36} No valid config found")
-
         print()
 
         # Clean up GPU memory before next iteration
@@ -786,18 +790,18 @@ if __name__ == "__main__":
             result["CuTe latency (us)"] = us_cute
         if us_triton is not None:
             result["Triton latency (us)"] = us_triton
+        if us_gluon_default is not None:
+            result["Gluon (default) latency (us)"] = us_gluon_default
         if us_gluon_ragged is not None:
             result["Gluon (ragged) latency (us)"] = us_gluon_ragged
-        if us_gluon_update is not None:
-            result["Gluon (update) latency (us)"] = us_gluon_update
         if us_cute is not None:
             result["CuTe speedup"] = us_cutlass / us_cute
         if us_triton is not None:
             result["Triton speedup"] = us_cutlass / us_triton
+        if us_gluon_default is not None:
+            result["Gluon (default) speedup"] = us_cutlass / us_gluon_default
         if us_gluon_ragged is not None:
             result["Gluon (ragged) speedup"] = us_cutlass / us_gluon_ragged
-        if us_gluon_update is not None:
-            result["Gluon (update) speedup"] = us_cutlass / us_gluon_update
         results.append(result)
 
     df = pd.DataFrame(results)
