@@ -31,6 +31,8 @@ struct NamespaceBase {
   PyObject* base_count;
 };
 
+static int NamespaceBase_clear(NamespaceBase* self);
+
 static PyObject* NamespaceBase_new(
     PyTypeObject* type,
     PyObject* args,
@@ -50,15 +52,22 @@ static int NamespaceBase_init_fn(
     PyObject* args,
     PyObject* kwds) {
   self->obj_to_name = PyDict_New();
-  if (!self->obj_to_name)
-    return -1;
+  if (!self->obj_to_name) {
+    goto fail;
+  }
   self->used_names = PySet_New(nullptr);
-  if (!self->used_names)
-    return -1;
+  if (!self->used_names) {
+    goto fail;
+  }
   self->base_count = PyDict_New();
-  if (!self->base_count)
-    return -1;
+  if (!self->base_count) {
+    goto fail;
+  }
   return 0;
+
+fail:
+  NamespaceBase_clear(self);
+  return -1;
 }
 
 static int NamespaceBase_traverse(
