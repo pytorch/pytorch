@@ -96,7 +96,6 @@ class MultiUserConvOp(nn.Module):
 class EfficientConvBNEvalTemplate(TestCase):
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
-    @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
     def test_functional_batch_norm_defaults(self):
         class Model(torch.nn.Module):
             def forward(self, x, mean, var):
