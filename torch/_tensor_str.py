@@ -20,6 +20,22 @@ class __PrinterOptions:
 
 PRINT_OPTS = __PrinterOptions()
 
+_UNSUPPORTED_PRINT_DTYPES = {
+    getattr(torch, "float4_e2m1fn_x2", None),
+}
+
+# Add uint1..7 and int1..7
+for i in range(1, 8):
+    _UNSUPPORTED_PRINT_DTYPES.add(getattr(torch, f"uint{i}", None))
+    _UNSUPPORTED_PRINT_DTYPES.add(getattr(torch, f"int{i}", None))
+
+# Add likely 'bits' types (common names for sub-byte bit tensors)
+for bit_type in ["bits1x8", "bits2x4", "bits4x2", "bits8", "bits16"]:
+    _UNSUPPORTED_PRINT_DTYPES.add(getattr(torch, bit_type, None))
+
+# Clean up None values (for types not found in this PyTorch version)
+_UNSUPPORTED_PRINT_DTYPES.discard(None)
+
 
 # We could use **kwargs, but this will give better docs
 def set_printoptions(
@@ -143,12 +159,9 @@ class _Formatter:
                 self.max_width = max(self.max_width, len(value_str))
 
         else:
-            if tensor.dtype == torch.float4_e2m1fn_x2:  # type: ignore[attr-defined]
+            if tensor.dtype in _UNSUPPORTED_PRINT_DTYPES:  # type: ignore[attr-defined]
                 # torch.float4_e2m1fn_x2 is special and does not support the casts necessary
-                # to print it, we choose to display the uint8 representation here for
-                # convenience of being able to print a tensor.
-                # TODO(#146647): extend this to other dtypes without casts defined, such
-                # as the bits, uint1..7 and int1..7 dtypes.
+                
                 tensor_view = tensor_view.view(torch.uint8)
 
             nonzero_finite_vals = torch.masked_select(
