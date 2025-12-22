@@ -143,7 +143,7 @@ struct OptionalStreamGuard {
   }
 
  private:
-  c10::impl::InlineOptionalStreamGuard<impl::VirtualGuardImpl> guard_{};
+  c10::impl::InlineOptionalStreamGuard<impl::VirtualGuardImpl> guard_;
 };
 
 /**

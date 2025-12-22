@@ -17,7 +17,7 @@ struct TableState {
     out << "cfa = " << self.cfa << "; ";
     for (auto r : c10::irange(self.registers.size())) {
       if (self.registers.at(r).kind != A_UNDEFINED) {
-        out << "r" << r << " = " << self.registers.at(r) << "; ";
+        out << 'r' << r << " = " << self.registers.at(r) << "; ";
       }
     }
     return out;
@@ -57,7 +57,7 @@ struct FDE {
       throw UnwindError("unsupported 'eh' augmentation string");
     }
     code_alignment_factor_ = static_cast<int64_t>(LC.readULEB128());
-    data_alignment_factor_ = static_cast<int64_t>(LC.readSLEB128());
+    data_alignment_factor_ = LC.readSLEB128();
     if (version == 1) {
       ra_register_ = LC.read<uint8_t>();
     } else {
@@ -110,21 +110,21 @@ struct FDE {
     auto previous_pc = current_pc_;
     current_pc_ += amount;
     if (LOG) {
-      (*out_) << (void*)(previous_pc - load_bias_) << "-"
-              << (void*)(current_pc_ - load_bias_) << ": " << state() << "\n";
+      (*out_) << (void*)(previous_pc - load_bias_) << '-'
+              << (void*)(current_pc_ - load_bias_) << ": " << state() << '\n';
     }
   }
 
   void advance_loc(int64_t amount) {
     if (LOG) {
-      (*out_) << "advance_loc " << amount << "\n";
+      (*out_) << "advance_loc " << amount << '\n';
     }
     advance_raw(amount * code_alignment_factor_);
   }
 
   void offset(int64_t reg, int64_t offset) {
     if (LOG) {
-      (*out_) << "offset " << reg << " " << offset << "\n";
+      (*out_) << "offset " << reg << ' ' << offset << '\n';
     }
     if (reg > (int64_t)state().registers.size()) {
       if (LOG) {
@@ -138,7 +138,7 @@ struct FDE {
 
   void restore(int64_t reg) {
     if (LOG) {
-      (*out_) << "restore " << reg << "\n";
+      (*out_) << "restore " << reg << '\n';
     }
     if (reg > (int64_t)state().registers.size()) {
       if (LOG) {
@@ -151,7 +151,7 @@ struct FDE {
 
   void def_cfa(int64_t reg, int64_t off) {
     if (LOG) {
-      (*out_) << "def_cfa " << reg << " " << off << "\n";
+      (*out_) << "def_cfa " << reg << ' ' << off << '\n';
     }
     last_reg_ = reg;
     last_offset_ = off;
@@ -179,13 +179,13 @@ struct FDE {
 
   void undefined(int64_t reg) {
     if (LOG) {
-      (*out_) << "undefined " << reg << "\n";
+      (*out_) << "undefined " << reg << '\n';
     }
     state().registers.at(reg) = Action::undefined();
   }
   void register_(int64_t reg, int64_t rhs_reg) {
     if (LOG) {
-      (*out_) << "register " << reg << " " << rhs_reg << "\n";
+      (*out_) << "register " << reg << ' ' << rhs_reg << '\n';
     }
     state().registers.at(reg) =
         Action::regPlusData(static_cast<int32_t>(reg), 0);
@@ -214,7 +214,7 @@ struct FDE {
     if (LOG) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
       (*out_) << "readUpTo " << (void*)addr << " for " << library_name_
-              << " at " << (void*)load_bias_ << "\n";
+              << " at " << (void*)load_bias_ << '\n';
     }
     state_stack_.emplace_back();
     current_pc_ = low_pc_;
@@ -245,8 +245,8 @@ struct FDE {
   }
 
   void dumpAddr2Line() {
-    std::cout << "addr2line -f -e " << library_name_ << " "
-              << (void*)(low_pc_ - load_bias_) << "\n";
+    std::cout << "addr2line -f -e " << library_name_ << ' '
+              << (void*)(low_pc_ - load_bias_) << '\n';
   }
 
   void readInstruction(Lexer& L) {

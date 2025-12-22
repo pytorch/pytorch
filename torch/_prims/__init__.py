@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import operator
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from enum import Enum
 from functools import partial, reduce
-from typing import Callable, Optional, Union
+from typing import Optional, Union
 
 import torch
 import torch._prims_common as utils
@@ -145,7 +145,6 @@ __all__ = [
     "conj",
     "expand_dims",
     "slice",
-    "slice_in_dim",  # implemented using slice -- make this a ref?
     "split_dim",
     "squeeze",
     "transpose",
@@ -222,12 +221,12 @@ __all__ = [
 
 
 def TensorMeta(
-    tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
+    tensorlike: NumberType | torch.Tensor | None = None,
     *,
-    shape: Optional[ShapeType] = None,
-    strides: Optional[StrideType] = None,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[Union[torch.device, str]] = None,
+    shape: ShapeType | None = None,
+    strides: StrideType | None = None,
+    dtype: torch.dtype | None = None,
+    device: torch.device | str | None = None,
 ):
     if isinstance(tensorlike, Number):
         assert not shape and (shape is None or isinstance(shape, Sequence))
@@ -267,11 +266,11 @@ def TensorMeta(
 def _make_prim(
     *,
     schema: str,
-    return_type: Union[RETURN_TYPE, tuple[RETURN_TYPE, ...]],
+    return_type: RETURN_TYPE | tuple[RETURN_TYPE, ...],
     meta: Callable,
     impl_aten: Callable,
     doc: str,
-    tags: Optional[Sequence[torch.Tag]] = None,
+    tags: Sequence[torch.Tag] | None = None,
     use_old_custom_ops_api: bool = False,
     register_conj_neg_fallthrough: bool = False,
 ):
@@ -353,12 +352,14 @@ def _make_prim(
 
     from torch._subclasses.fake_tensor import contains_tensor_types
 
-    if not any(contains_tensor_types(a.type) for a in _prim._schema.arguments) or str(
-        _prim
-    ) in [
-        # See https://github.com/pytorch/pytorch/issues/103532
-        "prims.device_put.default"
-    ]:
+    if (
+        not any(contains_tensor_types(a.type) for a in _prim._schema.arguments)
+        or str(
+            _prim
+            # See https://github.com/pytorch/pytorch/issues/103532
+        )
+        == "prims.device_put.default"
+    ):
         prim_backend_select_impl.impl(name, _backend_select_impl)
 
     for p in (_prim_packet, _prim):
@@ -384,7 +385,7 @@ class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
 def _prim_elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
-    args_with_fixed_dtypes: Optional[tuple[TensorLikeType, ...]] = None,
+    args_with_fixed_dtypes: tuple[TensorLikeType, ...] | None = None,
 ) -> FakeTensor:
     """
     Meta function for elementwise operations that produce outputs in the same dtype
@@ -404,7 +405,7 @@ def _prim_elementwise_meta(
     utils.check_same_device(*args_, allow_cpu_scalar_tensors=True)
     utils.check_same_shape(*args_, allow_cpu_scalar_tensors=True)
 
-    l2p_perm = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
+    l2p_perm, _ = utils.compute_elementwise_output_logical_to_physical_perm(*args_)
     shape = utils.extract_shape(*args_, allow_cpu_scalar_tensors=True)
 
     # Acquires the dtype
@@ -426,6 +427,7 @@ def _prim_elementwise_meta(
     # Acquires the device (if it exists) or number
     device = None
     number = None
+    # pyrefly: ignore [bad-assignment]
     for arg in args_:
         if isinstance(arg, TensorLike):
             if utils.is_cpu_scalar_tensor(arg):
@@ -445,9 +447,7 @@ def _prim_elementwise_meta(
     # (but getting it wrong will cause too many casts to be inserted in traces!)
     if device is not None:
         assert dtype is not None
-        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.DEFAULT:
-            dtype = dtype
-        elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
+        if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
             dtype = torch.bool
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
             if utils.is_integer_dtype(dtype) or utils.is_boolean_dtype(dtype):
@@ -455,8 +455,6 @@ def _prim_elementwise_meta(
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.COMPLEX_TO_FLOAT:
             if utils.is_complex_dtype(dtype):
                 dtype = utils.corresponding_real_dtype(dtype)
-            else:
-                dtype = dtype
 
         assert shape is not None
         return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
@@ -692,16 +690,22 @@ def _clone_meta(
             device=input.device,
             memory_format=memory_format,
         )
+    else:
+        # Match eager behavior by preserving strides for non_overlapping_and_dense tensors
+        # If not, eager clone creates contiguous strides
+        computed_stride = None
+        if utils.is_non_overlapping_and_dense(input):
+            computed_stride = input.stride()
+        else:
+            computed_stride = utils.compute_elementwise_output_strides(input)
 
-    # memory_format == torch.preserve_format
-    strides = utils.compute_elementwise_output_strides(input)
-    return torch.empty_strided(
-        input.shape,
-        strides,
-        dtype=input.dtype,
-        layout=input.layout,
-        device=input.device,
-    )
+        return torch.empty_strided(
+            input.shape,
+            computed_stride,
+            dtype=input.dtype,
+            layout=input.layout,
+            device=input.device,
+        )
 
 
 clone = _make_prim(
@@ -1008,8 +1012,10 @@ def _div_aten(a, b):
     )
 
     if is_integral:
+        # pyrefly: ignore [bad-argument-type]
         return torch.div(a, b, rounding_mode="trunc")
     else:
+        # pyrefly: ignore [bad-argument-type]
         return torch.true_divide(a, b)
 
 
@@ -1109,7 +1115,7 @@ lt = _make_elementwise_binary_prim(
 
 # Note: the following impls are because torch.maximum and torch.minimum do not support scalar inputs
 def _maximum_aten(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+    a: TensorLikeType | NumberType, b: TensorLikeType | NumberType
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
@@ -1128,7 +1134,7 @@ maximum = _make_elementwise_binary_prim(
 
 
 def _minimum_aten(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+    a: TensorLikeType | NumberType, b: TensorLikeType | NumberType
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
@@ -1384,12 +1390,22 @@ def _collapsed_shape(shape: ShapeType, start: int, end: int) -> tuple[int, ...]:
     return shape[0:start] + (dim_length,) + shape[end + 1 :]
 
 
+# If the collapse is invalid or cannot be determined (because of unbacked data)
+# then `must_be_valid` determines the behavior:
+#   None: return None, None.
+#   str: Do a torch._check() to ensure the collapse is valid and if it isn't
+#   then fail with the provided string.
 def _collapse_view_helper(
-    a: TensorLikeType, start: int, end: int
-) -> tuple[Optional[ShapeType], Optional[StrideType]]:
+    a: TensorLikeType, start: int, end: int, must_be_valid: str | None
+) -> tuple[ShapeType | None, StrideType | None]:
     assert isinstance(a, TensorLike)
 
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import (
+        guard_or_false,
+        guard_or_true,
+        sym_and,
+        sym_or,
+    )
 
     _validate_collapse_args(a, start, end)
 
@@ -1404,52 +1420,69 @@ def _collapse_view_helper(
     if a.ndim == 0 or (end == start):
         return shape, strides
 
-    length = shape[end]
+    valid_op = True
+    if guard_or_false(a.numel() != 0):
+        for idx in range(end - 1, start - 1, -1):
+            valid_op = sym_and(
+                valid_op,
+                sym_or(
+                    shape[idx] == 1,
+                    shape[idx + 1] == 1,
+                    strides[idx] == strides[idx + 1] * shape[idx + 1],
+                ),
+            )  # type: ignore[assignment]
+
+            # early exit if we already know its invalid.
+            if guard_or_false(valid_op is False):
+                break
+
+    # for unbacked this become a runtime assertion.
+    valid_op = sym_or(valid_op, a.numel() == 0)
+
+    if must_be_valid:
+        torch._check(valid_op, lambda: must_be_valid)
+    else:
+        if not guard_or_false(valid_op):
+            return None, None
+
+    # compute stride
     stride = strides[end]
     for idx in range(end - 1, start - 1, -1):
-        if guard_size_oblivious(shape[idx] == 0) or guard_size_oblivious(
-            shape[idx + 1] == 0
-        ):
-            length = 0
-            stride = 0
-            break
+        if shape[idx] != 1:
+            # TODO with unbacked we should really exclude when shape[idx] == 1
+            # something like
+            # min(stride[end], torch.ite(shape[x]!=1,stride[idx], inf), ...)
+            stride = min(stride, strides[idx])
 
-        if guard_size_oblivious(shape[idx] == 1):
-            continue
-
-        length = length * shape[idx]
-        if guard_size_oblivious(stride < strides[idx]):
-            stride = stride
-        else:
-            stride = strides[idx]
-
-        if (
-            guard_size_oblivious(a.numel() > 0)
-            and guard_size_oblivious(shape[idx + 1] != 1)
-            and not guard_size_oblivious(
-                strides[idx] == strides[idx + 1] * shape[idx + 1]
-            )
-        ):
-            return None, None
+    # compute length
+    length = shape[end]
+    if guard_or_true(length != 0):
+        for idx in range(end - 1, start - 1, -1):
+            if guard_or_false(shape[idx] == 0):
+                length = 0
+                stride = 0
+                break
+            length = length * shape[idx]
+    else:
+        stride = 0
 
     new_shape = shape[:start] + (length,) + shape[end + 1 :]
     new_strides = strides[:start] + (stride,) + strides[end + 1 :]
 
     # NOTE: when the input has no elements it's restrided as if it were contiguous
-    if guard_size_oblivious(a.numel() == 0):
+    # except for unbacked.
+    if guard_or_false(a.numel() == 0):
         new_strides = utils.make_contiguous_strides_for(new_shape)
 
     return new_shape, new_strides
 
 
 def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeType:
-    new_shape, new_strides = _collapse_view_helper(a, start, end)
-
-    if new_shape is None:
-        msg = "Attempting to view a collapsed tensor, but no such view exists!"
-        raise ValueError(msg)
-
+    new_shape, new_strides = _collapse_view_helper(
+        a, start, end, "Attempting to view a collapsed tensor, but no such view exists!"
+    )
     assert new_strides is not None
+    assert new_shape is not None
     return a.as_strided(new_shape, new_strides, a.storage_offset())
 
 
@@ -1809,7 +1842,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     )
 
 
-def _cat_aten(tensors: Union[tuple[Tensor, ...], list[Tensor]], dim: int) -> Tensor:
+def _cat_aten(tensors: tuple[Tensor, ...] | list[Tensor], dim: int) -> Tensor:
     return torch.cat(tensors, dim)
 
 
@@ -1958,7 +1991,7 @@ convert_element_type = _make_prim(
 
 
 def _device_put_meta(
-    a: TensorLikeType, device: Union[str, torch.device], non_blocking=False
+    a: TensorLikeType, device: str | torch.device, non_blocking=False
 ) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     assert isinstance(device, (str, torch.device))
@@ -1968,7 +2001,7 @@ def _device_put_meta(
 
 
 def _device_put_aten(
-    a: Tensor, device: Union[str, torch.device], non_blocking=False
+    a: Tensor, device: str | torch.device, non_blocking=False
 ) -> Tensor:
     return a.to(device, non_blocking=non_blocking)
 
@@ -2268,9 +2301,9 @@ sum = _make_reduction_prim(
 
 def _xor_sum_aten(
     inp: TensorLikeType,
-    dims: Optional[DimsSequenceType],
+    dims: DimsSequenceType | None,
     *,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> Tensor:
     raise NotImplementedError("xor_sum only implemented with inductor")
 
@@ -2284,9 +2317,9 @@ xor_sum = _make_reduction_prim(
 
 def _prod_aten(
     inp: TensorLikeType,
-    dims: Optional[DimsSequenceType],
+    dims: DimsSequenceType | None,
     *,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> Tensor:
     if dims is not None:
         if len(dims) == 0:
@@ -2693,12 +2726,12 @@ svd = _make_prim(
 def _normal_meta(
     shape: ShapeType,
     *,
-    mean: Union[float, complex],
+    mean: float | complex,
     std: float,
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
-    generator: Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> TensorLikeType:
     torch._check(
         std >= 0.0,
@@ -2717,12 +2750,12 @@ def _normal_meta(
 def _normal_aten(
     shape: ShapeType,
     *,
-    mean: Union[float, complex],
+    mean: float | complex,
     std: float,
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
-    generator: Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     a = torch.empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
     with torch.no_grad():
@@ -2756,7 +2789,7 @@ def _uniform_meta(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
-    generator: Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> TensorLikeType:
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
@@ -2769,7 +2802,7 @@ def _uniform_aten(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
-    generator: Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     a = torch.empty(shape, dtype=dtype, device=device)
     a.uniform_(low, high, generator=generator)
@@ -2960,6 +2993,8 @@ _sink_tokens = _make_prim(
     impl_aten=_sink_tokens_aten,
     doc="Sink all of the tokens which were previously used for keeping track of side effects.",
 )
+
+torch.fx.node.has_side_effect(_sink_tokens)
 
 
 register_rng_prims()

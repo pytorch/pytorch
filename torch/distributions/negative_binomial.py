@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -33,6 +32,7 @@ class NegativeBinomial(Distribution):
         logits (Tensor): Event log-odds for probabilities of success
     """
 
+    # pyrefly: ignore [bad-override]
     arg_constraints = {
         "total_count": constraints.greater_than_eq(0),
         "probs": constraints.half_open_interval(0.0, 1.0),
@@ -42,10 +42,10 @@ class NegativeBinomial(Distribution):
 
     def __init__(
         self,
-        total_count: Union[Tensor, float],
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        total_count: Tensor | float,
+        probs: Tensor | None = None,
+        logits: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(
@@ -54,13 +54,16 @@ class NegativeBinomial(Distribution):
         if probs is not None:
             (
                 self.total_count,
+                # pyrefly: ignore [read-only]
                 self.probs,
             ) = broadcast_all(total_count, probs)
             self.total_count = self.total_count.type_as(self.probs)
         else:
-            assert logits is not None  # helps mypy
+            if logits is None:
+                raise AssertionError("logits is unexpectedly None")
             (
                 self.total_count,
+                # pyrefly: ignore [read-only]
                 self.logits,
             ) = broadcast_all(total_count, logits)
             self.total_count = self.total_count.type_as(self.logits)

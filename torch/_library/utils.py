@@ -2,11 +2,12 @@
 import dataclasses
 import inspect
 import sys
-from collections.abc import Iterable, Iterator
-from typing import Any, Callable, Literal, Optional, overload, Union
+from collections.abc import Callable, Iterable, Iterator
+from typing import Any, Literal, Optional, overload, Union
 
 import torch
 import torch.utils._pytree as pytree
+import torchgen
 from torch import _C, _utils_internal
 from torch._ops import OpOverload
 
@@ -74,12 +75,15 @@ def is_builtin(op: OpOverload) -> bool:
     return op.namespace in {"aten", "prim", "prims"}
 
 
-def is_functional_schema(schema: Any) -> bool:
+def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool:
     """Check if the schema is functional.
 
     An operator is functional if:
     - it does not mutate any of its inputs
-    - it does not return a view on any of its inputs
+    - If no view are allowed
+        - it does not return a view on any of its inputs
+    - If valid views are allowed
+        - it is not a view or a view with a single input Tensor and single output Tensor
     - it has at least one return
     """
 
@@ -90,8 +94,31 @@ def is_functional_schema(schema: Any) -> bool:
         is_non_mutating_view = len(rets) > 0 and any(
             r.alias_info is not None and not r.alias_info.is_write for r in rets
         )
+        num_tensor_inputs = 0
+        num_tensor_outputs = 0
+
+        if isinstance(schema, torch.FunctionSchema):
+            for arg in schema.arguments:
+                if isinstance(arg.type, torch.TensorType):
+                    num_tensor_inputs += 1
+
+            for ret in schema.returns:
+                if isinstance(ret.type, torch.TensorType):
+                    num_tensor_outputs += 1
+
+        elif isinstance(schema, torchgen.model.FunctionSchema):
+            for argument in schema.arguments.flat_non_out:
+                if argument.type.is_tensor_like():
+                    num_tensor_inputs += 1
+
+            for ret_arg in schema.returns:
+                if ret_arg.type.is_tensor_like():
+                    num_tensor_outputs += 1
+
         if is_non_mutating_view:
-            return False
+            return allow_valid_view and (
+                num_tensor_inputs == 1 and num_tensor_outputs == 1
+            )
         if not schema.returns:
             return False
         return True
@@ -135,7 +162,7 @@ def mutates_and_returns_first_arg(op: OpOverload):
     if op.namespace != "aten":
         return False
     schema = op._schema
-    if not len(schema.returns) == 1:
+    if len(schema.returns) != 1:
         return False
     if schema.returns[0].alias_info is None:
         return False
@@ -341,13 +368,13 @@ def check_aliasing_constraint(name, prev, result, get_module=lambda: "???"):
     """
     custom operators' outputs must not alias any inputs or other outputs.
     """
-    storages = {id(t.untyped_storage()) for t in prev if isinstance(t, torch.Tensor)}
+    storages = {t.untyped_storage()._cdata for t in prev if isinstance(t, torch.Tensor)}
     tuple_result = result
     if not isinstance(result, tuple):
         tuple_result = (result,)
     for tensor in iter_tensors(tuple_result, {}):
-        key = id(tensor.untyped_storage())
-        if id(tensor.untyped_storage()) in storages:
+        key = tensor.untyped_storage()._cdata
+        if tensor.untyped_storage()._cdata in storages:
             raise RuntimeError(
                 f"{name} (with implementation in {get_module()}): "
                 f"The output of this custom operator (1) must not "
@@ -527,3 +554,94 @@ def get_layout_constraint_tag(fn, *, with_default=True):
 
         return getattr(torch._C.Tag, config.custom_op_default_layout_constraint)
     return None
+
+
+# List of random functions that should be treated as impure
+_RANDOM_FUNCTIONS = {
+    torch.rand,
+    torch.randn,
+    torch.randint,
+    torch.randperm,
+    torch.rand_like,
+    torch.randn_like,
+    torch.randint_like,
+    torch.normal,
+    torch.poisson,
+    torch.bernoulli,
+    torch.multinomial,
+}
+
+
+def is_impure(
+    op: Callable,
+    *,
+    args: Optional[tuple[Any, ...]] = None,
+    kwargs: Optional[dict[str, Any]] = None,
+    impure_random: bool = True,
+) -> bool:
+    """
+    An operator is impure if it:
+    - Mutates its inputs (has a mutable schema)
+    - Has nondeterministic/random behavior that mutates RNG state
+    - Is explicitly marked as effectful via torch.library._register_effectful_op
+
+    Args:
+        op: The operator to check (function, OpOverload, HigherOrderOperator, etc.)
+        args: Optional arguments that would be passed to the callable
+        kwargs: Optional keyword arguments that would be passed to the callable
+        impure_random: Whether to treat random operations as impure (default: True)
+
+    Returns:
+        bool: True if the callable has side effects, False otherwise
+    """
+    # Import here to avoid circular dependencies
+    from torch._higher_order_ops.effects import _get_effect
+    from torch.fx.node import _side_effectful_functions
+
+    if isinstance(op, torch._ops.OpOverload):
+        schema = getattr(op, "_schema", None)
+        if schema is not None and schema.is_mutable:
+            return True
+
+        if op in _side_effectful_functions:
+            return True
+
+        if _get_effect(op) is not None:
+            return True
+
+    if isinstance(op, torch._ops.HigherOrderOperator):
+        if op in (
+            torch.ops.higher_order.auto_functionalized,
+            torch.ops.higher_order.auto_functionalized_v2,
+        ):
+            # Check if the auto-functionalized operator (the first argument) is
+            # side-effectful
+            if args and len(args) > 0:
+                return args[0] in _side_effectful_functions
+
+        if _get_effect(op) is not None:
+            return True
+
+        return False
+
+    # Impure since it mutates RNG state
+    if impure_random and getattr(op, "_nondeterministic_seeded", False):
+        return True
+
+    # Handle Python random functions that don't have _nondeterministic_seeded
+    # but still affect global RNG state (issue #151524)
+    # These should be impure regardless of impure_random setting to maintain
+    # consistency between eager and compiled execution
+    # All random operations are impure to ensure consistent behavior
+    # between eager and compiled execution, regardless of generator usage
+    if op in _RANDOM_FUNCTIONS:
+        return True
+
+    schema = getattr(op, "_schema", None)
+    if schema is not None and schema.is_mutable:
+        return True
+
+    if op in _side_effectful_functions:
+        return True
+
+    return False

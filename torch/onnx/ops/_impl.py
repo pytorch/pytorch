@@ -1,6 +1,14 @@
+"""Implementations of ONNX operators as native Torch ops.
+
+NOTE: Fake implementations:
+    Refer to https://docs.pytorch.org/docs/stable/library.html#torch.library.register_fake
+    for more details on how to create fake kernels.
+"""
+
 # flake8: noqa: B950
 import math
-from typing import Callable, Optional, TypeVar
+from collections.abc import Callable
+from typing import Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -24,7 +32,7 @@ _ATTENTION_23_ALLOWED_INTERMEDIATE_PRECISIONS = frozenset(
 
 
 def _onnx_op(
-    op_type: str, opset_version: int
+    op_type: str, opset_version: int, fake_impl: Callable[_P, _R]
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
     """Decorator to register an ONNX operator with a custom implementation."""
 
@@ -36,15 +44,27 @@ def _onnx_op(
         ONNX_ATEN_DECOMP_TABLE[getattr(getattr(torch.ops.onnx, op_type), overload)] = (
             func  # type: ignore[assignment]
         )
-        # Use the same implementation for the fake implementation
-        # This is possible because we use pure aten ops to implement ONNX ops
-        torch_op.register_fake(func)
+        torch_op.register_fake(fake_impl)
         return torch_op  # type: ignore[return-value]
 
     return decorator
 
 
-@_onnx_op("RotaryEmbedding", 23)
+def _rotary_embedding_23_fake_impl(
+    x: torch.Tensor,
+    cos_cache: torch.Tensor,
+    sin_cache: torch.Tensor,
+    position_ids: Optional[torch.Tensor] = None,
+    *,
+    interleaved: bool = False,
+    num_heads: int = 0,
+    rotary_embedding_dim: int = 0,
+) -> torch.Tensor:
+    """Fake implementation for RotaryEmbedding-23 for torch.compile purposes."""
+    return x.clone()
+
+
+@_onnx_op("RotaryEmbedding", 23, _rotary_embedding_23_fake_impl)
 def rotary_embedding_23(
     x: torch.Tensor,
     cos_cache: torch.Tensor,
@@ -56,18 +76,55 @@ def rotary_embedding_23(
     rotary_embedding_dim: int = 0,
 ) -> torch.Tensor:
     """RotaryEmbedding-23 https://onnx.ai/onnx/operators/onnx__RotaryEmbedding.html#rotaryembedding-23"""
+    # x has shape (batch_size, num_heads, sequence_length, head_size)
+    # or (batch_size, sequence_length, hidden_size)
+    input_shape = x.shape
+    input_rank = len(input_shape)
+    batch_size = input_shape[0]
+    sequence_length = input_shape[-2]
+
+    # Validate position_ids and caches match x
+    if position_ids is not None:
+        torch._check(
+            position_ids.dim() == 2,
+            lambda: f"position_ids must be 2D when provided. Received shape {position_ids.shape}",
+        )
+        torch._check(
+            position_ids.shape[0] == batch_size,
+            lambda: f"position_ids first dim (batch) must match x.shape[0] ({batch_size}). Received {position_ids.shape[0]}",
+        )
+        torch._check(
+            position_ids.shape[1] == sequence_length,
+            lambda: f"position_ids second dim (sequence) must match x.shape[-2] ({sequence_length}). Received {position_ids.shape[1]}",
+        )
+        torch._check(
+            cos_cache.dim() == 2 and sin_cache.dim() == 2,
+            lambda: "cos_cache/sin_cache must be 2D when position_ids is provided. "
+            f"Received cos_cache shape {cos_cache.shape}, sin_cache shape {sin_cache.shape}",
+        )
+    else:
+        torch._check(
+            cos_cache.dim() == 3 and sin_cache.dim() == 3,
+            lambda: "cos_cache/sin_cache must be 3D when position_ids is not provided. "
+            f"Received cos_cache shape {cos_cache.shape}, sin_cache shape {sin_cache.shape}",
+        )
+
     # First ensure x has shape [batch_size, num_heads, seq_len, head_size]
-    batch_size = x.shape[0]
-    sequence_length = x.shape[1]
-    if len(x.shape) == 3:
-        hidden_size = x.shape[2]
+    # So that the rotation logic can be shared with reshaped 3D inputs
+    if input_rank == 4:
+        # Reshape from (batch_size, num_heads, seq_len, head_size)
+        # to [batch_size, seq_len, num_heads, head_size]
+        x = torch.permute(x, (0, 2, 1, 3))
+    elif input_rank == 3:
         torch._check(
             num_heads != 0,
-            lambda: f"num_heads must be provided for 3D inputs. Received input tensor with shape {x.shape}",
+            lambda: f"num_heads must be provided for 3D inputs. Received input tensor with shape {input_shape}",
         )
+        hidden_size = input_shape[2]
         head_size = hidden_size // num_heads
         new_shape = [batch_size, sequence_length, num_heads, head_size]
         x = torch.reshape(x, new_shape)
+
     torch._check(len(x.shape) == 4, lambda: "x should be a 4D tensor by now")
     head_size = x.shape[3]
 
@@ -88,14 +145,25 @@ def rotary_embedding_23(
             position_ids
         ]  # Shape: [batch_size, sequence_length, head_size/2]
     else:
-        cos = cos_cache
-        sin = sin_cache
-    cos = cos[
-        :, :, :rotary_embedding_dim_half
-    ]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
-    sin = sin[
-        :, :, :rotary_embedding_dim_half
-    ]  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
+        cos = cos_cache  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
+        sin = sin_cache  # Shape: [batch_size, sequence_length, rotary_embedding_dim/2]
+
+    torch._check(
+        cos.shape[0] == batch_size and cos.shape[1] == sequence_length,
+        lambda: f"cos has shape {cos.shape} but expected (batch={batch_size}, seq={sequence_length}, ...)",
+    )
+    torch._check(
+        sin.shape[0] == batch_size and sin.shape[1] == sequence_length,
+        lambda: f"sin has shape {sin.shape} but expected (batch={batch_size}, seq={sequence_length}, ...)",
+    )
+    torch._check(
+        cos.shape[-1] == rotary_embedding_dim_half,
+        lambda: f"Last dimension of cos cache ({cos.shape[-1]}) should match rotary_embedding_dim/2 ({rotary_embedding_dim_half}).",
+    )
+    torch._check(
+        sin.shape[-1] == rotary_embedding_dim_half,
+        lambda: f"Last dimension of sin cache ({sin.shape[-1]}) should match rotary_embedding_dim/2 ({rotary_embedding_dim_half}).",
+    )
     cos = torch.unsqueeze(
         cos, 2
     )  # Shape: [batch_size, sequence_length, 1, rotary_embedding_dim/2]
@@ -125,9 +193,11 @@ def rotary_embedding_23(
     else:
         x_rotate = torch.cat((real, imag), dim=-1)
     output = torch.cat((x_rotate, x_not_rotate), dim=-1)
-    if len(x.shape) == 3:
-        output = torch.reshape(output, x.shape)
-    return output
+    if input_rank == 3:
+        return torch.reshape(output, input_shape)
+
+    # Return the dimensions to the original order
+    return torch.permute(output, (0, 2, 1, 3))
 
 
 def _get_scale_factor(scale: Optional[float], head_size: int) -> float:
@@ -198,7 +268,91 @@ def _compute_qk_output_for_mode_0(
     return torch.matmul(Q_scaled, K_scaled.transpose(-2, -1))
 
 
-@_onnx_op("Attention", 23)
+def _attention_23_fake_impl(
+    Q: torch.Tensor,
+    K: torch.Tensor,
+    V: torch.Tensor,
+    attn_mask: Optional[torch.Tensor] = None,
+    past_key: Optional[torch.Tensor] = None,
+    past_value: Optional[torch.Tensor] = None,
+    *,
+    is_causal: bool = False,
+    kv_num_heads: int = 0,
+    q_num_heads: int = 0,
+    qk_matmul_output_mode: int = 0,
+    scale: Optional[float] = None,
+    softcap: float = 0.0,
+    softmax_precision: Optional[int] = None,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Fake implementation for Attention-23 for torch.compile purposes."""
+    batch_size = Q.shape[0]
+
+    # Handle 3D vs 4D input shapes
+    if len(Q.shape) == 3:
+        # 3D input: (batch_size, sequence_length, hidden_size)
+        q_sequence_length = Q.shape[1]
+        output_shape = Q.shape  # Same shape as Q for 3D output
+
+        # For present_key and present_value, we need 4D shapes
+        if past_key is not None:
+            present_key_shape = (
+                batch_size,
+                kv_num_heads,
+                past_key.shape[2] + K.shape[1],  # Combined sequence length
+                K.shape[2] // kv_num_heads,  # head_size
+            )
+        else:
+            present_key_shape = (
+                batch_size,
+                kv_num_heads,
+                K.shape[1],  # sequence_length
+                K.shape[2] // kv_num_heads,  # head_size
+            )
+        present_value_shape = present_key_shape  # Same shape as present_key
+
+        # QK output shape for 3D input (reshaped to 4D internally)
+        qk_output_shape = (
+            batch_size,
+            q_num_heads,
+            q_sequence_length,
+            present_key_shape[2],  # kv_sequence_length
+        )
+    else:
+        # 4D input: (batch_size, num_heads, sequence_length, head_size)
+        q_sequence_length = Q.shape[2]
+        # Same shape as Q for 4D output
+        output_shape = Q.shape  # type: ignore[assignment]
+
+        # Handle past key/value concatenation
+        if past_key is not None:
+            present_key_shape = (
+                K.shape[0],  # batch_size
+                K.shape[1],  # num_heads
+                past_key.shape[2] + K.shape[2],  # Combined sequence length
+                K.shape[3],  # head_size
+            )
+        else:
+            present_key_shape = K.shape  # type: ignore[assignment]
+        present_value_shape = present_key_shape  # Same shape as present_key
+
+        # QK output shape
+        qk_output_shape = (
+            Q.shape[0],  # batch_size
+            Q.shape[1],  # q_num_heads
+            Q.shape[2],  # q_sequence_length
+            present_key_shape[2],  # kv_sequence_length
+        )
+
+    # Create fake tensors with correct shapes and dtypes
+    output = torch.empty(output_shape, dtype=Q.dtype, device=Q.device)
+    present_key = torch.empty(present_key_shape, dtype=K.dtype, device=K.device)
+    present_value = torch.empty(present_value_shape, dtype=V.dtype, device=V.device)
+    qk_output = torch.empty(qk_output_shape, dtype=Q.dtype, device=Q.device)
+
+    return output, present_key, present_value, qk_output
+
+
+@_onnx_op("Attention", 23, _attention_23_fake_impl)
 def attention_23(
     Q: torch.Tensor,
     K: torch.Tensor,
@@ -276,18 +430,11 @@ def attention_23(
 
     if can_use_sdpa:
         # Use PyTorch's optimized scaled_dot_product_attention
-
-        # Prepare attention mask for SDPA
-        sdpa_attn_mask = None
-        if attn_mask is not None:
-            # Convert boolean mask: True means participate, SDPA expects True to mask out
-            sdpa_attn_mask = ~attn_mask if attn_mask.dtype == torch.bool else attn_mask
-
         output = torch.nn.functional.scaled_dot_product_attention(
             Q,
             K,
             V,
-            attn_mask=sdpa_attn_mask,
+            attn_mask=attn_mask,
             dropout_p=0.0,
             is_causal=is_causal,
             scale=scale,

@@ -1,9 +1,16 @@
-# mypy: allow-untyped-defs
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
+
+if TYPE_CHECKING:
+    from torch.types import _dtype
+
 from torch.utils.benchmark import Fuzzer, FuzzedParameter, ParameterAlias, FuzzedSparseTensor
 
+__all__ = ["UnaryOpSparseFuzzer"]
 
 _MIN_DIM_SIZE = 16
 _MAX_DIM_SIZE = 16 * 1024 ** 2
@@ -13,7 +20,9 @@ _POW_TWO_SIZES = tuple(2 ** i for i in range(
 ))
 
 class UnaryOpSparseFuzzer(Fuzzer):
-    def __init__(self, seed, dtype=torch.float32, cuda=False):
+    def __init__(self, seed: int | None, dtype: _dtype | None = None, cuda: bool = False) -> None:
+        if dtype is None:
+            dtype = getattr(torch, 'float32', None)
         super().__init__(
             parameters=[
                 # Sparse dim parameter of x. (e.g. 1D, 2D, or 3D.)

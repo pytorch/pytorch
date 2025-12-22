@@ -1,0 +1,109 @@
+name: docker-cache-rocm
+
+on:
+  workflow_run:
+    workflows: [docker-builds]
+    branches: [main, release]
+    types:
+      - completed
+  workflow_dispatch:
+    inputs:
+      branch:
+        type: string
+        description: Branch corresponding to the docker images being cached
+        required: true
+      run_id:
+        type: string
+        description: Workflow run id to pull artifacts from
+        required: true
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+  actions: read
+
+jobs:
+  download-docker-builds-artifacts:
+    if: github.repository_owner == 'pytorch'
+    name: download-docker-builds-artifacts
+    runs-on: ubuntu-latest
+    outputs:
+      pytorch-linux-jammy-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}
+      pytorch-linux-noble-rocm-n-py3: ${{ steps.process-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}
+      pytorch-linux-jammy-rocm-n-py3-benchmarks: ${{ steps.process-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e #4.1.7
+        with:
+          run-id: ${{ github.event.workflow_run.id || github.event.inputs.run_id }}
+          path: ./docker-builds-artifacts
+          merge-multiple: true
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Process artifacts
+        id: process-artifacts
+        run: |
+          ls -R ./docker-builds-artifacts
+          cat ./docker-builds-artifacts/*txt >> "${GITHUB_OUTPUT}"
+          cat "${GITHUB_OUTPUT}"
+
+  docker-cache:
+    if: github.repository_owner == 'pytorch'
+    needs: download-docker-builds-artifacts
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [linux.rocm.mi250.docker-cache]
+        docker-image: [
+          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3 }}",
+          "${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-noble-rocm-n-py3 }}"
+          #"${{ needs.download-docker-builds-artifacts.outputs.pytorch-linux-jammy-rocm-n-py3-benchmarks }}"
+        ]
+    runs-on: "${{ matrix.runner }}"
+    steps:
+      - name: debug
+        run: |
+          JSON_STRINGIFIED="${{ toJSON(needs.download-docker-builds-artifacts.outputs) }}"
+          echo "Outputs of download-docker-builds-artifacts job: ${JSON_STRINGIFIED}"
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
+      - name: Generate ghrc.io tag
+        id: ghcr-io-tag
+        run: |
+            ecr_image="${{ matrix.docker-image }}"
+            ghcr_image="ghcr.io/pytorch/ci-image:${ecr_image##*:}"
+            echo "ghcr_image=${ghcr_image}" >> "$GITHUB_OUTPUT"
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.ghcr-io-tag.outputs.ghcr_image }}
+
+      - name: Save as tarball
+        run: |
+          docker_image_tag=${{ matrix.docker-image }}
+          docker_image_tag="${docker_image_tag#*:}" # Remove everything before and including first ":"
+          docker_image_tag="${docker_image_tag%-*}" # Remove everything after and including last "-"
+          ref_name=${{ github.event.workflow_run.head_branch || github.event.inputs.branch }}
+          if [[ $ref_name =~ "release/" ]]; then
+            ref_suffix="release"
+          elif [[ $ref_name == "main" ]]; then
+            ref_suffix="main"
+          else
+            echo "Unexpected branch in ref_name: ${ref_name}" && exit 1
+          fi
+          docker tag ${{ steps.ghcr-io-tag.outputs.ghcr_image }} ${{ matrix.docker-image }}
+          # mv is atomic operation, so we use intermediate tar.tmp file to prevent read-write contention
+          docker save -o ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ${{ matrix.docker-image }}
+          mv ~/pytorch-data/docker/${docker_image_tag}.tar.tmp ~/pytorch-data/docker/${docker_image_tag}_${ref_suffix}.tar

@@ -88,10 +88,10 @@ struct TORCH_API TensorDesc {
 };
 
 inline std::ostream& operator<<(std::ostream& out, const TensorDesc& d) {
-  out << d.scalar_type << "[";
+  out << d.scalar_type << '[';
   for (const auto b : d.contiguity)
-    out << b << ";";
-  out << "]";
+    out << b << ';';
+  out << ']';
   return out;
 }
 

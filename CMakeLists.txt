@@ -1,5 +1,4 @@
 cmake_minimum_required(VERSION 3.27 FATAL_ERROR)
-# cmake_policy(SET CMP0022 NEW) cmake_policy(SET CMP0023 NEW)
 
 # Use compiler ID "AppleClang" instead of "Clang" for XCode. Not setting this
 # sometimes makes XCode C compiler gets detected as "Clang", even when the C++
@@ -50,7 +49,7 @@ set(CMAKE_CXX_STANDARD
     CACHE STRING
           "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD
-    11
+    17
     CACHE STRING
           "The C standard whose features are requested to build this target.")
 
@@ -172,6 +171,7 @@ endif()
 set(CPU_AARCH64 OFF)
 set(CPU_INTEL OFF)
 set(CPU_POWER OFF)
+set(CPU_RISCV OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(AMD64|x86_64)")
   set(CPU_INTEL ON)
@@ -179,11 +179,12 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
   set(CPU_AARCH64 ON)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
   set(CPU_POWER ON)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(riscv64)")
+  set(CPU_RISCV ON)
 endif()
 
-# For non-supported platforms, turn USE_DISTRIBUTED off by default.
-# NB: USE_DISTRIBUTED simply disables the backend; distributed code
-# still gets built
+# For non-supported platforms, turn USE_DISTRIBUTED off by default. It is not
+# tested and likely won't work without additional changes.
 if(NOT LINUX AND NOT WIN32)
   set(USE_DISTRIBUTED
       OFF
@@ -214,7 +215,7 @@ cmake_dependent_option(
 cmake_dependent_option(
   CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
   "NOT BUILD_SHARED_LIBS" OFF)
-option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 option(BUILD_AOT_INDUCTOR_TEST "Build C++ test binaries for aot-inductor" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK
        "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
@@ -234,8 +235,19 @@ cmake_dependent_option(INSTALL_TEST "Install test binaries if BUILD_TEST is on"
 option(USE_CPP_CODE_COVERAGE "Compile C/C++ with code coverage flags" OFF)
 option(USE_COLORIZE_OUTPUT "Colorize output during compilation" ON)
 option(USE_ASAN "Use Address+Undefined Sanitizers" OFF)
+option(USE_LSAN "Use Leak Sanitizer" OFF)
 option(USE_TSAN "Use Thread Sanitizer" OFF)
+
+# Track whether USE_CUDA was explicitly set by the user (before option() is called)
+# If USE_CUDA is already defined in cache, it means user explicitly set it
+if(DEFINED CACHE{USE_CUDA})
+  set(_USE_CUDA_EXPLICITLY_SET TRUE)
+else()
+  set(_USE_CUDA_EXPLICITLY_SET FALSE)
+endif()
+
 option(USE_CUDA "Use CUDA" ON)
+
 option(USE_XPU "Use XPU" ON)
 cmake_dependent_option(
   BUILD_LAZY_CUDA_LINALG "Build cuda linalg ops as separate library" ON
@@ -262,11 +274,11 @@ option(USE_PYTORCH_METAL "Use Metal for PyTorch iOS build" OFF)
 option(USE_PYTORCH_METAL_EXPORT "Export Metal models on MacOSX desktop" OFF)
 option(USE_NATIVE_ARCH "Use -march=native" OFF)
 cmake_dependent_option(USE_MPS "Use MPS for macOS build" ON "MPS_FOUND" OFF)
-option(USE_DISTRIBUTED "Enable default distributed backends" ON)
+option(USE_DISTRIBUTED "Use distributed" ON)
 cmake_dependent_option(USE_NCCL "Use NCCL" ON
                        "USE_DISTRIBUTED;USE_CUDA OR USE_ROCM;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_XCCL "Use XCCL" ON
-                       "USE_DISTRIBUTED;USE_XPU;UNIX;NOT APPLE" OFF)
+                       "USE_XPU;UNIX;NOT APPLE" OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON USE_NCCL OFF)
 cmake_dependent_option(USE_RCCL "Use RCCL" ON "USE_NCCL;NOT WIN32" OFF)
 cmake_dependent_option(USE_STATIC_NCCL "Use static NCCL" OFF "USE_NCCL" OFF)
@@ -318,8 +330,8 @@ cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
 # Ensure that an MKLDNN build is the default for x86 CPUs but optional for
 # AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, and ppc64le."
-  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, ppc64le and riscv64."
+  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER OR CPU_RISCV" OFF)
 cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
@@ -375,16 +387,23 @@ cmake_dependent_option(
   "Build the lazy Torchscript backend, not compatible with mobile builds" ON
   "NOT INTERN_BUILD_MOBILE" OFF)
 cmake_dependent_option(BUILD_FUNCTORCH "Build Functorch" ON "BUILD_PYTHON" OFF)
-cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin fodler"
+cmake_dependent_option(BUILD_BUNDLE_PTXAS "Bundle PTX into torch/bin folder"
                        OFF "USE_CUDA" OFF)
 cmake_dependent_option(USE_KLEIDIAI "Use KleidiAI for the ARM CPU & AARCH64 architecture." ON
                         "CPU_AARCH64" OFF)
+# prioritized text linker, ON by default for AArch64+Linux, option visible to all AArch64, x86 and ppc64le.
+set(USE_PRIORITIZED_TEXT_DEFAULT OFF)
+if(LINUX AND CPU_AARCH64)
+  set(USE_PRIORITIZED_TEXT_DEFAULT ON)
+endif()
+cmake_dependent_option(USE_PRIORITIZED_TEXT_FOR_LD "Use prioritized text linker for ld."
+  "${USE_PRIORITIZED_TEXT_DEFAULT}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
 
 option(USE_MIMALLOC "Use mimalloc" OFF)
 # Enable third party mimalloc library to improve memory allocation performance
-# on Windows.
+# on Windows and AArch64.
 option(USE_MIMALLOC_ON_MKL "Use mimalloc on MKL" OFF)
-if(WIN32)
+if(WIN32 OR (CPU_AARCH64 AND NOT APPLE))
   set(USE_MIMALLOC ON)
 
   # Not enable USE_MIMALLOC_ON_MKL due to it caused issue:
@@ -431,11 +450,12 @@ if(WIN32)
       PATH_SUFFIXES lib
       NO_DEFAULT_PATH)
     if(NOT libuv_tmp_LIBRARY)
+      set(USE_DISTRIBUTED OFF)
       set(USE_GLOO OFF)
       message(
         WARNING
-          "Libuv is not installed in current conda env. Set USE_GLOO to OFF. "
-          "Please run command 'conda install -c conda-forge libuv=1.39' to install libuv."
+          "Libuv is not installed in current conda env. Set USE_DISTRIBUTED to OFF. "
+          "Please run command 'conda install -c conda-forge libuv=1.51' to install libuv."
       )
     else()
       set(ENV{libuv_ROOT} ${libuv_tmp_LIBRARY}/../../)
@@ -656,6 +676,11 @@ endif(MSVC)
 
 string(APPEND CMAKE_CUDA_FLAGS " -Xfatbin -compress-all")
 
+# Set linker max-page-size to 64KiB on AArch64 Linux
+if(LINUX AND CPU_AARCH64)
+  add_link_options_if_supported("-z,max-page-size=0x10000")
+endif()
+
 # Set INTERN_BUILD_MOBILE for all mobile builds. Components that are not
 # applicable to mobile are disabled by this variable. Setting
 # `BUILD_PYTORCH_MOBILE_WITH_HOST_TOOLCHAIN` environment variable can force it
@@ -712,6 +737,44 @@ set(INTERN_BUILD_ATEN_OPS ON)
 
 if(NOT DEFINED USE_BLAS)
   set(USE_BLAS ON)
+endif()
+
+# Prioritized Text Linker Optimization
+if(USE_PRIORITIZED_TEXT_FOR_LD)
+
+  set(LINKER_SCRIPT_FILE_IN "${CMAKE_SOURCE_DIR}/cmake/prioritized_text.txt")
+  set(LINKER_SCRIPT_FILE_OUT "${CMAKE_SOURCE_DIR}/cmake/linker_script.ld")
+
+  execute_process(
+    COMMAND ${Python_EXECUTABLE}
+            ${CMAKE_SOURCE_DIR}/tools/setup_helpers/generate_linker_script.py
+            --filein "${LINKER_SCRIPT_FILE_IN}"
+            --fout  "${LINKER_SCRIPT_FILE_OUT}"
+    RESULT_VARIABLE _gen_result
+    OUTPUT_VARIABLE _gen_output
+    ERROR_VARIABLE  _gen_error
+  )
+
+  if(NOT _gen_result EQUAL 0)
+    message(FATAL_ERROR
+      "Failed to generate linker script:\n${_gen_output}\n${_gen_error}")
+  endif()
+
+  append_cxx_flag_if_supported("-ffunction-sections" CMAKE_CXX_FLAGS)
+  append_cxx_flag_if_supported("-fdata-sections" CMAKE_CXX_FLAGS)
+  append_c_flag_if_supported("-ffunction-sections" CMAKE_C_FLAGS)
+  append_c_flag_if_supported("-fdata-sections" CMAKE_C_FLAGS)
+
+  set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
+  set(CMAKE_MODULE_LINKER_FLAGS "${CMAKE_MODULE_LINKER_FLAGS} -T${LINKER_SCRIPT_FILE_OUT}")
+
+else()
+  if(LINUX AND CPU_AARCH64)
+    message(WARNING [[
+    It is strongly recommend to enable linker script optimization for all AArch64 Linux builds.
+    To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
+    ]])
+  endif()
 endif()
 
 # Build libtorch mobile library, which contains ATen/TH ops and native support
@@ -837,9 +900,9 @@ include(ExternalProject)
 
 # ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
 # CMAKE_SYSTEM_PROCESSOR thinks its 64bit
-if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|aarch64)$")
   message(WARNING
-    "x64 operating system is required for FBGEMM. "
+    "x86_64 or aarch64 required for FBGEMM. "
     "Not compiling with FBGEMM. "
     "Turn this warning off by USE_FBGEMM=OFF.")
   set(USE_FBGEMM OFF)
@@ -873,26 +936,31 @@ cmake_dependent_option(
   "Whether to build the flash_attention kernel for scaled dot product attention.\
   Will be disabled if not supported by the platform"
   ON
-  "USE_CUDA OR USE_ROCM;NOT MSVC"
+  "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
+
+
+IF(USE_ROCM AND "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
+  message(WARNING "Setting USE_FBGEMM_GENAI for gfx942 to ON by default, doing ROCM build")
+  set(USE_FBGEMM_GENAI_DEFAULT ON)
+elseif(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
+  message(STATUS "Setting USE_FBGEMM_GENAI to ON by default , doing CUDA build for SM100a")
+  set(USE_FBGEMM_GENAI_DEFAULT ON)
+else()
+  set(USE_FBGEMM_GENAI_DEFAULT OFF)
+endif()
 
 cmake_dependent_option(
   USE_FBGEMM_GENAI
   "Whether to build FBGEMM GenAI quantized GEMM kernels.\
   Will be disabled if not supported by the platform"
-  ON
-  "USE_ROCM"
+  ${USE_FBGEMM_GENAI_DEFAULT}
+  "(USE_CUDA AND NOT MSVC) OR USE_ROCM"
   OFF)
 
-IF(USE_FBGEMM_GENAI AND USE_ROCM AND NOT "gfx942" IN_LIST PYTORCH_ROCM_ARCH)
-  message(WARNING "Unsupported ROCM arch for FBGEMM GenAI, will set USE_FBGEMM_GENAI to OFF")
-  set(USE_FBGEMM_GENAI off)
-endif()
 
-# Set USE_FBGEMM_GENAI to ON for CUDA build on SM100
-if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0a")
-  message(WARNING "Setting USE_FBGEMM_GENAI to ON for CUDA build on SM100")
-  set(USE_FBGEMM_GENAI ON)
+# Set USE_FBGEMM_GENAI to ON for CUDA build on SM100.
+if(USE_CUDA AND "$ENV{TORCH_CUDA_ARCH_LIST}" MATCHES "10.0" AND CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.8 AND NOT WIN32)
 endif()
 
 # CAVEAT: Again, Flash Attention2 will error while building for sm52 while Mem
@@ -908,7 +976,7 @@ cmake_dependent_option(
 # USE_FLASH_ATTENTION -> USE_ROCM -> Dependencies.cmake -> aotriton.cmake
 #
 if(USE_ROCM)
-  if(UNIX AND (USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION))
+  if(USE_FLASH_ATTENTION OR USE_MEM_EFF_ATTENTION)
     include(cmake/External/aotriton.cmake)
   endif()
 endif()
@@ -1149,41 +1217,6 @@ else()
   append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
 endif()
 
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  include(CheckCSourceCompiles)
-  check_c_source_compiles(
-    "#include <arm_neon.h>
-int main() {
-  float a[] = {1.0, 1.0};
-  float32x4x2_t v;
-  v.val[0] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
-  v.val[1] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
-  vst1q_f32_x2(a, v);
-  return 0;
-}"
-    HAS_VST1)
-
-  if(NOT HAS_VST1)
-    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VST1")
-  endif()
-endif()
-
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  include(CheckCSourceCompiles)
-  check_c_source_compiles(
-    "#include <arm_neon.h>
-int main() {
-  float a[] = {1.0, 1.0};
-  vld1q_f32_x2(a);
-  return 0;
-}"
-    HAS_VLD1)
-
-  if(NOT HAS_VLD1)
-    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VLD1")
-  endif()
-endif()
-
 # Add code coverage flags to supported compilers
 if(USE_CPP_CODE_COVERAGE)
   if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU")
@@ -1375,13 +1408,6 @@ if(BUILD_JNI)
   add_subdirectory(android/pytorch_android)
 endif()
 
-include(cmake/Summary.cmake)
-caffe2_print_configuration_summary()
-
-if(BUILD_FUNCTORCH)
-  add_subdirectory(functorch)
-endif()
-
 # Parse custom debug info
 if(DEFINED USE_CUSTOM_DEBINFO)
   string(REPLACE ";" " " SOURCE_FILES "${USE_CUSTOM_DEBINFO}")
@@ -1420,3 +1446,6 @@ if(BUILD_BUNDLE_PTXAS AND USE_CUDA)
   install(PROGRAMS "${PROJECT_BINARY_DIR}/ptxas"
           DESTINATION "${CMAKE_INSTALL_BINDIR}")
 endif()
+
+include(cmake/Summary.cmake)
+caffe2_print_configuration_summary()

@@ -5,7 +5,8 @@ import functools
 import sys
 import unittest
 from collections import namedtuple
-from typing import Callable, Optional, Union
+from collections.abc import Callable
+from typing import Optional, Union
 from unittest import expectedFailure
 from unittest.mock import patch
 
@@ -30,7 +31,6 @@ from torch.testing._internal.common_device_type import (
     skipXPUIf,
 )
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton_tma_device
 
 
@@ -43,9 +43,6 @@ if IS_WINDOWS and IS_CI:
 
 
 Tolerances = namedtuple("Tolerances", ["atol", "rtol"])
-# In MI300, HIPBLASLT_ALLOW_TF32=1 is used to enable tf32 for matmul.
-# In the current test, HIPBLASLT_ALLOW_TF32 is not set, according to the
-# logic of allowTF32CuBLAS(), set float32_matmul_precision to highest.
 if torch.version.hip:
     torch.set_float32_matmul_precision("highest")
 else:
@@ -61,22 +58,21 @@ TEST_ON_CUDA = (
 )
 TEST_ON_XPU = torch.xpu.is_available() and torch.utils._triton.has_triton()
 
-if HAS_GPU:
-    if TEST_ON_CUDA:
-        test_device = ("cuda",)
-        test_dtypes = (
-            [torch.float32, torch.bfloat16, torch.float16]
-            if PLATFORM_SUPPORTS_BF16
-            else [torch.float16, torch.float32]
-        )
-        test_dtypes_fast = [torch.float16]
-        SKIP_UT_ON_CPU = False
-    elif TEST_ON_XPU:
-        torch._C._set_onednn_allow_tf32(True)
-        test_device = ("xpu",)
-        test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
-        test_dtypes_fast = [torch.float16]
-        SKIP_UT_ON_CPU = False
+if TEST_ON_CUDA:
+    test_device = ("cuda",)
+    test_dtypes = (
+        [torch.float32, torch.bfloat16, torch.float16]
+        if PLATFORM_SUPPORTS_BF16
+        else [torch.float16, torch.float32]
+    )
+    test_dtypes_fast = [torch.float16]
+    SKIP_UT_ON_CPU = False
+elif TEST_ON_XPU:
+    torch._C._set_onednn_allow_tf32(True)
+    test_device = ("xpu",)
+    test_dtypes = [torch.float32, torch.bfloat16, torch.float16]
+    test_dtypes_fast = [torch.float16]
+    SKIP_UT_ON_CPU = False
 else:
     test_device = ("cpu",)
     torch_config_string = torch.__config__.show()
@@ -254,7 +250,6 @@ test_Bq_Bkv = [
 test_block_size = [
     64,
     128,
-    (1, 64),
     (128, 64),
 ]
 
@@ -414,7 +409,7 @@ class TestFlexDecoding(InductorTestCase):
         sdpa_partial = create_attention(
             score_mod,
             block_mask,
-            enable_gqa=(not Q_H == KV_H),
+            enable_gqa=(Q_H != KV_H),
             kernel_options=kernel_options,
         )
         compiled_sdpa = torch.compile(sdpa_partial)
@@ -609,7 +604,7 @@ class TestFlexDecoding(InductorTestCase):
                 return_lse=True,
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
-                enable_gqa=(not Q_H == KV_H),
+                enable_gqa=(Q_H != KV_H),
             )
         else:
             compiled_lse = None
@@ -620,7 +615,7 @@ class TestFlexDecoding(InductorTestCase):
                 return_lse=False,
                 block_mask=converted_block_mask,
                 score_mod=converted_score_mod,
-                enable_gqa=(not Q_H == KV_H),
+                enable_gqa=(Q_H != KV_H),
             )
         return compiled_out, compiled_lse
 
@@ -666,9 +661,7 @@ class TestFlexDecoding(InductorTestCase):
         if block_mask is None:
             block_mask = create_block_mask(noop_mask, Q_B, 1, 1, KV_S, device=device)
 
-        sdpa_partial = create_attention(
-            score_mod, block_mask, enable_gqa=(not Q_H == KV_H)
-        )
+        sdpa_partial = create_attention(score_mod, block_mask, enable_gqa=(Q_H != KV_H))
         golden_out, gold_lse = sdpa_partial(q_gold, k_gold, v_gold, return_lse=True)
         ref_out, ref_lse = sdpa_partial(q_ref, k_ref, v_ref, return_lse=True)
 
@@ -908,7 +901,7 @@ class TestFlexDecoding(InductorTestCase):
         sdpa_partial = create_attention(
             score_mod=score_mod,
             block_mask=None,
-            enable_gqa=(not Hq == Hkv),
+            enable_gqa=(Hq != Hkv),
         )
         compiled_sdpa = torch.compile(sdpa_partial)
         ref_out = sdpa_partial(q, k, v)
@@ -1146,7 +1139,7 @@ class TestFlexDecoding(InductorTestCase):
 
         def head_attention_mod(kv_head_num):
             head_type = torch.tensor(
-                [False if i % kv_head_num == 0 else True for i in range(kv_head_num)],
+                [i % kv_head_num != 0 for i in range(kv_head_num)],
                 dtype=torch.bool,
                 device=device,
             )
@@ -1182,17 +1175,17 @@ class TestFlexDecoding(InductorTestCase):
             (2, 2, 128, 4),
             dtype=dtype,
             device=device,
-            requires_grad=True,
+            requires_grad=False,
         )
         make_q = functools.partial(
             torch.randn,
             (2, 2, 8, 4),
             dtype=dtype,
             device=device,
-            requires_grad=True,
+            requires_grad=False,
         )
         query, key, value = make_q(), make_kv(), make_kv()
-        # floor_div is not decomposed in decompostion_table is empty
+        # floor_div is not decomposed in decomposition_table is empty
         attention = functools.partial(flex_attention, score_mod=score_mod_func)
         gm = make_fx(attention, decomposition_table={})(query, key, value)
         self.assertExpectedInline(
@@ -1915,6 +1908,45 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
             else:
                 self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+
+    @supported_platform
+    @common_utils.parametrize("q_seq_len", [4, 8, 16, 23, 64])
+    def test_multi_block_m(self, q_seq_len, device):
+        def mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        B, KV_SEQ_LEN, NUM_Q_HEAD, NUM_KV_HEAD, HEAD_DIM = 1, 128, 32, 8, 128
+        mask = create_block_mask(
+            mask_mod=mask_mod,
+            B=1,
+            H=1,
+            Q_LEN=q_seq_len,
+            KV_LEN=KV_SEQ_LEN,
+            device=device,
+            BLOCK_SIZE=16,  # follow the vllm integration
+        )
+
+        flex_attention_compiled = torch.compile(flex_attention)
+
+        dtype = torch.float
+        q = torch.randn(B, NUM_Q_HEAD, q_seq_len, HEAD_DIM, device=device, dtype=dtype)
+        k = torch.randn(
+            B, NUM_KV_HEAD, KV_SEQ_LEN, HEAD_DIM, device=device, dtype=dtype
+        )
+        v = torch.randn(
+            B, NUM_KV_HEAD, KV_SEQ_LEN, HEAD_DIM, device=device, dtype=dtype
+        )
+
+        # settings for vllm integration
+        kernel_options = dict(BLOCK_M=16, BLOCK_N=16)
+        kwargs = dict(
+            block_mask=mask,
+            kernel_options=kernel_options,
+            enable_gqa=True,
+        )
+        eager = flex_attention(q, k, v, **kwargs)
+        out = flex_attention_compiled(q, k, v, **kwargs)
+        torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)

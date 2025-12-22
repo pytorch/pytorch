@@ -1993,7 +1993,7 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_post_hook(self, device, dtype, optim_info):
-        def post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def post_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
             nonlocal data
             data += 2
 
@@ -2025,7 +2025,7 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_pre_hook(self, device, dtype, optim_info):
-        def pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def pre_hook(opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]):
             nonlocal data
             data += 2
 
@@ -2058,19 +2058,27 @@ class TestOptimRenewed(TestCase):
 
     @optims(optim_db, dtypes=[torch.float32])
     def test_step_all_hooks(self, device, dtype, optim_info):
-        def global_pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def global_pre_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(0)
 
-        def global_post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def global_post_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(5)
 
-        def local_pre_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def local_pre_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(1)
 
-        def local_post_hook(opt: Optimizer, args: tuple[Any], kwargs: dict[Any, Any]):
+        def local_post_hook(
+            opt: Optimizer, args: tuple[Any, ...], kwargs: dict[Any, Any]
+        ):
             nonlocal data
             data.append(2)
 
@@ -2304,6 +2312,34 @@ class TestOptimRenewed(TestCase):
 
             for state in optim.state.values():
                 self.assertGreater(len(state), 0)
+
+    @parametrize("dtype", [torch.float32])
+    def test_step_iteration(self, device, dtype):
+        def _get_model_and_input_tensor(device, dtype):
+            model = torch.nn.Sequential(
+                torch.nn.Conv2d(4, 2, 1, stride=2),
+                torch.nn.BatchNorm2d(2, eps=1e-05, momentum=0.1),
+            )
+            input = torch.rand(1, 4, 16, 16, device=device, dtype=dtype)
+            model.to(dtype=dtype, device=device)
+            return model, input
+
+        counter = 0
+
+        def fwd_bwd(optim, mod, i):
+            nonlocal counter
+            counter += 1
+            optim.zero_grad()
+            loss = mod(i).sum()
+            loss.backward()
+            return loss
+
+        model, input = _get_model_and_input_tensor(device, dtype)
+        optimizer = torch.optim.LBFGS(
+            model.parameters(), max_iter=1, max_eval=5, line_search_fn="strong_wolfe"
+        )
+        optimizer.step(functools.partial(fwd_bwd, optimizer, model, input))
+        self.assertEqual(counter, 6)
 
 
 instantiate_device_type_tests(TestOptimRenewed, globals(), allow_mps=True)

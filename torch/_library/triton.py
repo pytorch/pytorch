@@ -2,8 +2,8 @@ import ast
 import contextlib
 import inspect
 import threading
-from collections.abc import Generator, Iterable
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable, Generator, Iterable
+from typing import Any, Optional, Union
 
 from torch.utils._exposed_in import exposed_in
 
@@ -126,7 +126,7 @@ def triton_op(
         mutates_args (Iterable[str] or "unknown"): The names of args that the function mutates.
             This MUST be accurate, otherwise, the behavior is undefined. If "unknown",
             it pessimistically assumes that all inputs to the operator are being mutated.
-        schema (None | str): A schema string for the operator. If None
+        schema (str | None): A schema string for the operator. If None
             (recommended) we'll infer a schema for the operator from its type
             annotations. We recommend letting us infer a schema unless you
             have a specific reason not to.
@@ -215,7 +215,7 @@ def triton_op(
             # the exported program to be high-level and serializable. If we decompose
             # the custom op to a functional hop and make it a node in exported program,
             # we need to figure out ways of serializing the hop and its arguments, which can be triton.jited
-            # functions and triton dtypes. This is undesireble because:
+            # functions and triton dtypes. This is undesirable because:
             # - it can be tedious to maintain a layer that serializes the jited function (e.g. with a string) and dtypes.
             # - exported program will contain the implementation detail (e.g. triton source code) for a specific
             #   backend (GPU), which is probably at a wrong level of abstraction.

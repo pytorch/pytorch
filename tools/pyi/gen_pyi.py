@@ -663,6 +663,156 @@ def gen_nn_functional(fm: FileManager) -> None:
                     "Tensor",
                 )
             ],
+            "im2col": [
+                defs(
+                    "im2col",
+                    [
+                        INPUT,
+                        KERNEL_SIZE,
+                        "dilation: _int | _size",
+                        "padding: _int | _size",
+                        "stride: _int | _size",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "l1_loss": [
+                defs(
+                    "l1_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mish": [
+                defs(
+                    "mish",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mish_": [
+                defs(
+                    "mish_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "mse_loss": [
+                defs(
+                    "mse_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "multilabel_margin_loss": [
+                defs(
+                    "multilabel_margin_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "multi_margin_loss": [
+                defs(
+                    "multi_margin_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "p: float = 1.0",
+                        "margin: float = 1.0",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "nll_loss_nd": [
+                defs(
+                    "nll_loss_nd",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "weight: Tensor | None = None",
+                        "reduction: str = ...",
+                        "ignore_index: int = -100",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "relu6": [
+                defs(
+                    "relu6",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "relu6_": [
+                defs(
+                    "relu6_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "silu": [
+                defs(
+                    "silu",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "silu_": [
+                defs(
+                    "silu_",
+                    [
+                        INPUT,
+                    ],
+                    "Tensor",
+                )
+            ],
+            "smooth_l1_loss": [
+                defs(
+                    "smooth_l1_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                        "beta: float = 1.0",
+                    ],
+                    "Tensor",
+                )
+            ],
+            "soft_margin_loss": [
+                defs(
+                    "soft_margin_loss",
+                    [
+                        INPUT,
+                        "target: Tensor",
+                        "reduction: str = ...",
+                    ],
+                    "Tensor",
+                )
+            ],
         }
     )
 
@@ -844,6 +994,7 @@ def add_docstr_to_hint(docstr: str, hint: str) -> str:
         hint = hint.removesuffix("...").rstrip()  # remove "..."
         content = hint + "\n" + textwrap.indent(f'r"""\n{docstr}\n"""', prefix="    ")
         # Remove trailing whitespace on each line
+        # pyrefly: ignore [no-matching-overload]
         return "\n".join(map(str.rstrip, content.splitlines())).rstrip()
 
     # attribute or property
@@ -1430,15 +1581,14 @@ def gen_pyi(
                     "S",
                 )
             ],
-            "_make_dtensor": [
+            "_dtensor__new__": [
                 "@staticmethod\n"
                 + defs(
-                    "_make_dtensor",
+                    "_dtensor__new__",
                     [
                         "cls: type[S]",
-                        "size: Sequence[_int | SymInt]",
-                        "strides: Sequence[_int | SymInt]",
                         "local_tensor: Tensor",
+                        "spec: torch.distributed.tensor._dtensor_spec.DTensorSpec",
                         "requires_grad: _bool",
                     ],
                     "S",

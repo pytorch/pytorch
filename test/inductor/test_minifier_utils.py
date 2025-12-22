@@ -63,7 +63,7 @@ class MinifierUtilsTests(TestCase):
         )
 
         model = M()
-        gm = torch.export.export(model, inputs, strict=False).module()
+        gm = torch.export.export(model, inputs, strict=False).module(check_guards=False)
 
         # TODO: make NNModuleToString.convert() generate string for nested submodules.
         model_string = get_module_string(gm)

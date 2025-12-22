@@ -1,0 +1,60 @@
+name: Limited CI for symmetric memory tests on B200
+
+on:
+  pull_request:
+    paths:
+      - .github/workflows/b200-symm-mem.yml
+  workflow_dispatch:
+  push:
+    tags:
+      - ciflow/b200-symm-mem/*
+  schedule:
+    - cron: 22 8 * * *  # about 1:22am PDT
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  linux-jammy-cuda12_8-py3_10-gcc11-sm100-build-symm:
+    name: linux-jammy-cuda12.8-py3.10-gcc11-sm100-symm
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      runner: linux.r7i.4xlarge
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm100-symm
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      cuda-arch-list: '10.0'
+      test-matrix: |
+        { include: [
+          { config: "b200-symm-mem", shard: 1, num_shards: 1, runner: "linux.dgx.b200.8" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-cuda12_8-py3_10-gcc11-sm100-test:
+    name: linux-jammy-cuda12.8-py3.10-gcc11-sm100-symm
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda12_8-py3_10-gcc11-sm100-build-symm
+    with:
+      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build-symm.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build-symm.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm100-build-symm.outputs.test-matrix }}
+      aws-role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+    secrets: inherit

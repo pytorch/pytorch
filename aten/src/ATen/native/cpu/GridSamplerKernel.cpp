@@ -293,7 +293,7 @@ struct ComputeLocationBase<scalar_t, /*align_corners=*/false> {
     , empty(size <= 0) {}
 
   inline Vec unnormalize(const Vec &in) const {
-    return (in + Vec(1)) * Vec(scaling_factor) - Vec(0.5);
+    return (in + Vec(static_cast<scalar_t>(1))) * Vec(scaling_factor) - Vec(static_cast<scalar_t>(0.5));
   }
 
   inline Vec clip_coordinates(const Vec &in) const {
@@ -441,7 +441,7 @@ struct ComputeLocation<scalar_t, GridSamplerPadding::Reflection, align_corners>
 // See NOTE [ Grid Sample CPU Kernels ] for details.
 
 template<typename scalar_t>
-static inline void
+inline void
 mask_scatter_add(const scalar_t *src, scalar_t* base_addr,
                  const int_same_size_t<scalar_t> *offsets,
                  const int_same_size_t<scalar_t> *mask, int64_t len) {
@@ -831,7 +831,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
 
   // constant used in cubic convolution
   // could be -0.5 or -0.75, use the same value in UpSampleBicubic2d.h
-  const Vec A = Vec(-0.75);
+  const Vec A = Vec(static_cast<scalar_t>(-0.75));
 
   ApplyGridSample(const TensorAccessor<const scalar_t, 4>& input)
     : inp_H(input.size(2))
@@ -1030,7 +1030,7 @@ struct ApplyGridSample<scalar_t, 2, GridSamplerInterpolation::Bicubic,
 // See NOTE [ Grid Sample CPU Kernels ] for details.
 
 template<typename scalar_t, typename ApplyFn>
-static inline void grid_sample_2d_grid_slice_iterator(
+inline void grid_sample_2d_grid_slice_iterator(
     const TensorAccessor<const scalar_t, 3>& grid_slice, const ApplyFn &apply_fn) {
   int64_t out_H = grid_slice.size(0);
   int64_t out_W = grid_slice.size(1);

@@ -11,6 +11,11 @@ def remove_cuda(config_list):
     return [config for config in config_list if cuda_config not in config]
 
 
+def remove_cpu(config_list):
+    cpu_config = {"device": "cpu"}
+    return [config for config in config_list if cpu_config not in config]
+
+
 # Configs for conv-1d ops
 conv_1d_configs_short = op_bench.config_list(
     attr_names=["IC", "OC", "kernel", "stride", "N", "L"],
@@ -126,6 +131,18 @@ conv_3d_configs_short = op_bench.config_list(
         "device": ["cpu", "cuda"],
     },
     tags=["short"],
+)
+conv_3d_configs_long = op_bench.cross_product_configs(
+    IC=[16, 32],
+    OC=[32, 64],
+    kernel=[3, 5],
+    stride=[1, 2],
+    N=[1],
+    D=[128],
+    H=[128],
+    W=[128],
+    device=["cpu", "cuda"],
+    tags=["long"],
 )
 
 linear_configs_short = op_bench.config_list(

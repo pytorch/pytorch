@@ -56,6 +56,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten._scaled_dot_product_fused_attention_overrideable_backward.default": {},
     "aten._scaled_dot_product_fused_attention_overrideable.default": {},
     "aten._scaled_mm.default": {},
+    "aten._scaled_grouped_mm.default": {},
     "aten._scaled_mm.out": {},
     "aten._segment_reduce_backward.default": {},
     "aten._thnn_fused_lstm_cell.default": {},
@@ -188,4 +189,6 @@ aten_shimified_ops: dict[str, dict[str, list[str]]] = {
     "aten.amax.default": {},
     "aten.new_empty.default": {},
     "aten.new_zeros.default": {},
+    "aten.full.default": {},
+    "aten.subtract.Tensor": {},
 }

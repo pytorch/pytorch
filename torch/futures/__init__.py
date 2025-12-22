@@ -1,9 +1,14 @@
 # mypy: allow-untyped-defs
+# pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
-from typing import Callable, cast, Generic, Optional, TypeVar, Union
+from typing import cast, Generic, Optional, TYPE_CHECKING, TypeVar, Union
 
 import torch
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
 
 
 __all__ = ["Future", "collect_all", "wait_all"]
@@ -267,9 +272,10 @@ class Future(torch._C.Future, Generic[T]):
             ...
             ValueError: foo
         """
-        assert isinstance(result, Exception), (
-            f"{result} is of type {type(result)}, not an Exception."
-        )
+        if not isinstance(result, Exception):
+            raise AssertionError(
+                f"{result} is of type {type(result)}, not an Exception."
+            )
 
         def raise_error(fut_result):
             raise fut_result

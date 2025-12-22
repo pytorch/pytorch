@@ -1,0 +1,54 @@
+name: quantization-periodic
+
+on:
+  push:
+    tags:
+      - ciflow/quantization-periodic/*
+  workflow_dispatch:
+  schedule:
+    # run weekly
+    - cron: "45 0 * * 0"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  get-default-label-prefix:
+    name: get-default-label-prefix
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    if: ${{ (github.event_name != 'schedule' || github.repository == 'pytorch/pytorch') && github.repository_owner == 'pytorch' }}
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
+
+  periodic-quantization-build:
+    name: periodic-quantization-build
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-default-label-prefix
+    with:
+      runner_prefix: "${{ needs.get-default-label-prefix.outputs.label-type }}"
+      build-environment: linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
+      cuda-arch-list: '8.9'
+      test-matrix: |
+        { include: [
+          { config: "quantization", shard: 1, num_shards: 1, runner: "${{ needs.get-default-label-prefix.outputs.label-type }}linux.g6.4xlarge.experimental.nvidia.gpu" },
+        ]}
+    secrets: inherit
+  periodic-test-quantization:
+    name: periodic-test-quantization
+    uses: ./.github/workflows/_linux-test.yml
+    needs: periodic-quantization-build
+    with:
+      build-environment: ${{ needs.periodic-quantization-build.outputs.build-environment }}
+      docker-image: ${{ needs.periodic-quantization-build.outputs.docker-image }}
+      test-matrix: ${{ needs.periodic-quantization-build.outputs.test-matrix }}
+    secrets: inherit
