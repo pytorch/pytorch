@@ -1351,13 +1351,15 @@ class BuiltinVariable(VariableTracker):
                     if all_can_peek:
                         try:
                             res = fn(*peeked_args, **peeked_kwargs)
-                        except Exception as exc:
-                            raise_observed_exception(
-                                type(exc),
-                                tx,
-                                args=list(map(ConstantVariable.create, exc.args)),
-                            )
+                        except Exception:
+                            # Operation failed - fall through to let other handlers try.
+                            # This can happen when types don't support the operation
+                            # (e.g., operator.le(torch.device, str) fails with TypeError).
+                            # Other handlers like polyfill-based comparison handlers
+                            # may be able to handle this case.
+                            all_can_peek = False
 
+                    if all_can_peek:
                         if any_unrealized:
                             # Realize all lazy constants to install guards
                             from .lazy import LazyVariableTracker
