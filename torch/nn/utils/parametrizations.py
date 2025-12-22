@@ -327,6 +327,15 @@ class _WeightNorm(Module):
         return torch._weight_norm(weight_v, weight_g, self.dim)
 
     def right_inverse(self, weight):
+        """Decompose weight back into magnitude and direction components.
+        
+        Args:
+            weight: Normalized weight tensor to decompose
+            
+        Returns:
+            Tuple of (weight_g, weight_v) where weight_g is the magnitude 
+            and weight_v is the direction component
+        """
         weight_g = torch.norm_except_dim(weight, 2, self.dim)
         weight_v = weight
 
