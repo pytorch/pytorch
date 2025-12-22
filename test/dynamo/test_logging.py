@@ -227,19 +227,19 @@ class LoggingTests(LoggingTestCase):
         )
 
         self.assertIn(
-            "0: return outer_fn(x, ys, zs)",
+            """ 0: {"name": "outmost_fn", "line": "return outer_fn(x, ys, zs)"}""",
             record_str,
         )
         self.assertIn(
-            "1: return fn(x, ys, zs)",
+            """2: {"name": "fn", "line": "return inner(x, ys, zs)""",
             record_str,
         )
         self.assertIn(
-            "2: return inner(x, ys, zs)",
+            """1: {"name": "outer_fn", "line": "return fn(x, ys, zs)"}""",
             record_str,
         )
         self.assertIn(
-            "3: for y, z in zip(ys, zs)",
+            """3: {"name": "inner", "line": "for y, z in zip(ys, zs):"}""",
             record_str,
         )
 

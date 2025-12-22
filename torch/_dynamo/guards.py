@@ -26,6 +26,7 @@ import functools
 import importlib
 import inspect
 import io
+import json
 import logging
 import math
 import pickle
@@ -4436,20 +4437,23 @@ def strip_local_scope(s: str) -> str:
     return re.sub(pattern, r"\1", s)
 
 
-def format_user_stack_trace(user_stack: Optional[traceback.StackSummary]) -> str:
+def format_user_stack_trace(user_stack: traceback.StackSummary | None) -> str:
     """
     Format the user stack trace for display in guard failure messages.
 
-    Returns a formatted string with the full stack trace, or an empty string
-    if no user stack is available.
+    Returns a formatted string with the full stack trace in JSON format per line,
+    or an empty string if no user stack is available.
     """
     if user_stack is None or len(user_stack) == 0:
         return ""
 
     formatted = "\n  Full recompile user stack trace:\n"
     for idx, frame in enumerate(user_stack):
-        line_info = frame.line.strip() if frame.line else ""
-        formatted += f"    {idx}: {line_info}\n"
+        frame_data = {
+            "name": frame.name,
+            "line": frame.line.strip() if frame.line else "",
+        }
+        formatted += f"    {idx}: {json.dumps(frame_data)}\n"
     return formatted
 
 
@@ -4500,9 +4504,7 @@ def get_guard_fail_reason_helper(
                 verbose_code_parts = []
 
         # Format user stack trace if available and recompile logging is enabled
-        if (
-            is_recompiles_enabled() or is_recompiles_verbose_enabled()
-        ) and guard_debug_info.user_stack:
+        if guard_debug_info.user_stack:
             user_stack_str = format_user_stack_trace(guard_debug_info.user_stack)
     elif cache_entry_backend != backend:
         # None of the guard entries failed - a backend match issue
