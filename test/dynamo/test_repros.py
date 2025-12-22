@@ -7727,12 +7727,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
     # https://github.com/pytorch/pytorch/issues/151670
     @requires_cuda
-<<<<<<< HEAD
     def test_diagonal_scatter_single_elem_cpu_with_cuda_tensor(self):
-=======
-    @parametrize("backend", ["eager", "inductor"])
-    def test_single_elem_cpu_with_cuda_tensor(self, backend: str):
->>>>>>> d9edf67ff04 (update test names to be more descriptive)
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
