@@ -523,6 +523,19 @@ class RangeVariable(BaseListVariable):
     def as_python_constant(self) -> range:
         return range(*[x.as_python_constant() for x in self.items])
 
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """Override to use range(*values) instead of range(values)."""
+        values = []
+        any_unrealized = False
+        for item in self.items:
+            can_peek, is_unrealized, value = item.try_peek_constant()
+            if not can_peek:
+                return (False, False, None)
+            if is_unrealized:
+                any_unrealized = True
+            values.append(value)
+        return (True, any_unrealized, range(*values))
+
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
@@ -1065,6 +1078,27 @@ class DequeVariable(CommonListMethodsVariable):
             [x.as_python_constant() for x in self.items],
             maxlen=self.maxlen.as_python_constant(),
         )
+
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """Override to include maxlen parameter."""
+        values = []
+        any_unrealized = False
+        for item in self.items:
+            can_peek, is_unrealized, value = item.try_peek_constant()
+            if not can_peek:
+                return (False, False, None)
+            if is_unrealized:
+                any_unrealized = True
+            values.append(value)
+        # Also check maxlen
+        can_peek_maxlen, is_unrealized_maxlen, maxlen_value = (
+            self.maxlen.try_peek_constant()
+        )
+        if not can_peek_maxlen:
+            return (False, False, None)
+        if is_unrealized_maxlen:
+            any_unrealized = True
+        return (True, any_unrealized, self.python_type()(values, maxlen=maxlen_value))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
