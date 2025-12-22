@@ -5766,7 +5766,7 @@ class ExternKernel(InputsKernel):
         layout: OutputSpec,
         inputs: Sequence[Union[IRNode, Sequence[IRNode]]],
         constant_args: Sequence[Any] = (),
-        kwargs: Optional[dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
         output_view: Optional[ReinterpretView] = None,
         python_kernel_name: Optional[str] = None,
         cpp_kernel_name: Optional[str] = None,
@@ -7939,8 +7939,8 @@ class FallbackKernel(ExternKernelAlloc):
             # No need to serialize in the cpp wrapper JIT mode
             # For HOPs (HigherOrderOperator), include kwargs as a separate dict
             # since they may not have ordered_kwargs_for_cpp_kernel
-            if isinstance(target, torch._ops.HigherOrderOperator):
-                return (args, kwargs)
+            # if isinstance(target, torch._ops.HigherOrderOperator):
+            #     return (args, kwargs)
             return [*args, *ordered_kwargs]
 
         serializer = GraphModuleSerializer(None, [])  # type: ignore[arg-type]
