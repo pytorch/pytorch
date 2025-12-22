@@ -14345,9 +14345,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         f = torch.compile(f)
 
         x = torch.randn((2, 3, 2), device=self.device)
+        device_str = "hip" if TEST_WITH_ROCM else "cuda"
+        if self.device.type == "cpu":
+            device_str = "cpu"
         expected_graph1 = f"""\
-def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]{str(x.device)}"):
-        permute: "f32[2, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg0_1, [0, 2, 1]);  arg0_1 = None
+def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]{device_str}"):
+        permute: "f32[2, 2, 3][6, 1, 2]{device_str}" = torch.ops.aten.permute.default(arg0_1, [0, 2, 1]);  arg0_1 = None
         return (permute,)"""  # noqa: B950
 
         post_grad_graph = get_post_grad_graph(f, (x,))
@@ -14361,9 +14364,12 @@ def forward(self, arg0_1: "f32[2, 3, 2][6, 2, 1]{str(x.device)}"):
 
         # dynamic shape
         x = torch.randn((4, 3, 2), device=self.device)
+        device_str = "hip" if TEST_WITH_ROCM else "cuda"
+        if self.device.type == "cpu":
+            device_str = "cpu"
         expected_graph2 = f"""\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.device)}"):
-        permute: "f32[s77, 2, 3][6, 1, 2]{str(x.device)}" = torch.ops.aten.permute.default(arg1_1, [0, 2, 1]);  arg1_1 = None
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{device_str}"):
+        permute: "f32[s77, 2, 3][6, 1, 2]{device_str}" = torch.ops.aten.permute.default(arg1_1, [0, 2, 1]);  arg1_1 = None
         return (permute,)"""  # noqa: B950
         post_grad_graph = get_post_grad_graph(f, (x,))
         self.assertExpectedInline(
@@ -14387,9 +14393,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{str(x.dev
         torch._dynamo.mark_dynamic(x, 2)
 
         post_grad_graph = get_post_grad_graph(f, (x,))
+        device_str = "hip" if TEST_WITH_ROCM else "cuda"
+        if self.device.type == "cpu":
+            device_str = "cpu"
         expected_graph = f"""\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "u8[s77, s27, s53][s27*s53, s53, 1]{str(x.device)}"):
-        permute: "u8[s77, s53, s27][s27*s53, 1, s53]{str(x.device)}" = torch.ops.aten.permute.default(arg3_1, [0, 2, 1]);  arg3_1 = None
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "u8[s77, s27, s53][s27*s53, s53, 1]{device_str}"):
+        permute: "u8[s77, s53, s27][s27*s53, 1, s53]{device_str}" = torch.ops.aten.permute.default(arg3_1, [0, 2, 1]);  arg3_1 = None
         return (permute,)"""  # noqa: B950
         self.assertExpectedInline(
             post_grad_graph,
