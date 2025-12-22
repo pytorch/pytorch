@@ -690,6 +690,59 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
         self._test_common(mod, (x1, x2), matcher_check_fn)
 
+    @skipIfNoDynamoSupport
+    def test_woq_int8(self, device):
+        class M(torch.nn.Module):
+            def __init__(self, is_permute):
+                super().__init__()
+                self.is_permute = is_permute
+
+            def forward(self, x, weight, scales):
+                if self.is_permute:
+                    weight = weight.t()
+                    m = torch.mm(
+                        x.reshape(-1, x.shape[-1]),
+                        weight.to(x.dtype),
+                    )
+                    y = m * scales.to(m.dtype)
+                    y = y.reshape(*x.shape[:-1], y.shape[-1])
+                    return y
+                else:
+                    return (
+                        torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+                    )
+
+        x_shape = (1, 1, 256)
+        s_shape = 12
+        x_strides = [
+            (256, 256, 1),  # linear dispatching to mm
+            (256, 32, 1),  # linear dispatching to bmm
+        ]
+        is_permutes = [False, True]
+        for x_stride, is_permute in itertools.product(x_strides, is_permutes):
+            mod = M(is_permute=is_permute).eval()
+            x = (
+                torch.randn(x_shape, dtype=torch.bfloat16)
+                .as_strided(x_shape, x_stride)
+                .to(device)
+            )
+
+            w_shape = (12, 256)
+            w = torch.randint(-128, 127, w_shape, dtype=torch.int8).to(device)
+            s = torch.randn(s_shape, dtype=torch.bfloat16).to(device)
+
+            def matcher_check_fn():
+                self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
+
+            self._test_common(
+                mod,
+                (x, w, s),
+                matcher_check_fn,
+                check_quantization=False,
+                atol=0.001,
+                rtol=0.07,
+            )
+
 
 class TestPatternMatcher(TestPatternMatcherBase):
     @reduced_f32_on_and_off()
@@ -1085,7 +1138,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
             mod = M().to(dtype).eval()
             v = torch.randn(2, 4, 16).to(dtype)
             self._test_common(mod, (v,), matcher_check_fn, rtol=1e-2, atol=1e-2)
-
 
 instantiate_device_type_tests(
     TestPatternMatcherGeneric, globals(), allow_xpu=True, only_for=("cpu", "xpu")

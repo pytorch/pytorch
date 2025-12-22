@@ -129,7 +129,7 @@ def lazy_register_extern_choice(fn):
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out", op_overload=aten.mm.out)
 aten_mm_dtype = ExternKernelChoice(
     torch.mm,
-    "at::_mm_dtype_out_cuda",
+    "at::_mm_dtype_out_xpu" if torch.xpu.is_available() else "at::_mm_dtype_out_cuda",
     name="mm_dtype",
     op_overload=aten.mm.dtype_out,
 )
@@ -312,8 +312,8 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             lambda: "input dtypes must be the same",
         )
         torch._check(
-            mat1.get_device().type == "cuda",
-            lambda: "out_dtype is only supported for CUDA",
+            mat1.get_device().type in ("cuda", "xpu"),
+            lambda: "out_dtype is only supported for CUDA or XPU",
         )
         torch._check(
             out_dtype == input_dtype
@@ -423,6 +423,14 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
             if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
                 templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
+
+            if (
+                inductor_config.is_fbcode()
+                and inductor_config.triton.enable_tlx_templates
+            ):
+                from torch._inductor.fb.tlx_templates.mm_templates import append_tlx
+
+                templates_to_use = append_tlx(templates_to_use)
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
@@ -754,6 +762,7 @@ scaling_pairs = [
     (ScalingType.RowWise, ScalingType.RowWise),
     (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128),
     (ScalingType.BlockWise1x128, ScalingType.BlockWise1x128),
+    (ScalingType.BlockWise128x128, ScalingType.BlockWise1x128),
 ]
 
 
