@@ -247,7 +247,7 @@ class FakeTensorTest(TestCase):
             torch.nextafter(fake_x, fake_y)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_one_dim_cpu_with_cuda_tensor(self):
+    def test_one_dim_single_elem_cpu_with_cuda_tensor(self):
         with FakeTensorMode():
             base = torch.zeros((1, 2), device="cuda")
             src = torch.tensor([1.0])
@@ -257,7 +257,7 @@ class FakeTensorTest(TestCase):
             self.assertTrue(isinstance(out, FakeTensor))
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_n_dim_single_elem_cpu_with_cuda_tensor(self):
+    def test_three_dim_single_elem_cpu_with_cuda_tensor(self):
         with FakeTensorMode():
             x = torch.randn((1, 1, 1))
             y = torch.randn(10, device="cuda")
