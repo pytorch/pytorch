@@ -1011,7 +1011,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
     @staticmethod
     def _compute_padding_info(
-        current_logical_shape: list[int],
+        logical_size_on_dim: int,
         num_chunks: int,
         shard_dim: int,
         split_factor: int = 1,
@@ -1034,7 +1034,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         When split_factor=1, this behaves identically to regular Shard padding logic.
 
         Args:
-            current_logical_shape: The logical shape of the tensor being sharded.
+            logical_size_on_dim: The logical shape size of the tensor ``shard_dim``.
             num_chunks: Number of chunks to split into (typically the mesh dim size).
             shard_dim: The dimension along which the tensor is sharded.
             split_factor: The number of pre-existing splits from right-to-left sharding.
@@ -1052,8 +1052,6 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
         if split_factor != 1:
             # Computing padding info for StridedShard tensor dim
-            logical_size_on_dim = current_logical_shape[shard_dim]
-
             # First level: split into split_factor pieces
             first_chunk_size = _ceil_div(logical_size_on_dim, split_factor)
             num_full_first_chunks = logical_size_on_dim // first_chunk_size
@@ -1077,7 +1075,6 @@ class _StridedShard(torch._C._distributed.StridedShard):
                 max_chunk_size += _ceil_div(remainder, num_chunks)
         else:
             # Compute padding info for normal shard, no split_factor impact.
-            logical_size_on_dim = current_logical_shape[shard_dim]
             needs_padding_on_dim = logical_size_on_dim % num_chunks != 0
             max_chunk_size = _ceil_div(logical_size_on_dim, num_chunks)
 
@@ -1109,7 +1106,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
             _,
             old_dim_max_chunk_size,
         ) = _StridedShard._compute_padding_info(
-            current_logical_shape,
+            current_logical_shape[old_shard_dim],
             num_chunks,
             old_shard_dim,
             split_factor,
@@ -1119,7 +1116,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
             _,
             new_dim_max_chunk_size,
         ) = _StridedShard._compute_padding_info(
-            current_logical_shape,
+            current_logical_shape[new_shard_dim],
             num_chunks,
             new_shard_dim,
         )
@@ -1164,7 +1161,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
             old_dim_logical_size,
             _,
         ) = _StridedShard._compute_padding_info(
-            current_logical_shape,
+            current_logical_shape[old_shard_dim],
             num_chunks,
             old_shard_dim,
             split_factor,
@@ -1174,7 +1171,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
             new_dim_logical_size,
             new_dim_max_chunk_size,
         ) = _StridedShard._compute_padding_info(
-            current_logical_shape,
+            current_logical_shape[new_shard_dim],
             num_chunks,
             new_shard_dim,
         )
