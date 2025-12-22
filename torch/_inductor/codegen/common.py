@@ -112,7 +112,7 @@ class FileBackedGraphModule:
     def __post_init__(self) -> None:
         # Write the code to a file for compatibility with debugging utilities.
         # The file is deleted upon program termination.
-        self.tempfile = tempfile.NamedTemporaryFile(
+        self.tempfile = tempfile.NamedTemporaryFile(  # noqa: SIM115
             mode="w+", suffix=".py", delete=False
         )
         atexit.register(os.remove, self.tempfile.name)
@@ -521,6 +521,7 @@ def init_backend_registration() -> None:
             "cpp": CppScheduling,
             "halide": HalideScheduling,
             "triton": TritonScheduling,
+            "pallas": PallasScheduling,
         }
         register_backend_for_device(
             "cpu",
@@ -1732,9 +1733,15 @@ class KernelArgs:
             call_args.append(self.wrap_ptr_arg(outer, dtype))
             arg_types.append(f"{cpp_dtype}*")
         for outer, inner in self.sizevars.items():
-            arg_defs.append(f"const {INDEX_TYPE} {inner}")
+            if isinstance(outer, sympy.Symbol) and symbol_is_type(
+                outer, (SymT.UNBACKED_FLOAT)
+            ):
+                arg_defs.append(f"const float {inner}")
+                arg_types.append("const float")
+            else:
+                arg_defs.append(f"const {INDEX_TYPE} {inner}")
+                arg_types.append(f"const {INDEX_TYPE}")
             call_args.append(self.wrap_size_arg(outer))
-            arg_types.append(f"const {INDEX_TYPE}")
             if V.graph.wrapper_code:
                 V.graph.wrapper_code.ensure_size_computed(outer)
         assert not self.workspace_args, "Workspace not supported on CPU "
@@ -2353,6 +2360,7 @@ class Kernel(CodeGen, Generic[CSEVariableType]):
                     SymT.UNBACKED_INT,
                     SymT.SIZE,
                     SymT.PRECOMPUTED_SIZE,
+                    SymT.UNBACKED_FLOAT,
                 ),
             )
         }

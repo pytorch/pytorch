@@ -829,6 +829,7 @@ class HalideKernel(SIMDKernel):
                         if lt(divisor, n.divisor) and lt(n.divisor, end)
                     ]
                 )
+                # pyrefly: ignore [bad-assignment]
                 while sizes_to_add:
                     next_size = functools.reduce(sympy.gcd, sizes_to_add)
                     if eq(next_size, 1):
@@ -906,7 +907,7 @@ class HalideKernel(SIMDKernel):
             return self.dom_renames[prefix]
 
         renames = {}
-        for var in self.halide_vars.keys():
+        for var in self.halide_vars:
             if not self.inside_reduction and var in self.reduction_renames:
                 continue
             m = re.match(r"^h(\d+)$", var.name)

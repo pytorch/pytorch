@@ -475,6 +475,7 @@ class MetaTensorDescriber:
             ),
             fake_mode=torch._subclasses.fake_tensor.maybe_get_fake_mode(t),
             view_func=view_func,
+            # pyrefly: ignore [bad-argument-type]
             attrs=attrs,
             ctx=ctx,
             type=type_v,
@@ -870,7 +871,7 @@ class MetaConverter(Generic[_TensorT]):
 
     # This function assumes that it's possible to do the conversion
     # NB: name here is used in a conventional way by Dynamo; it corresponds
-    # precisely to the Source.name() of the tensor we're fakeifying and
+    # precisely to the Source.name of the tensor we're fakeifying and
     # corresponds to a valid Python expression.  When we construct sub-names
     # as part of this process, we will maintain this invariant!  (Even though
     # other users of this may not need it this property to be upheld.)
@@ -1415,8 +1416,12 @@ class MetaConverter(Generic[_TensorT]):
                     # tensor graph input that is a view of a strided NT.
                     from torch._dynamo.exc import unimplemented
 
+                    # NOTE this graph break will NOT be present in Dynamo's graph break registry
                     unimplemented(
-                        "strided nested tensors are not supported by meta conversion"
+                        gb_type="attempted to apply meta conversion to strided nested tensor",
+                        context=str(t),
+                        explanation="This is not supported.",
+                        hints=[],
                     )
                 elif t.is_mkldnn:
                     is_leaf = t.is_leaf
@@ -1453,7 +1458,10 @@ class MetaConverter(Generic[_TensorT]):
                         from torch._dynamo.exc import unimplemented
 
                         unimplemented(
-                            "view functorch tensors are not supported by meta conversion"
+                            gb_type="attempted to apply meta conversion to view functorch tensor",
+                            context=str(t),
+                            explanation="This is not supported.",
+                            hints=[],
                         )
 
                     # Wraps a functorch tensor class (BatchedTensor, GradTrackingTensor)
@@ -1930,7 +1938,7 @@ class MetaConverter(Generic[_TensorT]):
                 metadata_fn=lambda: {
                     "describer_id": self.describer.id,
                     "id": t_desc.id,
-                    "source": source.name(),
+                    "source": source.name,
                 },
             )
 

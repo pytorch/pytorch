@@ -4,7 +4,6 @@
 #include <c10/util/SmallVector.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
@@ -58,24 +57,6 @@
 
 // forward declare
 class cublasCommonArgs;
-
-#ifndef _WIN32
-namespace fbgemm_gpu {
-
-// NOTE(slayton58): FBGemm_GPU kernels come from <fbgemm_gpu/torch_ops.h> within the FBGemm repo.
-//                  To update supported ops means a submodule bump, which is.. painful. Instead, we
-//                  can simply forward-declare the methods we want to use.. Works at least as a short-term
-//                  thing, but should still be fixed somewhere/somehow.
-at::Tensor f4f4bf16(
-    at::Tensor,
-    at::Tensor,
-    at::Tensor,
-    at::Tensor,
-    std::optional<at::Tensor>,
-    bool use_mx);
-
-} // namespace fbgemm_gpu
-#endif
 
 using at::blas::ScalingType;
 using at::blas::SwizzleType;
@@ -391,8 +372,10 @@ _scaled_gemm(
           const std::optional<Tensor>& alpha = std::nullopt) {
   cublasCommonArgs args(mat1, mat2, out, scale_a, scale_b, std::nullopt, scaling_choice_a, scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
-  TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
-
+  // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
+  if (_scaled_mm_allowed_device(true, false)) {
+    TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
+  }
 // ROCM enables the TunableOp path only
 // but can fallback to at::cuda::blas::scaled_gemm
 #ifdef USE_ROCM
@@ -451,12 +434,12 @@ _scaled_gemm(
 //                  to help cleanup v1 call structure.
 Tensor&
 _scaled_rowwise_rowwise(
-          const Tensor&, const Tensor&,
-          const Tensor&, const Tensor&,
-          const std::optional<Tensor>&,
-          const c10::ScalarType,
-          bool,
-          Tensor&);
+          const Tensor& /*mat_a*/, const Tensor& /*mat_b*/,
+          const Tensor& /*scale_a*/, const Tensor& /*scale_b*/,
+          const std::optional<Tensor>& /*bias*/,
+          const c10::ScalarType /*out_dtype*/,
+          bool /*use_fast_accum*/,
+          Tensor& /*out*/);
 
 
 // Computes matrix multiply + bias while applying scaling to input and output matrices
@@ -740,7 +723,12 @@ _scaled_rowwise_rowwise(
   TORCH_CHECK_VALUE(scale_a.numel() == mat_a.size(0) && scale_a.scalar_type() == kFloat, "scale_a must have ", mat_a.size(0), " Float elements, got ", scale_a.numel())
   TORCH_CHECK_VALUE(scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat, "scale_b must have ", mat_b.size(1), " Float elements, got ", scale_b.numel())
 
-  TORCH_CHECK_VALUE(scale_a.stride(1) == 1, "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1));
+  // if we have a scale of shape [256, 1] (say), then stride can be [1, 0] - handle this case
+  TORCH_CHECK_VALUE(
+      scale_a.stride(1) == 1 ||
+      scale_a.size(1) == 1,
+      "expected scale_a.stride(1) to be 1, but got ", scale_a.stride(1)
+  );
   TORCH_CHECK_VALUE(scale_b.stride(1) == 1, "expected scale_b.stride(1) to be 1, but got ", scale_b.stride(1));
 
   auto scaling_choice_a = ScalingType::RowWise;
@@ -753,7 +741,7 @@ _scaled_rowwise_rowwise(
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
       // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
-      ||  (dprops->major == 10 && (scale_a.sizes().size() || scale_b.sizes().size())))) {
+      ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty())))) {
     TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat_a,
@@ -1096,6 +1084,19 @@ _scaled_mxfp8_mxfp8(
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 }
 
+void
+_check_mxfp4_support() {
+#ifndef USE_ROCM
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+  // Only on B200 GPUs
+  TORCH_CHECK_NOT_IMPLEMENTED(
+    // B200 = 10.0, B300 = 10.3
+    dprops->major == 10,
+    "MXFP4 scaling only supported in CUDA for B200/B300"
+  );
+#endif
+}
+
 
 Tensor&
 _scaled_mxfp4_mxfp4(
@@ -1108,6 +1109,7 @@ _scaled_mxfp4_mxfp4(
 #if defined(_WIN32) || (!defined(USE_ROCM) && !defined(USE_FBGEMM_GENAI))
   TORCH_CHECK_NOT_IMPLEMENTED(false, "MXFP4 scaling supported on ROCM and CUDA+FBGEMM_GENAI only");
 #else
+  _check_mxfp4_support();
   // Restrictions:
   // A, B are FP4, scales are e8m0, A: shape K//32, B: K, N//32
   TORCH_CHECK_VALUE(mat_a.scalar_type() == at::kFloat4_e2m1fn_x2 && mat_b.scalar_type() == at::kFloat4_e2m1fn_x2, "mat_a and mat_b must be fp4 types, got: ",
@@ -1165,22 +1167,14 @@ _scaled_mxfp4_mxfp4(
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 #else
   // NVIDIA
-  // NOTE(slayton58): fbgemm_gpu::f4f4bf16 does *not* allow passing an output tensor,
-  //                  but we have one we need to use. Two clear options are to copy into
-  //                  our output (slow), or use a move-assignment-operator (faster).
-  //                  However, the compiler can complain about the explicit move preventing
-  //                  copy elision because the return from f4f4bf16 is a temporary object.
-  //                  So we don't explicitly move, and trust the compiler here...
-  //                  In the longer term this should be fixed on the FBGemm side.
-  out = fbgemm_gpu::f4f4bf16(
+  fbgemm_gpu::f4f4bf16(
       mat_a,
       mat_b.transpose(-2, -1),
       scale_a,
       scale_b,
-      std::nullopt, /* global_scale */
-      true          /* use_mx */
+      out,
+      std::nullopt /* global_scale */
   );
-
   return out;
 #endif
 #endif
@@ -1294,7 +1288,7 @@ _scaled_mm_cuda_v2_out(
   // Check if the input matrix sizes can be multiplied
   // - if optional contraction dims are provided, use those
   //   -- mostly for < 1B formats (i.e. nvfp4x2) where cheap .t() is not available.
-  if (contraction_dim.size() > 0) {
+  if (!contraction_dim.empty()) {
     TORCH_CHECK_VALUE(contraction_dim.size() == 2, "contraction_dim must have exactly 2 elements");
     auto mat_a_dim = contraction_dim[0];
     auto mat_b_dim = contraction_dim[1];

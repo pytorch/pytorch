@@ -27,7 +27,7 @@ namespace at::functorch {
 //
 // There are alternative designs we could have chosen (e.g. each grad transform
 // stores a weak map of Tensor -> AutogradMeta); the benefit of the TensorWrapper
-// design is that we can re-use existing VariableType kernels (i.e. Autograd kernels)
+// design is that we can reuse existing VariableType kernels (i.e. Autograd kernels)
 // without much modification. Since a TensorWrapper looks like a regular Tensor,
 // the VariableType kernel can pull out the AutogradMeta struct from where it
 // expects and extend the autograd graph

@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.ao.nn.quantized as nnq
@@ -21,10 +21,10 @@ NON_LEAF_MODULE_TO_ADD_OBSERVER_ALLOW_LIST = {
 
 
 def _find_match(
-    str_list: Union[dict[str, Any], list[str]],
+    str_list: dict[str, Any] | list[str],
     key_str: str,
     postfix: str,
-) -> Optional[str]:
+) -> str | None:
     split_str = key_str.split(".")
     if split_str[-1] == postfix:
         match_string = "".join(key_str.split(".")[0:-1])

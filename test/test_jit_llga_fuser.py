@@ -507,13 +507,12 @@ class TestFusionPattern(JitLlgaTestCase):
                 x = torch.clamp(x, max=2)
                 return x
 
-        for inplace in [False, True]:  # noqa: F841
-            for memory_format in [torch.contiguous_format, torch.channels_last]:
-                x = torch.rand(1, 32, 28, 28).to(memory_format=memory_format)
-                m = M()
-                _, graph = self.checkTrace(m, [x], dtype)
-                self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 5)
-                self.assertFused(graph, ['aten::_convolution', "aten::clamp"])
+        for memory_format in [torch.contiguous_format, torch.channels_last]:
+            x = torch.rand(1, 32, 28, 28).to(memory_format=memory_format)
+            m = M()
+            _, graph = self.checkTrace(m, [x], dtype)
+            self.assertGraphContainsExactly(graph, LLGA_FUSION_GROUP, 5)
+            self.assertFused(graph, ['aten::_convolution', "aten::clamp"])
 
     @onlyCPU
     @dtypes(torch.float32, torch.bfloat16)
@@ -854,4 +853,5 @@ instantiate_device_type_tests(TestFusionPattern, globals())
 instantiate_device_type_tests(TestOp, globals())
 
 if __name__ == '__main__':
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

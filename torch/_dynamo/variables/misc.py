@@ -18,15 +18,18 @@ Key classes include:
 """
 
 import dataclasses
+import enum
 import functools
 import inspect
 import itertools
 import random
 import re
 import sys
+import traceback
 import types
 import warnings
-from typing import Optional, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -39,7 +42,7 @@ from ..bytecode_transformation import (
     create_instruction,
 )
 from ..create_parameter_op import do_not_convert_to_tracable_parameter
-from ..exc import raise_observed_exception, unimplemented, unimplemented_v2
+from ..exc import raise_observed_exception, unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..mutation_guard import unpatched_nn_module_init
 from ..source import (
@@ -108,7 +111,7 @@ class SuperVariable(VariableTracker):
 
     def _resolved_getattr_and_source(self, tx: "InstructionTranslator", name):
         if not self.objvar:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="1-arg super not implemented",
                 context="",
                 explanation=f"Dynamo failed to trace attribute `{name}` accessed "
@@ -159,7 +162,7 @@ class SuperVariable(VariableTracker):
                         )
                     return resolved_getattr, source
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unable to resolve super getattr",
             context="",
             explanation=f"Dynamo failed to trace attribute `{name}` accessed "
@@ -220,7 +223,7 @@ class SuperVariable(VariableTracker):
                     )
                     return fn_vt.call_function(tx, [self.objvar] + args, kwargs)
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unsupported super().__init__() call",
                     context=f"call_method {self} {name} {args} {kwargs}",
                     explanation="Dynamo encountered a super().__init__() call "
@@ -290,7 +293,7 @@ class SuperVariable(VariableTracker):
             try:
                 attr = attr.as_python_constant()
             except NotImplementedError as exc:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Non-constant attribute given to `super().__delattr__()`",
                     context=f"call_method {self} {name}",
                     explanation="Dynamo requires the attribute name passed to "
@@ -301,7 +304,7 @@ class SuperVariable(VariableTracker):
                     from_exc=exc,
                 )
             if not tx.output.side_effects.is_attribute_mutation(self.objvar):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Attempted super().__delattr__() on an object without mutation tracking",
                     context=f"call_method {self} {name}",
                     explanation="Dynamo needs to track mutations on an object "
@@ -392,7 +395,7 @@ class SuperVariable(VariableTracker):
             fn_var = VariableTracker.build(tx, inner_fn, source)
             return fn_var.call_function(tx, [self.objvar] + args, kwargs)
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Attempted to call a super() attribute that is "
             "not a function or method",
             context=f"call_method {self} {name}",
@@ -405,6 +408,121 @@ class SuperVariable(VariableTracker):
         )
 
 
+class FrameSummaryVariable(VariableTracker):
+    def __init__(self, frame_summary: traceback.FrameSummary, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.frame_summary = frame_summary
+
+    def var_getattr(self, tx, name):
+        if name == "lineno":
+            return variables.ConstantVariable.create(self.frame_summary.lineno)
+        elif name == "filename":
+            return variables.ConstantVariable.create(self.frame_summary.filename)
+        elif name == "name":
+            return variables.ConstantVariable.create(self.frame_summary.name)
+        elif name == "line":
+            return variables.ConstantVariable.create(self.frame_summary.line)
+        return super().var_getattr(tx, name)
+
+
+class TracebackVariable(VariableTracker):
+    def __init__(
+        self,
+        frame_summary: FrameSummaryVariable,
+        tb_next,
+        **kwargs,
+    ) -> None:
+        # The traceback holds four attributes:
+        #  - tb_frame
+        #  - tb_lineno
+        #  - tb_lasti
+        #  - tb_next
+
+        super().__init__(**kwargs)
+        self.frame_summary = frame_summary
+        # the next traceback in the chain
+        assert tb_next is not None
+        self.tb_next = tb_next
+
+    @classmethod
+    def from_frame_summary(
+        cls,
+        frame_summary: traceback.FrameSummary,
+        tb_next: Union["TracebackVariable", ConstantVariable],
+    ):
+        return cls(FrameSummaryVariable(frame_summary), tb_next=tb_next)
+
+    @staticmethod
+    def is_valid_traceback(obj: VariableTracker) -> bool:
+        return istype(obj, TracebackVariable) or (
+            istype(obj, ConstantVariable) and obj.is_constant_none()
+        )
+
+    def extract_tb(self) -> list[traceback.FrameSummary]:
+        if istype(self.tb_next, ConstantVariable):
+            return [self.frame_summary]
+        return [self.frame_summary] + self.tb_next.extract_tb()
+
+    def has_reference_cycle(self, tb: "TracebackVariable") -> bool:
+        # checks if `tb` is in the chain of tb_next starting from `self`
+        curr_tb = self
+        while istype(curr_tb, TracebackVariable):
+            if curr_tb is tb:
+                return True
+            curr_tb = curr_tb.tb_next
+        return False
+
+    def python_type(self):
+        return types.TracebackType
+
+    def call_setattr(
+        self,
+        tx: "InstructionTranslator",
+        name_var: VariableTracker,
+        val: VariableTracker,
+    ):
+        name = name_var.as_python_constant()
+        if name == "tb_next":
+            if not self.is_valid_traceback(val):
+                raise_observed_exception(TypeError, tx)
+            if self.has_reference_cycle(val) or (
+                istype(val, TracebackVariable) and val.has_reference_cycle(self)
+            ):
+                raise_observed_exception(ValueError, tx)
+            self.tb_next = val
+        return variables.ConstantVariable(None)
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "tb_next":
+            return self.tb_next
+        elif name == "tb_lineno":
+            return self.frame_summary.var_getattr(tx, "lineno")
+        elif name == "frame_summary":
+            return self.frame_summary
+        elif name == "tb_lasti":
+            unimplemented(
+                gb_type="traceback.tb_lasti not supported",
+                context=f"{self} accessing 'tb_lasti'",
+                explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ):
+        if name == "__eq__":
+            # Two traceback variables are only equal if they are the same object
+            return variables.ConstantVariable.create(self is args[0])
+        elif name == "__setattr__":
+            return self.call_setattr(tx, *args)
+        return super().call_method(tx, name, args, kwargs)
+
+
 class ExceptionVariable(VariableTracker):
     # The ExceptionVariable corresponds to the BaseException class in Python
     def __init__(
@@ -414,7 +532,7 @@ class ExceptionVariable(VariableTracker):
         self.exc_type = exc_type
         self.args = args
         if init_kwargs:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Keyword args passed to exception constructor",
                 context=f"{self} with kwargs {init_kwargs}",
                 explanation="Dynamo does not know how to handle keyword args passed to an exception constructor",
@@ -429,9 +547,11 @@ class ExceptionVariable(VariableTracker):
         self.__cause__ = ConstantVariable(None)
         # Boolean flag that controls whether the __context__ attribute is set
         self.__suppress_context__ = ConstantVariable(False)
-        # Contains the call stack where the exception was raised. Dynamo does
-        # not track traceback. So, this variable is always set to None
+        # Contains the call stack where the exception was raised.
         self.__traceback__ = ConstantVariable(None)
+        # The user stack at the time this exception was first raised.
+        # Used to preserve the original exception location when re-raising.
+        self.python_stack = None
 
     def set_context(self, context: "ExceptionVariable"):
         self.__context__ = context
@@ -473,7 +593,7 @@ class ExceptionVariable(VariableTracker):
         if name == "__context__":
             self.set_context(val)
         elif name == "__cause__":
-            if (isinstance(val, ConstantVariable) and val.value is None) or isinstance(
+            if val.is_constant_none() or isinstance(
                 val,
                 (
                     variables.BuiltinVariable,
@@ -487,27 +607,24 @@ class ExceptionVariable(VariableTracker):
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__suppress_context__":
-            if isinstance(val, ConstantVariable) and val.value in (True, False):
+            if val.is_constant_match(True, False):
                 self.__suppress_context__ = val
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__traceback__":
-            if isinstance(val, ConstantVariable) and val.value is None:
-                self.__traceback__ = val
-            else:
-                unimplemented_v2(
-                    gb_type="Set Exception object `__traceback__` attribute to not-`None`",
-                    context=f"call_setattr {self} {name}",
-                    explanation="Dynamo does not support setting the attribute "
-                    "'__traceback__' on tracked exception objects to anything "
-                    "other than None.",
-                    hints=[
-                        "Avoid setting '__traceback__' on exception objects "
-                        "within traced code, or set it to None."
+            if not TracebackVariable.is_valid_traceback(val):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        ConstantVariable.create(
+                            "__traceback__ must be a traceback object or None"
+                        )
                     ],
                 )
+            self.__traceback__ = val
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported attribute assignment on Exception object",
                 context=f"call_setattr {self} {name}",
                 explanation="Dynamo does not support setting the attribute "
@@ -527,7 +644,7 @@ class ExceptionVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__context__":
             return self.__context__
         elif name == "__cause__":
@@ -535,7 +652,7 @@ class ExceptionVariable(VariableTracker):
         elif name == "__suppress_context__":
             return self.__suppress_context__
         elif name == "__traceback__":
-            return variables.ConstantVariable(None)
+            return self.__traceback__
         elif name == "args":
             return variables.ListVariable(self.args, source=self.source)
         return super().var_getattr(tx, name)
@@ -567,11 +684,11 @@ class DelayGraphBreakVariable(UnknownVariable):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented_v2(
+        unimplemented(
             gb_type="Unsupported function call (delayed)",
             context=f"source: {self.source}",
             explanation="Dynamo determined that a graph break should occur "
-            f"when calling `{self.source.name()}`. Reason: {self.msg}",
+            f"when calling `{self.source.name}`. Reason: {self.msg}",
             hints=[],
         )
 
@@ -690,7 +807,7 @@ class AutogradFunctionVariable(VariableTracker):
 
         def visit(vt):
             nonlocal requires_grad
-            if isinstance(vt, variables.TensorVariable):
+            if vt.is_tensor():
                 if vt.requires_grad is not False:
                     requires_grad = True
             if isinstance(vt, variables.NNModuleVariable):
@@ -700,6 +817,7 @@ class AutogradFunctionVariable(VariableTracker):
         VariableTracker.visit(visit, (args, kwargs))
 
         if requires_grad and torch.is_grad_enabled():
+            source = self.source
             if config.capture_autograd_function is False:
                 warnings.warn(
                     "The config.capture_autograd_function flag is deprecated, it's now always true."
@@ -719,10 +837,14 @@ class AutogradFunctionVariable(VariableTracker):
                 forward_fn = autograd_function_forward_rewritten(
                     self.fn_cls.forward, self.fn_cls.setup_context
                 )
+                # The forward points to a new function now, so we can't use the
+                # old source. Later on, we guard specifically on
+                # is_setup_ctx_defined
+                source = None
 
             vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
             if vjp_fn is not torch.autograd.Function.vjp:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unsupported custom vjp",
                     context=f"call_apply {self} {args} {kwargs}",
                     explanation="Dynamo does not support tracing "
@@ -737,7 +859,7 @@ class AutogradFunctionVariable(VariableTracker):
 
             jvp_fn = self.fn_cls.jvp  # type: ignore[attr-defined]
             if jvp_fn is not torch.autograd.Function.jvp:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unsupported custom jvp",
                     context=f"call_apply {self} {args} {kwargs}",
                     explanation="Dynamo does not support tracing "
@@ -751,29 +873,23 @@ class AutogradFunctionVariable(VariableTracker):
 
             from .higher_order_ops import AutogradFunctionApplyVariable
 
-            source = self.source
-            if source is None:
+            if source is None and not is_setup_ctx_defined:
                 source = AttrSource(
                     tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
                 )
+            apply_source = source and AttrSource(source, member="apply")
 
             val = AutogradFunctionApplyVariable(
                 forward_fn,
                 self.fn_cls.backward,
                 source,
-                source=AttrSource(source, member="apply"),
+                source=apply_source,
             ).call_function(tx, args, kwargs)
-            # Inside of AutogradFunctionApplyVariable.call_function, we use sourceless variable wrapping
-            # the forward function, as we don't want to generate guards for new_forward.__closure__
-            # if forward is rewritten by autograd_function_forward_rewritten.
-            # But we still need to generate correct guards for the original forward and setup_context
-            # functions, so we have to add guards manually.
-            if self.source:
+            if self.source and is_setup_ctx_defined:
                 fwd_src = AttrSource(self.source, "forward")
                 install_guard(fwd_src.make_guard(GuardBuilder.CLOSURE_MATCH))
-                if is_setup_ctx_defined:
-                    setup_ctx_src = AttrSource(self.source, "setup_context")
-                    install_guard(setup_ctx_src.make_guard(GuardBuilder.CLOSURE_MATCH))
+                setup_ctx_src = AttrSource(self.source, "setup_context")
+                install_guard(setup_ctx_src.make_guard(GuardBuilder.CLOSURE_MATCH))
 
             return val
 
@@ -798,7 +914,7 @@ class AutogradFunctionVariable(VariableTracker):
                 source=source,
             ).call_function(tx, args, kwargs)
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Non-function or method in subclass of torch.autograd.Function",
                 context=f"call_apply {self} {args} {kwargs}",
                 explanation="Dynamo requires the `forward` attribute of a "
@@ -873,7 +989,7 @@ class AutogradFunctionVariable(VariableTracker):
                     obj.__func__, self, source=source
                 ).call_function(tx, args, kwargs)
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unsupported autograd.Function method",
                     context=f"call_method {self} {name}",
                     explanation="Dynamo does not support calling the method "
@@ -924,10 +1040,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     def create(tx: "InstructionTranslator", args=None, kwargs=None):
         needs_input_grad = None
         if args and not kwargs:
-            needs_input_grad = tuple(
-                isinstance(x, variables.TensorVariable) and x.requires_grad
-                for x in args
-            )
+            needs_input_grad = tuple(x.is_tensor() and x.requires_grad for x in args)
         out = tx.output.side_effects.track_object_new(
             None,
             torch.autograd.function.FunctionCtx,
@@ -943,7 +1056,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
 
     def as_proxy(self):
         if self.proxy is None:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="proxy not set",
                 context=f"as_proxy {self}",
                 explanation="Dynamo requires the autograd.Function context "
@@ -968,7 +1081,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
             return variables.ConstantVariable.create(None)
 
         if name != "save_for_backward":
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported autograd.Function context method",
                 context=f"call_method {self} {name}",
                 explanation="Dynamo does not support calling the method "
@@ -978,7 +1091,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
         if self.saved_tensors is None:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported autograd.Function context `save_for_backward`",
                 context=f"call_method {self} {name}",
                 explanation="Dynamo requires the `saved_tensors` attribute "
@@ -1057,7 +1170,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
                     kwargs,
                 )
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Unsupported torch._C._ImperativeEngine.queue_callback()",
                     context=f"call_method {self} {name}",
                     explanation="queue_callback() is only supported when "
@@ -1065,7 +1178,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
                     hints=[],
                 )
         else:
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Unsupported torch._C._ImperativeEngine method",
                 context=f"call_method {self} {name}",
                 explanation="Dynamo only supports the `queue_callback` method "
@@ -1283,7 +1396,7 @@ class MethodWrapperVariable(VariableTracker):
                 except AsPythonConstantNotImplementedError:
                     pass
 
-            unimplemented_v2(
+            unimplemented(
                 gb_type="unsupported type.__dict__['__annotations__'].__get__ call",
                 context=f"call_function {self}, args: {args}, kwargs: {kwargs}",
                 explanation="`torch.compile` only supports calling type.__dict__['__annotations__'].__get__ "
@@ -1304,6 +1417,15 @@ class MethodWrapperVariable(VariableTracker):
 
     def as_python_constant(self):
         return self.method_wrapper
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.as_python_constant())
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
 
 
 class GetSetDescriptorVariable(VariableTracker):
@@ -1382,7 +1504,15 @@ class TypingVariable(VariableTracker):
         if name == "__getitem__" and len(args) == 1:
             new_typing = self.value[args[0].as_python_constant()]
             return TypingVariable(new_typing)
-        unimplemented("unsupported method call on typing variable")
+        unimplemented(
+            gb_type="unsupported method call on `typing` variable",
+            context=f"typing variable: {self.value}, method name: {name}, args: {args}, kwargs: {kwargs}",
+            explanation=f"`torch.compile` does not support method call `{name}` on `typing` variable f{self.value}.",
+            hints=[
+                f"Avoid calling the {name} method on {self.value}.",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str):
         from .builder import SourcelessBuilder, VariableBuilder
@@ -1430,6 +1560,15 @@ class TypingVariable(VariableTracker):
         # Let's skip all that noise and just emit it as a simple const.
         #
         codegen.append_output(codegen.create_load_const(self.value))
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.as_python_constant())
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
 
 
 @functools.lru_cache(maxsize=1)
@@ -1493,7 +1632,15 @@ class NumpyVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if not config.trace_numpy:
-            unimplemented(f"numpy.{self.value}()")
+            unimplemented(
+                gb_type="attempted to trace numpy function with config.trace_numpy=False",
+                context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs}",
+                explanation=f"Attempted to trace numpy function {self.value} "
+                "while `torch._dynamo.config.trace_numpy` was set to False.",
+                hints=[
+                    "Set `torch._dynamo.config.trace_numpy` to True to trace numpy functions.",
+                ],
+            )
 
         from ..utils import numpy_to_tensor_wrapper
         from .tensor import NumpyNdarrayVariable
@@ -1501,8 +1648,12 @@ class NumpyVariable(VariableTracker):
         func = get_np_to_tnp_map().get(self.value)
         if func is None:
             unimplemented(
-                f"Can't find numpy function {self.value} in torch._numpy. "
-                " Please file an issue to request support for this function."
+                gb_type="attempted to trace numpy function unsupported by PyTorch",
+                context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+                explanation=f"Can't find numpy numpy function {self.value} in torch._numpy.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         # We are dealing with a function that produces a const collection type (np.dtype, np.iinfo/np.finfo)
@@ -1516,20 +1667,32 @@ class NumpyVariable(VariableTracker):
                         **{k: v.as_python_constant() for k, v in kwargs.items()},
                     )
                 )
-            except NotImplementedError:
+            except AsPythonConstantNotImplementedError:
                 unimplemented(
-                    f"{self.value.__name__} with non-const args: {args} {kwargs}"
+                    gb_type="numpy function that produces a const collection type encountered non-const arguments",
+                    context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+                    explanation=f"numpy function {self.value} that produces a const collection type "
+                    "(e.g. np.dtype, np.iinfo/np.finfo) "
+                    "received arguments that are not constant.",
+                    hints=[
+                        *graph_break_hints.USER_ERROR,
+                    ],
                 )
         else:
             if (
                 func.__module__ == "torch._numpy.random"
                 and config.use_numpy_random_stream
             ):
-                msg = f"delegate '{func.__qualname__}' to NumPy itself via "
-                msg += (
-                    f"config.use_numpy_random_stream={config.use_numpy_random_stream}"
+                unimplemented(
+                    gb_type="attempted to trace torch._numpy.random function with config.use_numpy_random_stream=True",
+                    context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs} (corresponding torch function: {func})",
+                    explanation=f"Attempted to trace {self.value} when `torch._dynamo.config.use_numpy_random_stream` "
+                    "is set to True.",
+                    hints=[
+                        "Set `torch._dynamo.config.use_numpy_random_stream` to False.",
+                        f"Avoid calling {self.value}.",
+                    ],
                 )
-                unimplemented(msg)
 
             args, kwargs = NumpyNdarrayVariable.patch_args(func.__name__, args, kwargs)
 
@@ -1559,19 +1722,40 @@ class NumpyVariable(VariableTracker):
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        unimplemented("numpy")
+        unimplemented(
+            gb_type="attempted to trace numpy.* function as a method",
+            context=f"numpy function: {self.value}, args: {args}, kwargs: {kwargs}",
+            explanation="Tracing numpy.* functions as methods is not supported.",
+            hints=[
+                *graph_break_hints.DIFFICULT,
+            ],
+        )
 
     def as_python_constant(self):
         return self.value
 
     def as_proxy(self):
-        if config.trace_numpy and isinstance(self.value, type):
-            # This handles numpy dtype attributes such as np.float32
-            # We return a string as we don't want to serialize non-PyTorch objects in the output FX graph
-            # In torch/_numpy we normalize strings to their dtypes when the input is a dtype, as NumPy does
-            return self.value.__name__
+        if config.trace_numpy:
+            # Can replace with EnumType once we drop 3.10 support
+            if isinstance(self.value, enum.EnumMeta):
+                # This is mostly for np._CopyMode
+                return self.value
+            if isinstance(self.value, type):
+                # This handles numpy dtype attributes such as np.float32
+                # We return a string as we don't want to serialize non-PyTorch objects in the output FX graph
+                # In torch/_numpy we normalize strings to their dtypes when the input is a dtype, as NumPy does
+                return self.value.__name__
 
         return super().as_proxy()
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.as_python_constant())
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
 
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
@@ -1584,7 +1768,15 @@ class NullVariable(VariableTracker):
 
     def reconstruct(self, codegen: "PyCodegen"):
         if sys.version_info < (3, 11):
-            unimplemented("cannot reconstruct NullVariable in < Python 3.11")
+            unimplemented(
+                gb_type="cannot reconstruct NullVariable in Python < 3.11",
+                context="",
+                explanation="Attempted to generate PUSH_NULL instruction in Python < 3.11; "
+                "where this instruction does not exist.",
+                hints=[
+                    *graph_break_hints.DYNAMO_BUG,
+                ],
+            )
         codegen.append_output(create_instruction("PUSH_NULL"))
 
 
@@ -1666,8 +1858,13 @@ class DebuggingVariable(VariableTracker):
 
         if not self.can_reorder_logs(self.value, args, kwargs):
             unimplemented(
-                f"Reordering debugging function {self.value} "
-                f"with inputs {args} {kwargs} is not yet implemented."
+                gb_type="attempted to reorder a debugging function that can't actually be reordered",
+                context=f"fn: {self.value}, args: {args}, kwargs: {kwargs}",
+                explanation="`torch.compile` can only reorder functions where the arguments "
+                "are Tensors, constants, or string formatters.",
+                hints=[
+                    f"Avoid calling the logging function {self.value} with args that are not supported.",
+                ],
             )
 
         tx.debug_locals.append((self, list(args)))
@@ -1696,9 +1893,22 @@ class DebuggingVariable(VariableTracker):
         return True
 
 
+class IgnoredFunctionVariable(VariableTracker):
+    """
+    Represents a call to an arbitrary function that should be ignored.
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def call_function(self, tx, args, kwargs):
+        return variables.ConstantVariable.create(None)
+
+
 class LoggingLoggerVariable(VariableTracker):
     """
-    Represents a call to any of logging.Logger methods
+    Represents a call to any logging.Logger methods.
     """
 
     def __init__(self, value, **kwargs) -> None:
@@ -1713,23 +1923,31 @@ class LoggingLoggerVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if tx.export:
-            # For export cases, we can just make debugging functions no-ops
-            return
+            # For export cases, we can just make logging functions no-ops.
+            return variables.ConstantVariable.create(None)
+
         method = getattr(self.value, name, None)
         function = getattr(method, "__func__", None)
-        if {method, function}.intersection(torch._dynamo.config.ignore_logger_methods):
+
+        # Unified ignore set
+        ignore_set = torch._dynamo.config.ignore_logging_functions
+
+        if method in ignore_set or function in ignore_set:
             return variables.ConstantVariable.create(None)
+
         unimplemented(
-            "Logger not supported for non-export cases. "
-            "To avoid graph breaks caused by logger in compile-mode, it is recommended to"
-            " disable logging by adding logging methods to config.ignore_logger_methods"
+            gb_type="logging.Logger method not supported for non-export cases",
+            context=f"method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
+            explanation="logging.Logger methods are not supported for non-export cases.",
+            hints=[
+                "Add the logging method to `torch._dynamo.config.ignore_logging_functions`.",
+            ],
         )
 
 
 class ConstantLikeVariable(VariableTracker):
     """self.value is a compile-time constant, but not a literal"""
 
-    _error_prefix = "ConstantLikeVariable"
     try:
         from numpy import (
             dtype as np_dtype,
@@ -1743,6 +1961,17 @@ class ConstantLikeVariable(VariableTracker):
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
+
+    @property
+    def _error_prefix(self):
+        """Dynamically compute the prefix from the value's type"""
+        t = type(self.value)
+
+        # For builtins (int, str, etc.), just return the name
+        if t.__module__ == "builtins":
+            return t.__qualname__
+
+        return f"{t.__module__}.{t.__qualname__}"
 
     def as_python_constant(self):
         return self.value
@@ -1759,16 +1988,30 @@ class ConstantLikeVariable(VariableTracker):
             cargs = [x.as_python_constant() for x in args]
             ckwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
         except NotImplementedError:
-            unimplemented(f"{self._error_prefix}.{name}(*{args}, **{kwargs})")
+            unimplemented(
+                gb_type="constant-like method call with non-constant args",
+                context=f"{self._error_prefix}.{name}(*{args}, **{kwargs})",
+                explanation=f"Attempted to call {self._error_prefix}.{name} with non-constant args.",
+                hints=[
+                    "Ensure that the args to the method call are constant (int, str, etc.).",
+                ],
+            )
 
         result = getattr(self.value, name)(*cargs, **ckwargs)
 
         if variables.ConstantVariable.is_literal(result):
             return variables.ConstantVariable.create(result)
         if isinstance(result, re.Match):
-            return ConstantRegexMatchVariable(result)
+            return ConstantLikeVariable(result)
 
-        unimplemented(f"{self._error_prefix}.{name}() -> {result}")
+        unimplemented(
+            gb_type="constant-like method call with unsupported return type",
+            context=f"{self._error_prefix}.{name}(*{args}, **{kwargs}) returned {result}",
+            explanation=f"Attempted to call {self._error_prefix}.{name}, got unsupported return value {result}.",
+            hints=[
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         result = getattr(self.value, name)
@@ -1784,14 +2027,6 @@ class ConstantLikeVariable(VariableTracker):
         return GetAttrVariable(self, name)
 
 
-class RegexPatternVariable(ConstantLikeVariable):
-    _error_prefix = "re.Pattern"
-
-
-class ConstantRegexMatchVariable(ConstantLikeVariable):
-    _error_prefix = "re.Match"
-
-
 class TorchVersionVariable(ConstantLikeVariable):
     _error_prefix = "torch.__version__"
 
@@ -1801,13 +2036,7 @@ class TorchVersionVariable(ConstantLikeVariable):
         super().__init__(**kwargs)
 
 
-class NumpyTypeInfoVariable(ConstantLikeVariable):
-    _error_prefix = "np.iinfo/np.finfo"
-
-
 class NumpyDTypeVariable(ConstantLikeVariable):
-    _error_prefix = "np.dtype[...]"
-
     def as_proxy(self):
         """Similar to how numpy dtype descriptors (e.g. np.float32 ) are handled by NumpyVariable:
 
@@ -1818,8 +2047,8 @@ class NumpyDTypeVariable(ConstantLikeVariable):
 
 
 np_constant_collections_map = {
-    tnp.finfo: NumpyTypeInfoVariable,
-    tnp.iinfo: NumpyTypeInfoVariable,
+    tnp.finfo: ConstantLikeVariable,
+    tnp.iinfo: ConstantLikeVariable,
     tnp.dtype: NumpyDTypeVariable,
 }
 
@@ -1831,10 +2060,15 @@ class RandomClassVariable(VariableTracker):
         super().__init__(**kwargs)
 
     def call_function(self, tx: "InstructionTranslator", args, kwargs):
-        if len(args) > 1:
-            unimplemented("random.Random() with > 1 arg")
-        elif kwargs:
-            unimplemented("random.Random() with kwargs")
+        if len(args) > 1 or kwargs:
+            unimplemented(
+                gb_type="random.Random() with improper arguments",
+                context=f"args: {args}, kwargs: {kwargs}",
+                explanation="random.Random() with > 1 arg or with kwargs is not supported.",
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
         seed = variables.ConstantVariable.create(None) if len(args) == 0 else args[0]
         return RandomVariable(
             seed=seed, mutation_type=variables.base.ValueMutationNew()
@@ -2017,3 +2251,13 @@ class WeakRefVariable(VariableTracker):
         codegen(self.referent_vt)
         codegen(self.callback_vt)
         codegen.extend_output(create_call_function(2, False))
+
+    def is_python_hashable(self):
+        return self.referent_vt.is_python_hashable()
+
+    def get_python_hash(self):
+        # weakref relies on the referent's hash
+        return self.referent_vt.get_python_hash()
+
+    def is_python_equal(self, other):
+        return self.referent_vt.is_python_equal(other.referent_vt)

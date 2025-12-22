@@ -74,6 +74,19 @@ void box_cox_zero_lambda(
 }
 
 template <typename T>
+at::vec::Vectorized<T> box_cox_nonzero_lambda_impl(
+    at::vec::Vectorized<T> data,
+    at::vec::Vectorized<T> lambda1,
+    at::vec::Vectorized<T> lambda2,
+    at::vec::Vectorized<T> k_eps) {
+  auto sum = data + lambda2;
+  auto max = at::vec::max(sum, k_eps);
+  auto lambda_over_1 = at::vec::fast_recieprocal(lambda1);
+  auto pow = max.pow(lambda1);
+  return at::vec::fmsub(pow, lambda_over_1, lambda_over_1);
+}
+
+template <typename T>
 void box_cox_nonzero_lambda(
     int64_t D,
     const T* data_ptr,
@@ -88,21 +101,18 @@ void box_cox_nonzero_lambda(
   auto k_eps_vec = Vec(k_eps);
   for(; j + VLEN < D; j += VLEN) {
     auto data = Vec::loadu(data_ptr + j);
-    auto lambda2 = Vec::loadu(lambda2_ptr + j);
-    auto sum = data + lambda2;
-    auto max = at::vec::max(sum, k_eps_vec);
     auto lambda1 = Vec::loadu(lambda1_ptr + j);
-    auto lambda_over_1 = at::vec::fast_recieprocal(lambda1);
-    auto pow = max.pow(lambda1);
-    auto res = at::vec::fmsub(pow, lambda_over_1, lambda_over_1);
+    auto lambda2 = Vec::loadu(lambda2_ptr + j);
+    auto res = box_cox_nonzero_lambda_impl(data, lambda1, lambda2, k_eps_vec);
     res.store(out + j);
   }
-  for ( ;j < D; ++j) {
-    auto sum = data_ptr[j] + lambda2_ptr[j];
-    auto max = std::max(sum, k_eps);
-    auto lambda_over_1 = at::vec::fast_recieprocal(lambda1_ptr[j]);
-    auto pow = std::pow(max, lambda1_ptr[j]);
-    out[j] = pow * lambda_over_1 - lambda_over_1;
+  if (j < D) {
+    auto remaining = D - j;
+    auto data = Vec::loadu(data_ptr + j, remaining);
+    auto lambda1 = Vec::loadu(lambda1_ptr + j, remaining);
+    auto lambda2 = Vec::loadu(lambda2_ptr + j, remaining);
+    auto res = box_cox_nonzero_lambda_impl(data, lambda1, lambda2, k_eps_vec);
+    res.store(out + j, remaining);
   }
 }
 #else

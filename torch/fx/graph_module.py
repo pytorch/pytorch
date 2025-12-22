@@ -20,6 +20,7 @@ from torch.nn.modules.module import _addindent
 from torch.package import Importer, PackageExporter, PackageImporter, sys_importer
 
 from ._compatibility import compatibility
+from .experimental import _config as fx_experimental_config
 from .graph import (
     _BoxedCodeGen,
     _custom_builtins,
@@ -858,14 +859,15 @@ class {module_name}(torch.nn.Module):
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
+        # Do not import anything inside recompile, it might slow down the
+        # function and cause perf regression. Import outside of the method instead.
         if isinstance(self._graph._codegen, _PyTreeCodeGen):
             self._in_spec = self._graph._codegen.pytree_info.in_spec
             self._out_spec = self._graph._codegen.pytree_info.out_spec
 
-        from torch._dynamo import config as dynamo_config
-
         python_code = self._graph.python_code(
-            root_module="self", record_func=dynamo_config.enrich_profiler_metadata
+            root_module="self",
+            record_func=fx_experimental_config.enrich_profiler_metadata,
         )
         self._code = python_code.src
         self._lineno_map = python_code._lineno_map
@@ -874,7 +876,7 @@ class {module_name}(torch.nn.Module):
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
 
-        if dynamo_config.enrich_profiler_metadata:
+        if fx_experimental_config.enrich_profiler_metadata:
             # Generate metadata and register for profiler augmentation
             node_metadata: dict[int, dict[str, Any]] = {}
             for i, node in enumerate(self._graph.nodes):

@@ -19,14 +19,17 @@ restoring state changes.
 """
 
 import inspect
+import logging
 import sys
 import warnings
 from collections.abc import Callable, Sequence, Sized
-from contextlib import ExitStack
-from typing import Any, ContextManager, Optional, TYPE_CHECKING, Union
+from contextlib import AbstractContextManager, ExitStack
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch._C
+from torch._dynamo import config
 from torch._guards import Guard
+from torch._logging import warning_once
 
 from .. import graph_break_hints, variables
 from ..bytecode_transformation import (
@@ -34,7 +37,7 @@ from ..bytecode_transformation import (
     create_instruction,
     create_setup_with,
 )
-from ..exc import unimplemented_v2
+from ..exc import unimplemented
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource, GlobalStateSource
 from ..utils import _get_error_on_graph_break, _set_error_on_graph_break
@@ -55,6 +58,8 @@ from .user_defined import UserDefinedObjectVariable
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
+
+log = logging.getLogger(__name__)
 
 
 class ContextWrappingVariable(VariableTracker):
@@ -163,7 +168,7 @@ class ContextWrappingVariable(VariableTracker):
 class GenericContextWrappingVariable(UserDefinedObjectVariable):
     # Some methods in ContextWrappingVariable assumes the arguments are
     # python constants. Which might not always be the case here.
-    def __init__(self, cm_obj: ContextManager[Any], **kwargs: Any) -> None:
+    def __init__(self, cm_obj: AbstractContextManager[Any], **kwargs: Any) -> None:
         assert cm_obj is not None
         super().__init__(
             value=cm_obj,
@@ -212,22 +217,29 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         # We don't call super().__init__() because we're delegating most methods to cm_vt
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
-        # Custom enter implementation with side effects
-
-        self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
-        self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
-        tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
-        tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
-        return self.cm_vt.enter(tx)
+        # Custom enter implementation with side effects. Additionally, do not
+        # worry about side effects for the hop, as they cancel each other out.
+        with torch._dynamo.variables.higher_order_ops.dynamo_allow_side_effects_in_hop(
+            tx
+        ):
+            self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
+            self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+            tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
+            tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
+            return self.cm_vt.enter(tx)
 
     def exit(
         self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker:
-        # Custom exit implementation with side effects
-        x = self.cm_vt.exit(tx, *args)
-        tx.output.side_effects.stop_ignoring_mutations_on(self.old_buffer_var)
-        tx.output.side_effects.stop_ignoring_mutations_on(self.old_parameters_var)
-        return x
+        # Custom enter implementation with side effects. Additionally, do not
+        # worry about side effects for the hop, as they cancel each other out.
+        with torch._dynamo.variables.higher_order_ops.dynamo_allow_side_effects_in_hop(
+            tx
+        ):
+            x = self.cm_vt.exit(tx, *args)
+            tx.output.side_effects.stop_ignoring_mutations_on(self.old_buffer_var)
+            tx.output.side_effects.stop_ignoring_mutations_on(self.old_parameters_var)
+            return x
 
     # Forward all other method calls to self.cm_vt
     def __getattr__(self, name: str) -> Any:
@@ -1089,7 +1101,7 @@ class ProfilerContextVariable(ContextWrappingVariable):
         return "nullcontext"
 
     def reconstruct(self, cg: "PyCodegen") -> None:
-        unimplemented_v2(
+        unimplemented(
             gb_type="torch.profiler object escaped from compiled region",
             context=str(self),
             explanation="Dynamo doesn't support compiling a region that returns a torch.profiler context manager.",
@@ -1097,6 +1109,121 @@ class ProfilerContextVariable(ContextWrappingVariable):
                 *graph_break_hints.SUPPORTABLE,
             ],
         )
+
+
+class ProfilerRecordFunctionContextVariable(ContextWrappingVariable):
+    """
+    This class represents torch profiler context objects.
+
+    For record_function: emits torch.ops.profiler._record_function_enter_new
+    to the graph on enter, and torch.ops.profiler._record_function_exit on exit.
+    But if emit_profiler_ops=False, behaves like nullcontext.
+
+    For profile: behaves like nullcontext, ignoring all side-effects.
+    """
+
+    _nonvar_fields = {
+        "emit_profiler_ops",
+        *ContextWrappingVariable._nonvar_fields,
+    }
+
+    @staticmethod
+    def create(
+        func: Any,
+        record_args: Sequence[VariableTracker],
+        record_kwargs: "dict[str, VariableTracker]",
+        **kwargs: Any,
+    ) -> "ProfilerRecordFunctionContextVariable":
+        target_values = None
+        if config.capture_profiler_record_function:
+            # Extract name and args for record_function
+            # record_function(name: str, args: Optional[str] = None)
+            name = (
+                record_args[0].as_python_constant()
+                if record_args
+                else kwargs.get(
+                    "name", variables.ConstantVariable("unknown")
+                ).as_python_constant()
+            )
+            record_args_const = None
+            if len(record_args) > 1:
+                record_args_const = record_args[1].as_python_constant()
+            elif "args" in kwargs:
+                record_args_const = kwargs["args"].as_python_constant()
+            target_values = [name, record_args_const]
+        else:
+            warning_once(log, "Profiler record function %s will be ignored", func)
+        return ProfilerRecordFunctionContextVariable(
+            target_values=target_values,
+            initial_values=None,
+            **kwargs,
+        )
+
+    def __init__(
+        self,
+        target_values: Any = None,
+        initial_values: Optional[Any] = None,
+        **kwargs: Any,
+    ) -> None:
+        super().__init__(
+            target_values=target_values, initial_values=initial_values, **kwargs
+        )
+
+    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
+        if config.capture_profiler_record_function:
+            name, args = self.target_values
+            # Create the profiler entry node in the graph
+            self.proxy = tx.output.create_node(
+                "call_function",
+                torch.ops.profiler._record_function_enter_new,
+                (name, args),
+                {},
+            )
+        return self
+
+    def exit(
+        self, tx: "InstructionTranslator", *args: VariableTracker
+    ) -> VariableTracker:
+        if config.capture_profiler_record_function:
+            # Create the profiler exit node in the graph
+            tx.output.create_node(
+                "call_function",
+                torch.ops.profiler._record_function_exit._RecordFunction,
+                (self.proxy,),
+                {},
+            )
+        return variables.ConstantVariable.create(None)
+
+    def module_name(self) -> str:
+        return (
+            "torch.autograd.profiler"
+            if config.capture_profiler_record_function
+            else "contextlib"
+        )
+
+    def fn_name(self) -> str:
+        return (
+            "record_function"
+            if config.capture_profiler_record_function
+            else "nullcontext"
+        )
+
+    def reconstruct_type(self, codegen: "PyCodegen") -> None:
+        # This will be called if we try to reconstruct the record_function type
+        # when there's a graph break. The _set_error_on_graph_break(True) in enter()
+        # will cause the graph break to raise an error before we get here.
+        if config.capture_profiler_record_function:
+            unimplemented(
+                gb_type="record_function escaped from compiled region",
+                context=str(self),
+                explanation="Dynamo doesn't support graph break inside record_function region.",
+                hints=[
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+        else:
+            # If capture is disabled, allow reconstruction (behaves like nullcontext)
+            super().reconstruct_type(codegen)
 
 
 class PreserveVersionContextVariable(ContextWrappingVariable):
@@ -1109,7 +1236,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         tx: "InstructionTranslator",
         tensors: VariableTracker,
     ) -> "PreserveVersionContextVariable":
-        if isinstance(tensors, variables.TensorVariable):
+        if tensors.is_tensor():
             versions = variables.TupleVariable(
                 [x.var_getattr(tx, "_version") for x in [tensors]]
             )
@@ -1141,11 +1268,9 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         self.tensors = tensors
         self.prev_versions = prev_versions
         # The context manager accepts Union[Tensor, Tuple[Tensor]]
-        if isinstance(self.tensors, variables.TensorVariable):
+        if self.tensors.is_tensor():
             self.tensors = variables.TupleVariable([self.tensors])
-        if isinstance(
-            self.prev_versions, (variables.ConstantVariable, variables.SymNodeVariable)
-        ):
+        if self.prev_versions.is_symnode_like():
             self.prev_versions = variables.TupleVariable([self.prev_versions])
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
@@ -1161,7 +1286,7 @@ class PreserveVersionContextVariable(ContextWrappingVariable):
         ).call_function(tx, [self.tensors, self.prev_versions], {})
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
-        unimplemented_v2(
+        unimplemented(
             gb_type="torch.autograd._unsafe_preserve_version_counter escaped from compiled region",
             context=str(self),
             explanation=(
@@ -1376,7 +1501,7 @@ class FxTracebackAnnotateVariable(ContextWrappingVariable):
         return "annotate"
 
     def reconstruct_type(self, codegen: "PyCodegen") -> None:
-        unimplemented_v2(
+        unimplemented(
             gb_type="torch.fx.traceback.annotate escaped from compiled region",
             context=str(self),
             explanation="Dynamo doesn't support graph break on torch.fx.traceback.annotate.",
@@ -1467,7 +1592,7 @@ class WithEnterFunctionVariable(VariableTracker):
             type_str = f"{self.ctx.module_name()}.{self.ctx.fn_name()}"
         except NotImplementedError:
             type_str = str(type(self.ctx))
-        unimplemented_v2(
+        unimplemented(
             gb_type="Attempted to reconstruct context manager's __enter__ method",
             context=str(self.ctx),
             explanation=f"Attempted to reconstruct context manager {type_str} while tracing `with ...:`",
@@ -1513,7 +1638,7 @@ class WithExitFunctionVariable(VariableTracker):
         # Note here we reconstruct the context manager rather than the
         # exit function.  The handler generated by BlockStackEntry
         # will re-enter the context in the resume function.
-        self.ctx.reconstruct_type(codegen)  # type: ignore[attr-defined]
+        self.ctx.reconstruct_type(codegen)  # type: ignore[union-attr]
         if codegen.tx.output.partial_convert:
             if sys.version_info >= (3, 11):
                 codegen.append_output(create_instruction("PUSH_NULL"))
@@ -1522,10 +1647,10 @@ class WithExitFunctionVariable(VariableTracker):
             # We rely on classes subtyping `GenericContextWrappingVariable`
             # to implement these fns and have these attributes
             codegen.extend_output(
-                [codegen.create_load_const(val) for val in self.ctx.target_values]  # type: ignore[arg-type]
+                [codegen.create_load_const(val) for val in self.ctx.target_values]  # type: ignore[union-attr]
             )
             codegen.extend_output(
-                create_call_function(len(self.ctx.target_values), False)  # type: ignore[arg-type]
+                create_call_function(len(self.ctx.target_values), False)  # type: ignore[union-attr]
             )
             codegen.append_output(create_setup_with(self.target))
             codegen.append_output(create_instruction("POP_TOP"))

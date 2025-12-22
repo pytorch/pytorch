@@ -25,6 +25,11 @@ def has_user_objects() -> bool:
     return bool(index_to_bytecode_constructor)
 
 
+def stash_graph_created_object(obj: Any) -> Any:
+    keep_alive.append(obj)
+    return obj
+
+
 def get_external_object_by_index(index: int) -> Any:
     assert index in index_to_external_object_weakref, (
         "Index not registered in index_to_user_object_weakref"
@@ -59,9 +64,9 @@ def register_graph_created_object(
     try:
         index_to_external_object_weakref[index] = weakref.ref(example_value)
     except TypeError as e:
-        from .exc import unimplemented_v2
+        from .exc import unimplemented
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Failed to make weakref to graph-created external object",
             context=f"user_object: {example_value}",
             explanation="Object does not allow us to make a weakref to it",
@@ -79,9 +84,9 @@ def register_user_object(value: Any, source: Source) -> int:
     try:
         index_to_external_object_weakref[index] = weakref.ref(value)
     except TypeError as e:
-        from .exc import unimplemented_v2
+        from .exc import unimplemented
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Failed to make weakref to User Object",
             context=f"user_object: {value}",
             explanation="Object does not allow us to make a weakref to it",

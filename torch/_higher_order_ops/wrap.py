@@ -6,12 +6,15 @@ from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
-from torch._higher_order_ops.utils import reenter_make_fx
+from torch._C import DispatchKey
+from torch._higher_order_ops.utils import redirect_to_mode, reenter_make_fx
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
 from torch.fx import GraphModule
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
 from torch.types import _dtype
+from torch.utils._debug_mode import DebugMode
+from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 log = logging.getLogger(__name__)
@@ -39,6 +42,36 @@ class Wrap(HigherOrderOperator):
 
 
 wrap = Wrap()
+
+
+class InductorCompiledCode(HigherOrderOperator):
+    """
+    Defines a HOP for wrapping inductor compiled functions as a callable.
+    When used with torch.compile via "wrap_inductor_compiled_regions",
+    this HOP will automatically be wrapped and redirect various torch dispatch modes.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("inductor_compiled_code")
+
+    def __call__(self, func, *args, **kwargs):
+        # pyrefly: ignore [missing-attribute]
+        return super().__call__(func, *args, **kwargs)
+
+
+inductor_compiled_code = InductorCompiledCode()
+inductor_compiled_code.fallthrough(DispatchKey.AutogradCPU)
+inductor_compiled_code.fallthrough(DispatchKey.AutogradCUDA)
+
+
+@inductor_compiled_code.py_impl(DispatchKey.CompositeExplicitAutograd)
+def inductor_compiled_code_impl(func, inputs):
+    return func(inputs)
+
+
+redirect_to_mode(inductor_compiled_code, DebugMode)
+redirect_to_mode(inductor_compiled_code, _CachingTorchDispatchMode)
+redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
 
 
 class WrapWithSetGradEnabled(HigherOrderOperator):
@@ -194,7 +227,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
     """
 
     def __init__(self) -> None:
-        super().__init__("tag_activation_checkpoint", cacheable=False)
+        super().__init__("tag_activation_checkpoint", cacheable=True)
 
     @staticmethod
     def divide_kwargs(kwargs):
@@ -228,10 +261,10 @@ class TagActivationCheckpoint(HigherOrderOperator):
         checkpoint_keys.add("preserve_rng_state")
 
         checkpoint_kwargs = {
-            name: kwargs[name] for name in kwargs.keys() if name in checkpoint_keys
+            name: kwargs[name] for name in kwargs if name in checkpoint_keys
         }
         gmod_kwargs = {
-            name: kwargs[name] for name in kwargs.keys() if name not in checkpoint_keys
+            name: kwargs[name] for name in kwargs if name not in checkpoint_keys
         }
         return checkpoint_kwargs, gmod_kwargs
 
@@ -257,6 +290,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
         )
         dispatch_key = dispatch_key_set.highestPriorityTypeId()
         if dispatch_key == torch._C.DispatchKey.PreDispatch:
+            # pyrefly: ignore [missing-attribute]
             return super().__call__(gmod, *args, **kwargs)
 
         return tag_activation_checkpoint_impl(gmod, *args, **kwargs)

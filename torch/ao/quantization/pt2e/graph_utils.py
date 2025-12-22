@@ -3,7 +3,7 @@ import itertools
 import operator
 from collections import OrderedDict
 from collections.abc import Callable, Sequence
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 from torch.export import ExportedProgram
@@ -95,7 +95,7 @@ def find_sequential_partitions(
     gm: torch.fx.GraphModule,
     partition_types: list[Any],
     include_functional_equivalent=True,
-    filter_fn: Optional[Callable[[Node], bool]] = None,
+    filter_fn: Callable[[Node], bool] | None = None,
 ):
     if not _valid_type_sequence(partition_types):
         raise ValueError(
@@ -166,7 +166,7 @@ def _get_control_flow_submodules(
 
 
 def bfs_trace_with_node_process(
-    model: Union[ExportedProgram, torch.fx.GraphModule], node_op: Callable
+    model: ExportedProgram | torch.fx.GraphModule, node_op: Callable
 ) -> None:
     """Traverse the graph module and apply node_op to each node."""
 

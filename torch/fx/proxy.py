@@ -17,6 +17,7 @@ from typing import Any, Optional
 import torch
 import torch.fx.traceback as fx_traceback
 from torch._C import _fx_map_aggregate as map_aggregate, _fx_map_arg as map_arg
+from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import getArtifactLogger
 from torch.utils._traceback import CapturedTraceback
 
@@ -187,6 +188,10 @@ class TracerBase:
             stack_trace = current_meta.get("stack_trace")
             if stack_trace:
                 node.stack_trace = stack_trace
+
+                if fx_traceback.GRADIENT_ACC_SPECIAL_STACK in stack_trace:
+                    node.meta["is_gradient_acc"] = True
+
             # Explicitly set the stack_trace, nn_module_stack and source_fn on the node.meta
             # If other meta fields are needed, they can be added here
             for field in _COPY_META_FIELDS:
@@ -407,6 +412,9 @@ class TracerBase:
             )
 
         elif isinstance(a, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
+            return a
+
+        elif is_opaque_value_type(type(a)):
             return a
 
         elif is_dataclass(a):

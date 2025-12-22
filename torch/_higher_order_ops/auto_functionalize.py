@@ -356,6 +356,7 @@ class AutoFunctionalized(HigherOrderOperator):
     ) -> tuple[Any, tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(_mutable_op, **kwargs)
 
 
@@ -398,6 +399,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         assert _op_to_check is not None
         assert can_auto_functionalize(_op_to_check)
         assert isinstance(kwargs, dict)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(_mutable_op, **kwargs)
 
 
