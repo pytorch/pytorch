@@ -155,10 +155,12 @@ EOF
     fi
 
     # ROCm 6.0 had a regression where journal_mode was enabled on the kdb files resulting in permission errors at runtime
-    for kdb in /opt/rocm/share/miopen/db/*.kdb
-    do
-        sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
-    done
+    if [ -d /opt/rocm/share/miopen/db ]; then
+        for kdb in /opt/rocm/share/miopen/db/*.kdb
+        do
+            sqlite3 $kdb "PRAGMA journal_mode=off; PRAGMA VACUUM;"
+        done
+    fi
 
     # ROCm 6.3 had a regression where initializing static code objects had significant overhead
     # CI no longer builds for ROCm 6.3, but
