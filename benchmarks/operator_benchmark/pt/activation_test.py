@@ -32,7 +32,7 @@ activation_short_configs = op_bench.config_list(
 )
 
 activation_long_configs = op_bench.cross_product_configs(
-    shape=[(1,), (64,), (4096,), (8192,),(131072,), (262144,), (524288,), (1048576,)],
+    shape=[(1,), (64,), (4096,), (8192,), (131072,), (262144,), (524288,), (1048576,)],
     device=["cuda"],
     tags=["long"],
 )

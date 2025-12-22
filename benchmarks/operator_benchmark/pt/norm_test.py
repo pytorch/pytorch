@@ -110,7 +110,9 @@ batchnorm2d_configs = op_bench.cross_product_configs(
 class BatchNorm2dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, device, B, C, H, W, training):
         self.inputs = {
-            "input": torch.rand(B, C, H, W, device=device, requires_grad=self.auto_set())
+            "input": torch.rand(
+                B, C, H, W, device=device, requires_grad=self.auto_set()
+            )
         }
         self.op_func = nn.BatchNorm2d(C, device=device)
         self.op_func.train(training)
@@ -150,7 +152,9 @@ batchnorm3d_configs = op_bench.cross_product_configs(
 class BatchNorm3dBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, device, B, C, D, H, W, training):
         self.inputs = {
-            "input": torch.rand(B, C, D, H, W, device=device, requires_grad=self.auto_set())
+            "input": torch.rand(
+                B, C, D, H, W, device=device, requires_grad=self.auto_set()
+            )
         }
         self.op_func = nn.BatchNorm3d(C, device=device)
         self.op_func.train(training)
@@ -189,7 +193,9 @@ groupnorm_configs = op_bench.cross_product_configs(
 class GroupNormBenchmark(op_bench.TorchBenchmarkBase):
     def init(self, device, B, C, H, W, num_groups):
         self.inputs = {
-            "input": torch.rand(B, C, H, W, device=device, requires_grad=self.auto_set())
+            "input": torch.rand(
+                B, C, H, W, device=device, requires_grad=self.auto_set()
+            )
         }
         self.op_func = nn.GroupNorm(num_groups, C, device=device)
         self.set_module_name("GroupNorm")
@@ -211,4 +217,3 @@ op_bench.generate_pt_gradient_test(
 
 if __name__ == "__main__":
     op_bench.benchmark_runner.main()
-
