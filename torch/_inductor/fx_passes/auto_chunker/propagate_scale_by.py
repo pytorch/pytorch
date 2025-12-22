@@ -19,27 +19,27 @@ from .utils import (
 aten = torch.ops.aten
 prims = torch.ops.prims
 
-propagate_rules = {}  # type: ignore[var-annotated]
-
-_HANDLER_TYPE: TypeAlias = Callable[[Node], bool]
+_HandlerType: TypeAlias = Callable[[Node], bool]
+propagate_rules: dict[torch._ops.OpOverload, _HandlerType] = {}
 
 
 def _register_propagate_rule(
     aten_op: torch._ops.OpOverload | Sequence[torch._ops.OpOverload],
-    handler: _HANDLER_TYPE,
-) -> _HANDLER_TYPE:
+    handler: _HandlerType,
+) -> _HandlerType:
     if not isinstance(aten_op, (list, tuple)):
         aten_op = [aten_op]  # type: ignore[assignment, list-item]
 
     assert isinstance(aten_op, (list, tuple)), f"{type(aten_op)=}"
     for op in aten_op:
+        assert isinstance(op, torch._ops.OpOverload)
         propagate_rules[op] = handler
     return handler
 
 
 def register_propagate_rule(
     aten_op: torch._ops.OpOverload | Sequence[torch._ops.OpOverload],
-) -> Callable[[_HANDLER_TYPE], _HANDLER_TYPE]:
+) -> Callable[[_HandlerType], _HandlerType]:
     return functools.partial(_register_propagate_rule, aten_op)
 
 
@@ -67,7 +67,10 @@ def propagate_scale_by(nodes_with_chunking_meta: Sequence[Node]) -> None:
             continue
 
         target = node.target
-        if target not in propagate_rules:
+        if (
+            not isinstance(target, torch._ops.OpOverload)
+            or target not in propagate_rules
+        ):
             raise CantChunk(
                 f"Missing scale_by propagation rule for target {target}: {node.format_node()}"
             )
