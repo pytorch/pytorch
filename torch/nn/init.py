@@ -91,6 +91,7 @@ def _no_grad_trunc_normal_(
     b: float,
     generator: torch.Generator | None = None,
 ) -> Tensor:
+    """Fill tensor with truncated normal distribution values in no-grad context."""
     # Method based on https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
     def norm_cdf(x: float) -> float:
         # Computes standard normal cumulative distribution function
