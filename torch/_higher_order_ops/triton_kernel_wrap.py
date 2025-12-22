@@ -984,6 +984,8 @@ def identify_mutated_tensors(
             ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
         ]
     except Exception:
+        import torch._inductor.ir
+
         log.warning(
             "Encountered an exception in identify_mutated_tensors, assuming every input is mutated",
             exc_info=True,
@@ -996,7 +998,11 @@ def identify_mutated_tensors(
                 log.debug("===\t%s\t===", name)
                 for ret, ops in fn.items():
                     log.debug("%s\t=>\t%s", ret, ops)
-        return [key for key, value in kwargs.items() if isinstance(value, Tensor)]
+        return [
+            key
+            for key, value in kwargs.items()
+            if isinstance(value, (Tensor, torch._inductor.ir.TensorBox))
+        ]
 
 
 ###############################################################################
