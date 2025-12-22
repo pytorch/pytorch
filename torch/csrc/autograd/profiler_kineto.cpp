@@ -527,9 +527,9 @@ void onFunctionExit(
     // Record only the outputs in this exit callback of the record function
     torch::profiler::impl::SaveNcclMetaConfig ncclMetaConfig{
         true, false, false, true};
-    auto additonal_nccl_meta =
+    auto additional_nccl_meta =
         torch::profiler::impl::saveNcclMeta(fn, ncclMetaConfig);
-    extra_meta.insert(additonal_nccl_meta.begin(), additonal_nccl_meta.end());
+    extra_meta.insert(additional_nccl_meta.begin(), additional_nccl_meta.end());
   }
   if (config.state == ProfilerState::KINETO_GPU_FALLBACK) {
     try {
@@ -716,7 +716,7 @@ void toggleCollectionDynamic(
       (activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0 ||
        activities.count(torch::autograd::profiler::ActivityType::XPU) == 0)) {
     LOG(WARNING)
-        << "Toggling CPU activity with GPU activity on may result in traces with GPU events on artibrary tracks";
+        << "Toggling CPU activity with GPU activity on may result in traces with GPU events on arbitrary tracks";
   } else if (
       (activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 ||
        activities.count(torch::autograd::profiler::ActivityType::XPU) > 0) &&

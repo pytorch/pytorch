@@ -220,7 +220,7 @@ Grad Modes
 Apart from setting ``requires_grad`` there are also three grad modes that can
 be selected from Python that can affect how computations in PyTorch are
 processed by autograd internally: default mode (grad mode), no-grad mode,
-and inference mode, all of which can be togglable via context managers and
+and inference mode, all of which can be toggleable via context managers and
 decorators.
 
 .. list-table::
