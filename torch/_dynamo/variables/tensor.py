@@ -47,7 +47,6 @@ from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
     unimplemented,
     UnknownPropertiesDuringBackwardTrace,
-    UserError,
     UserErrorType,
 )
 from ..external_utils import call_hook_from_backward_state
@@ -1630,10 +1629,14 @@ class SymNodeVariable(VariableTracker):
             if torch.fx.experimental._config.no_data_dependent_graph_break:
                 raise
 
-            raise UserError(  # noqa: B904
-                UserErrorType.ANTI_PATTERN,
-                f"Consider annotating your code using torch._check*(). {str(e)}",
-                case_name="constrain_as_size_example",
+            unimplemented(
+                gb_type="user_error",
+                context="torch._dynamo.variables.tensor: constrain_as_size_example",
+                explanation=f"Consider annotating your code using torch._check*(). {str(e)}",
+                hints=[],
+                from_exc=None,
+                error_type=UserErrorType.ANTI_PATTERN,
+                exportdb_case_name="constrain_as_size_example",
             )
 
     def call_method(

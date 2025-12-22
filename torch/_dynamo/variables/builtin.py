@@ -48,7 +48,6 @@ from ..exc import (
     raise_observed_exception,
     unimplemented,
     Unsupported,
-    UserError,
     UserErrorType,
 )
 from ..guards import GuardBuilder, install_guard
@@ -2894,11 +2893,14 @@ class BuiltinVariable(VariableTracker):
         try:
             py_type = obj.python_type()
         except NotImplementedError as error:
-            raise UserError(
-                UserErrorType.INVALID_INPUT,
-                str(error),
-                case_name="unknown_python_type",
-            ) from None
+            unimplemented(
+                gb_type="user_error",
+                context="torch._dynamo.variables.builtin: unknown_python_type",
+                explanation=str(error),
+                hints=[],
+                from_exc=None,
+                error_type=UserErrorType.INVALID_INPUT,
+            )
 
         source = obj.source and TypeSource(obj.source)
         if (

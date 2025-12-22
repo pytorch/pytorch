@@ -30,7 +30,6 @@ from ..exc import (
     ObservedUserStopIteration,
     raise_observed_exception,
     unimplemented,
-    UserError,
 )
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
@@ -458,10 +457,13 @@ class ZipVariable(IteratorVariable):
                         # all iterables exhausted, raise original error
                         raise
                 handle_observed_exception(tx)
-                raise UserError(
-                    ValueError,  # type: ignore[arg-type]
-                    "zip() has one argument of len differing from others",
-                ) from None
+                unimplemented(
+                    gb_type="user_error",
+                    context="torch._dynamo.variables.iter",
+                    explanation="zip() has one argument of len differing from others",
+                    hints=[],
+                    from_exc=None,
+                )
             raise
 
         tx.output.side_effects.mutation(self)

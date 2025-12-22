@@ -65,6 +65,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
     unsupported,
 )
 from torch._dispatch.python import enable_python_dispatcher
+from torch._dynamo.exc import unimplemented
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._export.utils import _compiling_state_context
 from torch._subclasses.fake_tensor import unset_fake_temporarily
@@ -99,7 +100,6 @@ from .exc import (
     CondOpArgsMismatchError,
     ShortenTraceback,
     Unsupported,
-    UserError,
     UserErrorType,
 )
 from .hooks import Hooks
@@ -1781,15 +1781,20 @@ def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
         input_errors.append(msg)
 
     if input_errors:
-        raise UserError(
-            UserErrorType.INVALID_INPUT,
-            "Cannot export model which references tensors that are neither "
-            "buffers/parameters/constants nor are direct inputs.  For each tensor, if you'd "
-            "like this tensor to be an explicit input, add it as a dummy argument "
-            "to the top-level model definition you are exporting; if you would "
-            "like its value to be embedded as an exported constant, wrap its access "
-            "in a function marked with @assume_constant_result.\n\n"
-            + "\n\n".join(input_errors),
+        unimplemented(
+            gb_type="user_error",
+            context="torch._dynamo.eval_frame: invalid input",
+            explanation=(
+                "Cannot export model which references tensors that are neither "
+                "buffers/parameters/constants nor are direct inputs.  For each tensor, if you'd "
+                "like this tensor to be an explicit input, add it as a dummy argument "
+                "to the top-level model definition you are exporting; if you would "
+                "like its value to be embedded as an exported constant, wrap its access "
+                "in a function marked with @assume_constant_result.\n\n"
+                + "\n\n".join(input_errors)
+            ),
+            hints=[],
+            error_type=UserErrorType.INVALID_INPUT,
         )
 
 
@@ -1813,16 +1818,21 @@ def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -
             if error_type == UserErrorType.INVALID_INPUT and v is None:
                 continue
 
-            raise UserError(
-                error_type,
-                f"It looks like one of the {value_type}s with type `{type(v)}` "
-                "is not supported or pytree-flattenable. \n"
-                f"Exported graphs {value_type}s can only contain the "
-                f"following supported types: {supported_types}. \n"
-                "If you are using a custom class object, "
-                "please register a pytree_flatten/unflatten function "
-                "using `torch.utils._pytree.register_pytree_node` or "
-                "`torch.export.register_dataclass`.",
+            unimplemented(
+                gb_type="user_error",
+                context=f"torch._dynamo.eval_frame: invalid {value_type}",
+                explanation=(
+                    f"It looks like one of the {value_type}s with type `{type(v)}` "
+                    "is not supported or pytree-flattenable. \n"
+                    f"Exported graphs {value_type}s can only contain the "
+                    f"following supported types: {supported_types}. \n"
+                    "If you are using a custom class object, "
+                    "please register a pytree_flatten/unflatten function "
+                    "using `torch.utils._pytree.register_pytree_node` or "
+                    "`torch.export.register_dataclass`."
+                ),
+                hints=[],
+                error_type=error_type,
             )
 
 
@@ -1849,7 +1859,6 @@ def rewrite_signature(
         for name, param in f_sig.parameters.items():
             if param.default is not inspect.Parameter.empty:
                 import torch._dynamo.graph_break_hints as graph_break_hints
-                from torch._dynamo.exc import unimplemented
 
                 log.error(
                     "Parameter %s is optional with a default value of %s",
@@ -2303,10 +2312,13 @@ def export(
                     )(*example_fake_inputs)
                 except CondOpArgsMismatchError as e:
                     # Wrap the internal error to the user-facing error
-                    raise UserError(  # noqa: B904
-                        UserErrorType.DYNAMIC_CONTROL_FLOW,
-                        str(e),
-                        case_name="cond_operands",
+                    unimplemented(
+                        gb_type="user_error",
+                        context="torch._dynamo.eval_frame: cond_operands",
+                        explanation=str(e),
+                        hints=[],
+                        from_exc=None,
+                        error_type=UserErrorType.DYNAMIC_CONTROL_FLOW,
                     )
 
             assert graph is not None

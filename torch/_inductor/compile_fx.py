@@ -2977,12 +2977,15 @@ def _aoti_flatten_inputs(
     )
 
     if any(isinstance(x[1], torch.ScriptObject) for x in flat_args_with_path):
-        from torch._dynamo.exc import UserError, UserErrorType
-
-        raise UserError(
-            UserErrorType.INVALID_INPUT,
-            "TorchBind objects found in inputs. TorchBind object inputs are not supported in AOTInductor. "
-            "TorchBind objects can only be attributes.",
+        from torch._dynamo.exc import unimplemented, UserErrorType
+        msg = "TorchBind objects found in inputs. TorchBind object inputs are not supported in AOTInductor. TorchBind objects can only be attributes."
+        unimplemented(
+            gb_type="user_error",
+            context="torch._inductor.compile_fx._aoti_flatten_inputs",
+            explanation=msg,
+            hints=[],
+            from_exc=None,
+            error_type=UserErrorType.INVALID_INPUT
         )
 
     # Replace non-tensor (constant) inputs with Nones, since these are not being

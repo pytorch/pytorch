@@ -365,7 +365,7 @@ def export_for_aoti_minifier(
     #
     # If skip_export_error=True, then the errors in export will not be raised, and the minifier
     # will keep exploring and ignore this graph.
-    from torch._dynamo.exc import UserError, UserErrorType
+    from torch._dynamo.exc import Unsupported, UserErrorType
 
     try:
         ep = torch.export.export(gm, tuple_inputs, strict=strict)
@@ -374,7 +374,7 @@ def export_for_aoti_minifier(
     except Exception as e:
         if skip_export_error:
             return None
-        if isinstance(e, UserError) and e.error_type == UserErrorType.INVALID_OUTPUT:
+        if isinstance(e, Unsupported) and e.error_type == UserErrorType.INVALID_OUTPUT:
             # graph output is not allowed by export when strict=True
             return None
         if isinstance(e, RuntimeError):

@@ -11,7 +11,6 @@ Base Exceptions:
     - Various specialized subclasses for different error scenarios
 
 User Error Handling:
-    - UserError: Exceptions for user-facing errors in TorchDynamo usage
     - UserErrorType: Enumeration of different categories of user errors
     - Formatted error messages with debugging information
 
@@ -168,6 +167,7 @@ class Unsupported(TorchDynamoException):
         *,
         case_name: Optional[str] = None,
         real_stack: StackSummary | None = None,
+        error_type: UserErrorType | None = None,
     ) -> None:
         super().__init__(msg)
         if not real_stack:
@@ -177,6 +177,7 @@ class Unsupported(TorchDynamoException):
         self.category: Optional[str] = None
         self.add_to_stats()
         self.case_name: Optional[str] = case_name
+        self.error_type = error_type
 
     def remove_from_stats(self) -> None:
         assert self.category is not None
@@ -229,31 +230,6 @@ class UserErrorType(Enum):
     INVALID_INPUT = auto()
     INVALID_OUTPUT = auto()
     UNSUPPORTED_ALIASED_MUTATED_DYNAMIC_INPUTS = auto()
-
-
-class UserError(Unsupported):
-    def __init__(
-        self, error_type: UserErrorType, msg: str, case_name: Optional[str] = None
-    ) -> None:
-        """
-        Type of errors that would be valid in Eager, but not supported in TorchDynamo.
-        The error message should tell user about next actions.
-
-        error_type: Type of user error
-        msg: Actionable error message
-        case_name: (Optional) Unique name (snake case) for the usage example in exportdb.
-        """
-        if case_name is not None:
-            assert isinstance(case_name, str)
-            if msg.endswith("."):
-                msg += " "
-            else:
-                msg += "\n"
-            msg += exportdb_error_message(case_name)
-        super().__init__(msg)
-        self.error_type = error_type
-        self.message = msg
-
 
 class SkipCodeRecursiveException(TorchDynamoException):
     pass
@@ -495,6 +471,7 @@ def format_graph_break_message(
     context: str,
     explanation: str,
     hints: list[str],
+    exportdb_case_name: str | None = None,
 ) -> str:
     explanation = textwrap.indent(explanation, "    ").lstrip()
     hints_str = "\n".join(
@@ -508,6 +485,11 @@ def format_graph_break_message(
 {hints_str}
 
   Developer debug context: {context}"""
+
+    if exportdb_case_name:
+        msg += f"\n\n {exportdb_error_message(exportdb_case_name)}"
+        return msg
+
     documentation_link = get_gbid_documentation_link(gb_type)
 
     if documentation_link:
@@ -577,6 +559,8 @@ def unimplemented(
     hints: list[str],
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
+    error_type: UserErrorType | None = None,
+    exportdb_case_name: str | None = None,
 ) -> NoReturn:
     """
     Called within dynamo to cause a graph break.
@@ -588,7 +572,7 @@ def unimplemented(
         hints: List of user-facing hints for the graph break.
     """
 
-    msg = format_graph_break_message(gb_type, context, explanation, hints)
+    msg = format_graph_break_message(gb_type, context, explanation, hints, exportdb_case_name)
 
     if log_warning:
         log.warning(msg)
@@ -596,8 +580,8 @@ def unimplemented(
         past_real_stack = None
         if hasattr(from_exc, "real_stack"):
             past_real_stack = from_exc.real_stack
-        raise Unsupported(msg, real_stack=past_real_stack) from from_exc
-    raise Unsupported(msg)
+        raise Unsupported(msg, real_stack=past_real_stack, error_type=error_type) from from_exc
+    raise Unsupported(msg, error_type=error_type)
 
 
 # KeyError has special handling for its args

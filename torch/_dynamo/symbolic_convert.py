@@ -806,7 +806,7 @@ def generic_jump(
                     eval_result = value.evaluate_expr(self.output)
                 else:
                     eval_result = guard_bool(value.sym_num != 0)
-            except exc.UserError as e:
+            except exc.Unsupported as e:
                 if self.should_compile_partial_graph():
                     return jump_graph_break(self, inst, value, extra_msg=f"\n{e}")
                 raise

@@ -3484,7 +3484,6 @@ def get_fake_value(
         TorchRuntimeError,
         unimplemented,
         Unsupported,
-        UserError,
         UserErrorType,
     )
 
@@ -3634,13 +3633,24 @@ def get_fake_value(
         elif isinstance(
             cause, torch.fx.experimental.symbolic_shapes.GuardOnDataDependentSymNode
         ):
-            raise UserError(  # noqa: B904
-                UserErrorType.CONSTRAINT_VIOLATION,
-                str(cause),
-                case_name="constrain_as_size_example",
+            unimplemented(
+                gb_type="user_error",
+                context="torch._dynamo.utils: constrain_as_size_example",
+                explanation=str(cause),
+                hints=[],
+                from_exc=None,
+                error_type=UserErrorType.CONSTRAINT_VIOLATION,
+                exportdb_case_name="constrain_as_size_example",
             )
         elif isinstance(cause, ValueRangeError):
-            raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
+            unimplemented(
+                gb_type="user_error",
+                context="torch._dynamo.utils: constraint violation",
+                explanation=e.args[0],
+                hints=[],
+                from_exc=e,
+                error_type=UserErrorType.CONSTRAINT_VIOLATION,
+            )
         elif isinstance(cause, TypeError) and "argument" in str(cause):
             unimplemented(
                 gb_type="TypeError when making fake tensor call",
