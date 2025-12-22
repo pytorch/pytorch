@@ -225,7 +225,12 @@ def _packed_sequence_init_args(
 
     # support being called as `PackedSequence(data, batch_sizes, sorted_indices)`
     if batch_sizes is not None:
-        # TODO: Re-enable this check (.type isn't supported in TorchScript)
+        # TODO: Re-enable device type validation when TorchScript supports .type attribute
+        # Currently disabled because batch_sizes.device.type raises AttributeError in TorchScript
+        # Potential alternatives:
+        # - Use batch_sizes.device.index or batch_sizes.is_cuda instead  
+        # - Add @torch.jit.unused decorator to skip this check in TorchScript
+        # - Wait for TorchScript to support device.type attribute
         if batch_sizes.device.type != "cpu":
             raise ValueError(
                 "batch_sizes should always be on CPU. "
