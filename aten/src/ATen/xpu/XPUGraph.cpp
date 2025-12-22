@@ -180,6 +180,47 @@ void XPUGraph::reset() {
   }
 }
 
+void XPUGraph::enable_debug_mode() {
+  _xpu_graphs_debug = true;
+}
+
+void XPUGraph::debug_dump(const std::string& debug_path) {
+  if (_xpu_graphs_debug || keep_graph_) {
+    TORCH_WARN("DEBUG: calling debug_dump()");
+    if (has_graph_) {
+        TORCH_WARN("DEBUG: calling print_graph(verbose=1) to ", debug_path);
+        graph_->print_graph(debug_path, /* verbose = */ 1);
+      if (!keep_graph_) {
+        graph_.reset();
+        has_graph_ = false;
+      }
+    }
+  } else {
+    TORCH_WARN("XPU Graphs debug not enabled, set with [graph].enable_debug_mode()");
+  }
+}
+
+// Is it necessary to have keep_graph_ = true to access the raw xpuGraph_t instance?
+xpuGraph_t* XPUGraph::raw_xpu_graph() {
+  TORCH_CHECK(keep_graph_, "You cannot access the raw xpuGraph_t instance unless XPUGraph was initialized with keep_graph=true");
+  TORCH_CHECK(has_graph_, "You cannot access the raw xpuGraph_t instance until capture_end() has been called");
+  return graph_.get();
+}
+
+xpuGraphExec_t* XPUGraph::raw_xpu_graph_exec() {
+  TORCH_CHECK(
+      has_graph_exec_,
+      "You cannot access the raw xpuGraphExec_t instance until instantiate() has been called");
+  return graph_exec_.get();
+}
+
+// Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
+MempoolId_t XPUGraph::pool() {
+TORCH_CHECK(capture_ended_,
+              "Called XPUGraph::pool() without a preceding successful capture.");
+  return mempool_id_;
+}
+
 XPUGraph::~XPUGraph() {
   for (auto& [generator_state, wholegraph_increments] :
        captured_generator_states_) {

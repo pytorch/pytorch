@@ -34,6 +34,11 @@ struct TORCH_XPU_API XPUGraph {
   void instantiate();
   void replay();
   void reset();
+  MempoolId_t pool();
+  void enable_debug_mode();
+  void debug_dump(const std::string& debug_path);
+  xpuGraph_t* raw_xpu_graph();
+  xpuGraphExec_t* raw_xpu_graph_exec();  
 
  protected:
   std::unique_ptr<xpuGraph_t> graph_;
