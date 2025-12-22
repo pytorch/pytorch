@@ -2094,7 +2094,7 @@ def use_nv_universal_gemm_template(
     Required conditions:
         1. NVGEMM backend is enabled
         2. cutlass_api is available
-        3. We are on a Blackwell arch
+        3. We are on a NVIDIA GPU
         4. The dtype is fp16 or bf16
         5. Max autotune or max autotune gemm is enabled
         6. We are not using dynamic shapes
@@ -2112,17 +2112,12 @@ def use_nv_universal_gemm_template(
     if not _use_autotune_backend("NVGEMM"):
         return False
 
-    from .codegen.cuda.cuda_env import is_datacenter_blackwell_arch
     from .virtualized import V
 
-    # NVIDIA Universal GEMM requires runtime JIT compilation which is not compatible with AOTI
     if V.aot_compilation:
         return False
 
-    if not is_gpu(layout.device.type):
-        return False
-
-    if not is_datacenter_blackwell_arch():
+    if layout.device.type != "cuda" or torch.version.hip:
         return False
 
     layout_dtypes = [torch.float16, torch.bfloat16]
