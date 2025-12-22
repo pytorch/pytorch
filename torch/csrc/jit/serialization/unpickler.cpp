@@ -604,14 +604,14 @@ PickleOpCode Unpickler::readInstruction() {
         tensor = at::empty({0}, options).set_(storage);
       }
 
-      if (device.is_cuda() || device.is_xpu() || device.is_meta() ||
-          device.is_mtia() || device.is_hpu() || device.is_mps() ||
-          device.is_privateuseone()) {
+      if (device.is_cuda() || device.is_hip() || device.is_xpu() ||
+          device.is_meta() || device.is_mtia() || device.is_hpu() ||
+          device.is_mps() || device.is_privateuseone()) {
         tensor = tensor.to(device, tensor.scalar_type());
       } else if (device.type() != DeviceType::CPU) {
         TORCH_CHECK(
             false,
-            "supported devices include CPU, CUDA, HPU and ",
+            "supported devices include CPU, CUDA, HIP, HPU and ",
             c10::get_privateuse1_backend(),
             " however got ",
             DeviceTypeName(device.type(), false));

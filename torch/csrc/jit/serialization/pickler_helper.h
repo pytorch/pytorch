@@ -107,7 +107,7 @@ struct WriteableTensorData {
 };
 
 // returns a (tensor, record_size) for a tensor, converting it to a CPU tensor
-// if it was CUDA and to_cpu is True.
+// if it was CUDA/HIP and to_cpu is True.
 TORCH_API WriteableTensorData
 getWriteableTensorData(const at::Tensor& tensor, bool to_cpu = true);
 
