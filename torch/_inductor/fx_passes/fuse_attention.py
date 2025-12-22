@@ -949,20 +949,24 @@ def _get_sfdp_patterns():
                 {},
                 _sfdp_extra_check(aten.div.Tensor),
             ),
-            # TODO: Enable CUDA after solving Bert accuracy issue of calling efficient attention
+            # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g(), g(), g(), m(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                _sfdp_extra_check(
+                    aten.div.Tensor, disable_cuda=torch.version.hip is None
+                ),
             ),
             (
                 _sfdp_pattern_16,
                 _sfdp_replacement_16,
                 [g_bs1(), g_bs1(), g_bs1(), m_bs1(), c()],
                 d,
-                _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                _sfdp_extra_check(
+                    aten.div.Tensor, disable_cuda=torch.version.hip is None
+                ),
             ),
             (
                 _sfdp_pattern_17,
@@ -1058,7 +1062,10 @@ def _get_sfdp_patterns():
                     _sfdp_replacement_16,
                     [g(), g(), g(), m_float(), c()],
                     d,
-                    _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                    # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
+                    _sfdp_extra_check(
+                        aten.div.Tensor, disable_cuda=torch.version.hip is None
+                    ),
                 )
             )
             candidates.append(
@@ -1067,7 +1074,10 @@ def _get_sfdp_patterns():
                     _sfdp_replacement_16,
                     [g_bs1(), g_bs1(), g_bs1(), m_bs1_float(), c()],
                     d,
-                    _sfdp_extra_check(aten.div.Tensor, disable_cuda=True),
+                    # disable_cuda only for NVIDIA CUDA (not ROCm) due to Bert accuracy issue
+                    _sfdp_extra_check(
+                        aten.div.Tensor, disable_cuda=torch.version.hip is None
+                    ),
                 )
             )
 

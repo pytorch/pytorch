@@ -124,6 +124,11 @@ _TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
 _spec_cache: WeakKeyDictionary[Any, Any] = WeakKeyDictionary()
 
 
+# Raised when get_function() cannot convert a nested function to a Python function.
+class ClosureConversionError(NotImplementedError):
+    pass
+
+
 @functools.lru_cache
 def get_pytree_SUPPORTED_NODES_source():
     return AttrSource(
@@ -1359,7 +1364,7 @@ class UserMethodVariable(UserFunctionVariable):
         self,
         fn: Callable[..., Any],
         obj: VariableTracker,
-        source_fn: Callable[..., Any] | None = None,
+        source_fn: Source | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(fn=fn, **kwargs)  # type: ignore[arg-type]
@@ -1589,13 +1594,67 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def python_type(self) -> type:
         return types.FunctionType
 
-    def get_function(self) -> types.FunctionType:
+    def get_function(self, _converting: set[int] | None = None) -> types.FunctionType:
+        # _converting is used a way to break cycles when
+        # two nested_functions refer to each other.
+        from .base import AsPythonConstantNotImplementedError
+
+        self_id = id(self)
+        if _converting is None:
+            _converting = set()
+        if self_id in _converting:
+            raise ClosureConversionError(
+                "cycle detected in mutually recursive closures"
+            )
+        _converting.add(self_id)
+        try:
+            return self._get_function_impl(_converting)
+        except AsPythonConstantNotImplementedError as e:
+            raise ClosureConversionError(
+                "failed to convert closure cell to Python constant"
+            ) from e
+        finally:
+            _converting.discard(self_id)
+
+    def _get_function_impl(self, _converting: set[int]) -> types.FunctionType:
+        closure_cells = None
         if self.closure:
-            raise NotImplementedError("get_function")
+            from torch._dynamo.symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
+            cells = []
+
+            for cell_var in self.closure.items:  # type: ignore[attr-defined]
+                # Get the cell contents from side_effects or pre_existing_contents
+                # load_cell will replay the side-effects
+                cell_contents = tx.output.side_effects.load_cell(cell_var)
+
+                # Check for self-referential closure (function capturing itself for recursion)
+                # For example:
+                # def outer():
+                #     def helper(n):
+                #         if n <= 0:
+                #             return 0
+                #         return n + helper(n - 1)  # helper calls itself
+                #     return helper
+                if cell_contents is self:
+                    raise ClosureConversionError("self-referential nested function")
+
+                # If the cell contents is a NestedUserFunctionVariable, call get_function
+                # directly to properly propagate the _converting set for cycle detection
+                if isinstance(cell_contents, NestedUserFunctionVariable):
+                    value = cell_contents.get_function(_converting)
+                else:
+                    value = cell_contents.as_python_constant()
+                cells.append(make_cell(value))
+            closure_cells = tuple(cells)
+
         func = types.FunctionType(
             self.code.as_python_constant(),
             self.f_globals,
             self.fn_name.as_python_constant(),
+            argdefs=None,
+            closure=closure_cells,
         )
         if self.defaults:
             func.__defaults__ = self.defaults.as_python_constant()
@@ -1878,7 +1937,17 @@ class SkipFunctionVariable(VariableTracker):
                 )
             )
         elif self.value is torch._dynamo.step_unsupported:
-            raise StepUnsupported
+            try:
+                unimplemented(
+                    gb_type="Call to `torch._dynamo.step_unsupported()`",
+                    context="",
+                    explanation="User-inserted step_unsupported.",
+                    hints=[
+                        "Remove the `torch._dynamo.step_unsupported()` call.",
+                    ],
+                )
+            except Unsupported as e:
+                raise StepUnsupported(e.msg) from None
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
@@ -2545,16 +2614,6 @@ class PolyfilledFunctionVariable(VariableTracker):
         return self.fn
 
 
-class TracebackVariable(VariableTracker):
-    # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(  # type: ignore[empty-body]
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker: ...
-
-
 class SysFunctionVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -2564,12 +2623,8 @@ class SysFunctionVariable(VariableTracker):
         if len(tx.exn_vt_stack):
             exn = tx.exn_vt_stack[-1]
             typ = exn.exc_type  # type: ignore[union-attr]
-            tb = None
-            items = [
-                VariableTracker.build(tx, typ),
-                exn,
-                VariableTracker.build(tx, tb),
-            ]
+            tb = exn.var_getattr(tx, "__traceback__")
+            items = [VariableTracker.build(tx, typ), exn, tb]
         else:
             items = [
                 variables.ConstantVariable(None),
