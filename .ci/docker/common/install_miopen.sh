@@ -109,7 +109,6 @@ mkdir -p build
 cd build
 PKG_CONFIG_PATH=/usr/local/lib/pkgconfig CXX=${ROCM_INSTALL_PATH}/llvm/bin/clang++ cmake .. \
     ${MIOPEN_CMAKE_COMMON_FLAGS} \
-    ${MIOPEN_CMAKE_DB_FLAGS} \
     -DCMAKE_PREFIX_PATH="${ROCM_INSTALL_PATH}"
 make MIOpen -j $(nproc)
 
