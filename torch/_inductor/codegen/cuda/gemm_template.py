@@ -475,7 +475,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
 
     @staticmethod
     @abstractmethod
-    def _has_tma_epilogue(self) -> bool:
+    def _has_tma_epilogue(
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+    ) -> bool:
         raise NotImplementedError
 
     @abstractmethod
@@ -1732,7 +1734,9 @@ class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
         return [cutlass_lib.GemmKind.Universal, cutlass_lib.GemmKind.Sparse]
 
     @staticmethod
-    def _has_tma_epilogue(self) -> bool:
+    def _has_tma_epilogue(
+        op: "cutlass_library.gemm_op.GemmOperation",  # type: ignore[name-defined]  # noqa: F821
+    ) -> bool:
         return False
 
     def _get_template(self) -> str:
