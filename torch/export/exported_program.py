@@ -435,11 +435,14 @@ def _decompose_and_get_gm_with_new_signature_constants(
         for node in mod.graph.nodes:
             if node.op == "placeholder":
                 if isinstance(node.meta["val"], CustomObjArgument):
-                    real_script_obj = None
-                    if node.meta["val"].fake_val is None:
-                        real_script_obj = ep.constants[node.meta["val"].name]
+                    custom_obj = node.meta["val"]
+                    fake_val = custom_obj.fake_val
+                    if fake_val is None:
+                        real_script_obj = ep.constants[custom_obj.name]
+                    elif isinstance(fake_val, FakeScriptObject):
+                        real_script_obj = fake_val.real_obj
                     else:
-                        real_script_obj = node.meta["val"].fake_val.real_obj
+                        real_script_obj = fake_val
                     retracing_args.append(real_script_obj)
                 else:
                     retracing_args.append(node.meta["val"])
