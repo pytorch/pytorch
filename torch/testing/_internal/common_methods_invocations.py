@@ -14293,6 +14293,15 @@ op_db: list[OpInfo] = [
                     promotes_int_to_float=True,
                     supports_out=True,
                     supports_rhs_python_scalar=False,
+                    skips=(
+                        # RuntimeError: mul(): functions with out=... arguments don't support
+                        # automatic differentiation, but one of the arguments requires grad
+                        # https://github.com/pytorch/pytorch/issues/68966
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
+                    ),
                     decorators=[
                         DecorateInfo(
                             toleranceOverride({
