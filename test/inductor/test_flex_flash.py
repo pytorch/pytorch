@@ -5,8 +5,6 @@ from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-from setuptools.config._apply_pyprojecttoml import _identity
-
 import torch
 from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available
 from torch._inductor.test_case import TestCase as InductorTestCase
@@ -698,9 +696,7 @@ class TestFlexFlash(InductorTestCase):
             InductorError,
             "Mixed query, key, and value dtype is not supported on this platform",
         ):
-            compiled_fn(
-                query, key, value, _identity, kernel_options={"BACKEND": "FLASH"}
-            )
+            compiled_fn(query, key, value, kernel_options={"BACKEND": "FLASH"})
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_rejects_mask_mod_on_unsupported_gpu(

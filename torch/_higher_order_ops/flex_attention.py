@@ -224,6 +224,10 @@ def math_attention(
         value: The value tensor
         score_mod: The score_mod function
         other_buffers: Other buffers that are passed to the score_mod function
+
+    Notes:
+        Query and Keys are dtype cast up to float64 (if query.dtype is float64) and float32 otherwise.
+        Scores and Values are dtype cast to input query.dtype at the end.
     """
     # broadcast query & key along head dim for GQA
     G = query.size(1) // key.size(1)

@@ -60,6 +60,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipXPUIf,
 )
+from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton, has_triton_tma_device
 
@@ -2789,11 +2790,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @skip_on_cpu
     @supported_platform
     def test_mixed_dtypes_sqnr_per_tensor(self, device):
-        def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            Ps = torch.norm(x)
-            Pn = torch.norm(x - y)
-            return 20 * torch.log10(Ps / Pn)
-
         query_ref = torch.testing.make_tensor(
             (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
         )
@@ -2819,18 +2815,12 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
         out = compiled_fn(query_ref, key_fp8, value_fp8, score_mod) * value_scale
         out_ref = compiled_fn(query_ref, key_ref, value_ref, _identity)
-        sqnr = compute_error(out_ref, out)
-        print(f"SQNR: {sqnr}")
+        _, _, sqnr = _snr(out_ref, out)
         self.assertGreater(sqnr, 15)
 
     @skip_on_cpu
     @supported_platform
     def test_mixed_dtypes_sqnr_per_head(self, device):
-        def compute_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
-            Ps = torch.norm(x)
-            Pn = torch.norm(x - y)
-            return 20 * torch.log10(Ps / Pn)
-
         query_ref = torch.testing.make_tensor(
             (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
         )
@@ -2858,8 +2848,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
         out = compiled_fn(query_ref, key_fp8, value_fp8, score_mod) * value_scale_b
         out_ref = compiled_fn(query_ref, key_ref, value_ref, _identity)
-        sqnr = compute_error(out_ref, out)
-        print(f"SQNR: {sqnr}")
+        _, _, sqnr = _snr(out_ref, out)
         self.assertGreater(sqnr, 15)
 
     @supported_platform
