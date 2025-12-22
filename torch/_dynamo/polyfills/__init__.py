@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         struct as struct,
         sys as sys,
         torch_c_nn as torch_c_nn,
+        traceback as traceback,
     )
 
 from torch.overrides import BaseTorchFunctionMode
@@ -98,6 +99,8 @@ def accumulate_grad(x, new_grad):
     new_grad_strided.copy_(new_grad)
     if x.grad is None:
         x.grad = new_grad_strided
+    elif torch.is_grad_enabled():
+        x.grad = x.grad + new_grad_strided
     else:
         x.grad.add_(new_grad_strided)
 

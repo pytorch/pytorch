@@ -231,33 +231,47 @@ class VariableTrackerCache:
         self.cache.clear()
 
 
-def find_reachable_grad_fn(
-    tensor: torch.Tensor, target_grad_fns: set[torch.autograd.graph.Node]
-) -> torch.autograd.graph.Node | None:
-    """Find and return the first target grad_fn reachable from tensor's autograd graph.
+def collect_reachable_grad_fns(
+    tensors_with_sources: list[tuple[torch.Tensor, str | None]],
+    stop_at: set[torch.autograd.graph.Node] | None = None,
+) -> set[torch.autograd.graph.Node]:
+    """Collect all grad_fns reachable from tensors' autograd graphs.
 
-    Returns the reachable grad_fn if found, None otherwise. This is useful for
-    providing specific context in error messages about which input has the external grad_fn.
+    Performs a DFS traversal and collects all visited grad_fns.
+    Optionally stops traversal (but still includes) nodes in stop_at set.
+
+    Args:
+        tensors_with_sources: List of (tensor, source_name) tuples to start search from.
+        stop_at: Optional set of grad_fns where traversal should stop (still included in result).
+
+    Returns:
+        Set of all reachable grad_fns.
     """
-    if tensor is None or not isinstance(tensor, torch.Tensor):
-        return None
-    grad_fn = tensor.grad_fn
-    if grad_fn is None:
-        return None
+    if stop_at is None:
+        stop_at = set()
 
     visited: set[torch.autograd.graph.Node] = set()
-    stack = [grad_fn]
+    stack: list[torch.autograd.graph.Node] = []
+
+    for tensor, _ in tensors_with_sources:
+        if isinstance(tensor, torch.Tensor):
+            grad_fn = tensor.grad_fn
+            if grad_fn is not None:
+                stack.append(grad_fn)
+
     while stack:
         node = stack.pop()
-        if node is None or node in visited:
+        if node in visited:
             continue
         visited.add(node)
-        if node in target_grad_fns:
-            return node
+        # Stop traversal at stop_at nodes (but still include them in visited)
+        if node in stop_at:
+            continue
         for next_fn, _ in node.next_functions:
-            if next_fn is not None and next_fn not in visited:
+            if next_fn is not None:
                 stack.append(next_fn)
-    return None
+
+    return visited
 
 
 @functools.cache
@@ -709,10 +723,11 @@ class OutputGraph(OutputGraphCommon):
         # back for backend errors.
         self.has_user_defined_allowed_in_graph = False
 
-        # Tracks grad_fn objects of tensors passed as the `outputs` arg to torch.autograd.grad.
-        # These tensors have had their grad_fn consumed and shouldn't be returned
-        # with requires_grad=True (would cause "backward through graph a second time" error).
-        self.autograd_grad_output_grad_fns: set[torch.autograd.graph.Node] = set()
+        # Tracks ALL grad_fn nodes that are consumed by torch.autograd.grad(outputs, inputs).
+        # This is the set of all nodes reachable from outputs' grad_fns, stopping at inputs' grad_fns.
+        # Used to detect returning tensors connected to consumed grad_fns (would cause
+        # "backward through graph a second time" error in aot_autograd).
+        self.autograd_grad_consumed_grad_fns: set[torch.autograd.graph.Node] = set()
 
         # Tracks a list of called ops that were not tagged with "pt2_compliant_tag".
         # This information is useful for logging.
@@ -2131,20 +2146,20 @@ class OutputGraph(OutputGraphCommon):
             raise exc.CompileCollectiveRestartAnalysis
 
     def _validate_outputs_safe_for_autograd_nodes(
-        self, rv: list["VariableTracker"]
+        self, rv: list["VariableTracker"], tx: "InstructionTranslatorBase"
     ) -> None:
         """
         Validate that if torch.autograd.grad is used in the graph and outputs
-        require grad, we trigger a graph break only if the output is connected
+        require grad, we trigger AutogradGradRestartAnalysis only if the output is connected
         to the autograd.grad computation.
 
-        This is because aot_autograd will try to trace backward through the outputs,
-        which will fail with a confusing error about "backward through graph a second time".
+        rv here refers to list of variables that are being returned from dynamo graph.
+
+        See Note [Tracing autograd.grad in dynamo]
         """
-        if not self.autograd_grad_output_grad_fns:
+        if not self.autograd_grad_consumed_grad_fns:
             return
 
-        from . import graph_break_hints
         from .variables.tensor import TensorVariable
 
         for var in rv:
@@ -2152,34 +2167,12 @@ class OutputGraph(OutputGraphCommon):
                 continue
 
             fake_tensor = var.as_proxy().node.meta.get("example_value")
-            if (
-                fake_tensor is not None
-                and find_reachable_grad_fn(
-                    fake_tensor, self.autograd_grad_output_grad_fns
-                )
-                is not None
-            ):
-                # Get source info for better context in error message
-                source_info = var.source.name if var.source else None
-                context = "output tensor requires grad"
-                if source_info:
-                    context = f"output tensor {source_info} requires grad"
-
-                unimplemented(
-                    gb_type="autograd.grad with output that requires grad",
-                    context=context,
-                    explanation=(
-                        "The compiled function uses torch.autograd.grad() and returns a tensor "
-                        "that still requires gradients and is connected to the autograd.grad() computation. "
-                        "This would cause aot_autograd to attempt 'backward through graph a second time', "
-                        "which is not supported."
-                    ),
-                    hints=[
-                        "Call .detach() on the output tensor before returning it from the compiled function.",
-                        "For example: `return loss.detach(), grads` instead of `return loss, grads`.",
-                        "Or set create_graph=False in autograd.grad() if you don't need higher-order gradients.",
-                        *graph_break_hints.USER_ERROR,
-                    ],
+            assert isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
+            if fake_tensor.grad_fn in self.autograd_grad_consumed_grad_fns:
+                # Set the flag to graph break at autograd.grad on retry
+                tx.speculation_log.graph_break_on_autograd_grad = True
+                raise exc.AutogradGradRestartAnalysis(
+                    restart_reason="autograd.grad consumed grad_fns of returned tensors"
                 )
 
     def compile_and_call_fx_graph(
@@ -2211,7 +2204,7 @@ class OutputGraph(OutputGraphCommon):
 
             # Check if autograd.grad is used with outputs that require grad
             # This would cause double backward issues in aot_autograd
-            self._validate_outputs_safe_for_autograd_nodes(rv)
+            self._validate_outputs_safe_for_autograd_nodes(rv, tx)
 
             output_node = self.create_node(
                 "output",
