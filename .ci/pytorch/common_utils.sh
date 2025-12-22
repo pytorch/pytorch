@@ -333,12 +333,28 @@ function install_flash_attn_cute() {
 }
 
 function install_cutlass_dsl() {
+  # cutlass-dsl requires Python >= 3.12
+  local py_version
+  py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
+    echo "Skipping CUTLASS DSL install: requires Python >= 3.12, have $py_version"
+    return 0
+  fi
+
   echo "Installing NVIDIA CUTLASS DSL from PyPI..."
   pip_install nvidia-cutlass-dsl
   echo "NVIDIA CUTLASS DSL installation complete."
 }
 
 function install_cutlass_api() {
+  # cutlass-api requires Python >= 3.12
+  local py_version
+  py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
+    echo "Skipping CUTLASS API install: requires Python >= 3.12, have $py_version"
+    return 0
+  fi
+
   echo "Installing CUTLASS API from Github..."
 
   # Install CuTeDSL dependency first
