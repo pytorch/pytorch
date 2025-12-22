@@ -40,6 +40,11 @@ input descriptors you might find on the joint FX graph:
   are related.  Note that this can be nested (if you have nested tensor
   subclasses!)
 
+* SubclassMethodAOTInput(base=AOTInput(idx=0), target="method_name", args=(...),
+  kwargs={...}) - this tensor corresponds to the result of calling a method on
+  the tensor subclass that is at the first index.  Similar to SubclassGetAttrAOTInput,
+  but for method calls instead of attribute access.
+
 Here are some output descriptors you might find on the Joint FX graph:
 
 * PlainAOTOutput(idx=0) - the first output from the original forward function,
@@ -177,6 +182,7 @@ handle them:
     * ParamAOTInput
     * TangentAOTInput
     * SubclassGetAttrAOTInput et al. (if you use subclasses)
+    * SubclassMethodAOTInput (if you use subclass methods)
 
   * View related (can be eliminated by cloning inputs to graph; if you don't
     eliminate them, make sure to handle pairing them with GradAOTOutput):
@@ -452,6 +458,38 @@ class SubclassGetAttrAOTInput(AOTInput):
 
     def expr(self) -> str:
         return f"{self.base.expr()}.{self.attr}"
+
+    def is_param(self) -> bool:
+        return self.base.is_param()
+
+    def is_buffer(self) -> bool:
+        return self.base.is_buffer()
+
+    def is_tangent(self) -> bool:
+        return self.base.is_tangent()
+
+
+@dataclasses.dataclass(frozen=True)
+class SubclassMethodAOTInput(AOTInput):
+    """Represents a method call on a subclass input.  This tells you which particular
+    method of the subclass this particular input corresponds to (called on the 'base'
+    originally subclass argument.)
+    """
+
+    base: AOTInput
+    target: str
+    args: tuple = ()
+    kwargs: dict = dataclasses.field(default_factory=dict)
+
+    def expr(self) -> str:
+        base_expr = self.base.expr()
+        # Format args
+        args_str = ", ".join(repr(arg) for arg in self.args)
+        # Format kwargs
+        kwargs_str = ", ".join(f"{k}={repr(v)}" for k, v in self.kwargs.items())
+        # Combine
+        all_args = ", ".join(filter(None, [args_str, kwargs_str]))
+        return f"{base_expr}.{self.target}({all_args})"
 
     def is_param(self) -> bool:
         return self.base.is_param()

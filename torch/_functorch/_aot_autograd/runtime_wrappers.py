@@ -60,6 +60,7 @@ from .descriptors import (
     MetadataMutationAOTOutput,
     PlainAOTInput,
     SubclassGetAttrAOTInput,
+    SubclassMethodAOTInput,
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
@@ -130,6 +131,11 @@ def _evaluate_opaque_descriptor(descriptor: AOTInput, args: Sequence[FxValue]):
             # base.attr
             base_value = _evaluate_opaque_descriptor(base, args)
             return getattr(base_value, attr)
+        case SubclassMethodAOTInput(base, target, args=margs, kwargs=kwargs):
+            # base.attr(margs, kwargs)
+            base_value = _evaluate_opaque_descriptor(base, args)
+            method = getattr(base_value, target)
+            return method(*margs, **kwargs)
         case _:
             raise NotImplementedError(
                 f"Unsupported descriptor type: {type(descriptor)}"
