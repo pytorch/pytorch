@@ -1,3 +1,0 @@
-FAIL
-AssertionError: Scalars are not equal!
-Numerical mismatch in batch_norm computation

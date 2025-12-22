@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpvv8uo63f/35/c35rolyiq3r532tlvdbf3vki7lvdrxaclievvy7hg4mhfrphttkd.py", line 12, in pallas_fused_sum_b04c1254_kernel
-    out_ptr0[...] = tmp1.reshape(s27)
-                                 ^^^
-NameError: name 's27' is not defined
