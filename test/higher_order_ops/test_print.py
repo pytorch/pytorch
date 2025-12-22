@@ -1,12 +1,9 @@
 # Owner(s): ["module: higher order operators"]
 import io
-import os
-import tempfile
 from unittest.mock import patch
 
 import torch
 from torch._functorch.aot_autograd import aot_export_module
-from torch._inductor import config
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
@@ -354,8 +351,8 @@ x = add_1, y = add_2);  getitem = None
         self.assertEqual(orig_out, opt_out)
 
     @skipIfTorchDynamo("Skipped under Dynamo")
-    def test_inductor_python_wrapper_uses_builtin_print(self):
-        """Test that the Python wrapper uses builtins.print for both kwargs and positional args.
+    def test_inductor_python_wrapper_uses_python_print(self):
+        """Test that the Python wrapper uses python print instead of HOP for print fallback.
 
         This verifies that when compiling with inductor (Python wrapper), the generated
         code uses builtins.print directly rather than calling torch.ops.higher_order.print,
@@ -384,119 +381,18 @@ x = add_1, y = add_2);  getitem = None
             # Concatenate all generated code chunks to simplify assertions
             merged_code = "\n".join(codes)
 
-            # Verify that the merged code uses builtins.print
-            self.assertIn(
-                "builtins.print",
-                merged_code,
-                "Generated code should use builtins.print for print HOP fallback",
-            )
-            # And does not call torch.ops.higher_order.print
-            self.assertNotIn(
-                "torch.ops.higher_order.print",
-                merged_code,
-                "Generated code should not call torch.ops.higher_order.print directly",
-            )
-
-    def test_compile_inductor_cpp_wrapper_print(self):
-        """Test print with C++ wrapper enabled for both kwargs and positional args.
-
-        C++ wrapper uses std::cout which writes to file descriptor 1 (stdout).
-        We need to redirect the actual file descriptor to capture the output.
-        """
-
-        # Test with kwargs
-        def f_kwargs(x):
-            torch._higher_order_ops.print("C++ print test: value={x}", x=x)
-            res = x + x
-            torch._higher_order_ops.print("Result={res}", res=res)
-            return res
-
-        # Test with positional args
-        def f_args(x):
-            torch._higher_order_ops.print("C++ print: {} {}", x, 42)
-            res = x + x
-            return res
-
-        inputs = (torch.randn(2, 3),)
-
-        # Test kwargs version
-        with config.patch({"cpp_wrapper": True}):
-            compiled_f = torch.compile(f_kwargs, backend="inductor")
-
-            with tempfile.TemporaryFile(mode="w+") as tmp_stdout:
-                original_stdout_fd = os.dup(1)
-                try:
-                    os.dup2(tmp_stdout.fileno(), 1)
-                    res = compiled_f(*inputs)
-                    os.fsync(1)
-                finally:
-                    os.dup2(original_stdout_fd, 1)
-                    os.close(original_stdout_fd)
-
-                tmp_stdout.seek(0)
-                captured_output = tmp_stdout.read().strip()
-
-            # C++ prints literal format strings with buffer names for tensors
-            self.assertEqual(
-                captured_output,
-                "C++ print test: value=<Tensor:arg1_1>\nResult=<Tensor:buf1>",
-            )
-
-            expected = f_kwargs(*inputs)
-            self.assertTrue(torch.allclose(res, expected))
-
-        # Test positional args version
-        with config.patch({"cpp_wrapper": True}):
-            compiled_f = torch.compile(f_args, backend="inductor")
-
-            with tempfile.TemporaryFile(mode="w+") as tmp_stdout:
-                original_stdout_fd = os.dup(1)
-                try:
-                    os.dup2(tmp_stdout.fileno(), 1)
-                    res = compiled_f(*inputs)
-                    os.fsync(1)
-                finally:
-                    os.dup2(original_stdout_fd, 1)
-                    os.close(original_stdout_fd)
-
-                tmp_stdout.seek(0)
-                captured_output = tmp_stdout.read().strip()
-
-            # C++ prints with buffer names for tensors and actual values for scalars
-            self.assertEqual(captured_output, "C++ print: <Tensor:arg1_1> 42")
-
-            expected = f_args(*inputs)
-            self.assertTrue(torch.allclose(res, expected))
-
-    @skipIfTorchDynamo("Skipped under Dynamo")
-    def test_compile_inductor_cpp_wrapper_codegen(self):
-        """Test that C++ wrapper generates std::cout statements for print HOP.
-
-        This verifies that when compiling with inductor (C++ wrapper), the generated
-        code uses std::cout directly for printing.
-        """
-
-        def f(x):
-            torch._higher_order_ops.print("C++ codegen test: val={v}", v=x)
-            res = x + x
-            return res
-
-        inputs = (torch.randn(2, 3),)
-
-        # Enable C++ wrapper and get the generated code
-        with config.patch({"cpp_wrapper": True}):
-            compiled_f = torch.compile(f, backend="inductor")
-            _, codes = run_and_get_code(compiled_f, *inputs)
-
-            # Concatenate all generated code chunks
-            merged_code = "\n".join(codes)
-
-            # Verify that the generated C++ code uses std::cout
-            self.assertIn(
-                'std::cout << "C++ codegen test: val=<Tensor:arg1_1>" << std::endl;',
-                merged_code,
-                "Generated C++ code should use std::cout for print HOP",
-            )
+        # Verify that the merged code uses python print
+        self.assertIn(
+            "print",
+            merged_code,
+            "Generated code should use python print for print HOP fallback",
+        )
+        # And does not call torch.ops.higher_order.print
+        self.assertNotIn(
+            "torch.ops.higher_order.print",
+            merged_code,
+            "Generated code should not call torch.ops.higher_order.print directly",
+        )
 
 
 if __name__ == "__main__":

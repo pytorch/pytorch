@@ -228,9 +228,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             if device != "meta":
                 self.add_device_include(device)
 
-        # Add iostream for C++ std::cout support (needed for print HOP)
-        self.header.splice("#include <iostream>")
-
         if V.graph.aot_mode:
             if config.aot_inductor.dynamic_linkage:
                 with open(
@@ -2380,6 +2377,8 @@ class CppWrapperCpu(PythonWrapperCodegen):
             assert isinstance(output_name, list), type(output_name)
             output_args = output_name
 
+<<<<<<< HEAD
+=======
         # Special handling for torch.ops.higher_order.print
         # Format the string with args and kwargs values at codegen time
         if (
@@ -2436,6 +2435,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
             self.writeline(f'std::cout << "{escaped_str}" << std::endl;')
             return
 
+>>>>>>> 0b6406f780d (Fix comments)
         # In AOT mode, we use a ProxyExecutor to run fallback kernels.
         if V.graph.aot_mode:
             self.generate_fallback_kernel_with_runtime_lookup_aot(

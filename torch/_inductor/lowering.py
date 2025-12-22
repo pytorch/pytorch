@@ -25,6 +25,7 @@ import torch.fx
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
+from torch._higher_order_ops.print import print as hop_print
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import get_layout_constraint_tag
@@ -7324,12 +7325,8 @@ def cond(
 
 @register_lowering(torch.ops.higher_order.print, type_promotion_kind=None)
 def print(format_str: str, *args: object, **kwargs: object):
-    from torch._higher_order_ops.print import print as hop_print
-
     # Use FallbackKernel to handle the HOP print
-    # The C++ and Python backends will handle codegen separately:
-    # - Python: calls torch.ops.higher_order.print() → builtins.print()
-    # - C++: generates native printf() call (handled in cpp_wrapper_cpu.py)
+    # - Python: calls torch.ops.higher_order.print() → print()
     ir.FallbackKernel.create(hop_print, format_str, *args, **kwargs)
     # print returns None
     return None
