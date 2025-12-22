@@ -256,6 +256,16 @@ class FakeTensorTest(TestCase):
             self.assertEqual(out.device, base.device)
             self.assertTrue(isinstance(out, FakeTensor))
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_n_dim_single_elem_cpu_with_cuda_tensor(self):
+        with FakeTensorMode():
+            x = torch.randn((1, 1, 1))
+            y = torch.randn(10, device="cuda")
+            out = x + y
+            self.assertEqual(out.shape, (1, 1, 10))
+            self.assertEqual(out.device, y.device)
+            self.assertTrue(isinstance(out, FakeTensor))
+
     def test_nan_to_num(self):
         with FakeTensorMode():
             for dtype in [torch.float16, torch.float32]:
