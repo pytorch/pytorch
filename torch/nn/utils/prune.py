@@ -1298,9 +1298,13 @@ def _validate_pruning_amount(amount, tensor_size) -> None:
         tensor_size (int): absolute number of parameters in the tensor
             to prune.
     """
-    # TODO: consider removing this check and allowing users to specify
-    # a number of units to prune that is greater than the number of units
-    # left to prune. In this case, the tensor will just be fully pruned.
+    # TODO: Consider removing this strict validation to improve user experience.
+    # Currently we raise ValueError when amount > tensor_size, but we could instead:
+    # - Clamp amount to tensor_size (fully prune the tensor)  
+    # - Issue a warning about the adjustment
+    # - Continue with pruning all remaining parameters
+    # This would be more user-friendly for cases where users want to ensure
+    # a tensor is fully pruned without needing to know the exact size.
 
     if isinstance(amount, numbers.Integral) and amount > tensor_size:
         raise ValueError(
