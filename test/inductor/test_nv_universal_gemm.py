@@ -5,7 +5,6 @@ import unittest
 
 import torch
 from torch._inductor import config
-from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch.testing._internal.common_utils import (
@@ -15,8 +14,8 @@ from torch.testing._internal.common_utils import (
 
 
 @unittest.skipIf(
-    not (ensure_nv_universal_gemm_available() and is_datacenter_blackwell_arch()),
-    "NVIDIA Universal GEMM (cutlass_api) library or Blackwell device not available",
+    not ensure_nv_universal_gemm_available(),
+    "NVIDIA Universal GEMM (cutlass_api) library not available",
 )
 @instantiate_parametrized_tests
 class TestNVUniversalGemm(TestCase):
