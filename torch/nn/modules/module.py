@@ -732,7 +732,7 @@ class Module:
             mod = getattr(mod, item)
 
             if not isinstance(mod, torch.nn.Module):
-                raise AttributeError("`" + item + "` is not an nn.Module")
+                raise AttributeError(f"`{item}` is not an nn.Module")
 
         return mod
 
