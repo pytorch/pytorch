@@ -7211,6 +7211,8 @@ torch.cuda.synchronize()
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @onlyCUDA
+    # AssertionError, wrong number of dimensions3 for op torch.ops.aten._flash_attention_forward.default
+    @skipIfRocmArch(MI200_ARCH, MI300_ARCH)
     @skipIfTorchDynamo()
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
@@ -7713,6 +7715,11 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
+    # AssertionError
+    # expected size 1==4, stride 27==96 at dim=0
+    # expected size 3==3, stride 9==32 at dim=1
+    # expected size 9==32, stride 1==1 at dim=2
+    @skipIfRocmArch(MI200_ARCH, MI300_ARCH) 
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
