@@ -53,12 +53,14 @@ class DecompShardingInterpreter(torch.fx.Interpreter):
     def __init__(
         self,
         module: torch.fx.GraphModule,
-        mesh: DeviceMesh,
+        mesh_device: str,
         sharding_prop: ShardingPropagator,
     ):
         super().__init__(module)
         self.sharding_prop = sharding_prop
-        self.mesh = mesh
+
+        # Build single mesh dim strategies using fake 1d mesh
+        self.mesh = DeviceMesh(mesh_device, torch.arange(2))
 
     def call_function(self, target, args, kwargs):
         if not isinstance(target, OpOverload):
@@ -102,10 +104,8 @@ class DecompShardingStrategy:
         placements = cls._get_candidate_placements(graph, op_schema)
         mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
 
-        # Build single mesh dim strategies using fake 1d mesh: hacky but ok?
-        mesh_1d = DeviceMesh(mesh.device_type, torch.arange(2))
         single_dim_strategies = []
-        interp = DecompShardingInterpreter(graph, mesh_1d, sharding_prop)
+        interp = DecompShardingInterpreter(graph, mesh.device_type, sharding_prop)
         for placement in placements:
             try:
                 output = cls._propagate_through_decomp(interp, placement, op_schema)
