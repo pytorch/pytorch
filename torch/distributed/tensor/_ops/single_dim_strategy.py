@@ -1,11 +1,11 @@
 #  Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     ArgsType,
     KwargsType,
@@ -161,6 +161,7 @@ def _expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
     single_dim_strategy: _SingleDimStrategyFunc,
+    output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
 ) -> _ExpandedSingleDimStrategyFunc:
     """
     Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
@@ -171,6 +172,9 @@ def _expand_single_dim_strategy_to_mesh(
 
     The expanded_strategy function accesses both the args_schema/kwargs_schema, which contains TensorMeta in place of
     tensor arguments, but also the op_schema which contains OpStrategy in place of Tensor args.
+
+    Args:
+        output_tensor_meta: tensor metadata for the output(s), precomputed during sharding prop
     """
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
@@ -215,6 +219,7 @@ def _expand_single_dim_strategy_to_mesh(
             mesh,
             op_schema,
             cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
+            output_tensor_meta=output_tensor_meta,
         )
 
     return expanded_strategy
