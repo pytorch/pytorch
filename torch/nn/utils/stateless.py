@@ -104,7 +104,6 @@ def _reparametrize_module(
     stack_weights: bool = False,
 ):
     """Context manager for temporarily replacing module parameters and buffers.
-    
     Args:
         module: The module to reparametrize
         parameters_and_buffers: Dict mapping parameter names to new values
