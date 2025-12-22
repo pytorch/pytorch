@@ -50,6 +50,7 @@ from .hints import (
     TRITON_MAX_RSPLIT,
 )
 from .runtime_utils import (
+    cache_dir,
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
@@ -236,11 +237,19 @@ def _dump_launch_tensors(args, kernel_path, kernel_hash, kernel_name):
 
     # Default path for kernels with no hash
     if not kernel_path:
-        directory_path = "/tmp/torchinductor_root/unhashed_kernel_inputs"
+        directory_path = os.path.join(cache_dir(), "unhashed_kernel_inputs")
     else:
         directory_path = os.path.dirname(kernel_path)
     directory_path = f"{directory_path}/{kernel_name}_run_{run_index}"
     os.makedirs(directory_path, exist_ok=True)
+
+    # Log the saved tensor path for this kernel (once per kernel, not per input)
+    log.info(
+        "Dumping %d tensor(s) for kernel %s to %s",
+        len(tensor_list),
+        kernel_name,
+        directory_path,
+    )
 
     for index, tensor in enumerate(tensor_list):
         torch.save(tensor, f"{directory_path}/tensor_{index}.pt")
