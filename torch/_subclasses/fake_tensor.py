@@ -44,6 +44,7 @@ from torch._subclasses.meta_utils import (
     MetaConverter,
 )
 from torch._utils import render_call
+from torch.fx.experimental.symbolic_shapes import guard_or_false
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -925,7 +926,7 @@ class FakeTensor(Tensor):
             return device.type == "cpu"
 
         def cpu_single_element(t: Tensor) -> bool:
-            return check_cpu_device(t.device) and torch.numel(t) == 1
+            return check_cpu_device(t.device) and guard_or_false(t.numel() == 1)
 
         def merge_devices(t: object) -> None:
             nonlocal common_device
