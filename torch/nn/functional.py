@@ -6616,7 +6616,10 @@ def multi_head_attention_forward(
         q_scaled = q * math.sqrt(1.0 / float(E))
 
         if is_causal and attn_mask is None:
-            raise AssertionError("FIXME: is_causal not implemented for need_weights")
+            raise NotImplementedError(
+                "is_causal=True with need_weights=True is not currently supported. "
+                "Please use need_weights=False or provide an explicit attn_mask."
+            )
 
         if attn_mask is not None:
             attn_output_weights = torch.baddbmm(
