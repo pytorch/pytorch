@@ -61,6 +61,7 @@ function install_ucc() {
     else
       amdgpu_targets=`rocm_agent_enumerator | grep -v gfx000 | sort -u | xargs`
     fi
+    HIP_OFFLOAD=""
     for arch in $amdgpu_targets; do
       HIP_OFFLOAD="$HIP_OFFLOAD --offload-arch=$arch"
     done
