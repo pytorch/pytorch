@@ -3941,17 +3941,15 @@ class TestConvolutionNNDeviceType(NNTestCase):
             for g_f in [torch.contiguous_format, torch.channels_last]:
                 for input_format in [torch.contiguous_format, torch.channels_last]:
                     output_format = torch.contiguous_format
-                    # Older versions of CudNN have Channels Last support disabled
-                    if torch.backends.cudnn.version() >= 7603:
-                        if input_format == torch.channels_last:
+                    if input_format == torch.channels_last:
+                        output_format = torch.channels_last
+                    # This is because we have N111 weight that cannot handle
+                    # the ambiguous memory_format
+                    if w_f == torch.channels_last:
+                        if layer is nn.Conv2d and filter_size * c != 1:
                             output_format = torch.channels_last
-                        # This is because we have N111 weight that cannot handle
-                        # the ambiguous memory_format
-                        if w_f == torch.channels_last:
-                            if layer is nn.Conv2d and filter_size * c != 1:
-                                output_format = torch.channels_last
-                            if layer is nn.ConvTranspose2d and filter_size * k != 1:
-                                output_format = torch.channels_last
+                        if layer is nn.ConvTranspose2d and filter_size * k != 1:
+                            output_format = torch.channels_last
                     self._run_conv(
                         layer,
                         device,
