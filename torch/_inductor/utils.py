@@ -2103,6 +2103,9 @@ def use_nv_universal_gemm_template(
         9. Non-unit strides are divisible by 16
         10. Not in AOT Inductor mode (requires runtime JIT compilation)
     """
+    if not ensure_cute_available():
+        return False
+
     if not ensure_nv_universal_gemm_available():
         return False
 
@@ -2129,6 +2132,7 @@ def use_nv_universal_gemm_template(
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
+    # TODO(nikhilap) Enable dynamic shapes
     if any(is_dynamic(x) for x in [mat_a, mat_b]):
         return False
 

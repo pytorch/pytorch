@@ -23,38 +23,22 @@ class TestNVUniversalGemm(TestCase):
     """Test cases for NVIDIA Universal GEMM functionality."""
 
     @parametrize("dtype", (torch.float16, torch.bfloat16))
-    def test_basic_matmul(self, dtype):
-        """Test basic matmul with NVIDIA Universal GEMM backend."""
-        m, n, k = 512, 512, 512
-
-        def matmul(a, b):
-            return a @ b
-
-        a = torch.randn(m, k, device="cuda", dtype=dtype)
-        b = torch.randn(k, n, device="cuda", dtype=dtype)
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
-            }
-        ):
-            compiled_fn = torch.compile(matmul)
-            result = compiled_fn(a, b)
-            expected = matmul(a, b)
-
-            torch.testing.assert_close(result, expected)
-
-    @parametrize("layout_a", ("contiguous", "aligned_offset", "view"))
-    @parametrize("layout_b", ("contiguous", "aligned_offset", "view"))
-    def test_assorted_layouts(self, layout_a, layout_b):
-        """Test matmul with various tensor layouts (offset, view).
+    @parametrize(
+        "layout_a,layout_b",
+        (
+            ("contiguous", "contiguous"),
+            ("aligned_offset", "contiguous"),
+            ("contiguous", "view"),
+            ("aligned_offset", "view"),
+        ),
+    )
+    def test_matmul(self, dtype, layout_a, layout_b):
+        """Test matmul with various dtypes and tensor layouts.
 
         These layouts all have 16-byte aligned strides and should work with NVIDIA Universal GEMM.
+        M=513 tests that non-divisible M dimension works (only N and K must be divisible by 16).
         """
-        m, n, k = 512, 512, 512
-        dtype = torch.bfloat16
+        m, n, k = 513, 512, 512
         device = "cuda"
 
         def matmul(a, b):
@@ -148,36 +132,6 @@ class TestNVUniversalGemm(TestCase):
                 Exception, "NoValidChoicesError|no valid choice"
             ):
                 compiled_fn(a, b)
-
-    def test_non_divisible_m_works(self):
-        """Test that matmul with m not divisible by 16 still works.
-
-        NVIDIA Universal GEMM only requires n and k to be divisible by 16, not m.
-        """
-        m, n, k = 513, 512, 512
-        dtype = torch.bfloat16
-        device = "cuda"
-
-        def matmul(a, b):
-            return a @ b
-
-        a = torch.randn(m, k, device=device, dtype=dtype)
-        b = torch.randn(k, n, device=device, dtype=dtype)
-
-        torch._dynamo.reset()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
-            }
-        ):
-            compiled_fn = torch.compile(matmul)
-            result = compiled_fn(a, b)
-            expected = matmul(a, b)
-
-        torch.testing.assert_close(result, expected)
 
     @parametrize("m,n,k", ((512, 513, 512), (512, 512, 513)))
     def test_non_divisible_n_or_k_rejected(self, m, n, k):
