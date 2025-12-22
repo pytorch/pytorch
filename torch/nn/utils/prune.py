@@ -97,6 +97,21 @@ class BasePruningMethod(ABC):
         """
 
         def _get_composite_method(cls, module, name, *args, **kwargs):
+            """Get or create a composite pruning method for a module parameter.
+            
+            Checks if a pruning method has already been applied to the specified
+            parameter. If so, retrieves the existing method to compose with the new one.
+            
+            Args:
+                cls: The pruning method class
+                module: The module containing the parameter to prune
+                name: Name of the parameter to prune
+                *args: Arguments for the new pruning method
+                **kwargs: Keyword arguments for the new pruning method
+                
+            Returns:
+                The composed pruning method (new or combined with existing)
+            """
             # Check if a pruning method has already been applied to
             # `module[name]`. If so, store that in `old_method`.
             old_method = None
