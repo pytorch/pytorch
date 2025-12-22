@@ -573,6 +573,31 @@ def _meta_deserialize(obj, location):
         return torch.UntypedStorage(obj.nbytes(), device="meta")
 
 
+def _is_meta_location(map_location):
+    """
+    Check if map_location specifies the meta device.
+
+    This is used to skip reading storage data from disk when loading
+    to the meta device, since meta tensors don't hold actual data.
+
+    Args:
+        map_location: The map_location argument passed to torch.load
+
+    Returns:
+        True if map_location is definitively the meta device, False otherwise.
+        For dict or callable map_location, returns False since we can't
+        easily determine the target device without evaluating it.
+    """
+    if map_location is None:
+        return False
+    if isinstance(map_location, str):
+        return map_location == "meta"
+    if isinstance(map_location, torch.device):
+        return map_location.type == "meta"
+    # dict or callable - can't easily determine
+    return False
+
+
 def _validate_device(location, backend_name):
     """
     Check whether the device index of specified backend is valid
@@ -1924,6 +1949,8 @@ def _load(
 
     loaded_storages = {}
 
+    is_meta_map_location = _is_meta_location(map_location)
+
     can_calculate_storage_offsets = False
     if zip_file.has_record(".format_version"):
         version = zip_file.get_record(".format_version")
@@ -2027,21 +2054,19 @@ def _load(
 
         return storage_offset
 
-    def load_tensor(dtype, numel, key, location):
+    def load_tensor(dtype, nbytes, key, location):
         name = f"data/{key}"
-        if torch._guards.detect_fake_mode(None) is not None:
-            nbytes = numel * torch._utils._element_size(dtype)
+        if torch._guards.detect_fake_mode(None) is not None or is_meta_map_location:
             storage = torch.UntypedStorage(nbytes, device="meta")
             if can_calculate_storage_offsets:
-                storage._checkpoint_offset = _get_offset(key, name, numel)
+                storage._checkpoint_offset = _get_offset(key, name, nbytes)
             else:
                 storage._checkpoint_offset = zip_file.get_record_offset(name)
         elif _serialization_tls.skip_data:
-            nbytes = numel * torch._utils._element_size(dtype)
             storage = torch.UntypedStorage(nbytes)
         elif overall_storage is not None:
             if can_calculate_storage_offsets and calculate_storage_offsets:
-                storage_offset = _get_offset(key, name, numel)
+                storage_offset = _get_offset(key, name, nbytes)
                 if run_debug_asserts:
                     if storage_offset != zip_file.get_record_offset(name):
                         raise RuntimeError(
@@ -2051,12 +2076,12 @@ def _load(
                         )
             else:
                 storage_offset = zip_file.get_record_offset(name)
-            storage = overall_storage[storage_offset : storage_offset + numel]
+            storage = overall_storage[storage_offset : storage_offset + nbytes]
         else:
             if can_calculate_storage_offsets and run_debug_asserts:
                 # This is debug code that we use to test the validity of
                 # torch.utils.serialization.config.load.calculate_storage_offsets throughout CI
-                storage_offset = _get_offset(key, name, numel)
+                storage_offset = _get_offset(key, name, nbytes)
                 if storage_offset != zip_file.get_record_offset(name):
                     raise RuntimeError(
                         "This is a debug assert that was run as the `TORCH_SERIALIZATION_DEBUG` environment "
@@ -2064,7 +2089,7 @@ def _load(
                         f"{zip_file.get_record_offset(name)}"
                     )
             storage = (
-                zip_file.get_storage_from_record(name, numel, torch.UntypedStorage)
+                zip_file.get_storage_from_record(name, nbytes, torch.UntypedStorage)
                 ._typed_storage()
                 ._untyped_storage
             )
@@ -2076,7 +2101,13 @@ def _load(
         # TODO: Once we decide to break serialization FC, we can
         # stop wrapping with TypedStorage
 
-        if torch._guards.detect_fake_mode(None) is None:
+        if is_meta_map_location:
+            # Skip restore_location for meta map_location. Since we already created
+            # a meta storage above, calling restore_location would just redundantly
+            # call _meta_deserialize which creates another meta storage with the same
+            # size.
+            wrap_storage = storage
+        elif torch._guards.detect_fake_mode(None) is None:
             wrap_storage = restore_location(storage, location)
         else:
             storage._fake_device = location

@@ -648,6 +648,16 @@
       "Hints": []
     }
   ],
+  "GB4636": [
+    {
+      "Gb_type": "Call to `torch._dynamo.step_unsupported()`",
+      "Context": "",
+      "Explanation": "User-inserted step_unsupported.",
+      "Hints": [
+        "Remove the `torch._dynamo.step_unsupported()` call."
+      ]
+    }
+  ],
   "GB0065": [
     {
       "Gb_type": "Graph break in inlined function",
@@ -2747,6 +2757,27 @@
       ]
     }
   ],
+  "GB4927": [
+    {
+      "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
+      "Context": "",
+      "Explanation": "torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.",
+      "Hints": [
+        "If you don't need to backward through the returned tensor, ",
+        "call .detach() before returning: `return loss.detach()`",
+        "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."
+      ]
+    },
+    {
+      "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
+      "Context": "",
+      "Explanation": "torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.",
+      "Hints": [
+        "If you don't need to backward through the returned tensor, call .detach() before returning: `return loss.detach()`",
+        "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."
+      ]
+    }
+  ],
   "GB0262": [
     {
       "Gb_type": "unsupported contextlib.* API",
@@ -3319,6 +3350,16 @@
       ]
     }
   ],
+  "GB9625": [
+    {
+      "Gb_type": "traceback.tb_lasti not supported",
+      "Context": "{self} accessing 'tb_lasti'",
+      "Explanation": "Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0316": [
     {
       "Gb_type": "torch.associative_scan: improper additional_inputs",
@@ -3874,6 +3915,16 @@
   ],
   "GB0370": [
     {
+      "Gb_type": "record_function escaped from compiled region",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph break inside record_function region.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0371": [
+    {
       "Gb_type": "autograd.grad with output that requires grad",
       "Context": "context",
       "Explanation": "The compiled function uses torch.autograd.grad() and returns a tensor that still requires gradients and is connected to the autograd.grad() computation. This would cause aot_autograd to attempt 'backward through graph a second time', which is not supported.",
@@ -3895,7 +3946,18 @@
       ]
     }
   ],
-  "GB0371": [
+  "GB0372": [
+    {
+      "Gb_type": "autograd.grad with external grad_fn",
+      "Context": "context",
+      "Explanation": "torch.autograd.grad() cannot trace through the autograd graph because it's output depends on a tensor that was created outside the compiled region and has a grad_fn attached. The autograd graph extends beyond the compiled region boundary, which Dynamo cannot trace.",
+      "Hints": [
+        "If you don't need gradients to flow back to the original tensor outside ",
+        "the compiled region, detach the input: `tensor.detach().requires_grad_(True)`.",
+        "Otherwise, move the autograd.grad() call outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "autograd.grad with external grad_fn",
       "Context": "context",
@@ -3919,7 +3981,7 @@
       ]
     }
   ],
-  "GB0372": [
+  "GB0373": [
     {
       "Gb_type": "autograd.grad with compiled autograd",
       "Context": "compiled_autograd is currently enabled",
