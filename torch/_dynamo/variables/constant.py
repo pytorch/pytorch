@@ -355,12 +355,16 @@ its type to `common_constant_types`.
         return hash(self.value)
 
     def is_python_equal(self, other):
-        # Could be an EnumVariable as well
         from .tensor import SymNodeVariable
 
         if isinstance(other, SymNodeVariable):
             return self.as_python_constant() == other.evaluate_expr()
-        return self.as_python_constant() == other.as_python_constant()
+        if isinstance(other, ConstantVariable):
+            return self.as_python_constant() == other.as_python_constant()
+        # Delegate to other's is_python_equal - this handles cases like
+        # StringFormatVariable which can compare against constants and
+        # install guards for any lazy constants it contains.
+        return other.is_python_equal(self)
 
 
 class EnumVariable(VariableTracker):
