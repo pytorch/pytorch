@@ -556,17 +556,19 @@ if _should_generate_scaled_mm_configs():
         )
 
     # MX + NVFP4: keep bf16-only for now.
-    scaled_mm_configs_long += op_bench.config_list(
-        attr_names=["M", "N", "K"],
-        attrs=_scaled_mm_long_shapes,
-        cross_product_configs={
-            "device": ["cuda"],
-            "float8_dtype": ["e4m3fn"],
-            "output_dtype": ["bfloat16"],
-            "scaling": ["mxfp8", "mxfp4", "nvfp4"],
-        },
-        tags=["long"],
-    )
+    # These are CUDA-only (non-HIP) due to swizzled scale requirements.
+    if torch.version.hip is None:
+        scaled_mm_configs_long += op_bench.config_list(
+            attr_names=["M", "N", "K"],
+            attrs=_scaled_mm_long_shapes,
+            cross_product_configs={
+                "device": ["cuda"],
+                "float8_dtype": ["e4m3fn"],
+                "output_dtype": ["bfloat16"],
+                "scaling": ["mxfp8", "mxfp4", "nvfp4"],
+            },
+            tags=["long"],
+        )
 
     # DeepSeek FP8 blockwise (1x128 / 128x128) is SM90-only.
     if _supports_fp8_deepseek_blockwise_scaling():

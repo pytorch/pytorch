@@ -8,6 +8,7 @@ from pt import configs  # noqa: F401
 import operator_benchmark as op_bench
 
 import torch
+from torch.nn.functional import ScalingType
 from torch.testing._internal.common_cuda import (
     IS_SM100,
     IS_SM90,
@@ -19,8 +20,15 @@ from torch.torch_version import TorchVersion
 """
 Operator microbenchmarks for `scaled_grouped_mm`.
 
-This benchmark focuses on the MXFP8/MXFP4/NVFP4 grouped-K path (offs along K),
-reusing the same conversion helpers as `test/test_scaled_matmul_cuda.py`.
+This benchmark supports:
+- FP8 (e4m3/e5m2) with TensorWise and RowWise scaling:
+  * CUDA SM90 (H100) only - not supported on SM100 (B200)
+  * ROCm MI300+ (gfx94x) with grouped GEMM support
+- MXFP8/MXFP4/NVFP4 grouped-K path with blocked scaling:
+  * CUDA-only (non-HIP), SM90+ and SM100+
+  * Requires swizzled scales
+
+All modes reuse the same conversion helpers as `test/test_scaled_matmul_cuda.py`.
 """
 
 _TEST_SCALED_MATMUL_CUDA_MOD: Optional[ModuleType] = None
@@ -94,10 +102,29 @@ def _build_equal_k_group_offs(total_k: int, groups: int, device: str) -> torch.T
     )
 
 
-class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
-    def init(self, M, N, K, G, device, scaling="mxfp8", output_dtype="bfloat16"):
-        helpers = _get_test_scaled_matmul_cuda()
+def _get_float8_dtype(float8_dtype):
+    """Normalize the FP8 dtype arg (handles ROCm fnuz variants via test aliases)."""
+    from torch.testing._internal.common_device_type import e4m3_type, e5m2_type
 
+    if float8_dtype in ("e4m3fn", e4m3_type, torch.float8_e4m3fn):
+        return e4m3_type
+    if float8_dtype in ("e5m2", e5m2_type, torch.float8_e5m2):
+        return e5m2_type
+    return e4m3_type  # default
+
+
+class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
+    def init(
+        self,
+        M,
+        N,
+        K,
+        G,
+        device,
+        scaling="mxfp8",
+        output_dtype="bfloat16",
+        float8_dtype="e4m3fn",
+    ):
         if output_dtype != "bfloat16":
             raise ValueError(
                 "scaled_grouped_mm benchmark currently supports bfloat16 output only"
@@ -111,9 +138,80 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
                 "scaled_grouped_mm benchmark requires ROCm MI300+ (gfx94x) grouped GEMM support"
             )
 
-        if scaling not in ("mxfp8", "mxfp4", "nvfp4"):
-            raise ValueError(f"Unsupported scaling format: {scaling}")
         self.scaling = scaling
+        self.base_dtype = torch.bfloat16
+
+        if scaling in ("fp8_tensorwise", "fp8_rowwise"):
+            self._init_fp8(M, N, K, G, device, float8_dtype, scaling)
+        elif scaling in ("mxfp8", "mxfp4", "nvfp4"):
+            self._init_mx_nvfp4(M, N, K, G, device, scaling)
+        else:
+            raise ValueError(f"Unsupported scaling format: {scaling}")
+
+        self.set_module_name("scaled_grouped_mm")
+
+    def _init_fp8(self, M, N, K, G, device, float8_dtype, scaling):
+        """Initialize FP8 tensorwise or rowwise scaling."""
+        self.float8_dtype = _get_float8_dtype(float8_dtype)
+
+        # We interpret offs as group end offsets along K (grouped-K).
+        # Use deterministic equal-sized groups.
+        offs = _build_equal_k_group_offs(K, G, device)
+
+        # Create FP8 inputs directly (similar to test_scaled_grouped_gemm_2d_2d)
+        # Input shapes: (M, K) and (N, K) where K is the total K dimension
+        x_lp = torch.randn(M, K, device=device, dtype=self.base_dtype).to(
+            self.float8_dtype
+        )
+        w_lp = torch.randn(N, K, device=device, dtype=self.base_dtype).to(
+            self.float8_dtype
+        )
+
+        if scaling == "fp8_tensorwise":
+            # Tensorwise scaling: one scale per group
+            # For tensorwise, we still use RowWise recipe but with repeated scales
+            # scale_a: (M*G,), scale_b: (N*G,)
+            # Each group gets the same scale value repeated M or N times
+            scale_a = torch.rand(
+                G, device=device, dtype=torch.float32
+            ).repeat_interleave(M)
+            scale_b = torch.rand(
+                G, device=device, dtype=torch.float32
+            ).repeat_interleave(N)
+
+            self._scale_recipe_a = ScalingType.RowWise
+            self._scale_recipe_b = ScalingType.RowWise
+
+        elif scaling == "fp8_rowwise":
+            # Rowwise scaling: M scales per group, N scales per group
+            # scale_a: (M*G,), scale_b: (N*G,)
+            # Organized as [group0_M_scales, group1_M_scales, ..., group_{G-1}_M_scales]
+            scale_a = torch.rand(M * G, device=device, dtype=torch.float32)
+            scale_b = torch.rand(N * G, device=device, dtype=torch.float32)
+
+            self._scale_recipe_a = ScalingType.RowWise
+            self._scale_recipe_b = ScalingType.RowWise
+
+        self._swizzle_a = None
+        self._swizzle_b = None
+
+        # For grouped-K, mat_b is expected as (K, N).
+        self.inputs = {
+            "x": x_lp,
+            "w_t": w_lp.t(),
+            "offs": offs,
+            "scale_a": scale_a,
+            "scale_b": scale_b,
+        }
+
+    def _init_mx_nvfp4(self, M, N, K, G, device, scaling):
+        """Initialize MX or NVFP4 blocked scaling (CUDA-only, non-HIP)."""
+        helpers = _get_test_scaled_matmul_cuda()
+
+        if torch.version.hip is not None:
+            raise ValueError(
+                f"{scaling} benchmarks are only wired for CUDA swizzled scales (non-HIP)."
+            )
 
         # We interpret offs as group end offsets along K (grouped-K).
         # Use deterministic equal-sized groups.
@@ -156,7 +254,6 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
             "scale_a": kwargs["scale_a"],
             "scale_b": kwargs["scale_b"],
         }
-        self.set_module_name("scaled_grouped_mm")
 
     def forward(self, x, w_t, offs, scale_a, scale_b):
         call_kwargs = {
@@ -196,23 +293,39 @@ MNKG_list = [
     (128000, 2048, 7168, 8),
 ]
 
-scaled_grouped_mm_configs_long = op_bench.config_list(
-    attr_names=["M", "N", "K", "G"],
-    attrs=[[m, n, k, g] for (m, n, k, g) in MNKG_list],
-    cross_product_configs={
-        "device": ["cuda"],
-        "scaling": ["mxfp4", "mxfp4", "nvfp4"],
-        "output_dtype": ["bfloat16"],
-    },
-    tags=["long"],
-)
+scaled_grouped_mm_configs_long = []
+
+if _should_generate_scaled_grouped_mm_configs():
+    # FP8 tensorwise and rowwise: works on both CUDA and ROCm
+    # Requires PLATFORM_SUPPORTS_FP8_GROUPED_GEMM (SM90/H100, not SM100/B200)
+    if PLATFORM_SUPPORTS_FP8_GROUPED_GEMM:
+        scaled_grouped_mm_configs_long += op_bench.config_list(
+            attr_names=["M", "N", "K", "G"],
+            attrs=[[m, n, k, g] for (m, n, k, g) in MNKG_list],
+            cross_product_configs={
+                "device": ["cuda"],
+                "float8_dtype": ["e4m3fn"],
+                "output_dtype": ["bfloat16"],
+                "scaling": ["fp8_tensorwise", "fp8_rowwise"],
+            },
+            tags=["long"],
+        )
+
+    # MX + NVFP4 are CUDA-only (non-HIP) due to swizzled scale requirements.
+    if torch.version.hip is None:
+        scaled_grouped_mm_configs_long += op_bench.config_list(
+            attr_names=["M", "N", "K", "G"],
+            attrs=[[m, n, k, g] for (m, n, k, g) in MNKG_list],
+            cross_product_configs={
+                "device": ["cuda"],
+                "scaling": ["mxfp4", "mxfp8", "nvfp4"],
+                "output_dtype": ["bfloat16"],
+            },
+            tags=["long"],
+        )
 
 op_bench.generate_pt_test(
-    (
-        scaled_grouped_mm_configs_long
-        if _should_generate_scaled_grouped_mm_configs()
-        else []
-    ),
+    scaled_grouped_mm_configs_long,
     ScaledGroupedMMBenchmark,
 )
 
