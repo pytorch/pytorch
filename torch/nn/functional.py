@@ -4191,8 +4191,7 @@ def multilabel_soft_margin_loss(
     elif reduction == "sum":
         ret = loss.sum()
     else:
-        ret = input
-        raise ValueError(reduction + " is not valid")
+        raise ValueError(f"'{reduction}' is not a valid reduction mode. Expected 'none', 'mean', or 'sum'.")
     return ret
 
 
