@@ -8,8 +8,12 @@ else
   with_cuda=no
 fi
 
-if [[ -d "/opt/rocm" ]]; then
-  with_rocm=/opt/rocm
+if [[ -f /etc/rocm_env.sh ]]; then
+  source /etc/rocm_env.sh
+fi
+
+if [[ -d "${ROCM_PATH}" ]]; then
+  with_rocm="${ROCM_PATH}"
 else
   with_rocm=no
 fi
@@ -60,6 +64,12 @@ function install_ucc() {
     for arch in $amdgpu_targets; do
       HIP_OFFLOAD="$HIP_OFFLOAD --offload-arch=$arch"
     done
+    HIP_OFFLOAD="$HIP_OFFLOAD --rocm-path=${ROCM_PATH}"
+
+    # Set device library path if detected (handles TheRock vs traditional ROCm)
+    if [ -n "${ROCM_DEVICE_LIB_PATH}" ] && [ -d "${ROCM_DEVICE_LIB_PATH}" ]; then
+      HIP_OFFLOAD="$HIP_OFFLOAD --rocm-device-lib-path=${ROCM_DEVICE_LIB_PATH}"
+    fi
   else
     HIP_OFFLOAD="all-arch-no-native"
   fi

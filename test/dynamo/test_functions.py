@@ -1296,12 +1296,10 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             results.append(x.sin())
         else:
             results.append(x.cos())
-        # TODO: add sourceless builder for types.UnionType
-        # if sys.version_info >= (3, 10):
-        #     if isinstance([x], list | tuple):
-        #         results.append(x.sin())
-        #     else:
-        #         results.append(x.cos())
+        if isinstance([x], list | tuple):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
         return results
 
     @make_test
