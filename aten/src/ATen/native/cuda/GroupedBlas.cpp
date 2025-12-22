@@ -5,6 +5,7 @@
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
@@ -666,33 +667,33 @@ std::optional<c10::ScalarType> out_dtype) {
   );
 #ifndef USE_ROCM
   bool use_fast_path = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true) && a_b_and_out_are_bf16;
-#else
-  // _scaled_mm_allowed_device is used here within _grouped_mm_cuda which seems incorrect since scale is not used.
-  // the _grouped_mm_fallback should be safe for any ROCm GPU since it's just calling typical mm/bmm
-  bool use_fast_path = false;
-  // On non CK system(w/ ROCm), make sure use_fast_path is false
-#if defined(USE_ROCM_CK_GEMM)
-  if (at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
-    use_fast_path = true;
-  }
-#endif //USE_ROCM_CK_GEMM
-#endif
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
     // fast path, no d2h sync needed
-#ifndef USE_ROCM
     at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
-#else
-#if defined(USE_ROCM_CK_GEMM)
-    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
-#else
-    TORCH_WARN("ROCm: Group Gemm through CK not selected.");
-#endif //USE_ROCM_CK_GEMM
-#endif
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
+#else
+  // On ROCm fast path routes to group_gemm_ck and slow path to _grouped_mm_fallback.
+  // Keep use_fast_path as false till ck kernel perf is optimal.
+  // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
+  bool use_fast_path = false;
+  // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
+#if defined(USE_ROCM_CK_GEMM)
+  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
+    use_fast_path = true;
+  }
+#endif //USE_ROCM_CK_GEMM
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  if (use_fast_path) {
+    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
+  } else {
+    _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+  }
+#endif //ifndef USE_ROCM
   return out;
 }
 
