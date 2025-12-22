@@ -327,8 +327,8 @@ except that the system is defined by a sparse CSR matrix with layout
 Args:
     input (Tensor): a sparse CSR matrix of shape `(n, n)` representing the
         coefficients of the linear system.
-    other (Tensor): a dense matrix of shape `(n, )` representing the right-hand
-        side of the linear system.
+    other (Tensor): a dense matrix of shape `(n, )` or `(n, k)`representing the
+        right-hand side of the linear system.
     left (bool, optional): whether to solve the system for `input @ out = other`
         (default) or `out @ input = other`. Only `left=True` is supported.
 """,
