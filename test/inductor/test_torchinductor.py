@@ -10960,7 +10960,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.common(forward, args, atol=1e-5, rtol=1e-5)
 
     @xfail_if_mps_unimplemented  # embedding bag
-    @requires_gpu()
+    # @requires_gpu()
     @skip_if_halide  # cascading accuracy issues due rsqrt fallback
     def test_tmp_not_defined_issue3(self):
         test_device = torch.device(type=self.device)
@@ -11072,13 +11072,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 getitem_2,
                 getitem_3,
                 unsqueeze,
+                getitem_4,
                 getitem_5,
                 rsqrt,
-                add_1,
-                permute_1,
+                # add_1,
+                # permute_1,
             ]
 
         kwargs = aot_graph_input_parser(forward, device=self.device)
+        import pdb;pdb.set_trace()
         self.common(forward, [], kwargs=kwargs)
 
     @skip_if_gpu_halide

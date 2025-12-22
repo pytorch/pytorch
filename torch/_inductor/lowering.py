@@ -6386,9 +6386,10 @@ def use_two_step_variance(x, axis, keepdim):
 
     ranges = kwargs["ranges"]
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
+    two_step_variance_threshold = 1024
     return (
         isinstance(reduction_numel, sympy.Integer)
-        and (config.two_step_variance_threshold>0 and int(reduction_numel) <= config.two_step_variance_threshold)
+        and int(reduction_numel) <= two_step_variance_threshold
         and sympy_product(ranges) != 1
     )
 
