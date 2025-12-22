@@ -1065,7 +1065,7 @@ def gen_pyi(
                 defs(
                     "asarray",
                     [
-                        "obj: Any",
+                        "obj: ArrayLike",
                         "*",
                         "dtype: _dtype | None = None",
                         "device: DeviceLikeType | None = None",
@@ -1094,7 +1094,7 @@ def gen_pyi(
             "as_tensor": [
                 defs(
                     "as_tensor",
-                    ["data: Any", "dtype: _dtype | None = None", DEVICE_PARAM],
+                    ["data: ArrayLike", "dtype: _dtype | None = None", DEVICE_PARAM],
                     "Tensor",
                 )
             ],
@@ -1108,7 +1108,7 @@ def gen_pyi(
             # These functions are explicitly disabled by
             # SKIP_PYTHON_BINDINGS because they are hand bound.
             # Correspondingly, we must hand-write their signatures.
-            "tensor": [defs("tensor", ["data: Any", *FACTORY_PARAMS], "Tensor")],
+            "tensor": [defs("tensor", ["data: ArrayLike", *FACTORY_PARAMS], "Tensor")],
             "sparse_coo_tensor": [
                 defs(
                     "sparse_coo_tensor",
@@ -1524,7 +1524,9 @@ def gen_pyi(
                 defs("new_ones", ["self", "size: _size", *FACTORY_PARAMS], "Tensor")
             ],
             "new_tensor": [
-                defs("new_tensor", ["self", "data: Any", *FACTORY_PARAMS], "Tensor")
+                defs(
+                    "new_tensor", ["self", "data: ArrayLike", *FACTORY_PARAMS], "Tensor"
+                )
             ],
             "__new__": [defs("__new__", ["cls", "*args", "**kwargs"], "Self")],
             # new and __init__ have the same signatures differ only in return type

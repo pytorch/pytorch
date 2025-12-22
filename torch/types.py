@@ -11,8 +11,17 @@ from builtins import (  # noqa: F401
     int as _int,
     str as _str,
 )
-from collections.abc import Sequence
-from typing import Any, IO, TYPE_CHECKING, TypeAlias, Union
+from collections.abc import Iterator, Sequence
+from typing import (
+    Any,
+    IO,
+    Protocol,
+    runtime_checkable,
+    TYPE_CHECKING,
+    TypeAlias,
+    TypeVar,
+    Union,
+)
 from typing_extensions import Self
 
 # `as` imports have better static analysis support than assignment `ExposedType: TypeAlias = HiddenType`
@@ -34,7 +43,7 @@ if TYPE_CHECKING:
     from torch.autograd.graph import GradientEdge
 
 
-__all__ = ["Number", "Device", "FileLike", "Storage"]
+__all__ = ["Number", "Device", "FileLike", "Storage", "ArrayLike"]
 
 # Convenience aliases for common composite types that we need
 # to talk about in PyTorch
@@ -67,6 +76,50 @@ Number: TypeAlias = int | float | bool
 _Number = (int, float, bool)
 
 FileLike: TypeAlias = str | os.PathLike[str] | IO[bytes]
+
+# TypeVar used in Protocols below
+_T_co = TypeVar("_T_co", covariant=True)
+
+
+# Protocol for nested sequences (matches numpy._typing._NestedSequence)
+@runtime_checkable
+class NestedSequence(Protocol[_T_co]):
+    """A protocol for representing nested sequences of elements."""
+
+    def __len__(self, /) -> int: ...
+    def __getitem__(self, index: int, /) -> "_T_co | NestedSequence[_T_co]": ...
+    def __contains__(self, x: object, /) -> bool: ...
+    def __iter__(self, /) -> "Iterator[_T_co | NestedSequence[_T_co]]": ...
+
+
+# Protocol for objects that support the array protocol (__array__ method)
+@runtime_checkable
+class SupportsArray(Protocol):
+    """A protocol for objects that can be converted to arrays via __array__."""
+
+    def __array__(self) -> Any: ...
+
+
+# Type alias for array-like inputs accepted by torch.tensor, torch.as_tensor, etc.
+# This includes:
+#   - Tensor: PyTorch tensors
+#   - numpy.ndarray: NumPy arrays (via import)
+#   - SupportsArray: Objects with __array__ method (e.g., custom array types)
+#   - NestedSequence: Nested lists/tuples of numbers
+#   - Scalar types: bool, int, float, complex
+#   - bytes/bytearray: For certain dtype conversions
+ArrayLike: TypeAlias = (
+    Tensor
+    | "numpy.ndarray[Any, Any]"  # type: ignore[name-defined]  # numpy may not be installed
+    | SupportsArray
+    | NestedSequence[bool | int | float | complex]
+    | bool
+    | int
+    | float
+    | complex
+    | bytes
+    | bytearray
+)
 
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
