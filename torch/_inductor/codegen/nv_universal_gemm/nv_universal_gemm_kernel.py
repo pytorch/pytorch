@@ -9,6 +9,7 @@ import logging
 from typing import Any, Optional
 
 from torch._inductor.codegen.common import IndentedBuffer, Kernel
+from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
 from torch._inductor.ir import (
     BaseView,
     Buffer,
@@ -67,18 +68,6 @@ class NVUniversalGemmKernel(Kernel):
             self._template_input_args.append((param_name, input_node))
             self._seen_input_args.add(param_name)
 
-    def gen_imports(self) -> str:
-        """Generate common imports for NVIDIA Universal GEMM code."""
-        imports = IndentedBuffer()
-        imports.splice(
-            """
-            import torch
-            import cutlass
-            import cutlass_api
-            """
-        )
-        return imports.getvalue()
-
     def render(self) -> str:
         """
         Render the NVIDIA Universal GEMM kernel code as a Python source string.
@@ -100,94 +89,54 @@ class NVUniversalGemmKernel(Kernel):
             Python source code string to be written to a .py file and loaded
             via async_compile.nv_universal_gemm()
         """
-        code = IndentedBuffer()
-
-        code.splice(self.gen_imports())
-        code.writeline("")
-
         kernel_name_str = self.kernel_metadata["kernel_name"]
-        code.writeline(f'_NV_UNIVERSAL_GEMM_KERNEL_NAME = "{kernel_name_str}"')
-        code.writeline("_nv_universal_gemm_kernel_cache = {}")
-        code.writeline("_nv_universal_gemm_artifact_cache = {}")
-        code.writeline("")
 
-        acc_dtype_str = str(self.accumulator_type).split(".")[-1]  # e.g., "float32"
-        code.writeline(f"_ACCUMULATOR_DTYPE = torch.{acc_dtype_str}")
-        code.writeline("")
+        acc_dtype_str = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
+            self.accumulator_type, "cutlass.Float32"
+        )
 
-        code.writeline("def _get_accumulator_type():")
-        with code.indent():
-            code.writeline("dtype_map = {")
-            with code.indent():
-                code.writeline("torch.float32: cutlass.Float32,")
-                code.writeline("torch.float16: cutlass.Float16,")
-                code.writeline("torch.bfloat16: cutlass.BFloat16,")
-            code.writeline("}")
-            code.writeline("return dtype_map.get(_ACCUMULATOR_DTYPE, cutlass.Float32)")
-        code.writeline("")
-
-        input_params = []
-        for i, _ in enumerate(self.input_nodes):
-            input_params.append(f"in_ptr{i}")
-
-        input_params.append("out_ptr0")
-        input_params.append("stream=None")
-
+        input_params = [f"in_ptr{i}" for i, _ in enumerate(self.input_nodes)]
+        input_params.extend(["out_ptr0", "stream=None"])
         params_str = ", ".join(input_params)
-        code.writeline(f"def {self.kernel_name}_main({params_str}):")
-        with code.indent():
-            code.writeline(
-                "global _nv_universal_gemm_kernel_cache, _nv_universal_gemm_artifact_cache"
-            )
-            code.writeline("")
-            code.writeline(
-                "if _NV_UNIVERSAL_GEMM_KERNEL_NAME not in _nv_universal_gemm_kernel_cache:"
-            )
-            with code.indent():
-                code.writeline("kernels = cutlass_api.get_kernels(")
-                with code.indent():
-                    code.writeline(
-                        "metadata_filter=lambda m: m.kernel_name == _NV_UNIVERSAL_GEMM_KERNEL_NAME"
+
+        code = IndentedBuffer()
+        code.splice(
+            f"""
+            import cutlass
+            import cutlass_api
+
+            _NV_UNIVERSAL_GEMM_KERNEL_NAME = "{kernel_name_str}"
+            _nv_universal_gemm_kernel_cache = {{}}
+            _nv_universal_gemm_artifact_cache = {{}}
+
+            def {self.kernel_name}_main({params_str}):
+                global _nv_universal_gemm_kernel_cache, _nv_universal_gemm_artifact_cache
+
+                if _NV_UNIVERSAL_GEMM_KERNEL_NAME not in _nv_universal_gemm_kernel_cache:
+                    kernels = cutlass_api.get_kernels(
+                        metadata_filter=lambda m: m.kernel_name == _NV_UNIVERSAL_GEMM_KERNEL_NAME
                     )
-                code.writeline(")")
-                code.writeline("if not kernels:")
-                with code.indent():
-                    code.writeline(
-                        'raise RuntimeError(f"Could not find NVIDIA Universal GEMM kernel: {_NV_UNIVERSAL_GEMM_KERNEL_NAME}")'
-                    )
-                code.writeline(
-                    "_nv_universal_gemm_kernel_cache[_NV_UNIVERSAL_GEMM_KERNEL_NAME] = kernels[0]"
+                    if not kernels:
+                        raise RuntimeError(f"Could not find NVIDIA Universal GEMM kernel: {{_NV_UNIVERSAL_GEMM_KERNEL_NAME}}")
+                    _nv_universal_gemm_kernel_cache[_NV_UNIVERSAL_GEMM_KERNEL_NAME] = kernels[0]
+
+                kernel = _nv_universal_gemm_kernel_cache[_NV_UNIVERSAL_GEMM_KERNEL_NAME]
+
+                args = cutlass_api.arguments.GemmArguments(
+                    in_ptr0,
+                    in_ptr1,
+                    out_ptr0,
+                    accumulator_type={acc_dtype_str},
                 )
-            code.writeline("")
-            code.writeline(
-                "kernel = _nv_universal_gemm_kernel_cache[_NV_UNIVERSAL_GEMM_KERNEL_NAME]"
-            )
-            code.writeline("")
 
-            code.writeline("args = cutlass_api.arguments.GemmArguments(")
-            with code.indent():
-                code.writeline("in_ptr0,")
-                code.writeline("in_ptr1,")
-                code.writeline("out_ptr0,")
-                code.writeline("accumulator_type=_get_accumulator_type(),")
-            code.writeline(")")
-            code.writeline("")
+                cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)
+                if cache_key not in _nv_universal_gemm_artifact_cache:
+                    _nv_universal_gemm_artifact_cache[cache_key] = kernel.compile(args)
 
-            code.writeline(
-                "cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)"
-            )
-            code.writeline("if cache_key not in _nv_universal_gemm_artifact_cache:")
-            with code.indent():
-                code.writeline(
-                    "_nv_universal_gemm_artifact_cache[cache_key] = kernel.compile(args)"
-                )
-            code.writeline("")
-            code.writeline("artifact = _nv_universal_gemm_artifact_cache[cache_key]")
-            code.writeline("")
-
-            code.writeline(
-                "kernel.run(args, artifact, stream=stream, assume_supported_args=True)"
-            )
+                artifact = _nv_universal_gemm_artifact_cache[cache_key]
+                kernel.run(args, artifact, stream=stream, assume_supported_args=True)
+            """
+        )
 
         return code.getvalue()
 
