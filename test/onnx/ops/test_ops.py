@@ -1456,8 +1456,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
 
         class AttentionOutputsModel(torch.nn.Module):
             def forward(self, Q, K, V):
-                result, _, _, _ = torch.onnx.ops.attention(Q, K, V)
-                return result
+                return torch.onnx.ops.attention(Q, K, V)
 
         model = AttentionOutputsModel()
         onnx_program = self.export(model, (Q, K, V), opset_version=23)
@@ -1474,7 +1473,7 @@ class NativeOnnxOpsTest(common_utils.TestCase):
             outputs[0].shape, [batch_size, q_num_heads, q_seq_len, head_size]
         )
 
-        onnx_testing.assert_onnx_program(onnx_program)
+        onnx_testing.assert_onnx_program(onnx_program, backend="reference")
 
 
 if __name__ == "__main__":
