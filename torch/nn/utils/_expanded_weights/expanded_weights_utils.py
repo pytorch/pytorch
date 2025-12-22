@@ -60,6 +60,20 @@ def forward_helper(func, expanded_args, expanded_kwargs):
 
 
 def _check_and_unexpand_args(func, expanded_args, expanded_kwargs):
+    """Check arguments and convert ExpandedWeights back to regular tensors.
+    
+    Validates that the input is a proper tensor (not an ExpandedWeight) and
+    converts any ExpandedWeight arguments back to their original tensor form
+    for function execution.
+    
+    Args:
+        func: The function to be called
+        expanded_args: Arguments that may contain ExpandedWeights to convert
+        expanded_kwargs: Keyword arguments that may contain ExpandedWeights
+        
+    Returns:
+        Tuple of (unexpanded_args, unexpanded_kwargs) with regular tensors
+    """
     # input must be the first argument passed
     input = expanded_args[0]
     if isinstance(input, ExpandedWeight):
