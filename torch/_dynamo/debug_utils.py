@@ -266,7 +266,7 @@ def _cuda_system_info_comment() -> str:
         cuda_version_lines = cuda_version_out.decode().split("\n")
         comment = "".join([f"# {s} \n" for s in cuda_version_lines if s != ""])
         model_str += f"{comment}\n"
-    except (FileNotFoundError, subprocess.CalledProcessError):
+    except (FileNotFoundError, PermissionError, subprocess.CalledProcessError):
         model_str += "# nvcc not found\n"
 
     gpu_names = Counter(
