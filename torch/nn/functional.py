@@ -3237,8 +3237,7 @@ def poisson_nll_loss(
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     if reduction != "none" and reduction != "mean" and reduction != "sum":
-        ret = input
-        raise ValueError(reduction + " is not a valid value for reduction")
+        raise ValueError(f"'{reduction}' is not a valid reduction mode. Expected 'none', 'mean', or 'sum'.")
 
     ret = torch.poisson_nll_loss(
         input, target, log_input, full, eps, _Reduction.get_enum(reduction)
