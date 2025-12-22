@@ -1371,12 +1371,23 @@ class BuiltinVariable(VariableTracker):
                     if all_can_peek:
                         try:
                             res = fn(*peeked_args, **peeked_kwargs)
+                        except TypeError as exc:
+                            # Check if this is an "unsupported operand type" error
+                            # that should be propagated as an observed exception.
+                            # Errors like "unsupported operand type(s) for -: 'tuple' and 'set'"
+                            # are definitive and no other handler can help.
+                            exc_str = str(exc)
+                            if "unsupported operand type" in exc_str:
+                                raise_observed_exception(
+                                    TypeError,
+                                    tx,
+                                    args=list(map(ConstantVariable.create, exc.args)),
+                                )
+                            # For other TypeErrors (e.g., operator.le(torch.device, str)),
+                            # fall through to let polyfill handlers try.
+                            all_can_peek = False
                         except Exception:
-                            # Operation failed - fall through to let other handlers try.
-                            # This can happen when types don't support the operation
-                            # (e.g., operator.le(torch.device, str) fails with TypeError).
-                            # Other handlers like polyfill-based comparison handlers
-                            # may be able to handle this case.
+                            # Other exceptions - fall through to let other handlers try.
                             all_can_peek = False
 
                     if all_can_peek:

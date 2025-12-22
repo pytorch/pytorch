@@ -1872,6 +1872,14 @@ class StringFormatVariable(VariableTracker):
         assert success
         return hash(value)
 
+    def _realize_lazy_args(self) -> None:
+        """Realize any lazy constant arguments to install guards."""
+        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
+
+        for arg in itertools.chain(self.sym_args, self.sym_kwargs.values()):
+            if isinstance(arg, (LazyConstantVariable, ComputedLazyConstantVariable)):
+                arg.realize()
+
     def is_python_equal(self, other: "VariableTracker") -> bool:
         success, value = self._try_get_format_value()
         if not success:
@@ -1880,10 +1888,37 @@ class StringFormatVariable(VariableTracker):
             other_success, other_value = other._try_get_format_value()
             if not other_success:
                 return False
-            return value == other_value
+            if value == other_value:
+                # Match found - realize lazy args to install guards
+                self._realize_lazy_args()
+                other._realize_lazy_args()
+                return True
+            return False
         if other.is_python_constant():
-            return value == other.as_python_constant()
+            if value == other.as_python_constant():
+                # Match found - realize lazy args to install guards
+                self._realize_lazy_args()
+                return True
+            return False
         return False
+
+    def try_peek_constant(self) -> tuple[bool, bool, any]:
+        """Peek at the formatted string value without triggering realization.
+
+        Returns (can_peek, is_unrealized, value).
+        """
+        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
+
+        success, value = self._try_get_format_value()
+        if not success:
+            return (False, False, None)
+        # Check if any arg is unrealized lazy constant
+        any_unrealized = any(
+            isinstance(arg, (LazyConstantVariable, ComputedLazyConstantVariable))
+            and not arg.is_realized()
+            for arg in itertools.chain(self.sym_args, self.sym_kwargs.values())
+        )
+        return (True, any_unrealized, value)
 
 
 class DebuggingVariable(VariableTracker):
