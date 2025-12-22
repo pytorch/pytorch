@@ -84,9 +84,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    MI200_ARCH,
     skip_but_pass_in_sandcastle,
     skip_but_pass_in_sandcastle_if,
     skipIfRocm,
+    skipIfRocmArch,
+    TemporaryFileName,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils.data.distributed import DistributedSampler
@@ -215,10 +218,7 @@ def get_profiling_event(event_name, profiler, dedup_gpu_user_annotation=False):
 def get_profiler_nccl_meta(prof):
     """Torch profiler includes nccl metadata in an inserted operator called "record_param_comms"
     We will need to test metadata obtained from profiler here"""
-    with tempfile.NamedTemporaryFile(mode="w+t", suffix=".json") as tf:
-        tf.close()
-        trace_file = tf.name
-
+    with TemporaryFileName(mode="w+t", suffix=".json") as trace_file:
         prof.export_chrome_trace(trace_file)
         with open(trace_file) as f:
             events = json.load(f)["traceEvents"]
@@ -4795,7 +4795,12 @@ class DistributedTest:
 
             # Test a simple linear as well as a ResNet model.
             models_to_test = [
-                nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)).cuda()
+                nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)).cuda(),
+                # run model of at least 1M parameters to hit potential race conditions in
+                # stream semantics
+                nn.Sequential(
+                    nn.Linear(3, 1024), nn.Linear(1024, 1024), nn.Linear(1024, 3)
+                ).cuda(),
             ]
             if HAS_TORCHVISION:
                 models_to_test.append(torchvision.models.resnet50().cuda())
@@ -4837,7 +4842,7 @@ class DistributedTest:
                     for i in range(8):
                         inp = (
                             torch.randn(1, 3, 1000, 1000, device="cuda")
-                            if j == 1
+                            if j == 2
                             else torch.randn(10, 3, device="cuda")
                         )
                         model(inp).sum().backward()
@@ -4875,7 +4880,6 @@ class DistributedTest:
                         init_before=init_before,
                     )
 
-        @skipIfRocm
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_grad_as_bucket_view_false(self):
             for init_before in [True, False]:
@@ -4886,7 +4890,7 @@ class DistributedTest:
                     gradient_as_bucket_view=False,
                 )
 
-        @skipIfRocm
+        @skipIfRocmArch(MI200_ARCH)
         @skip_if_lt_x_gpu(2)
         def test_ddp_apply_optim_in_backward_ignored_params(self):
             torch.cuda.set_device(self.rank)
@@ -7075,27 +7079,25 @@ class DistributedTest:
         def test_ddp_profiling_execution_trace(self):
             self.assertEqual(dist.get_backend(), "nccl")
             # Create a temp file to save execution trace data
-            fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
-            fp.close()
-            et_file = fp.name
-            et = ExecutionTraceObserver().register_callback(et_file)
+            with TemporaryFileName("w+t", suffix=".et.json") as et_file:
+                et = ExecutionTraceObserver().register_callback(et_file)
 
-            # first profiler context need not have ET
-            torch_profiler_ctx1 = torch.profiler.profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-            )
-            # collect ET in second profiler pass
-            torch_profiler_ctx2 = torch.profiler.profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                execution_trace_observer=et,
-            )
-            self._test_ddp_profiling(
-                profiler_ctx=torch_profiler_ctx1,
-                profiler_ctx2=torch_profiler_ctx2,
-            )
+                # first profiler context need not have ET
+                torch_profiler_ctx1 = torch.profiler.profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                )
+                # collect ET in second profiler pass
+                torch_profiler_ctx2 = torch.profiler.profile(
+                    activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                    execution_trace_observer=et,
+                )
+                self._test_ddp_profiling(
+                    profiler_ctx=torch_profiler_ctx1,
+                    profiler_ctx2=torch_profiler_ctx2,
+                )
 
-            print(f"Execution trace saved at {fp.name}")
-            self._validate_execution_trace_nccl(et_file)
+                print(f"Execution trace saved at {et_file}")
+                self._validate_execution_trace_nccl(et_file)
 
         @skip_if_lt_x_gpu(2)
         @skip_but_pass_in_sandcastle_if(

@@ -1405,7 +1405,7 @@ class TestConverter(TestCase):
     )
     # qnnpack not supported on s390x
     @xfailIfS390X
-    def test_ts2ep_convert_quantized_model(self):
+    def test_ts2ep_convert_quantized_model1(self):
         class Standalone(torch.nn.Module):
             def __init__(self):
                 super().__init__()

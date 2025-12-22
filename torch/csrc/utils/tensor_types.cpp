@@ -1,10 +1,8 @@
-#include <Python.h>
 
 #include <torch/csrc/utils/tensor_types.h>
 
 #include <ATen/Context.h>
 #include <ATen/Formatting.h>
-#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/generated/VariableType.h>
 #include <torch/csrc/tensor/python_tensor.h>
 

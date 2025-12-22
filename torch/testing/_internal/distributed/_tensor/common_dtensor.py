@@ -43,6 +43,7 @@ from torch.distributed.tensor.parallel import (
     SequenceParallel,
 )
 from torch.testing._internal.common_distributed import (
+    ACCELERATOR_DIST_BACKENDS,
     MultiProcContinuousTest,
     MultiProcessTestCase,
     MultiThreadedTestCase,
@@ -396,13 +397,16 @@ class DTensorTestBase(MultiProcessTestCase):
         return init_device_mesh(self.device_type, (self.world_size,))
 
     def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
-        if "nccl" in self.backend and torch.cuda.device_count() < self.world_size:
+        if backend is None:
+            backend = self.backend
+
+        requires_gpu = any(
+            gpu_backend in backend for gpu_backend in ACCELERATOR_DIST_BACKENDS
+        )
+        if requires_gpu and torch.accelerator.device_count() < self.world_size:
             sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         curr_backend = dist.get_default_backend_for_device(self.device_type)
-
-        if backend is None:
-            backend = self.backend
 
         if backend not in [
             "nccl",
@@ -520,6 +524,12 @@ def with_comms(
             *args: tuple[object],
             **kwargs: dict[str, Any],  # type: ignore[misc]
         ) -> None:
+            # just passthrough if harness doesn't
+            # support init_pg e.g., DTensorOpTestBase
+            if not hasattr(self, "init_pg"):
+                func(self, *args, **kwargs)
+                return
+
             self.init_pg(eager_init, backend)
 
             try:
@@ -708,6 +718,68 @@ class DTensorConverter:
             raise RuntimeError(f"Trying to convert to DTensor, but got {type(t)}")
 
 
+class LocalDTensorOpTestBase(DTensorOpTestBase):
+    @property
+    def is_local_tensor_enabled(self) -> bool:
+        return True
+
+    def _handle_test_skip(self, msg: str) -> None:
+        self.skipTest(msg)
+
+    def _get_local_tensor_mode(self):
+        return LocalTensorMode(frozenset(range(self.world_size)))
+
+    def setUp(self) -> None:
+        super().setUp()
+        torch.autograd._enable_record_function(False)
+
+    def tearDown(self) -> None:
+        from torch.distributed.tensor import _random as random
+
+        random._rng_tracker = None
+        super().tearDown()
+        torch.autograd._enable_record_function(True)
+
+    @property
+    def rank(self):
+        return torch.SymInt(LocalIntNode({r: r for r in range(self.world_size)}))
+
+    @rank.setter
+    def rank(self, rank):
+        pass
+
+    def join_or_run(self, fn):
+        @wraps(fn)
+        def wrapper(self):
+            fn()
+
+        return types.MethodType(wrapper, self)
+
+    def build_device_mesh(self) -> DeviceMesh:
+        with maybe_disable_local_tensor_mode():
+            return super().build_device_mesh()
+
+    def init_pg(self, eager_init, backend: Optional[str] = None) -> None:
+        dist.init_process_group("fake", rank=0, world_size=self.world_size)
+        self._pg = dist.distributed_c10d._get_default_group()
+
+    def destroy_pg(self, device_id: Optional[int] = None) -> None:
+        dist.destroy_process_group(self._pg)
+        self._pg = None
+
+    def _spawn_processes(self) -> None:
+        pass
+
+    def _spawn_threads(self) -> None:
+        pass
+
+    def run_test(self, test_name: str, parent_pipe) -> None:
+        getattr(self, test_name)()
+
+    def init_manual_seed_for_rank(self) -> None:
+        torch.manual_seed(0)
+
+
 class LocalDTensorTestBase(DTensorTestBase):
     @property
     def is_local_tensor_enabled(self) -> bool:
@@ -786,7 +858,9 @@ def make_wrapped(fn, ctxs):
     return wrapped
 
 
-def create_local_tensor_test_class(orig_cls, skipped_tests=None):
+def create_local_tensor_test_class(
+    orig_cls, skipped_tests=None, base_class=LocalDTensorTestBase
+):
     if skipped_tests is None:
         skipped_tests = []
 
@@ -805,7 +879,7 @@ def create_local_tensor_test_class(orig_cls, skipped_tests=None):
 
     cls = type(
         orig_cls.__name__ + "WithLocalTensor",
-        (LocalDTensorTestBase,) + orig_cls.__bases__,
+        (base_class,) + orig_cls.__bases__,
         dct,
     )
     cls.__file__ = __file__

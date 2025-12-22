@@ -19,11 +19,9 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
-    SM53OrLater,
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
-    _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -282,8 +280,7 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1.1e-5)})
-    @dtypes(*([torch.float32, torch.float16] +
-              [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),
@@ -947,16 +944,35 @@ class TestMatmulCuda(InductorTestCase):
         self.assertGreater(t1 - t0, t3 - t2)
 
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
+    @serialTest()
+    def test_greencontext_graphs(self):
+        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
+        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
+        ctx.set_context()
+        partial_res = torch.matmul(a, a)
+        ctx.pop_context()
+        full_res = torch.matmul(a, a)
+        full_res.zero_()
+        partial_res.zero_()
+        torch.cuda.synchronize()
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            ctx.set_context()
+            partial_res = torch.matmul(a, a)
+            ctx.pop_context()
+            full_res = torch.matmul(a, a)
+        g.replay()
+        self.assertEqual(partial_res, full_res)
+
+
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
-        version = _get_torch_cuda_version()
-        if version < (11, 8):
-            self.skipTest("_mixed_dtypes_linear only compiled for CUDA 11.8+")
-
         def run_test(
             batch_shape,
             m,

@@ -1,24 +1,32 @@
-# mypy: allow-untyped-defs
-from collections.abc import Callable
+import typing
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Generic, overload, TypeAlias, TypeVar
+from typing_extensions import ParamSpec, TypeIs, TypeVarTuple, Unpack
 
 import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
 
 
-def is_graphable(val) -> bool:
+_R = TypeVar("_R")
+_P = ParamSpec("_P")
+_Ts = TypeVarTuple("_Ts")
+
+
+def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
     """Definition: a graphable type is a type that that is an acceptable input/output type to a FX node."""
-    return isinstance(val, torch.fx.node.base_types)
+    return isinstance(val, torch.fx.node.base_types) or is_opaque_type(type(val))
 
 
-def is_graphable_type(typ) -> bool:
+def is_graphable_type(typ: type[object]) -> bool:
     """Return whether the given type is graphable"""
-    return issubclass(typ, torch.fx.node.base_types)
+    return issubclass(typ, torch.fx.node.base_types) or is_opaque_type(typ)
 
 
-def to_graphable(stuff):
+def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
     """Flattens stuff into a flat list of graphable types."""
     # We can consider preserving things like List[int] to improve
     # perf and readability (right now that is all flattened out)
@@ -33,13 +41,17 @@ def to_graphable(stuff):
     return flat_args, spec
 
 
-def from_graphable(flat_args, spec):
+def from_graphable(
+    flat_args: tuple[Unpack[_Ts]], spec: pytree.TreeSpec
+) -> pytree.PyTree:
     """The inverse of to_graphable."""
     stuff = pytree.tree_unflatten(flat_args, spec)
     return stuff
 
 
-def func_to_graphable(func):
+def func_to_graphable(
+    func: Callable[..., object],
+) -> tuple[list[object], pytree.TreeSpec]:
     """
     Pack and flatten a function type into graphable types.
     This is useful for legalizing the function argument of `flat_apply`.
@@ -48,27 +60,42 @@ def func_to_graphable(func):
 
 
 @dataclass(frozen=True)
-class _ConstantFunction:
-    func: Callable
+class _ConstantFunction(Generic[_P, _R]):
+    func: Callable[_P, _R]
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> _R:
         return self.func(*args, **kwargs)
 
 
 pytree.register_constant(_ConstantFunction)
 
-_op_types = (
-    torch._ops.OpOverload,
-    torch._ops.OpOverloadPacket,
-    torch._ops.HigherOrderOperator,
+
+_OpTypes = (
+    torch._ops.OpOverload | torch._ops.OpOverloadPacket | torch._ops.HigherOrderOperator
 )
+_op_types = typing.get_args(_OpTypes)
+
+
+_Base: TypeAlias = torch.fx.node.BaseArgumentTypes
+# pyrefly bug: pyrefly is complaining: Expected a type form, got instance of `Literal['_FXOutput']
+# pyrefly: ignore[not-a-type]
+_FXOutput = _Base | Sequence["_FXOutput"]
 
 
 class FlatApply(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flat_apply")
 
-    def __call__(self, func, in_spec, *flat_args, **_unused):
+    def __call__(
+        self,
+        func: _OpTypes | pytree.TreeSpec,
+        in_spec: pytree.TreeSpec,
+        *flat_args: Unpack[_Ts],
+        # If True then the output is checked to be valid. If False then it is up
+        # to the caller to ensure the output is appropriate.
+        checked_output: bool = True,
+        **_unused: object,
+    ) -> object:
         """
         Functions that take in non-graphable types cannot directly be put into FX graph.
 
@@ -88,37 +115,46 @@ class FlatApply(HigherOrderOperator):
         - an input type is a constant type (i.e. torch.compile will specialize on it)
         registered with pytree.register_constant. The constant type goes directly
         into the spec.
-
         """
         assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
         assert len(_unused) == 0
-        return impl(func, in_spec, *flat_args)
+        # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
+        return impl(func, in_spec, flat_args, checked_output)
 
 
-def impl(func, in_spec, *flat_args):
-    if not isinstance(func, _op_types):
+@overload
+def is_valid_output(x: tuple[object, ...]) -> TypeIs[tuple[_FXOutput, ...]]: ...
+
+
+@overload
+def is_valid_output(x: Sequence[object]) -> TypeIs[Sequence[_FXOutput]]: ...
+
+
+def is_valid_output(x: object) -> bool:
+    if isinstance(x, (tuple, list)):
+        return all(map(is_valid_output, x))
+    return is_graphable(x)
+
+
+def impl(
+    func: _OpTypes | pytree.TreeSpec,
+    in_spec: pytree.TreeSpec,
+    flat_args: tuple[Unpack[_Ts]],
+    checked_output: bool,
+) -> _FXOutput:
+    if isinstance(func, pytree.TreeSpec):
         # assume _ConstantFunction
         func = pytree._retrieve_constant(func)
         assert isinstance(func, _ConstantFunction)
 
+    # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
     args, kwargs = from_graphable(flat_args, in_spec)
     out = func(*args, **kwargs)
 
-    # Right now, all outputs must either be graphable or lists/tuples of graphables.
-    #
-    # TODO: The following can be updated to support non-graphable outputs and pytrees.
-    # For non-graphable constant outputs: the assumption would be that they are constant
-    # (every time the function runs those MUST be the same)
-    # For pytree outputs:
-    # I'm not sure if we need to return (flat_output, spec) or just (flat_output,):
-    # in the latter case the tracers need to carry out the output specs
-    # (they need to know how to reconstruct the object from just the flat_output).
-    def is_valid_output(x):
-        if isinstance(x, (tuple, list)):
-            return all(map(is_valid_output, x))
-        return is_graphable(x)
-
-    assert is_valid_output(out)
+    if checked_output:
+        # For "normal" usage all outputs must either be graphable or
+        # lists/tuples of graphables.
+        assert is_valid_output(out)
     return out
 
 
