@@ -312,6 +312,7 @@ def aot_dispatch_base_graph(
                 include_stride=True,
                 include_device=True,
                 colored=True,
+                expanded_def=True,
             ),
         )
 
