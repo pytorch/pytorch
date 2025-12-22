@@ -678,8 +678,45 @@ autoheuristic_log_path = os.environ.get(
     "TORCHINDUCTOR_AUTOHEURISTIC_LOG_PATH", "DEFAULT"
 )
 
-# Disabled by default on ROCm, opt-in if model utilises NHWC convolutions
-layout_opt_default = "1" if not torch.version.hip else "0"
+def _get_layout_opt_default() -> str:
+    """
+    Determine the default value for layout optimization.
+
+    Layout optimization converts models to use channels-last (NHWC) memory format
+    for convolutions, which can significantly improve performance on modern GPUs.
+
+    For CUDA: Always enabled by default.
+
+    For ROCm: Originally disabled in #111474 (Oct 2023) due to NHWC performance
+    regressions on ROCm 5.7 (see #110319). Modern ROCm versions (6.x+) and
+    MI300 series GPUs have significantly improved NHWC convolution support via
+    MIOpen, so we now enable layout optimization for CDNA3+ architectures
+    (MI300 series and newer) while keeping it disabled for older architectures
+    to maintain backwards compatibility.
+    """
+    if not torch.version.hip:
+        return "1"
+
+    # For ROCm, enable layout optimization only on modern architectures (CDNA3+)
+    # that have good NHWC convolution performance in MIOpen.
+    try:
+        if torch.cuda.is_available():
+            arch_name = torch.cuda.get_device_properties(
+                torch.cuda.current_device()
+            ).gcnArchName
+            # gcnArchName format is like "gfx942:sramecc+:xnack-"
+            base_arch = arch_name.split(":")[0] if arch_name else ""
+            # CDNA3+ architectures with good NHWC support: MI300 series (gfx942) and newer (gfx950)
+            if base_arch in ("gfx942", "gfx950"):
+                return "1"
+    except Exception:
+        pass
+
+    # Default disabled for older ROCm architectures (MI200 and earlier)
+    return "0"
+
+
+layout_opt_default = _get_layout_opt_default()
 layout_optimization = (
     os.environ.get("TORCHINDUCTOR_LAYOUT_OPTIMIZATION", layout_opt_default) == "1"
 )
@@ -1842,6 +1879,8 @@ class aot_inductor:
     # Generate kernel files that support multiple archs
     # For CUDA, this means generating fatbin files for kernels, and the fatbin files
     # contains PTX and SASS for the current architecture.
+    # For ROCm, this uses clang-offload-bundler to create fat binaries containing
+    # code objects for multiple GPU architectures (e.g., gfx90a, gfx942).
     emit_multi_arch_kernel: Optional[bool] = None
 
     # If not None, the generated files with use this name in file stem.
@@ -2022,6 +2061,42 @@ class cuda:
     enable_caching_codegen: bool = True
 
 
+def _parse_rocm_num_stages() -> Optional[int]:
+    """
+    Parse TORCHINDUCTOR_ROCM_NUM_STAGES environment variable safely.
+
+    Returns the parsed integer value, or None if:
+    - Environment variable is not set or empty
+    - Value cannot be parsed as an integer
+    - Value is negative (invalid for pipeline stages)
+    """
+    env_val = os.environ.get("TORCHINDUCTOR_ROCM_NUM_STAGES")
+    if not env_val or not env_val.strip():
+        return None
+
+    try:
+        value = int(env_val)
+        if value < 0:
+            import logging
+
+            log = logging.getLogger(__name__)
+            log.warning(
+                "TORCHINDUCTOR_ROCM_NUM_STAGES=%r is negative, using auto-detection (None)",
+                env_val,
+            )
+            return None
+        return value
+    except ValueError:
+        import logging
+
+        log = logging.getLogger(__name__)
+        log.warning(
+            "TORCHINDUCTOR_ROCM_NUM_STAGES=%r is not a valid integer, using auto-detection (None)",
+            env_val,
+        )
+        return None
+
+
 class rocm:
     # Offload arch list for device code compilation, e.g. ["gfx90a", "gfx942"].
     # If empty, the `native` arch is used
@@ -2093,6 +2168,25 @@ class rocm:
 
     # The threshold at which we trigger a contiguous subgraph transformation
     contiguous_threshold: int = 16
+
+    # Enable Decompose-K optimization for matmul operations on ROCm.
+    # Decompose-K can improve performance for matmuls with large K dimensions
+    # by splitting the K dimension across multiple thread blocks.
+    # Set via TORCHINDUCTOR_ROCM_USE_DECOMPOSE_K environment variable.
+    use_decompose_k: bool = (
+        os.environ.get("TORCHINDUCTOR_ROCM_USE_DECOMPOSE_K", "1") == "1"
+    )
+
+    # Number of pipeline stages for Triton kernels on ROCm.
+    # Pipeline stages control software pipelining of memory operations.
+    # - None (default): Auto-select based on GPU architecture
+    #   - CDNA3 (MI300 series, gfx942): 3 stages (more LDS for deeper pipelining)
+    #   - CDNA2 (MI200 series, gfx90a): 2 stages (conservative default)
+    #   - Other architectures: 2 stages
+    # - Explicit int value: Override auto-detection with specific stage count
+    # Set via TORCHINDUCTOR_ROCM_NUM_STAGES environment variable.
+    # Validated by _parse_rocm_num_stages() to handle invalid input gracefully.
+    num_stages: Optional[int] = _parse_rocm_num_stages()
 
 
 # Backend to use for CPU codegen either "cpp" or "triton" (experimental) or "halide" (experimental) or "pallas" (experimental)

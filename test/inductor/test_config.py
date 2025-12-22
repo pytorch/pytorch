@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 import math
+import os
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch._dynamo.utils import counters
@@ -326,6 +328,130 @@ class TestInductorConfig(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+
+
+class TestEdgeCases(TestCase):
+    """Test edge cases for inductor utilities to ensure they handle invalid inputs gracefully."""
+
+    def test_get_k_splits_zero_m(self):
+        """Test get_k_splits handles m=0 without crashing (division by zero protection)."""
+        from torch._inductor.utils import get_k_splits
+
+        # Clear the cache to ensure we're testing fresh
+        get_k_splits.cache_clear()
+
+        # m=0 should return empty list (no meaningful k-splitting possible)
+        result = get_k_splits(0, 10, 100)
+        self.assertEqual(result, [])
+
+    def test_get_k_splits_zero_n(self):
+        """Test get_k_splits handles n=0 without crashing (division by zero protection)."""
+        from torch._inductor.utils import get_k_splits
+
+        # Clear the cache to ensure we're testing fresh
+        get_k_splits.cache_clear()
+
+        # n=0 should return empty list (no meaningful k-splitting possible)
+        result = get_k_splits(10, 0, 100)
+        self.assertEqual(result, [])
+
+    def test_get_k_splits_zero_both(self):
+        """Test get_k_splits handles m=0 and n=0 without crashing."""
+        from torch._inductor.utils import get_k_splits
+
+        # Clear the cache to ensure we're testing fresh
+        get_k_splits.cache_clear()
+
+        # Both m=0 and n=0 should return empty list
+        result = get_k_splits(0, 0, 100)
+        self.assertEqual(result, [])
+
+    def test_get_k_splits_normal_case(self):
+        """Test get_k_splits works correctly for normal inputs."""
+        from torch._inductor.utils import get_k_splits
+
+        # Clear the cache to ensure we're testing fresh
+        get_k_splits.cache_clear()
+
+        # Normal case should return a list (may be empty depending on k value)
+        result = get_k_splits(100, 100, 256)
+        self.assertIsInstance(result, list)
+
+    def test_parse_rocm_num_stages_invalid_string(self):
+        """Test _parse_rocm_num_stages handles invalid string values gracefully."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with invalid string value - should return None without crashing
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "invalid"}):
+            result = _parse_rocm_num_stages()
+            self.assertIsNone(result)
+
+    def test_parse_rocm_num_stages_negative(self):
+        """Test _parse_rocm_num_stages handles negative values gracefully."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with negative value - should return None without crashing
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "-1"}):
+            result = _parse_rocm_num_stages()
+            self.assertIsNone(result)
+
+    def test_parse_rocm_num_stages_empty_string(self):
+        """Test _parse_rocm_num_stages handles empty string gracefully."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with empty string - should return None without crashing
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": ""}):
+            result = _parse_rocm_num_stages()
+            self.assertIsNone(result)
+
+    def test_parse_rocm_num_stages_whitespace(self):
+        """Test _parse_rocm_num_stages handles whitespace-only values gracefully."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with whitespace-only value - should return None without crashing
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "   "}):
+            result = _parse_rocm_num_stages()
+            self.assertIsNone(result)
+
+    def test_parse_rocm_num_stages_valid(self):
+        """Test _parse_rocm_num_stages works correctly for valid values."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with valid integer - should return the parsed value
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "3"}):
+            result = _parse_rocm_num_stages()
+            self.assertEqual(result, 3)
+
+    def test_parse_rocm_num_stages_zero(self):
+        """Test _parse_rocm_num_stages handles zero correctly (valid edge case)."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with zero - should return 0 (valid value for no pipelining)
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "0"}):
+            result = _parse_rocm_num_stages()
+            self.assertEqual(result, 0)
+
+    def test_parse_rocm_num_stages_float(self):
+        """Test _parse_rocm_num_stages handles float values gracefully."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with float value - should return None without crashing
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "2.5"}):
+            result = _parse_rocm_num_stages()
+            self.assertIsNone(result)
+
+    def test_get_rocm_arch_num_stages_no_crash(self):
+        """Test _get_rocm_arch_num_stages doesn't crash even when CUDA is unavailable."""
+        from torch._inductor.utils import _get_rocm_arch_num_stages
+
+        # Clear the cache to test fresh
+        _get_rocm_arch_num_stages.cache_clear()
+
+        # This should return an integer without crashing, even if CUDA isn't available
+        # The function has exception handling for RuntimeError and AttributeError
+        result = _get_rocm_arch_num_stages()
+        self.assertIsInstance(result, int)
+        self.assertGreaterEqual(result, 2)  # Should be at least 2 (conservative default)
 
 
 if __name__ == "__main__":

@@ -2080,8 +2080,13 @@ def use_decompose_k_choice(
 
     decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
 
+    # Check if decompose_k should be enabled based on platform
+    # For NVIDIA CUDA: always enabled (when other conditions are met)
+    # For AMD ROCm: controlled via config.rocm.use_decompose_k (default True)
+    platform_enabled = not torch.version.hip or config.rocm.use_decompose_k
+
     return (
-        not torch.version.hip
+        platform_enabled
         and V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
@@ -2136,6 +2141,10 @@ def get_k_splits(m: _IntLike, n: _IntLike, k: _IntLike) -> list[int]:
     ):
         max_k_split = 256
     else:
+        # Guard against division by zero when m or n is 0.
+        # Zero-sized dimensions mean no meaningful k-splitting is possible.
+        if m == 0 or n == 0:
+            return []
         max_k_split = min(k // m, k // n)
 
     min_k_split = 2
@@ -2643,11 +2652,99 @@ def parallel_num_threads() -> int:
 
 
 @functools.cache
+def _get_rocm_arch_num_stages() -> int:
+    """
+    Return the optimal number of pipeline stages for the current ROCm architecture.
+
+    Pipeline stages control software pipelining of memory operations in Triton kernels.
+    Different AMD GPU architectures have varying amounts of LDS (Local Data Share)
+    and different memory subsystem characteristics that affect optimal pipelining depth.
+
+    Architecture-specific rationale:
+    - CDNA3 (MI300 series, gfx942, gfx950): 3 stages
+      - Larger LDS capacity (64KB per CU) enables deeper pipelining
+      - Improved memory subsystem benefits from more prefetching
+      - Higher compute density can hide memory latency better
+
+    - CDNA2 (MI200 series, gfx90a): 2 stages
+      - More conservative pipelining due to smaller LDS
+      - 2 stages provides good balance of performance vs register pressure
+
+    - Other/Unknown architectures: 2 stages (conservative default)
+
+    Note: This function queries torch.cuda.current_device() and caches the result
+    globally. In multi-GPU setups with different architectures (e.g., MI300 + MI200),
+    this returns the optimal stages for whichever device was current at first call.
+    For explicit control in heterogeneous setups, use config.rocm.num_stages.
+    """
+    # Check if user explicitly configured num_stages
+    if config.rocm.num_stages is not None:
+        return config.rocm.num_stages
+
+    # Architecture-specific stage selection
+    # Map architecture prefixes to optimal stage counts
+    arch_stage_mapping = {
+        # CDNA3 architectures (MI300 series) - can benefit from deeper pipelining
+        "gfx942": 3,  # MI300A, MI300X
+        "gfx950": 3,  # MI350X and future CDNA3+
+        # CDNA2 architectures (MI200 series) - conservative 2 stages
+        "gfx90a": 2,  # MI210, MI250, MI250X
+    }
+
+    try:
+        if torch.cuda.is_available():
+            # Get the architecture name from the current device
+            arch_name = torch.cuda.get_device_properties(
+                torch.cuda.current_device()
+            ).gcnArchName
+            # gcnArchName format is like "gfx942:sramecc+:xnack-"
+            # Extract the base architecture (e.g., "gfx942")
+            base_arch = arch_name.split(":")[0] if arch_name else ""
+
+            if base_arch in arch_stage_mapping:
+                return arch_stage_mapping[base_arch]
+    except RuntimeError as e:
+        # RuntimeError can occur from torch.cuda operations (e.g., no GPU available,
+        # CUDA/ROCm initialization failure, invalid device index)
+        log.debug("Could not determine ROCm architecture (RuntimeError): %s", e)
+    except AttributeError as e:
+        # AttributeError can occur if gcnArchName property doesn't exist
+        # (e.g., on non-ROCm builds or older PyTorch versions)
+        log.debug("Could not determine ROCm architecture (AttributeError): %s", e)
+
+    # Default for ROCm: 2 stages (conservative)
+    return 2
+
+
+@functools.cache
 def get_backend_num_stages() -> int:
+    """
+    Get the optimal number of pipeline stages for the current backend.
+
+    For CUDA: Returns the backend default (typically 3 stages for modern GPUs)
+    For ROCm: Returns architecture-aware stage count (2-3 stages depending on GPU)
+
+    Pipeline stages affect:
+    - Memory latency hiding through software pipelining
+    - Register and LDS pressure
+    - Kernel occupancy
+
+    Note: This function is cached globally and queries the current device at first
+    call. In multi-GPU setups with different architectures, use config.rocm.num_stages
+    for explicit control.
+    """
     from .runtime.triton_helpers import get_backend_options
 
     options = get_backend_options()
-    return options.get("num_stages", 2 if torch.version.hip else 3)
+
+    if torch.version.hip:
+        # ROCm: Use architecture-aware stage selection
+        default_stages = _get_rocm_arch_num_stages()
+    else:
+        # CUDA: Default to 3 stages for modern GPUs
+        default_stages = 3
+
+    return options.get("num_stages", default_stages)
 
 
 @functools.cache
@@ -3905,10 +4002,9 @@ def maybe_aoti_standalone_config(config_patches: dict[str, Any]) -> dict[str, An
         patch_config(config_patches, "aot_inductor.package_cpp_only", True)
         # Standlaone AOTInductor needs to embed the kernel code in the binary
         patch_config(config_patches, "aot_inductor.embed_kernel_binary", True)
-        # Default to use multi-arch kernel codegen for non-rocm GPU
-        patch_config(
-            config_patches, "aot_inductor.emit_multi_arch_kernel", not torch.version.hip
-        )
+        # Default to use multi-arch kernel codegen for GPU (CUDA and ROCm)
+        # ROCm uses clang-offload-bundler to create fat binaries with multiple arch targets
+        patch_config(config_patches, "aot_inductor.emit_multi_arch_kernel", True)
         patch_config(
             config_patches, "aot_inductor.model_name_for_generated_files", "aoti_model"
         )
