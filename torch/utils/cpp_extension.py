@@ -2602,7 +2602,23 @@ def _get_rocm_arch_flags(cflags: list[str] | None = None) -> list[str]:
         if archFlags:
             archs = archFlags.split()
         else:
+            # Try to auto-detect GPU architecture at runtime for all visible devices
             archs = []
+            if torch.cuda.is_available():
+                try:
+                    seen = set()
+                    for i in range(torch.cuda.device_count()):
+                        prop = torch.cuda.get_device_properties(i)
+                        # gcnArchName can be "gfx90a:sramecc+:xnack-", extract base arch
+                        gcn_arch_name = prop.gcnArchName
+                        base_arch = gcn_arch_name.split(":")[0]
+                        # Only add valid ROCm architectures (start with "gfx")
+                        if base_arch.startswith("gfx") and base_arch not in seen:
+                            seen.add(base_arch)
+                            archs.append(base_arch)
+                except (AttributeError, RuntimeError):
+                    # Not a ROCm device or other error, leave archs empty
+                    pass
     else:
         archs = _archs.replace(' ', ';').split(';')
     flags = [f'--offload-arch={arch}' for arch in archs]
