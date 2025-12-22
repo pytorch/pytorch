@@ -130,9 +130,20 @@ class SpectralNorm:
         )
 
     def _solve_v_and_rescale(self, weight_mat, u, target_sigma):
-        # Tries to returns a vector `v` s.t. `u = F.normalize(W @ v)`
-        # (the invariant at top of this class) and `u @ W @ v = sigma`.
-        # This uses pinverse in case W^T W is not invertible.
+        """Solve for vector v and rescale to achieve target singular value.
+        
+        Tries to return a vector v such that u = F.normalize(W @ v) 
+        (the invariant at top of this class) and u @ W @ v = sigma.
+        This uses pinverse in case W^T W is not invertible.
+        
+        Args:
+            weight_mat: Weight matrix W
+            u: Left singular vector  
+            target_sigma: Target singular value
+            
+        Returns:
+            Rescaled right singular vector v
+        """
         v = torch.linalg.multi_dot(
             [weight_mat.t().mm(weight_mat).pinverse(), weight_mat.t(), u.unsqueeze(1)]
         ).squeeze(1)
