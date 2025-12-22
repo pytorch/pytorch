@@ -107,16 +107,16 @@ vllm_distributed_test_2_gpu_28_failure_test:
   steps:
     - pytest -v -s distributed/test_sequence_parallel.py
 # V1 Test attention 100
-vllm_test_attention_h100:
-  title: v1 Attention Test H100
-  id: vllm_test_attention_h100
+vllm_test_attention:
+  title: v1 Attention Test
+  id: vllm_test_attention
   steps:
     - pytest -v -s v1/attention
 
 # h100 tests
-batch_invariance_test_h100:
+batch_invariance_test:
   title: Batch Invariance Tests H100
-  id: batch_invariance_test_h100
+  id: batch_invariance_test
   env_vars:
     VLLM_WORKER_MULTIPROC_METHOD: spawn
   package_install:

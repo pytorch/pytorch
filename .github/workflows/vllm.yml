@@ -53,8 +53,6 @@ jobs:
           { config: "vllm_distributed_test_28_failure_test", shard: 1, num_shards: 1, runner: "linux.g6.12xlarge.nvidia.gpu"},
           { config: "pytorch_fullgraph_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu"},
           { config: "pytorch_fullgraph_smoke_test", shard: 1, num_shards: 1, runner: "linux.g6.4xlarge.experimental.nvidia.gpu"},
-          { config: "vllm_test_attention_h100", shard: 1, num_shards: 1, runner: "linux.aws.h100"},
-          { config: "batch_invariance_test_h100", shard: 1, num_shards: 1, runner: "linux.aws.h100"},
         ]}
     secrets: inherit
 
