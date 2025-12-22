@@ -80,7 +80,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     return old_stream.unwrap();
   }
   void* getStreamHandle(const Stream s) const override {
-    CUDAStream cuda_stream{s};
+    CUDAStream stream{s};
     return reinterpret_cast<void*>(stream.stream());
   }
   DeviceIndex deviceCount() const noexcept override {
