@@ -1,6 +1,6 @@
 import ctypes
 import sys
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 
@@ -31,7 +31,7 @@ def _get_hip_runtime_library() -> ctypes.CDLL:
     return lib
 
 
-def _get_cuda_runtime_library() -> ctypes.CDLL:
+def _get_cuda_library() -> ctypes.CDLL:
     if sys.platform == "win32":
         return ctypes.CDLL("nvcuda.dll")
     else:  # Unix-based systems
@@ -43,7 +43,7 @@ def _get_gpu_runtime_library() -> ctypes.CDLL:
     if torch.version.hip:
         return _get_hip_runtime_library()
     else:
-        return _get_cuda_runtime_library()
+        return _get_cuda_library()
 
 
 # Helper: check CUDA errors
@@ -143,9 +143,9 @@ def _get_gpu_rtc_compatible_flags() -> list[str]:
 def _nvrtc_compile(
     kernel_source: str,
     kernel_name: str,
-    compute_capability: Optional[str] = None,
-    cuda_include_dirs: Optional[list] = None,
-    nvcc_options: Optional[list] = None,
+    compute_capability: str | None = None,
+    cuda_include_dirs: list | None = None,
+    nvcc_options: list | None = None,
     auto_pch: bool = False,
 ) -> tuple[bytes, str]:
     """
@@ -331,9 +331,9 @@ class _CudaKernel:
         self,
         grid: tuple[int, int, int] = (1, 1, 1),
         block: tuple[int, int, int] = (1, 1, 1),
-        args: Optional[list] = None,
+        args: list | None = None,
         shared_mem: int = 0,
-        stream: Optional[Any] = None,
+        stream: Any | None = None,
     ) -> None:
         """
         Call the compiled CUDA kernel
@@ -468,8 +468,8 @@ class _CudaKernel:
 
 
 def _cuda_load_module(
-    ptx: Union[str, bytes], kernel_names: Optional[list[str]] = None
-) -> Union[_CudaModule, dict[str, "_CudaKernel"]]:
+    ptx: str | bytes, kernel_names: list[str] | None = None
+) -> _CudaModule | dict[str, "_CudaKernel"]:
     """
     Loads a CUDA module from PTX code and returns a module object that can access kernels.
 

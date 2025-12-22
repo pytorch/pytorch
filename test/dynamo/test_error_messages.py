@@ -1620,6 +1620,13 @@ from user code:
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Encountered graph break that we cannot resume from. Compiling up to the previous resumable state, then skipping the rest of the function. Graph break encountered:
 
+Call to `torch._dynamo.step_unsupported()`
+  Explanation: User-inserted step_unsupported.
+  Hint: Remove the `torch._dynamo.step_unsupported()` call.
+
+  Developer debug context:
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb4636.html
 
 User code traceback:
   File "test_error_messages.py", line N, in test_step_graph_break
@@ -1926,6 +1933,7 @@ class NestedGraphBreakLoggingTests(
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Encountered graph break that we cannot resume from. Compiling up to the previous resumable state, then skipping the rest of the function. Graph break encountered:
+
 Graph break under GenericContextWrappingVariable
   Explanation: Attempted to graph break in an active context manager(s) that doesn't support graph breaking.
   Hint: Move the offending context manager(s) to outside the compiled region.
@@ -1978,6 +1986,7 @@ User code traceback:
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Encountered graph break that we cannot resume from. Compiling up to the previous resumable state, then skipping the rest of the function. Graph break encountered:
+
 Data-dependent branching
   Explanation: Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.
   Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
