@@ -419,16 +419,6 @@ static void bindGetDeviceProperties(PyObject* module) {
       py::return_value_policy::reference);
 }
 
-CapturedTraceback* getFromContext(
-    const std::shared_ptr<c10::GatheredContext>& x) {
-  if (CapturedTraceback* sc = dynamic_cast<CapturedTraceback*>(x.get())) {
-    return sc;
-  }
-  TORCH_CHECK(
-      false,
-      "attempting to gather stack context from the wrong StackContext type.");
-}
-
 static void initXpuMethodBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   m.def("_xpu_getMemoryInfo", [](c10::DeviceIndex device_index) {
@@ -491,7 +481,7 @@ static void initXpuMethodBindings(PyObject* module) {
     auto add_frame_key = [&](const py::dict& d,
                              const std::shared_ptr<c10::GatheredContext>& ctx) {
       if (ctx) {
-        auto sc = getFromContext(ctx);
+        auto sc = getCapturedTracebackFromContext(ctx);
         to_gather_frames.emplace_back(sc);
         to_gather_dest.emplace_back(d);
       } else {
@@ -553,35 +543,29 @@ static void initXpuMethodBindings(PyObject* module) {
     py::str segment_free_s = "segment_free";
     py::str segment_map_s = "segment_map";
     py::str segment_unmap_s = "segment_unmap";
-
     py::str snapshot_s = "snapshot";
     py::str oom_s = "oom";
     py::str device_free_s = "device_free";
 
     using namespace c10::xpu::XPUCachingAllocator;
 
+    const std::unordered_map<TraceEntry::Action, py::str> action_str_map = {
+        {TraceEntry::ALLOC, alloc_s},
+        {TraceEntry::FREE_REQUESTED, free_requested_s},
+        {TraceEntry::FREE_COMPLETED, free_completed_s},
+        {TraceEntry::SEGMENT_ALLOC, segment_alloc_s},
+        {TraceEntry::SEGMENT_FREE, segment_free_s},
+        {TraceEntry::SEGMENT_MAP, segment_map_s},
+        {TraceEntry::SEGMENT_UNMAP, segment_unmap_s},
+        {TraceEntry::SNAPSHOT, snapshot_s},
+        {TraceEntry::OOM, oom_s},
+    };
+
     auto action_to_str = [&](TraceEntry::Action action) {
-      switch (action) {
-        case TraceEntry::ALLOC:
-          return alloc_s;
-        case TraceEntry::FREE_REQUESTED:
-          return free_requested_s;
-        case TraceEntry::FREE_COMPLETED:
-          return free_completed_s;
-        case TraceEntry::SEGMENT_ALLOC:
-          return segment_alloc_s;
-        case TraceEntry::SEGMENT_FREE:
-          return segment_free_s;
-        case TraceEntry::OOM:
-          return oom_s;
-        case TraceEntry::SNAPSHOT:
-          return snapshot_s;
-        case TraceEntry::SEGMENT_UNMAP:
-          return segment_unmap_s;
-        case TraceEntry::SEGMENT_MAP:
-          return segment_map_s;
-      }
-      TORCH_CHECK(false, "unreachable");
+      auto it = action_str_map.find(action);
+      TORCH_INTERNAL_ASSERT(
+          it != action_str_map.end(), "Unknown action type in TraceEntry");
+      return it->second;
     };
 
     for (const auto& traceInfo : snapshot.device_traces) {
@@ -589,7 +573,7 @@ static void initXpuMethodBindings(PyObject* module) {
       for (const auto& te : traceInfo) {
         py::dict trace_entry;
         if (te.context_) {
-          auto sc = getFromContext(te.context_);
+          auto sc = getCapturedTracebackFromContext(te.context_);
           to_gather_frames.emplace_back(sc);
           to_gather_dest.emplace_back(trace_entry);
         }
