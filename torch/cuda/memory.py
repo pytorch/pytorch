@@ -1106,8 +1106,6 @@ def _dump_snapshot(filename="dump_snapshot.pickle", augment_with_fx_traces=False
         augment_with_fx_traces (bool, optional): If True, augment the snapshot with FX debug information
                                                   before dumping. This maps generated FX code stack traces
                                                   back to original model source code. Defaults to False.
-        verbose (bool, optional): If True and augment_with_fx_traces is True, print verbose debug output
-                                  during augmentation. Defaults to False.
     """
     s = _snapshot(augment_with_fx_traces=augment_with_fx_traces)
 

@@ -134,11 +134,11 @@ def _augment_memory_snapshot_stack_traces(
     snapshots loaded from disk in a different process.
 
     Args:
-        snapshot (str, _Snapshot): Either a memory snapshot dict or path to a snapshot pickle file
+        snapshot (str or _Snapshot): Either a memory snapshot dict or path to a snapshot pickle file
 
     Returns:
         _Snapshot: The augmented snapshot dictionary with fx_node_op, fx_node_name,
-        fx_original_trace, and fx_node_info fields added to frames
+            fx_original_trace, and fx_node_info fields added to frames
     """
 
     snapshot_dict: _Snapshot
