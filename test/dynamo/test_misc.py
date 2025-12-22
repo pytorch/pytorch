@@ -4991,6 +4991,40 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         self.assertEqual(opt_fn(x, 1), 9)
         self.assertEqual(opt_fn(x, -2), 9)
 
+    def test_torch_size_tensor_index_scalar_constant(self):
+        def fn(x):
+            idx = torch.tensor(1)
+            dim_size = x.shape[idx]
+            return x.reshape(-1, dim_size)
+
+        x = torch.randn(2, 3, 4)
+        ref = fn(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref, res))
+        self.assertEqual(cnts.frame_count, 1)
+
+    def test_torch_size_tensor_index_non_scalar(self):
+        def fn(x):
+            idx = torch.tensor([1, 1])
+            try:
+                dim_size = x.shape[idx]
+                return x * dim_size
+            except TypeError:
+                return x.sum()
+
+        x = torch.randn(2, 3, 4)
+        ref = fn(x)
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts)
+        res = opt_fn(x)
+
+        self.assertTrue(same(ref, res))
+
     def test_stride_dim(self):
         cnts = torch._dynamo.testing.CompileCounter()
 
