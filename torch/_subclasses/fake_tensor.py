@@ -44,7 +44,6 @@ from torch._subclasses.meta_utils import (
     MetaConverter,
 )
 from torch._utils import render_call
-from torch.fx.experimental.symbolic_shapes import guard_or_false
 from torch.fx.immutable_collections import immutable_dict
 from torch.fx.operator_schemas import normalize_function
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -904,6 +903,8 @@ class FakeTensor(Tensor):
         func: OpOverload, flat_args: Sequence[object]
     ) -> tuple[torch.device, bool]:
         # Returns: (common_device, has_scalar_only_inputs)
+
+        from torch.fx.experimental.symbolic_shapes import guard_or_false
 
         # cpu - single element tensors can be called in cuda kernels,
         # so overwrite the common_device if the only existing device
