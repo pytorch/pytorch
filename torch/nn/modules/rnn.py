@@ -164,7 +164,7 @@ class RNNBase(Module):
         elif mode == "RNN_RELU":
             gate_size = hidden_size
         else:
-            raise ValueError("Unrecognized RNN mode: " + mode)
+            raise ValueError(f"Unrecognized RNN mode: '{mode}'. Expected 'LSTM', 'GRU', 'RNN_TANH', or 'RNN_RELU'.")
 
         self._flat_weights_names = []
         self._all_weights = []
