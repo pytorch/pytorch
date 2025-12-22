@@ -3320,7 +3320,7 @@ def gaussian_nll_loss(
 
     # Check validity of reduction mode
     if reduction != "none" and reduction != "mean" and reduction != "sum":
-        raise ValueError(reduction + " is not valid")
+        raise ValueError(f"'{reduction}' is not a valid reduction mode. Expected 'none', 'mean', or 'sum'.")
 
     # Clamp for stability
     var = var.clone()
