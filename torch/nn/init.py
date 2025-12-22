@@ -79,6 +79,7 @@ def _no_grad_normal_(
     std: float,
     generator: torch.Generator | None = None,
 ) -> Tensor:
+    """Fill tensor with normal distribution values in no-grad context."""
     with torch.no_grad():
         return tensor.normal_(mean, std, generator=generator)
 
