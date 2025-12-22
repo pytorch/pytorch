@@ -92,6 +92,41 @@ class XPUGraph(torch._C._XPUGraph):
         r"""Delete the graph currently held by this instance."""
         super().reset()
 
+    def pool(self) -> _POOL_HANDLE:
+        r"""Return an opaque token representing the id of this graph's memory pool.
+
+        This id can optionally be passed to another graph's ``capture_begin``,
+        which hints the other graph may share the same memory pool.
+        """
+        return super().pool()
+
+    def enable_debug_mode(self) -> None:
+        r"""Enable debugging mode for XPUGraph.debug_dump."""
+        return super().enable_debug_mode()
+
+    def debug_dump(self, debug_path: str) -> None:
+        r"""
+        Arguments:
+            debug_path (required): Path to dump the graph to.
+
+        Calls a debugging function to dump the graph if the debugging is
+        enabled via XPUGraph.enable_debug_mode()
+        """
+        return super().debug_dump(debug_path)
+
+    def raw_xpu_graph(self) -> int:
+        r"""Returns the underlying xpuGraph_t. ``keep_graph`` must be True.
+
+        XPU doesn't provide APIs to manipulate this object.
+        """  # noqa: B950
+        return super().raw_xpu_graph()
+
+    def raw_xpu_graph_exec(self) -> int:
+        r"""Returns the underlying xpuGraphExec_t. ``instantiate`` must have been called if ``keep_graph`` is True, or ``capture_end`` must have been called if ``keep_graph`` is False. If you call ``instantiate()`` after ``raw_xpu_graph_exec()``, the previously returned xpuGraphExec_t will be destroyed. It is your responsibility not to use this object after destruction.
+
+        XPU doesn't provide APIs to manipulate this object.
+        """  # noqa: B950
+        return super().raw_xpu_graph_exec()
 
 class graph:
     r"""Context-manager that captures XPU work into a :class:`torch.xpu.XPUGraph` object for later replay.
