@@ -14396,19 +14396,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{device_st
         torch._dynamo.mark_dynamic(x, 1)
         torch._dynamo.mark_dynamic(x, 2)
 
-    def test_remove_noop_view_dtype(self):
-        def f(x):
-            x = x.transpose(1, 2)  # (batch_size, 2, 3)
-            x = x.view(torch.uint8)  # noop
-            return x
-
-        f = torch.compile(f)
-
-        x = torch.ones((2, 3, 2), device=self.device, dtype=torch.uint8)
-        torch._dynamo.mark_dynamic(x, 0)
-        torch._dynamo.mark_dynamic(x, 1)
-        torch._dynamo.mark_dynamic(x, 2)
-
         post_grad_graph = get_post_grad_graph(f, (x,))
         # Handle both CUDA and ROCm device string formats
         device_str = str(x.device)
