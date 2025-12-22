@@ -29,8 +29,7 @@ import types
 from collections.abc import Callable, Sequence
 from random import Random
 from types import BuiltinFunctionType
-from typing import Any, Literal, NoReturn, TYPE_CHECKING, Union
-from typing_extensions import TypeIs
+from typing import Any, Literal, NoReturn, TYPE_CHECKING, TypeGuard, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -549,7 +548,7 @@ class ExceptionVariable(VariableTracker):
     def __init__(
         self,
         exc_type: Any,
-        args: Sequence[VariableTracker],
+        args: tuple[VariableTracker, ...],
         init_kwargs: dict[str, VariableTracker] | None = None,
         source: Source | None = None,
         mutation_type: MutationType | None = None,
@@ -1247,6 +1246,7 @@ class AutogradEngineVariable(UserDefinedObjectVariable):
 
 
 class LambdaVariable(VariableTracker):
+    # TODO: change to Ts = TypeVarTuple("Ts") for py 3.11+
     def __init__(self, fn: Callable[..., VariableTracker], **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.fn = fn
@@ -1929,7 +1929,7 @@ class DebuggingVariable(VariableTracker):
     @staticmethod
     def is_reorderable_logging_function(
         obj: Any,
-    ) -> TypeIs[types.FunctionType | types.BuiltinFunctionType]:
+    ) -> TypeGuard[types.FunctionType | types.BuiltinFunctionType]:
         return (
             callable(obj)
             and isinstance(obj, (types.FunctionType, types.BuiltinFunctionType))

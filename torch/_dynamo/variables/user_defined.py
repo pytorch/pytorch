@@ -2168,7 +2168,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             and inspect.ismethoddescriptor(method)
             and len(kwargs) == 0
         ):
-            self.exc_vt.args = args
+            self.exc_vt.args = tuple(args)
             # pyrefly: ignore[missing-attribute]
             self.value.args = args
             return variables.ConstantVariable(None)
@@ -2190,7 +2190,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         return self.exc_vt.__context__
 
     @property
-    def args(self) -> Sequence[VariableTracker]:
+    def args(self) -> tuple[VariableTracker, ...]:
         return self.exc_vt.args
 
     def set_context(self, context: "variables.ExceptionVariable") -> None:
