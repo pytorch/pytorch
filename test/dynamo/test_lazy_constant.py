@@ -805,7 +805,13 @@ class LazyConstantVariableTests(TestCase):
             self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
     def test_computed_lazy_constant_fstring(self):
-        """Test f-strings with lazy constants produces correct results."""
+        """Test f-strings with lazy constants produces correct results without recompilation.
+
+        F-strings with lazy constants should work correctly and NOT trigger
+        recompilation when the constant values change. This is achieved by keeping
+        the lazy constants unrealized and using reconstruct() to generate bytecode
+        that rebuilds the f-string at runtime.
+        """
         tensor_input = torch.randn(3)
 
         def fn_fstring(t, name, count):
@@ -820,12 +826,12 @@ class LazyConstantVariableTests(TestCase):
         self.assertEqual(eager1[1], compiled1[1])  # "Hello Alice, you have 5 items"
         self.assertEqual(counter.frame_count, 1)
 
-        # Different values WILL recompile and produce correct result
+        # Different values do NOT recompile - f-string is reconstructed at runtime
         eager2 = fn_fstring(tensor_input, "Bob", 10)
         compiled2 = opt_fn(tensor_input, "Bob", 10)
         self.assertTrue(same(eager2[0], compiled2[0]))
         self.assertEqual(compiled2[1], "Hello Bob, you have 10 items")
-        self.assertEqual(counter.frame_count, 2)
+        self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
     def test_computed_lazy_constant_percent_format(self):
@@ -904,7 +910,13 @@ class LazyConstantVariableTests(TestCase):
         self.assertTrue(same(result3, expected3))
 
     def test_computed_lazy_constant_nested_fstring(self):
-        """Test f-strings with expressions involving lazy constants."""
+        """Test f-strings with expressions involving lazy constants.
+
+        F-strings with computations on lazy constants (like x * 2) should work
+        correctly without triggering recompilation when values change.
+
+        Note: This feature requires specialize_int=True.
+        """
         tensor_input = torch.randn(3)
 
         def fn_nested(t, x, y):
@@ -912,20 +924,85 @@ class LazyConstantVariableTests(TestCase):
             return t + 1, f"Result: {x * 2} and {y + 10}"
 
         counter = CompileCounter()
-        opt_fn = torch.compile(fn_nested, backend=counter)
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn_nested, backend=counter)
 
-        eager1 = fn_nested(tensor_input, 5, 3)
-        compiled1 = opt_fn(tensor_input, 5, 3)
-        self.assertTrue(same(eager1[0], compiled1[0]))
-        self.assertEqual(eager1[1], compiled1[1])  # "Result: 10 and 13"
-        self.assertEqual(counter.frame_count, 1)
+            eager1 = fn_nested(tensor_input, 5, 3)
+            compiled1 = opt_fn(tensor_input, 5, 3)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # "Result: 10 and 13"
+            self.assertEqual(counter.frame_count, 1)
 
-        # Different values WILL recompile and produce correct result
-        eager2 = fn_nested(tensor_input, 7, 15)
-        compiled2 = opt_fn(tensor_input, 7, 15)
-        self.assertTrue(same(eager2[0], compiled2[0]))
-        self.assertEqual(compiled2[1], "Result: 14 and 25")
-        self.assertEqual(counter.frame_count, 2)
+            # Different values do NOT recompile - f-string is reconstructed at runtime
+            eager2 = fn_nested(tensor_input, 7, 15)
+            compiled2 = opt_fn(tensor_input, 7, 15)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], "Result: 14 and 25")
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
+
+    def test_computed_lazy_constant_division_by_zero(self):
+        """Test that division by zero with lazy constants raises ZeroDivisionError.
+
+        When dividing lazy constants, if the divisor is zero, the operation should
+        raise ZeroDivisionError at compile time (when the computation is performed
+        eagerly in ComputedLazyConstantVariable.create).
+        """
+        tensor_input = torch.randn(3)
+
+        def fn_div_zero(t, a, b):
+            return t + 1, a / b
+
+        counter = CompileCounter()
+        with torch._dynamo.config.patch(specialize_float=True):
+            opt_fn = torch.compile(fn_div_zero, backend=counter)
+
+            # Normal division should work
+            eager1 = fn_div_zero(tensor_input, 10.0, 2.0)
+            compiled1 = opt_fn(tensor_input, 10.0, 2.0)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # 5.0
+            self.assertEqual(counter.frame_count, 1)
+
+            # Division by zero should raise ZeroDivisionError
+            with self.assertRaises(ZeroDivisionError):
+                opt_fn(tensor_input, 10.0, 0.0)
+
+    def test_computed_lazy_constant_comparison_no_branch(self):
+        """Test comparison operations on lazy constants without branching.
+
+        When comparison operators (==, <, >, etc.) are applied to lazy constants
+        and the result is just returned (not used in control flow), the result
+        should be correct without recompilation when values change.
+
+        Note: This feature requires specialize_int=True.
+        """
+        tensor_input = torch.randn(3)
+
+        def fn_compare(t, a, b):
+            # Compare without using result in a branch
+            return t + 1, a < b, a == b, a > b
+
+        counter = CompileCounter()
+        with torch._dynamo.config.patch(specialize_int=True):
+            opt_fn = torch.compile(fn_compare, backend=counter)
+
+            eager1 = fn_compare(tensor_input, 10, 20)
+            compiled1 = opt_fn(tensor_input, 10, 20)
+            self.assertTrue(same(eager1[0], compiled1[0]))
+            self.assertEqual(eager1[1], compiled1[1])  # True (10 < 20)
+            self.assertEqual(eager1[2], compiled1[2])  # False (10 == 20)
+            self.assertEqual(eager1[3], compiled1[3])  # False (10 > 20)
+            self.assertEqual(counter.frame_count, 1)
+
+            # Different values do NOT recompile - reconstruct_fn generates bytecode
+            # that recomputes comparisons at runtime
+            eager2 = fn_compare(tensor_input, 30, 20)
+            compiled2 = opt_fn(tensor_input, 30, 20)
+            self.assertTrue(same(eager2[0], compiled2[0]))
+            self.assertEqual(compiled2[1], False)  # 30 < 20 is False
+            self.assertEqual(compiled2[2], False)  # 30 == 20 is False
+            self.assertEqual(compiled2[3], True)  # 30 > 20 is True
+            self.assertEqual(counter.frame_count, 1)  # NO recompilation!
 
     def test_returning_lazy_constant_plus_one_no_recompile(self):
         """Test that returning LazyConstantVariable + 1 does not recompile.
