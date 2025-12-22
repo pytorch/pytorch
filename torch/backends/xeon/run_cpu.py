@@ -1,4 +1,4 @@
-# mypy: allow-untyped-defs 
+# mypy: allow-untyped-defs
 """
 This is a script for launching PyTorch inference on Intel® Xeon® Scalable Processors with optimal configurations.
 
@@ -465,10 +465,12 @@ Value applied: %s. Value ignored: %s",
         if args.ncores_per_instance != [-1]:
             if args.ninstances > 0:
                 if len(args.ncores_per_instance) == 1:
-                    args.ncores_per_instance = args.ncores_per_instance * args.ninstances
+                    args.ncores_per_instance = (
+                        args.ncores_per_instance * args.ninstances
+                    )
                 if len(args.ncores_per_instance) != args.ninstances:
                     raise AssertionError(
-                        'Mismatch for \"--ninstances\" and \"--ncores-per-instance\" settings.'
+                        'Mismatch for "--ninstances" and "--ncores-per-instance" settings.'
                     )
             elif len(args.ncores_per_instance) > 1:
                 args.ninstances = len(args.ncores_per_instance)
@@ -479,10 +481,7 @@ Value applied: %s. Value ignored: %s",
                 raise AssertionError(
                     'please specify "--ncores-per-instance" if you have pass the --core-list params'
                 )
-            if (
-                args.ninstances > 0
-                and sum(args.ncores_per_instance) < len(cores)
-            ):
+            if args.ninstances > 0 and sum(args.ncores_per_instance) < len(cores):
                 logger.warning(
                     "only first %s cores will be used, \
 but you specify %s cores in core_list",
@@ -531,7 +530,7 @@ please make sure ninstances <= total_cores)"
                     )
                     if args.ninstances > self.cpuinfo.node_nums:
                         raise AssertionError(
-                            f"--ninstances should not be larger than numa node number \
+                            "--ninstances should not be larger than numa node number \
 when --bind-numa-node or --skip-cross-node-cores is set"
                         )
                     cores.clear()
@@ -542,14 +541,20 @@ when --bind-numa-node or --skip-cross-node-cores is set"
                         args.ncores_per_instance.append(len(per_node_cores))
                 else:
                     logger.warning(
-                        f"all the CPU cores on the machine will be distributed "
-                        f"as evenly as possible to each instance. It is possible "
-                        f"that some cores in an instance may cross the numa node."
+                        "all the CPU cores on the machine will be distributed "
+                        "as evenly as possible to each instance. It is possible "
+                        "that some cores in an instance may cross the numa node."
                     )
-                    args.ncores_per_instance = [len(cores) // args.ninstances] * args.ninstances
+                    args.ncores_per_instance = [
+                        len(cores) // args.ninstances
+                    ] * args.ninstances
             elif args.ncores_per_instance != [-1]:
                 if args.bind_numa_node:
-                    utilized_node_cores = self.cpuinfo.node_logical_cores if args.use_logical_core else self.cpuinfo.node_physical_cores
+                    utilized_node_cores = (
+                        self.cpuinfo.node_logical_cores
+                        if args.use_logical_core
+                        else self.cpuinfo.node_physical_cores
+                    )
                     ncore_per_node = [len(c) for c in utilized_node_cores]
                     if len(args.ncores_per_instance) > len(ncore_per_node):
                         # too many ncores_per_instance to skip cross-node cores
@@ -596,11 +601,17 @@ this node and --bind-numa-node is specified.",
                 args.ninstances = 0
                 if args.bind_numa_node:
                     # Per-numa core allocation, the remainder cores are not used
-                    for node_id, node_core_list in enumerate(self.cpuinfo.node_physical_cores):
+                    for node_id, node_core_list in enumerate(
+                        self.cpuinfo.node_physical_cores
+                    ):
                         node_core_num = len(node_core_list)
-                        for i in range(core_num_per_instance, node_core_num + 1, core_num_per_instance):
+                        for i in range(
+                            core_num_per_instance,
+                            node_core_num + 1,
+                            core_num_per_instance,
+                        ):
                             args.ninstances += 1
-                            cores.extend(node_core_list[i - core_num_per_instance: i])
+                            cores.extend(node_core_list[i - core_num_per_instance : i])
                         if i < node_core_num:
                             logger.warning(
                                 f"With --bind-numa-node set, not all the cores on node {node_id} is used "
@@ -685,13 +696,15 @@ this node and --bind-numa-node is specified.",
                     for j in range(i):
                         core_index_start += args.ncores_per_instance[j]
                     core_list = cores[
-                        core_index_start : core_index_start + args.ncores_per_instance[i]
+                        core_index_start : core_index_start
+                        + args.ncores_per_instance[i]
                     ]
                 else:  # assign ncores_per_instance from rank
                     for j in range(args.rank):
                         core_index_start += args.ncores_per_instance[j]
                     core_list = cores[
-                        core_index_start : core_index_start + args.ncores_per_instance[args.rank]
+                        core_index_start : core_index_start
+                        + args.ncores_per_instance[args.rank]
                     ]
 
                 core_ranges: list[dict] = []
@@ -797,7 +810,7 @@ def _add_multi_instance_params(parser):
         metavar="\b",
         default=-1,
         type=int,
-        nargs='+',
+        nargs="+",
         help="Cores per instance",
     )
     group.add_argument(
