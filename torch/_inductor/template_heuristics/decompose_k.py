@@ -30,15 +30,14 @@ class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
     "xpu",
     op_name="mm",
 )
-# on CUDA, we don't support hip for decompose_k yet
+# Decompose-K is enabled on both NVIDIA CUDA and AMD ROCm.
+# For ROCm, the feature can be controlled via config.rocm.use_decompose_k
+# (defaults to True, set TORCHINDUCTOR_ROCM_USE_DECOMPOSE_K=0 to disable).
 @register_template_heuristic(
     decompose_k_subgraph_template.uid,
     "cuda",
-    register=torch.version.hip is None,
     op_name="mm",
 )
-# TODO(coconutruben): enable decompose k on AMD by removing the register bool
-# and benchmarking it for performance and stability
 # TODO(coconutruben): enable decompose k on other devices (xpu, cpu, mps, mtia)
 # by either adding specific register_template_heuristic tags, or setting the
 # device to None (enabled on all devices)

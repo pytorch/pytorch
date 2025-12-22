@@ -663,7 +663,14 @@ class GraphLowering(torch.fx.Interpreter):
         Decide if we should enable layout optimization for this graph based on
         heuristics.
         """
-        if not config.layout_optimization:
+        # Handle lazy evaluation of layout_optimization default
+        # None means use the lazy default (computed at runtime to avoid CUDA init at import)
+        from torch._inductor.config import _get_layout_optimization_default
+
+        layout_opt = config.layout_optimization
+        if layout_opt is None:
+            layout_opt = _get_layout_optimization_default()
+        if not layout_opt:
             return False
 
         if config.force_layout_optimization:

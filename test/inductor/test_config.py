@@ -1,6 +1,8 @@
 # Owner(s): ["module: inductor"]
 import math
+import os
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch._dynamo.utils import counters
@@ -326,6 +328,225 @@ class TestInductorConfig(TestCase):
         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
         self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+
+
+class TestEdgeCases(TestCase):
+    """Test edge cases for inductor utilities to ensure they handle invalid inputs gracefully."""
+
+    def test_get_k_splits_zero_m(self):
+        """Test get_k_splits handles m=0 without crashing (division by zero protection)."""
+        from torch._inductor.utils import get_k_splits
+
+        # Clear the cache to ensure we're testing fresh
+        get_k_splits.cache_clear()
+
+        # m=0 should return empty list (no meaningful k-splitting possible)
+        result = get_k_splits(0, 10, 100)
+        self.assertEqual(result, [])
+
+    def test_get_k_splits_zero_n(self):
+        """Test get_k_splits handles n=0 without crashing (division by zero protection)."""
+        from torch._inductor.utils import get_k_splits
+
+        # Clear the cache to ensure we're testing fresh
+        get_k_splits.cache_clear()
+
+        # n=0 should return empty list (no meaningful k-splitting possible)
+        result = get_k_splits(10, 0, 100)
+        self.assertEqual(result, [])
+
+    def test_get_k_splits_zero_both(self):
+        """Test get_k_splits handles m=0 and n=0 without crashing."""
+        from torch._inductor.utils import get_k_splits
+
+        # Clear the cache to ensure we're testing fresh
+        get_k_splits.cache_clear()
+
+        # Both m=0 and n=0 should return empty list
+        result = get_k_splits(0, 0, 100)
+        self.assertEqual(result, [])
+
+    def test_get_k_splits_normal_case(self):
+        """Test get_k_splits works correctly for normal inputs."""
+        from torch._inductor.utils import get_k_splits
+
+        # Clear the cache to ensure we're testing fresh
+        get_k_splits.cache_clear()
+
+        # Normal case should return a list (may be empty depending on k value)
+        result = get_k_splits(100, 100, 256)
+        self.assertIsInstance(result, list)
+
+    def test_parse_rocm_num_stages_invalid_string(self):
+        """Test _parse_rocm_num_stages handles invalid string values gracefully."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with invalid string value - should return None without crashing
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "invalid"}):
+            result = _parse_rocm_num_stages()
+            self.assertIsNone(result)
+
+    def test_parse_rocm_num_stages_negative(self):
+        """Test _parse_rocm_num_stages handles negative values gracefully."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with negative value - should return None without crashing
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "-1"}):
+            result = _parse_rocm_num_stages()
+            self.assertIsNone(result)
+
+    def test_parse_rocm_num_stages_empty_string(self):
+        """Test _parse_rocm_num_stages handles empty string gracefully."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with empty string - should return None without crashing
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": ""}):
+            result = _parse_rocm_num_stages()
+            self.assertIsNone(result)
+
+    def test_parse_rocm_num_stages_whitespace(self):
+        """Test _parse_rocm_num_stages handles whitespace-only values gracefully."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with whitespace-only value - should return None without crashing
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "   "}):
+            result = _parse_rocm_num_stages()
+            self.assertIsNone(result)
+
+    def test_parse_rocm_num_stages_valid(self):
+        """Test _parse_rocm_num_stages works correctly for valid values."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with valid integer - should return the parsed value
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "3"}):
+            result = _parse_rocm_num_stages()
+            self.assertEqual(result, 3)
+
+    def test_parse_rocm_num_stages_zero(self):
+        """Test _parse_rocm_num_stages handles zero correctly (valid edge case)."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with zero - should return 0 (valid value for no pipelining)
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "0"}):
+            result = _parse_rocm_num_stages()
+            self.assertEqual(result, 0)
+
+    def test_parse_rocm_num_stages_float(self):
+        """Test _parse_rocm_num_stages handles float values gracefully."""
+        from torch._inductor.config import _parse_rocm_num_stages
+
+        # Test with float value - should return None without crashing
+        with patch.dict(os.environ, {"TORCHINDUCTOR_ROCM_NUM_STAGES": "2.5"}):
+            result = _parse_rocm_num_stages()
+            self.assertIsNone(result)
+
+    def test_get_rocm_arch_num_stages_no_crash(self):
+        """Test _get_rocm_arch_num_stages doesn't crash even when CUDA is unavailable."""
+        from torch._inductor.utils import _get_rocm_arch_num_stages
+
+        # Clear the cache to test fresh
+        _get_rocm_arch_num_stages.cache_clear()
+
+        # This should return an integer without crashing, even if CUDA isn't available
+        # The function has exception handling for RuntimeError and AttributeError
+        result = _get_rocm_arch_num_stages()
+        self.assertIsInstance(result, int)
+        self.assertGreaterEqual(result, 2)  # Should be at least 2 (conservative default)
+
+    def test_get_layout_opt_default_cuda(self):
+        """Test _get_layout_opt_default returns '1' for CUDA (non-ROCm) builds."""
+        from torch._inductor.config import _get_layout_opt_default
+
+        # Mock torch.version.hip to be None (CUDA build)
+        with patch.object(torch.version, "hip", None):
+            result = _get_layout_opt_default()
+            self.assertEqual(result, "1")
+
+    def test_get_layout_opt_default_rocm_no_cuda(self):
+        """Test _get_layout_opt_default returns '0' for ROCm when CUDA is not available."""
+        from torch._inductor.config import _get_layout_opt_default
+
+        # Mock ROCm build with CUDA not available
+        with patch.object(torch.version, "hip", "6.0"):
+            with patch.object(torch.cuda, "is_available", return_value=False):
+                result = _get_layout_opt_default()
+                self.assertEqual(result, "0")
+
+    def test_get_layout_opt_default_rocm_mi300(self):
+        """Test _get_layout_opt_default returns '1' for ROCm with MI300 series (gfx942)."""
+        from torch._inductor.config import _get_layout_opt_default
+
+        # Mock ROCm build with MI300 GPU (gfx942)
+        mock_props = type("MockProps", (), {"gcnArchName": "gfx942:sramecc+:xnack-"})()
+        with patch.object(torch.version, "hip", "6.0"):
+            with patch.object(torch.cuda, "is_available", return_value=True):
+                with patch.object(torch.cuda, "current_device", return_value=0):
+                    with patch.object(
+                        torch.cuda, "get_device_properties", return_value=mock_props
+                    ):
+                        result = _get_layout_opt_default()
+                        self.assertEqual(result, "1")
+
+    def test_get_layout_opt_default_rocm_mi200(self):
+        """Test _get_layout_opt_default returns '0' for ROCm with MI200 series (gfx90a)."""
+        from torch._inductor.config import _get_layout_opt_default
+
+        # Mock ROCm build with MI200 GPU (gfx90a)
+        mock_props = type("MockProps", (), {"gcnArchName": "gfx90a:sramecc+:xnack-"})()
+        with patch.object(torch.version, "hip", "6.0"):
+            with patch.object(torch.cuda, "is_available", return_value=True):
+                with patch.object(torch.cuda, "current_device", return_value=0):
+                    with patch.object(
+                        torch.cuda, "get_device_properties", return_value=mock_props
+                    ):
+                        result = _get_layout_opt_default()
+                        self.assertEqual(result, "0")
+
+    def test_get_layout_optimization_default_with_env_override(self):
+        """Test _get_layout_optimization_default respects environment variable override."""
+        from torch._inductor.config import _get_layout_optimization_default
+
+        # Mock CUDA build (would default to True)
+        with patch.object(torch.version, "hip", None):
+            # Override with environment variable to disable
+            with patch.dict(os.environ, {"TORCHINDUCTOR_LAYOUT_OPTIMIZATION": "0"}):
+                result = _get_layout_optimization_default()
+                self.assertFalse(result)
+
+            # Override with environment variable to enable
+            with patch.dict(os.environ, {"TORCHINDUCTOR_LAYOUT_OPTIMIZATION": "1"}):
+                result = _get_layout_optimization_default()
+                self.assertTrue(result)
+
+    def test_layout_optimization_lazy_init(self):
+        """Test that layout_optimization config uses lazy initialization (None sentinel)."""
+        # The config should be None by default to enable lazy evaluation
+        # This prevents CUDA initialization at import time
+        self.assertIsNone(config.layout_optimization)
+
+
+class TestMultiArchConfig(TestCase):
+    """Test multi-arch kernel configuration for AOTInductor."""
+
+    def test_emit_multi_arch_kernel_default(self):
+        """Test that emit_multi_arch_kernel defaults to True for standalone AOTInductor."""
+        from torch._inductor.utils import aot_inductor_config_patches
+
+        # Get config patches for standalone compilation
+        patches = aot_inductor_config_patches(compile_standalone=True)
+
+        # Multi-arch should be enabled by default for standalone builds
+        self.assertTrue(patches.get("aot_inductor.emit_multi_arch_kernel", False))
+
+    def test_emit_multi_arch_kernel_non_standalone(self):
+        """Test that emit_multi_arch_kernel is not set for non-standalone builds."""
+        from torch._inductor.utils import aot_inductor_config_patches
+
+        # Get config patches for non-standalone compilation
+        patches = aot_inductor_config_patches(compile_standalone=False)
+
+        # Multi-arch should not be explicitly set for non-standalone builds
+        self.assertNotIn("aot_inductor.emit_multi_arch_kernel", patches)
 
 
 if __name__ == "__main__":

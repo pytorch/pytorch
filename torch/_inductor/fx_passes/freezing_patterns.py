@@ -74,10 +74,17 @@ def freezing_passes(gm: torch.fx.GraphModule, aot_example_inputs):
 
     # The CPU weight packing always assume the conv's weight is channels last,
     # So make sure the layout_optimization is on when doing it.
+    # Handle lazy evaluation of layout_optimization default
+    # None means use the lazy default (computed at runtime to avoid CUDA init at import)
+    from torch._inductor.config import _get_layout_optimization_default
+
+    layout_opt = config.layout_optimization
+    if layout_opt is None:
+        layout_opt = _get_layout_optimization_default()
     if (
         torch._C._has_mkldnn
         and config.cpp.weight_prepack
-        and config.layout_optimization
+        and layout_opt
     ):
         from .mkldnn_fusion import _eliminate_duplicate_packed_nodes
 
