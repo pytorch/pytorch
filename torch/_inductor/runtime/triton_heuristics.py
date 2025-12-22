@@ -23,10 +23,10 @@ from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar, Union
 import torch
 from torch._dynamo.utils import counters, set_feature_use
 from torch._inductor import metrics
+from torch._inductor.config import triton as inuctor_triton_config
 from torch._prims_common import compute_required_storage_length
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
-from torch._inductor.config import triton as inuctor_triton_config
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
@@ -242,10 +242,8 @@ def _dump_launch_tensors(args, kernel_path, kernel_hash, kernel_name):
     directory_path = f"{directory_path}/{kernel_name}_run_{run_index}"
     os.makedirs(directory_path, exist_ok=True)
 
-    tensor_index = 0
-    for tensor in tensor_list:
-        torch.save(tensor, f"{directory_path}/tensor_{tensor_index}.pt")
-        tensor_index +=1
+    for index, tensor in enumerate(tensor_list):
+        torch.save(tensor, f"{directory_path}/tensor_{index}.pt")
 
 
 def check_autotune_cache(
@@ -405,7 +403,9 @@ class CachingAutotuner(KernelInterface):
         self.dump_launch_tensors = (
             os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_TENSORS", "0") == "1"
         )
-        self.kernels_to_dump = os.environ.get("TORCHINDUCTOR_KERNELS_TO_DUMP", "").split(",")
+        self.kernels_to_dump = os.environ.get(
+            "TORCHINDUCTOR_KERNELS_TO_DUMP", ""
+        ).split(",")
 
         self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
 
@@ -1461,8 +1461,12 @@ class CachingAutotuner(KernelInterface):
 
         if self.dump_launch_tensors:
             # Check the kernel name if the list was provided
-            if not self.kernels_to_dump or any(kernel_name in self.fn.__name__ for kernel_name in self.kernels_to_dump):
-                _dump_launch_tensors(args, self.filename, self.kernel_hash, self.fn.__name__)
+            if not self.kernels_to_dump or any(
+                kernel_name in self.fn.__name__ for kernel_name in self.kernels_to_dump
+            ):
+                _dump_launch_tensors(
+                    args, self.filename, self.kernel_hash, self.fn.__name__
+                )
 
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
