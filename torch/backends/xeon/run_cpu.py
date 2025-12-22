@@ -453,6 +453,11 @@ Value applied: %s. Value ignored: %s",
         cores = []
         set_kmp_affinity = True
         enable_taskset = False
+        if args.skip_cross_node_cores:
+            logger.warning(
+                "Argument --skip-cross-node-cores is deprecated by --bind-numa-node."
+            )
+            args.bind_numa_node = args.skip_cross_node_cores
         # ncores_per_instance param check and expand for multi-instance
         if not isinstance(args.ncores_per_instance, list):
             args.ncores_per_instance = [args.ncores_per_instance]
@@ -461,17 +466,18 @@ Value applied: %s. Value ignored: %s",
             if args.ninstances > 0:
                 if len(args.ncores_per_instance) == 1:
                     args.ncores_per_instance = args.ncores_per_instance * args.ninstances
-                assert len(args.ncores_per_instance) == args.ninstances, (
-                    'Mismatch for \"--ninstances\" and \"--ncores-per-instance\" settings.'
-                )
+                if len(args.ncores_per_instance) != args.ninstances:
+                    raise AssertionError(
+                        'Mismatch for \"--ninstances\" and \"--ncores-per-instance\" settings.'
+                    )
             elif len(args.ncores_per_instance) > 1:
                 args.ninstances = len(args.ncores_per_instance)
 
         if args.core_list:  # user specify what cores will be used by params
             cores = [int(x) for x in args.core_list.split(",")]
             if args.ncores_per_instance == [-1]:
-                raise RuntimeError(
-                    'please specify the "--ncores-per-instance" if you have pass the --core-list params'
+                raise AssertionError(
+                    'please specify "--ncores-per-instance" if you have pass the --core-list params'
                 )
             if (
                 args.ninstances > 0
@@ -512,13 +518,13 @@ but you specify %s cores in core_list",
                 args.throughput_mode = True
             elif args.ncores_per_instance == [-1] and args.ninstances != -1:
                 if args.ninstances > len(cores):
-                    raise RuntimeError(
-                        f"there are {len(cores)} total cores but you specify {args.ninstances} ninstances; \
+                    raise AssertionError(
+                        f"there are only {len(cores)} total cores but you specify {args.ninstances} ninstances; \
 please make sure ninstances <= total_cores)"
                     )
-                if args.skip_cross_node_cores:
+                if args.bind_numa_node:
                     logger.warning(
-                        f"with --skip-cross-node-cores set, "
+                        f"with --bind-numa-node set, "
                         f"the first {args.ninstances} sub-numa node(s) will be used "
                         f"to launch {args.ninstances} instance(s), "
                         f"each node for 1 instance."
@@ -526,7 +532,7 @@ please make sure ninstances <= total_cores)"
                     if args.ninstances > self.cpuinfo.node_nums:
                         raise AssertionError(
                             f"--ninstances should not be larger than numa node number \
-when --skip-cross-node-cores is set"
+when --bind-numa-node or --skip-cross-node-cores is set"
                         )
                     cores.clear()
                     args.ncores_per_instance.clear()
@@ -542,31 +548,29 @@ when --skip-cross-node-cores is set"
                     )
                     args.ncores_per_instance = [len(cores) // args.ninstances] * args.ninstances
             elif args.ncores_per_instance != [-1]:
-                if args.skip_cross_node_cores:
+                if args.bind_numa_node:
                     utilized_node_cores = self.cpuinfo.node_logical_cores if args.use_logical_core else self.cpuinfo.node_physical_cores
                     ncore_per_node = [len(c) for c in utilized_node_cores]
                     if len(args.ncores_per_instance) > len(ncore_per_node):
                         # too many ncores_per_instance to skip cross-node cores
-                        logger.warning(
-                            "there are %s nodes, but %s ncores_per_instance elements and \
-skip_cross_node_cores are specified.",
+                        raise AssertionError(
+                            "there are %s nodes, but %s ncores-per-instance elements and \
+--bind-numa-node is specified.",
                             len(ncore_per_node),
                             len(args.ncores_per_instance),
                         )
-                        sys.exit(-1)
                     leftover_cores = list()
                     for i, core_num in enumerate(args.ncores_per_instance):
                         leftover_num = core_num - ncore_per_node[i]
                         if leftover_num > 0:
                             # too many ncores_per_instance for a node
-                            logger.warning(
+                            raise AssertionError(
                                 "there are %s core(s) in node %s, but specified %s cores for \
-this node and skip_cross_node_cores. ",
+this node and --bind-numa-node is specified.",
                                 ncore_per_node[i],
                                 i,
                                 core_num,
                             )
-                            sys.exit(-1)
                         elif leftover_num < 0:
                             # Exclude excessive cores from largest core IDs
                             leftover_cores.extend(utilized_node_cores[i][leftover_num:])
@@ -579,7 +583,7 @@ this node and skip_cross_node_cores. ",
                 args.ninstances = len(args.ncores_per_instance)
             else:
                 if sum(args.ncores_per_instance) > len(cores):
-                    raise RuntimeError(
+                    raise AssertionError(
                         "Please make sure the sum up of ncores_per_instance <= total_cores"
                     )
             if args.latency_mode:
@@ -590,13 +594,18 @@ this node and skip_cross_node_cores. ",
                 core_num_per_instance = 4
                 cores = list()
                 args.ninstances = 0
-                if args.skip_cross_node_cores:
+                if args.bind_numa_node:
                     # Per-numa core allocation, the remainder cores are not used
-                    for node_core_list in self.cpuinfo.node_physical_cores:
+                    for node_id, node_core_list in enumerate(self.cpuinfo.node_physical_cores):
                         node_core_num = len(node_core_list)
                         for i in range(core_num_per_instance, node_core_num + 1, core_num_per_instance):
                             args.ninstances += 1
                             cores.extend(node_core_list[i - core_num_per_instance: i])
+                        if i < node_core_num:
+                            logger.warning(
+                                f"With --bind-numa-node set, not all the cores on node {node_id} is used "
+                                f"because the core number on this node is not dividable by {core_num_per_instance}."
+                            )
                     args.ncores_per_instance = [core_num_per_instance] * args.ninstances
                 else:
                     # Compact allocation of all physical cores, regardless of numa
@@ -799,11 +808,19 @@ def _add_multi_instance_params(parser):
         help="For multi-instance, you should give the cores number you used for per instance.",
     )
     group.add_argument(
+        "--bind-numa-node",
+        "--bind_numa_node",
+        action="store_true",
+        default=False,
+        help="Bind each instance to a numa node when applicable. If it's conflict with other settings, \
+it would at least ensure no cross-numa cores would be assigned to any single instance.",
+    )
+    group.add_argument(
         "--skip-cross-node-cores",
         "--skip_cross_node_cores",
         action="store_true",
         default=False,
-        help="If specified --ncores-per-instance, skips cross-node cores.",
+        help="--skip-cross-node-cores is deprecated by --bind-numa-node.",
     )
     group.add_argument(
         "--rank",
