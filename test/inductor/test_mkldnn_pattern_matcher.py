@@ -1139,6 +1139,7 @@ class TestPatternMatcher(TestPatternMatcherBase):
             v = torch.randn(2, 4, 16).to(dtype)
             self._test_common(mod, (v,), matcher_check_fn, rtol=1e-2, atol=1e-2)
 
+
 instantiate_device_type_tests(
     TestPatternMatcherGeneric, globals(), allow_xpu=True, only_for=("cpu", "xpu")
 )
