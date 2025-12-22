@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 CUTLASS_OPERATION_KIND: str = "gemm"
 ACCUMULATOR_DTYPES: OrderedSet[torch.dtype] = OrderedSet([torch.float, torch.int32])
 XW_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
-    [torch.half, torch.bfloat16, torch.float8_e4m3fn, torch.int8]
+    [torch.half, torch.bfloat16, torch.float8_e4m3fn, torch.int8, torch.float8_e5m2]
 )
 
 
@@ -298,6 +298,7 @@ DTYPE_TO_CUTLASS_TYPE = {
     torch.float16: "__half",
     torch.bfloat16: "__nv_bfloat16",
     torch.float8_e4m3fn: "__nv_fp8_e4m3",
+    torch.float8_e5m2: "__nv_fp8_e5m2",
 }
 
 
@@ -345,6 +346,8 @@ def dtype_match(
         return cutlass_dtype == cutlass_library.library.DataType.s32
     elif torch_dtype == torch.float8_e4m3fn:
         return cutlass_dtype == cutlass_library.library.DataType.e4m3
+    elif torch_dtype == torch.float8_e5m2:
+        return cutlass_dtype == cutlass_library.library.DataType.e5m2
     else:
         return False
 
@@ -379,7 +382,15 @@ def get_accumulator_dtype(
         ]:
             torch_dtype = dtype0
 
-    if torch_dtype in (torch.float16, torch.bfloat16, torch.float, torch.float8_e4m3fn):
+    if torch_dtype in (
+        torch.float16,
+        torch.bfloat16,
+        torch.float,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+    ) or OrderedSet([dtype0, dtype1]) == OrderedSet(
+        [torch.float8_e5m2, torch.float8_e4m3fn]
+    ):
         accumulator_dtype = torch.float
     elif torch_dtype == torch.int8:
         accumulator_dtype = torch.int32
@@ -403,7 +414,12 @@ def get_alignments(torch_dtype: torch.dtype) -> list[int]:
         return [8, 4, 2, 1]
     elif torch_dtype == torch.float:
         return [4, 2, 1]
-    elif torch_dtype in (torch.uint8, torch.int8, torch.float8_e4m3fn):
+    elif torch_dtype in (
+        torch.uint8,
+        torch.int8,
+        torch.float8_e4m3fn,
+        torch.float8_e5m2,
+    ):
         return [16, 8, 4, 2]
     elif torch_dtype == torch.int32:
         return [4, 2, 1]
