@@ -950,14 +950,14 @@ class FakeTensor(Tensor):
             )
 
             # mismatching devices !
-            # if current tensor is cpu single value, defer to existing device
+            # if current tensor is cpu single element, defer to existing device
             if (
                 t_is_cpu_single_element
                 and not is_bypass_single_element_cpu_tensor_check_op
             ):
                 return
 
-            # current device is from cpu single value tensor, overwrite
+            # current device is from cpu single element tensor, overwrite
             if (
                 is_cpu_single_element
                 and not is_bypass_single_element_cpu_tensor_check_op
@@ -989,7 +989,7 @@ class FakeTensor(Tensor):
                     # Keep the existing preferred device type
                     return
 
-            # mismatching devices of non - single value tensors, throw
+            # mismatching devices of non - single element tensors, throw
             # This might be valid behavior and need to be explicitly modeled, e.g. reshape_as
             raise RuntimeError(
                 f"Unhandled FakeTensor Device Propagation for {func}, found two different devices {common_device}, {t.device}"
