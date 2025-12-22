@@ -221,7 +221,7 @@ class graph:
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
         # restriction that only one capture may be underway at a time in the process.
-        if self.__class__.default_capture_stream is None:
+        if stream is None and self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.cuda.Stream()
 
         self.pool: tuple[()] | tuple[_POOL_HANDLE] = () if pool is None else (pool,)

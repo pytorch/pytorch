@@ -935,10 +935,17 @@ class BuiltinVariable(VariableTracker):
                         return ConstantVariable.create(op.__name__ != "is_")
                     if left is right:
                         return ConstantVariable.create(op(left, right))
-                    if (
-                        istype(left, variables.ExceptionVariable)
-                        and istype(right, variables.ExceptionVariable)
-                        and left.exc_type is not right.exc_type
+
+                    # In CPython, exceptions compare equal only when they are the same object
+                    # (identity-based). In Dynamo, a single exception object cannot be represented
+                    # by multiple distinct ExceptionVariables. Therefore, the following scenarios
+                    # are impossible:
+                    # + is(a, b) == True but should be False => impossible, since a and b would be
+                    #   the same underlying object.
+                    # + is(a, b) == False but should be True => impossible, since Dynamo cannot
+                    #   create two different ExceptionVariables for the same exception instance.
+                    if istype(left, variables.ExceptionVariable) and istype(
+                        right, variables.ExceptionVariable
                     ):
                         return ConstantVariable.create(op(left, right))
                     return None
@@ -1161,9 +1168,18 @@ class BuiltinVariable(VariableTracker):
                                     kwargs,
                                 )
 
-                    return ComputedLazyConstantVariable.create(
-                        fn, list(args), reconstruct_fn
-                    )
+                    try:
+                        return ComputedLazyConstantVariable.create(
+                            fn, list(args), reconstruct_fn
+                        )
+                    except (TypeError, ValueError):
+                        # Operation failed (e.g., operator.le(torch.device, str) raises TypeError).
+                        # Fall back to realizing lazy args and let other handlers deal with it.
+                        return obj.call_function(
+                            tx,
+                            [v.realize() for v in args],
+                            kwargs,
+                        )
 
                 return handle_lazy_constant
 

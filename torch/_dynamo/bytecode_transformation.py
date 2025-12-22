@@ -639,27 +639,26 @@ def create_binary_op(op: Callable[..., Any]) -> Instruction | None:
 
 
 # Comparison operator to COMPARE_OP arg mapping.
-# In Python 3.12+, arg = (cmp_index << 4) | (intrinsic_flags).
-# The values below are obtained empirically from disassembling comparison bytecode.
-if sys.version_info >= (3, 12):
-    _OPERATOR_TO_COMPARE_OP_ARG: dict[Callable[..., Any], int] = {
-        operator.lt: 2,
-        operator.le: 26,
-        operator.eq: 40,
-        operator.ne: 55,
-        operator.gt: 68,
-        operator.ge: 92,
-    }
-else:
-    # Python <3.12: arg is the index in dis.cmp_op
-    _OPERATOR_TO_COMPARE_OP_ARG: dict[Callable[..., Any], int] = {
-        operator.lt: 0,
-        operator.le: 1,
-        operator.eq: 2,
-        operator.ne: 3,
-        operator.gt: 4,
-        operator.ge: 5,
-    }
+# The arg encoding changed between Python versions (3.12 vs 3.13), so we
+# compute the values dynamically at import time by disassembling actual bytecode.
+def _get_compare_op_arg(op_str: str) -> int:
+    """Get the COMPARE_OP arg for a comparison operator by disassembling bytecode."""
+    code = compile(f"a {op_str} b", "<compare>", "eval")
+    for instr in dis.get_instructions(code):
+        if instr.opname == "COMPARE_OP":
+            assert instr.arg is not None
+            return instr.arg
+    raise RuntimeError(f"Could not find COMPARE_OP for {op_str}")
+
+
+_OPERATOR_TO_COMPARE_OP_ARG: dict[Callable[..., Any], int] = {
+    operator.lt: _get_compare_op_arg("<"),
+    operator.le: _get_compare_op_arg("<="),
+    operator.eq: _get_compare_op_arg("=="),
+    operator.ne: _get_compare_op_arg("!="),
+    operator.gt: _get_compare_op_arg(">"),
+    operator.ge: _get_compare_op_arg(">="),
+}
 
 
 def create_compare_op(op: Callable[..., Any]) -> Instruction | None:
