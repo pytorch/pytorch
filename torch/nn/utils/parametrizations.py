@@ -324,6 +324,15 @@ class _WeightNorm(Module):
         self.dim = dim
 
     def forward(self, weight_g, weight_v):
+        """Apply weight normalization using magnitude and direction components.
+        
+        Args:
+            weight_g: Weight magnitude
+            weight_v: Weight direction  
+            
+        Returns:
+            Normalized weight tensor
+        """
         return torch._weight_norm(weight_v, weight_g, self.dim)
 
     def right_inverse(self, weight):
