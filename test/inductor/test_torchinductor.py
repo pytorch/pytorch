@@ -160,6 +160,25 @@ if TEST_WITH_ROCM:
     torch._inductor.config.force_layout_optimization = 1
     os.environ["PYTORCH_MIOPEN_SUGGEST_NHWC"] = "1"
 
+
+def get_test_device_name():
+    """Helper function to get the correct test device name for ROCm compatibility.
+    
+    Returns 'hip' when running on ROCm hardware, 'cuda' otherwise.
+    This centralizes device name logic to avoid code duplication.
+    """
+    return "hip" if torch.version.hip else "cuda"
+
+
+def get_test_dispatch_key():
+    """Helper function to get the correct dispatch key for ROCm compatibility.
+    
+    Returns 'HIP' when running on ROCm hardware, 'CUDA' otherwise.
+    This centralizes dispatch key logic to avoid code duplication.
+    """
+    return "HIP" if torch.version.hip else "CUDA"
+
+
 aten = torch.ops.aten
 
 requires_multigpu = functools.partial(
@@ -1044,9 +1063,9 @@ class CommonTemplate:
         op_name = "tril_indices"
         dispatch_key = "CPU"
         device = "cpu"
-        if self.device.lower() == "cuda":
-            dispatch_key = "CUDA"
-            device = "cuda"
+        if self.device.lower() == get_test_device_name():
+            dispatch_key = get_test_dispatch_key()
+            device = get_test_device_name()
 
         with _scoped_library("aten", "IMPL") as torch_compile_op_lib_impl:
             row = 128
@@ -3215,7 +3234,7 @@ class CommonTemplate:
 
     @xfail_if_triton_cpu
     def test_round_correctness(self):
-        if self.device == "cuda":
+        if self.device == get_test_device_name():
             raise unittest.SkipTest("need to debug tl.libdevice on A100/V100")
 
         def fn(a):
@@ -8932,7 +8951,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     def test_scatter2(self):
-        if self.device == "cuda":
+        if self.device == get_test_device_name():
             raise unittest.SkipTest("unstable on sm86")
 
         check_lowp = True
