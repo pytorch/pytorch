@@ -18,6 +18,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._guards import detect_fake_mode
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
@@ -182,7 +183,10 @@ def run_functionalized_fw_and_collect_metadata(
     @simple_wraps(f)
     def inner(*flat_args):
         # This function is meant to be run with the forward, which expects a flat list of tensor/symint/other args.
-        assert all(isinstance(a, tuple(KNOWN_TYPES)) for a in flat_args)
+        assert all(
+            isinstance(a, tuple(KNOWN_TYPES)) or is_opaque_type(type(a))
+            for a in flat_args
+        )
 
         input_info: list[InputAliasInfo] = []
         output_info: list[OutputAliasInfo] = []

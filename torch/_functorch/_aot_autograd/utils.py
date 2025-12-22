@@ -17,6 +17,7 @@ from typing_extensions import ParamSpec
 import torch
 import torch.utils._pytree as pytree
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -193,11 +194,7 @@ def create_tree_flattened_fn(fn, args, kwargs=None) -> tuple[Callable, PytreeThu
         tree_out = fn(*args, **kwargs)
         flat_out, spec = pytree.tree_flatten(tree_out)
         for i in flat_out:
-            is_known_type = False
-            for j in KNOWN_TYPES:
-                if isinstance(i, j):
-                    is_known_type = True
-                    break
+            is_known_type = isinstance(i, tuple(KNOWN_TYPES)) or is_opaque_type(i)
             if not is_known_type:
                 raise RuntimeError(
                     f"Found {type(i)} in output, which is not a known type. "

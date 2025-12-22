@@ -37,6 +37,7 @@ through `register_opaque_type(MyClass, typ="value")`.
 
 from dataclasses import dataclass
 from typing import Any, Literal, NewType
+from typing_extensions import TypeIs
 from weakref import WeakKeyDictionary
 
 import torch
@@ -163,6 +164,10 @@ def register_opaque_type(cls: Any, *, typ: str) -> None:
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
     torch._C._register_opaque_type(name)
+
+
+def is_opaque_value(value: object) -> TypeIs[OpaqueType]:
+    return is_opaque_type(type(value))
 
 
 def is_opaque_type(cls: Any) -> bool:
