@@ -218,20 +218,20 @@ HIPSPARSELT_LIB_FILES=($HIPSPARSELT_ARCH_SPECIFIC_FILES $HIPSPARSELT_OTHER_FILES
 ROCM_SO_PATHS=()
 for lib in "${ROCM_SO_FILES[@]}"
 do
-    file_path=($(find $ROCM_HOME/lib/ -name "$lib")) # First search in lib
-    if [[ -z $file_path ]]; then
+    file_path=($(find "$ROCM_HOME/lib/" -name "$lib")) # First search in lib
+    if [[ ${#file_path[@]} -eq 0 ]]; then
         if [ -d "$ROCM_HOME/lib64/" ]; then
-            file_path=($(find $ROCM_HOME/lib64/ -name "$lib")) # Then search in lib64
+            file_path=($(find "$ROCM_HOME/lib64/" -name "$lib")) # Then search in lib64
         fi
     fi
-    if [[ -z $file_path ]]; then
-        file_path=($(find $ROCM_HOME/ -name "$lib")) # Then search in ROCM_HOME
+    if [[ ${#file_path[@]} -eq 0 ]]; then
+        file_path=($(find "$ROCM_HOME/" -name "$lib")) # Then search in ROCM_HOME
     fi
-    if [[ -z $file_path ]]; then
+    if [[ ${#file_path[@]} -eq 0 ]]; then
         echo "Error: Library file $lib is not found." >&2
         exit 1
     fi
-    ROCM_SO_PATHS[${#ROCM_SO_PATHS[@]}]="$file_path" # Append lib to array
+    ROCM_SO_PATHS[${#ROCM_SO_PATHS[@]}]="${file_path[0]}" # Append first match to array
 done
 
 DEPS_LIST=(

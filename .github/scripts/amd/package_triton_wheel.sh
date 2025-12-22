@@ -1,7 +1,7 @@
 #!/bin/bash
 set -ex
 
-# Set ROCM_HOME isn't available, use ROCM_PATH if set or /opt/rocm
+# If ROCM_HOME isn't available, use ROCM_PATH if set or /opt/rocm
 ROCM_HOME="${ROCM_HOME:-${ROCM_PATH:-/opt/rocm}}"
 
 # Find rocm_version.h header file for ROCm version extract
@@ -29,7 +29,7 @@ if [[ -z "${TRITON_ROCM_DIR}" ]]; then
 fi
 
 # Remove packaged libs and headers
-rm -rf $TRITON_ROCM_DIR/include/*
+rm -rf "$TRITON_ROCM_DIR/include/"*
 
 LIBNUMA_PATH="/usr/lib64/libnuma.so.1"
 LIBELF_PATH="/usr/lib64/libelf.so.1"
@@ -48,7 +48,7 @@ OS_SO_PATHS=(
 
 for lib in "${OS_SO_PATHS[@]}"
 do
-    cp $lib $TRITON_ROCM_DIR/lib/
+    cp "$lib" "$TRITON_ROCM_DIR/lib/"
 done
 
 # Required ROCm libraries - ROCm 6.0
@@ -63,32 +63,32 @@ ROCM_SO=(
 
 for lib in "${ROCM_SO[@]}"
 do
-    file_path=($(find $ROCM_HOME/lib/ -name "$lib")) # First search in lib
-    if [[ -z $file_path ]]; then
+    file_path=($(find "$ROCM_HOME/lib/" -name "$lib")) # First search in lib
+    if [[ ${#file_path[@]} -eq 0 ]]; then
         if [ -d "$ROCM_HOME/lib64/" ]; then
-            file_path=($(find $ROCM_HOME/lib64/ -name "$lib")) # Then search in lib64
+            file_path=($(find "$ROCM_HOME/lib64/" -name "$lib")) # Then search in lib64
         fi
     fi
-    if [[ -z $file_path ]]; then
-        file_path=($(find $ROCM_HOME/ -name "$lib")) # Then search in ROCM_HOME
+    if [[ ${#file_path[@]} -eq 0 ]]; then
+        file_path=($(find "$ROCM_HOME/" -name "$lib")) # Then search in ROCM_HOME
     fi
-    if [[ -z $file_path ]]; then
+    if [[ ${#file_path[@]} -eq 0 ]]; then
         file_path=($(find /opt/ -name "$lib")) # Then search in /opt
     fi
-    if [[ -z $file_path ]]; then
-            echo "Error: Library file $lib is not found." >&2
-            exit 1
+    if [[ ${#file_path[@]} -eq 0 ]]; then
+        echo "Error: Library file $lib is not found." >&2
+        exit 1
     fi
 
-    cp $file_path $TRITON_ROCM_DIR/lib
+    cp "${file_path[0]}" "$TRITON_ROCM_DIR/lib"
 done
 
 # Copy Include Files
-cp -r $ROCM_HOME/include/hip $TRITON_ROCM_DIR/include
-cp -r $ROCM_HOME/include/roctracer $TRITON_ROCM_DIR/include
-cp -r $ROCM_HOME/include/hsa $TRITON_ROCM_DIR/include
-cp -r $ROCM_HOME/include/hipblas-common $TRITON_ROCM_DIR/include
+cp -r "$ROCM_HOME/include/hip" "$TRITON_ROCM_DIR/include"
+cp -r "$ROCM_HOME/include/roctracer" "$TRITON_ROCM_DIR/include"
+cp -r "$ROCM_HOME/include/hsa" "$TRITON_ROCM_DIR/include"
+cp -r "$ROCM_HOME/include/hipblas-common" "$TRITON_ROCM_DIR/include"
 
 # Copy linker
-mkdir -p $TRITON_ROCM_DIR/llvm/bin
-cp $ROCM_HOME/llvm/bin/ld.lld $TRITON_ROCM_DIR/llvm/bin/
+mkdir -p "$TRITON_ROCM_DIR/llvm/bin"
+cp "$ROCM_HOME/llvm/bin/ld.lld" "$TRITON_ROCM_DIR/llvm/bin/"
