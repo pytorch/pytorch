@@ -12,6 +12,16 @@ __all__ = ["orthogonal", "spectral_norm", "weight_norm"]
 
 
 def _is_orthogonal(Q, eps=None):
+    """Check if a matrix Q is orthogonal.
+    
+    Args:
+        Q (Tensor): Matrix to check for orthogonality
+        eps (float, optional): Tolerance for the orthogonality check. If None,
+            a reasonable default based on matrix dimensions and dtype is used.
+        
+    Returns:
+        bool: True if Q is orthogonal (i.e., Q.H @ Q ≈ I), False otherwise
+    """
     n, k = Q.size(-2), Q.size(-1)
     Id = torch.eye(k, dtype=Q.dtype, device=Q.device)
     # A reasonable eps, but not too large
