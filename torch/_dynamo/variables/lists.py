@@ -104,6 +104,19 @@ class BaseListVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
 
+    def is_python_constant(self) -> bool:
+        """Check if this container is a python constant without realizing lazy constants.
+
+        Uses try_peek_constant() to check each item without realizing lazy constants.
+        Returns False if any item is an unrealized lazy constant - this forces
+        the codegen path to use reconstruct() instead of loading as a constant,
+        which avoids installing guards on the lazy constants.
+        """
+        can_peek, is_unrealized, _value = self.try_peek_constant()
+        # Return False if any item is unrealized to avoid as_python_constant()
+        # being called, which would realize lazy constants and install guards
+        return can_peek and not is_unrealized
+
     def try_peek_constant(self) -> tuple[bool, bool, Any]:
         """Peek at the constant value without triggering realization.
 

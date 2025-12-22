@@ -1793,7 +1793,16 @@ class StringFormatVariable(VariableTracker):
 
     @classmethod
     def create(cls, format_string, sym_args, sym_kwargs):
-        if all(
+        from .lazy import ComputedLazyConstantVariable, LazyConstantVariable
+
+        # Check if any args are lazy constants - if so, keep them unrealized
+        # to avoid installing guards unnecessarily
+        has_lazy_constant = any(
+            isinstance(x, (LazyConstantVariable, ComputedLazyConstantVariable))
+            for x in itertools.chain(sym_args, sym_kwargs.values())
+        )
+
+        if not has_lazy_constant and all(
             x.is_python_constant()
             for x in itertools.chain(sym_args, sym_kwargs.values())
         ):
