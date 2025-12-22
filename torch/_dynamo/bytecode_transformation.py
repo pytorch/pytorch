@@ -587,6 +587,11 @@ if sys.version_info >= (3, 11):
             dis._nb_ops  # pyrefly: ignore[missing-attribute]
         )
     }
+    # List of opnames indexed by arg value, for use by symbolic_convert.BINARY_OP
+    _NB_OP_NAMES: list[str] = [
+        name
+        for name, _ in dis._nb_ops  # pyrefly: ignore[missing-attribute]
+    ]
     _OPERATOR_TO_BINARY_OP_ARG: dict[Callable[..., Any], int] = {
         operator.add: _NB_OP_TO_ARG["NB_ADD"],
         operator.and_: _NB_OP_TO_ARG["NB_AND"],
@@ -605,6 +610,7 @@ if sys.version_info >= (3, 11):
     _OPERATOR_TO_BINARY_OPNAME: dict[Callable[..., Any], str] = {}
 else:
     _NB_OP_TO_ARG = {}
+    _NB_OP_NAMES: list[str] = []
     _OPERATOR_TO_BINARY_OP_ARG: dict[Callable[..., Any], int] = {}
     _OPERATOR_TO_BINARY_OPNAME: dict[Callable[..., Any], str] = {
         operator.add: "BINARY_ADD",
