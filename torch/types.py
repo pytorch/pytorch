@@ -108,18 +108,18 @@ class SupportsArray(Protocol):
 #   - NestedSequence: Nested lists/tuples of numbers
 #   - Scalar types: bool, int, float, complex
 #   - bytes/bytearray: For certain dtype conversions
-ArrayLike: TypeAlias = (
-    Tensor
-    | "numpy.ndarray[Any, Any]"  # type: ignore[name-defined]  # numpy may not be installed
-    | SupportsArray
-    | NestedSequence[bool | int | float | complex]
-    | bool
-    | int
-    | float
-    | complex
-    | bytes
-    | bytearray
-)
+ArrayLike: TypeAlias = Union[
+    Tensor,
+    "numpy.ndarray[Any, Any]",  # noqa: F821  # pyrefly: ignore[unknown-name]  # numpy is optional
+    SupportsArray,
+    NestedSequence[Union[bool, int, float, complex]],
+    bool,
+    int,
+    float,
+    complex,
+    bytes,
+    bytearray,
+]
 
 # Meta-type for "device-like" things.  Not to be confused with 'device' (a
 # literal device object).  This nomenclature is consistent with PythonArgParser.
