@@ -284,7 +284,7 @@ class TestGrid(TestCase):
         assert_equal(grid.size, expected[0])
         assert_equal(grid_small.size, expected[1])
 
-    @xfail  # (reason="mgrid not implementd")
+    @xfail  # (reason="mgrid not implemented")
     def test_accepts_npfloating(self):
         # regression test for #16466
         grid64 = mgrid[0.1:0.33:0.1,]

@@ -47,7 +47,7 @@ if TYPE_CHECKING:
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.coordinate_descent_tuner import CoordescTuner
 from ..runtime.hints import DeviceProperties
-from ..runtime.runtime_utils import green_text, next_power_of_2, yellow_text
+from ..runtime.runtime_utils import green_text, last_power_of_2, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
@@ -705,7 +705,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         def add_range(i: int, expr: sympy.Expr) -> int:
             expr = sv.simplify(expr)
             if not sv.statically_known_multiple_of(remaining[i], expr):
-                raise CantSplit
+                raise CantSplit(remaining[i], expr)
             # guard on the last item out
             remaining[i] = FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
@@ -783,15 +783,29 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
                     )
 
-                # Two-dimensional tiling
-                elif current_group + 1 < len(remaining) and sv.statically_known_gt(
-                    size, remaining[current_group]
+                # Two-dimensional tiling: split size across current_group and next group.
+                elif current_group + 1 < len(remaining) and (
+                    sv.statically_known_gt(size, remaining[current_group])
+                    or
+                    # statically_known_gt(size, remaining) may return False for symbolic
+                    # expressions like 64*u0 vs u0, because both could be 0. Similarly for
+                    # backed expressions like s25*(((s70 - 5)//4)) - s25 and
+                    # (s25*(((s70 - 5)//4)) - s25)*64.
+                    # We want to assume tensor sizes are not 0 and pass the gt
+                    # using the following logic.
+                    #
+                    # if A//B = C and C >= 1
+                    # then A = B * C + R
+                    # and assuming A!=0
+                    # A must be > B .
+                    #
+                    sv.statically_known_gt(FloorDiv(size, remaining[current_group]), 1)
                 ):
                     # need to break size in two
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group]
                     ):
-                        raise CantSplit
+                        raise CantSplit(size, remaining[current_group])
 
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
@@ -1625,7 +1639,7 @@ class SIMDScheduling(BaseScheduling):
 
             # split_size is decided based on hint
             numel_hint = V.graph.sizevars.size_hint(numel)
-            split_size = max(next_power_of_2(numel_hint // estimated_num_splits), 16)
+            split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
             split_size = min(split_size, 128)
             return split_size
 
@@ -1678,7 +1692,6 @@ class SIMDScheduling(BaseScheduling):
                 split_size,
                 8,
             )
-            # print(f"Autotuning pick split size {split_size}")
 
         kernel, ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel_features,
@@ -1749,9 +1762,12 @@ class SIMDScheduling(BaseScheduling):
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
 
-            V.graph.wrapper_code.writeline(
-                f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
-            )
+            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+            # The workspace tensor is in torch.float, need a cast if the buffer is
+            # not.
+            if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
+                final_reduce += f".to({buffer_dtype})"
+            V.graph.wrapper_code.writeline(final_reduce)
             # mark the buffer as allocated, so we don't try to allocate
             # it again when it's later used
             V.graph.wrapper_code.allocated.add(buffer_name)
@@ -2274,11 +2290,7 @@ class SIMDScheduling(BaseScheduling):
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
     ) -> list[tuple[str, Any, Any]]:
-        from .triton import TritonKernel
         from .triton_combo_kernel import ComboKernel
-
-        # This is currently the only type supported by this method
-        assert issubclass(self.kernel_type, TritonKernel)
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         subkernel_map, node_schedule_map = {}, {}
@@ -2291,7 +2303,6 @@ class SIMDScheduling(BaseScheduling):
                 tiling,
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
                 optimize_mask=not mixed_sizes,
-                triton_kernel_cls=self.kernel_type,
             )
 
         partitions = ComboKernel.horizontal_partition(
@@ -2311,7 +2322,6 @@ class SIMDScheduling(BaseScheduling):
             if len(node_group) == 0:
                 continue
             kernel = ComboKernel(
-                triton_kernel_cls=self.kernel_type,
                 enable_autotune=enable_autotune,
                 mixed_sizes=mixed_sizes,
             )
@@ -2676,13 +2686,17 @@ class SIMDScheduling(BaseScheduling):
         pw_ranges = [ranges[v] for v in all_iter_vars]
         red_ranges = [ranges[v] for v in all_red_vars]
 
+        # Sometimes dynamic shapes is unable to prove equality without hint
+        get_hint = functools.partial(
+            V.graph.sizevars.size_hint, fallback=config.unbacked_symint_fallback
+        )
         torch._check(
-            sympy_product(pw_ranges) == pointwise_numel,
+            get_hint(sympy_product(pw_ranges)) == get_hint(pointwise_numel),
             lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}",
         )
 
         torch._check(
-            sympy_product(red_ranges) == reduction_numel,
+            get_hint(sympy_product(red_ranges)) == get_hint(reduction_numel),
             lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}",
         )
 
@@ -3117,4 +3131,10 @@ class CandidateTiling:
 
 
 class CantSplit(Exception):
-    pass
+    def __init__(self, expr, remaining):
+        super().__init__()
+        self.expr = expr
+        self.remaining = remaining
+
+    def __str__(self):
+        return f"{self.expr} not divisible by {self.remaining}"

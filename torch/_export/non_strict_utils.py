@@ -99,6 +99,7 @@ class _KeyPathTrie:
 
     def get(self, kp: KeyPath) -> tuple[Source, KeyPath]:
         node = self.root
+        # pyrefly: ignore [bad-assignment]
         while not isinstance(node, Source):
             assert len(kp) > 0
             k, *kp = kp  # type: ignore[assignment]
@@ -169,7 +170,11 @@ def fakify(
     sourced_prefixes: Optional[_KeyPathTrie] = None,
 ):
     source = key_path_to_source(kp, sourced_prefixes=sourced_prefixes)
-    if _is_constant_argument(t) or isinstance(t, (torch.ScriptObject, torch.nn.Module)):
+    if (
+        _is_constant_argument(t)
+        or isinstance(t, (torch.ScriptObject, torch.nn.Module))
+        or is_opaque_type(type(t))
+    ):
         return t
 
     if isinstance(t, _IntWrapper):
@@ -280,7 +285,7 @@ def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode)
             if isinstance(constraint, _RelaxedConstraint):
                 continue
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
+            mode.shape_env.source_name_to_debug_name[src.name] = constraint.name  # type: ignore[assignment]
 
     return symbolic_context
 
@@ -587,7 +592,12 @@ def produce_guards_and_solve_constraints(
     )
 
     if constraint_violation_error:
-        constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
+        if constraint_violation_error.args:
+            constraint_violation_error.args = (
+                constraint_violation_error.args[0] + msg,
+            )
+        else:
+            constraint_violation_error.args = (msg,)
     elif forced_specializations:
         constraint_violation_error = ConstraintViolationError(msg)
     if constraint_violation_error:
@@ -1099,7 +1109,7 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
                 def run():
                     # Run sequence.
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     t = args[0]
                     for _method, _args in sequence:
                         t = _method(t, *_args)
