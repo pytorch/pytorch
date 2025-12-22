@@ -708,7 +708,11 @@ class _TargetArgsExpr(_TargetExpr):
         return f"{self.__class__.__name__}({joiner_str.join(args)})"
 
     def _match(self, node: torch.fx.Node, ctx: MatchContext) -> MatchResult:
+        # if node.target == torch.nn.functional.softmax: breakpoint()
+        # if node.target == torch.argmax: breakpoint()
         if not self._match_fns(node) or len(node.args) != len(self.args):
+            if node.target == "exponential_":
+                breakpoint()
             return FailedMatch("function_mismatch: node={}, pattern={}", node, self)
 
         if not self._match_users(node, ctx):
@@ -759,6 +763,8 @@ class _TargetArgsExpr(_TargetExpr):
                 )
         m.nodes.append(node)
         m.targets[self] = node.target
+
+        print(f"match {node} got {m}")
         return m
 
     def find_anchor_nodes(
@@ -2053,6 +2059,7 @@ class PatternMatcherPass:
 
                     if is_match(m) and guard_or_false(entry.extra_check(m)):
                         count += 1
+                        print(f"apply to {node}")
                         entry.apply(m, graph, node)
                         counters[backend]["pattern_matcher_count"] += 1
                         counters[backend]["pattern_matcher_nodes"] += len(m.nodes)
