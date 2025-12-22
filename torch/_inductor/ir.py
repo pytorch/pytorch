@@ -8163,7 +8163,7 @@ class FallbackKernel(ExternKernelAlloc):
             kernel,
             (
                 torch._higher_order_ops.torchbind.CallTorchBind,
-                torch._ops.HigherOrderOperator,
+                torch.ops.higher_order.print,
             ),
         ):
             device = torch.device("cpu")

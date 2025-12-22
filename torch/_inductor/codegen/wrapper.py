@@ -70,6 +70,7 @@ from .common import (
     WorkspaceZeroMode,
 )
 from .cpp_utils import cexpr
+from .custom_extern_kernel_codegen import get_custom_codegen
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 
@@ -1548,44 +1549,13 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
-        # Special handling for print HOP - use builtin print directly
-        if (
-            isinstance(node.op_overload, torch._ops.HigherOrderOperator)
-            and node.python_kernel_name == "torch.ops.higher_order.print"
-        ):
-            self._generate_print_fallback(node)
+        # Check if this op has a custom codegen implementation
+
+        custom_codegen = get_custom_codegen(node.python_kernel_name, "python")
+        if custom_codegen is not None:
+            custom_codegen(node, self.writeline)
             return
         self.writeline(ExternKernelAllocLine(self, node))
-
-    def _generate_print_fallback(self, node: ir.FallbackKernel) -> None:
-        """Generate a builtin print call for the print HOP fallback."""
-        # Get args and kwargs from the node
-        args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
-
-        # First arg is the format string
-        format_str = args[0] if args else ""
-
-        # For HOPs, kwargs are stored in node.kwargs directly
-        # Use node.kwargs if available, otherwise fall back to unflatten_args kwargs
-        actual_kwargs = node.kwargs if node.kwargs else kwargs
-
-        # Build format kwargs - for Python we can directly use the values
-        format_kwargs: dict[str, str] = {}
-        for key, value in actual_kwargs.items():
-            if isinstance(value, ir.IRNode):
-                # For tensor nodes, reference the buffer
-                format_kwargs[key] = value.codegen_reference()
-            else:
-                format_kwargs[key] = repr(value)
-
-        # Generate the print call with formatted string using print
-        # to avoid any potential shadowing of the print name
-        if format_kwargs:
-            kwargs_str = ", ".join(f"{k}={v}" for k, v in format_kwargs.items())
-            self.writeline(f"print({repr(format_str)}.format({kwargs_str}))")
-        else:
-            # No format kwargs, just print the format string directly
-            self.writeline(f"print({repr(format_str)})")
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
