@@ -249,7 +249,14 @@ def _functional_call(
     tie_weights: bool = True,
     strict: bool = False,
 ):
-    # TODO allow kwargs such as unsafe and others for parametrization
+    # TODO: Add support for parametrization-related kwargs to improve API consistency
+    # Currently _functional_call only accepts tie_weights and strict kwargs, but 
+    # register_parametrization supports additional options like:
+    # - unsafe: bool = False (bypass safety checks)
+    # - cache_enabled: bool = False (enable caching for performance)
+    # Adding these would allow functional_call to handle parametrized modules
+    # with the same flexibility as regular parametrization workflows.
+    # See torch.nn.utils.parametrize.register_parametrization for reference.
     if (
         torch.jit.is_tracing()
         or torch.jit.is_scripting()
