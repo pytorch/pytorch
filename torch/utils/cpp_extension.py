@@ -2623,10 +2623,14 @@ def _get_build_directory(name: str, verbose: bool) -> str:
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
-        cu_str = ('cpu' if torch.version.cuda is None else
-                  f'cu{torch.version.cuda.replace(".", "")}')
+        if torch.version.cuda is not None:
+            accelerator = f'cu{torch.version.cuda.replace(".", "")}'
+        elif torch.version.hip is not None:
+            accelerator = f'rocm{torch.version.hip.replace(".", "")}'
+        else:
+            accelerator = 'cpu'
         python_version = f'py{sys.version_info.major}{sys.version_info.minor}{getattr(sys, "abiflags", "")}'
-        build_folder = f'{python_version}_{cu_str}'
+        build_folder = f'{python_version}_{accelerator}'
 
         root_extensions_directory = os.path.join(
             root_extensions_directory, build_folder)
