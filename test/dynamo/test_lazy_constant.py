@@ -1967,6 +1967,12 @@ class LazyConstantVariableTests(TestCase):
 
         When the same lazy key (same source) is used for both write and read,
         the result should always be correct regardless of what guards are installed.
+
+        TODO(jansel): Ideally this should NOT recompile since we're using the same
+        key for both write and read - the result is always what we just wrote,
+        regardless of the key value. Currently recompiles because operator.getitem
+        with a lazy key falls through to a handler that realizes the key (installing
+        CONSTANT_MATCH guard) before delegating to dict.__getitem__.
         """
         tensor_input = torch.tensor([1.0, 2.0, 3.0])
 
