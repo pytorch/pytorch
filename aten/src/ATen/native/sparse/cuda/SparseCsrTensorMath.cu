@@ -816,6 +816,7 @@ Tensor _sparse_csr_prod_cuda(const Tensor& input, IntArrayRef dims_to_reduce, bo
 }
 
 Tensor _sparse_csr_linear_solve(const Tensor& A, const Tensor& b, const bool left) {
+  TORCH_CHECK(b.numel() > 0, "Expected non-empty other tensor, but found empty tensor");
   Tensor out = at::empty(b.sizes(), b.options());
   if (b.dim() == 2) {
     // cuDSS expects column-major dense matrices. Convert the row-major contiguous
