@@ -147,7 +147,7 @@ class MissingTypeLinter(FileLinter):
             cmd = *shlex.split(self.args.type_check), *path
             text = self.call(cmd)
 
-        type_results = json.loads(text)
+        type_results = dict(sorted(json.loads(text).items()))
         name_count: dict[str, int] = {}
 
         # Uniquify pyrefly names
