@@ -1390,6 +1390,13 @@ def run_tests(argv=None):
     else:
         unittest.main(argv=argv)
 
+def cpu_supports_feature(feature):
+    if sys.platform != 'linux':
+        return False
+    with open("/proc/cpuinfo", encoding="ascii") as f:
+        lines = f.read()
+    return feature in lines
+
 IS_LINUX = sys.platform == "linux"
 IS_WINDOWS = sys.platform == "win32"
 IS_MACOS = sys.platform == "darwin"
@@ -1397,15 +1404,9 @@ IS_PPC = platform.machine() == "ppc64le"
 IS_X86 = platform.machine() in ('x86_64', 'i386')
 IS_ARM64 = platform.machine() in ('arm64', 'aarch64')
 IS_S390X = platform.machine() == "s390x"
-
-def is_avx512_vnni_supported():
-    if sys.platform != 'linux':
-        return False
-    with open("/proc/cpuinfo", encoding="ascii") as f:
-        lines = f.read()
-    return "vnni" in lines
-
-IS_AVX512_VNNI_SUPPORTED = is_avx512_vnni_supported()
+IS_AVX512_VNNI_SUPPORTED = cpu_supports_feature("vnni")
+IS_CPU_EXT_SVE_SUPPORTED = cpu_supports_feature("sve")
+IS_CPU_CAPABILITY_SVE256 = torch._C._get_cpu_capability() == "SVE256"
 
 if IS_WINDOWS:
     @contextmanager
