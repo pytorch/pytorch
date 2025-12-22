@@ -64,6 +64,8 @@ install_timm
 conda_run pip uninstall -y torch torchvision torchaudio triton torchao
 if [[ "${DESIRED_CUDA}" == 13.* ]]; then
   conda_run pip uninstall -y nvidia-nccl-cu13
+  conda_run pip uninstall -y nvidia-cudnn-cu13
 else
   conda_run pip uninstall -y nvidia-nccl-cu12
+  conda_run pip uninstall -y nvidia-cudnn-cu12
 fi
