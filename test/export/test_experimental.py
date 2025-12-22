@@ -3,8 +3,9 @@
 import copy
 import types
 import unittest
+import warnings
 from dataclasses import dataclass
-from typing import Dict, List, Tuple
+from typing import Any, Dict, List, Tuple
 
 import torch
 import torch._dynamo
@@ -16,6 +17,44 @@ from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import TEST_CUDA
+from torch.utils import _pytree as pytree
+
+
+GLOBAL_LIST = []
+
+
+class GlobalContext:
+    def __init__(self) -> None:
+        self._summaries: dict[str, MetricValue] = {}
+        self._tensors: dict[str, Tensor] = {}
+
+    def __flatten__(self):
+        """Flattens into (leaves, ctx)."""
+        summary_leaves, summary_spec = pytree.tree_flatten(self._summaries)
+        tensor_leaves, tensor_spec = pytree.tree_flatten(self._tensors)
+        leaves = (*summary_leaves, *tensor_leaves)
+        ctx = (summary_spec, tensor_spec)
+        return leaves, ctx
+
+    @classmethod
+    def __unflatten__(cls, leaves, ctx: tuple[pytree.TreeSpec, pytree.TreeSpec]):
+        """Reconstructs from (leaves, ctx)."""
+        output = cls()
+        summary_spec, tensor_spec = ctx
+        assert len(leaves) == summary_spec.num_leaves + tensor_spec.num_leaves
+        output._summaries = pytree.tree_unflatten(
+            leaves[: summary_spec.num_leaves], summary_spec
+        )
+        output._tensors = pytree.tree_unflatten(
+            leaves[summary_spec.num_leaves :], tensor_spec
+        )
+        return output
+
+    def __enter__(self) -> "GlobalContext":
+        return self
+
+    def __exit__(self, exc_type: Any, exc_value: Any, traceback: Any) -> None:
+        pass
 
 
 @unittest.skipIf(not torch._dynamo.is_dynamo_supported(), "dynamo isn't supported")
@@ -121,6 +160,104 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     permute_3 = torch.ops.aten.permute.default(permute_2, [1, 0]);  permute_2 = None
     return (div, permute_3, view_3)""",
         )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask(self):
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
+        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+
+        if BlockMask not in SUPPORTED_NODES:
+            register_pytree_node(
+                BlockMask,
+                BlockMask._flatten,
+                BlockMask._unflatten,
+                flatten_with_keys_fn=BlockMask._flatten_with_keys,
+                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+            )
+
+        def make_mask_closure():
+            def fn(b, h, q, k):
+                return q >= k
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+
+            def forward(self, x):
+                mask_fn = make_mask_closure()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        out_eager, mask_eager = module(x)
+
+        compiled = _dynamo_graph_capture_for_export(module)(x)
+        out_compiled, mask_compiled = compiled(x)
+
+        B = 1
+        H = 1
+        Q_LEN = 64
+        KV_LEN = 64
+
+        self.assertEqual(out_eager, out_compiled)
+        # they are not same function because dynamo reconstructs them
+        self.assertEqual(
+            mask_eager.mask_mod(B, H, Q_LEN, KV_LEN),
+            mask_compiled.mask_mod(B, H, Q_LEN, KV_LEN),
+        )
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_error(self):
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
+        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+
+        if BlockMask not in SUPPORTED_NODES:
+            register_pytree_node(
+                BlockMask,
+                BlockMask._flatten,
+                BlockMask._unflatten,
+                flatten_with_keys_fn=BlockMask._flatten_with_keys,
+                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+            )
+
+        def make_mask_closure():
+            closure = 4
+
+            def fn(b, h, q, k):
+                return q >= k + closure
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def __init__(
+                self,
+            ):
+                super().__init__()
+
+            def forward(self, x):
+                mask_fn = make_mask_closure()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported, "nested function with closure in output"
+        ):
+            compiled = _dynamo_graph_capture_for_export(module)(x)
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
@@ -349,6 +486,18 @@ def forward(self, x):
         res2 = p.generate(input_tensor=inp, input_tensor2=inp2)
         self.assertTrue(torch.allclose(res, res2))
 
+    def test_side_effect(self):
+        global_env = []
+
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                global_env.append(x)
+                return x.sin()
+
+        with torch._dynamo.config.patch(replay_side_effects=False):
+            _ = dynamo_graph_capture_for_export(Foo())(torch.randn(4, 4))
+            self.assertEqual(len(global_env), 0)
+
     def test_export_add_in_out_info(self):
         class Foo(torch.nn.Module):
             def forward(self, dct, lst, bleh):
@@ -375,9 +524,9 @@ def forward(self, x):
         export_inputs = ((dct, lst, 56), {})
         eager_inputs = copy.deepcopy(export_inputs)
 
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
-        graph_module = _dynamo_graph_capture_for_export(Foo())(
+        graph_module = dynamo_graph_capture_for_export(Foo())(
             *export_inputs[0], **export_inputs[1]
         )
 
@@ -394,9 +543,9 @@ def forward(self, x):
         export_inputs = ((torch.randn(4, 4),), {})
         eager_inputs = copy.deepcopy(export_inputs)
 
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
-        graph_module = _dynamo_graph_capture_for_export(Foo())(
+        graph_module = dynamo_graph_capture_for_export(Foo())(
             *export_inputs[0], **export_inputs[1]
         )
 
@@ -439,6 +588,31 @@ def forward(self, x):
         gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
         test_inputs = make_inputs()
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
+
+    def test_dynamo_graph_capture_with_call_override(self):
+        class _InterestingModule(torch.nn.Module):
+            def __init__(self, module):
+                super().__init__()
+                self._module = module
+
+            def __call__(self, *args, **kwargs):
+                return self._module(*args, **kwargs)
+
+        class MyModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        foo = _InterestingModule(MyModel())
+
+        def make_inputs():
+            return (torch.randn(2, 3),)
+
+        trace_inputs = make_inputs()
+        gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
+        test_inputs = make_inputs()
+        self.assertEqual(gm(*test_inputs), foo(*test_inputs))
+        self.assertEqual(len(list(gm.buffers())), len(list(foo.buffers())))
+        self.assertEqual(len(list(gm.parameters())), len(list(foo.parameters())))
 
     def test_dynamo_graph_capture_custom_pytree_type(self):
         import torch.utils._pytree as pytree
@@ -541,6 +715,33 @@ def forward(self, args_0):
         self.assertIsNotNone(gm.meta["tracing_context"].fake_mode)
         self.assertEqual(len(gm.meta["tracing_context"].tensor_to_context), 1)
 
+    def test_dynamo_graph_capture_ctx_return(self):
+        class Module(torch.nn.Module):
+            def forward(self, x):
+                with GlobalContext() as ctx:
+                    z = x + 1
+                    ctx._tensors["6"] = x + 2
+                return z, ctx
+
+        def make_inputs():
+            return (torch.randn(2, 3),)
+
+        try:
+            pytree.register_pytree_node(
+                GlobalContext,
+                lambda x: x.__flatten__(),
+                GlobalContext.__unflatten__,
+            )
+            mod = Module()
+
+            gm = dynamo_graph_capture_for_export(mod)(*make_inputs())
+            test_inputs = make_inputs()
+            actual_outputs = pytree.tree_leaves(gm(*test_inputs))
+            expected_outputs = pytree.tree_leaves(mod(*test_inputs))
+            self.assertEqual(actual_outputs, expected_outputs)
+        finally:
+            pytree._deregister_pytree_node(GlobalContext)
+
     def test_dynamo_graph_capture_dict_keys_getitem(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -598,6 +799,37 @@ def forward(self, args_0):
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
         self.assertEqual(len(list(gm.buffers())), len(list(foo.buffers())))
         self.assertEqual(len(list(gm.parameters())), len(list(foo.parameters())))
+
+    def test_dynamo_graph_capture_side_effects(self):
+        GLOBAL_LIST.clear()
+
+        def foo(x):
+            z = x + 1
+            GLOBAL_LIST.append(z)
+            return z
+
+        def make_inputs():
+            return (torch.randn(2, 3),)
+
+        trace_inputs = make_inputs()
+        with (
+            torch._dynamo.config.patch(replay_side_effects=False),
+            warnings.catch_warnings(record=True) as w,
+        ):
+            gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
+            cnt = 0
+            for entry in w:
+                if "While compiling, we found certain side effects happened" in str(
+                    entry.message
+                ):
+                    cnt += 1
+            self.assertEqual(cnt, 1)
+        self.assertEqual(len(GLOBAL_LIST), 0)
+        test_inputs = make_inputs()
+        gm_results = gm(*test_inputs)
+        self.assertEqual(len(GLOBAL_LIST), 0)
+        self.assertEqual(gm_results, foo(*test_inputs))
+        self.assertEqual(len(GLOBAL_LIST), 1)
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_dynamo_graph_capture_fx_graph_annotate_overlap_pass(self):

@@ -1,10 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 
 import contextlib
+import os
 import unittest
 
 import torch
 import torch.distributed as dist
+import torch.distributed._functional_collectives as _functional_collectives
+from torch._dynamo.testing import CompileCounterWithBackend
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -16,6 +19,11 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.testing._internal.common_distributed import (
+    MultiProcessTestCase,
+    requires_nccl,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -30,6 +38,8 @@ from torch.utils._debug_mode import (
     _RedistributeCall,
     _TritonKernelCall,
     DebugMode,
+    hash_tensor_fn,
+    norm_hash_fn,
 )
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._triton import has_triton_package
@@ -58,24 +68,23 @@ class TestDTensorDebugMode(TestCase):
         x_dtensor = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
         y_dtensor = DTensor.from_local(y, mesh, [Shard(0)], run_check=False)
 
-        with DebugMode(
-            record_torchfunction=True, record_ids=True, record_output=True
-        ) as debug_mode:
+        with DebugMode(record_torchfunction=True, record_ids=True) as debug_mode:
             torch.mm(x_dtensor, y_dtensor).sum()
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$6: f32[8, 32]| S(0)
+  torch.mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))  ->  dt$7: f32[8, 32]| S(0)
     aten::mm(dt$0: f32[8, 8]| S(0), dt$1: f32[8, 32]| S(0))
       redistribute_input(1, S(0) -> R)
         redistribute_input(t$2: f32[1, 32], trace: S(0)->R)
           _c10d_functional::all_gather_into_tensor(t$2: f32[1, 32], 8, 0)  ->  t$3: f32[8, 32]
+          _c10d_functional::_wrap_tensor_autograd(t$3: f32[8, 32])  ->  t$4: f32[8, 32]
           _c10d_functional::wait_tensor(t$3: f32[8, 32])  ->  t$3: f32[8, 32]
-      aten::mm(t$4: f32[1, 8], t$3: f32[8, 32])  ->  t$5: f32[1, 32]
-  <method 'sum' of 'torch._C.TensorBase' objects>(dt$6: f32[8, 32]| S(0))  ->  dt$8: f32[]| P
-    aten::sum(dt$6: f32[8, 32]| S(0))
-      aten::sum(t$5: f32[1, 32])  ->  t$7: f32[]""",
+      aten::mm(t$5: f32[1, 8], t$3: f32[8, 32])  ->  t$6: f32[1, 32]
+  <method 'sum' of 'torch._C.TensorBase' objects>(dt$7: f32[8, 32]| S(0))  ->  dt$9: f32[]| P(sum)
+    aten::sum(dt$7: f32[8, 32]| S(0))
+      aten::sum(t$6: f32[1, 32])  ->  t$8: f32[]""",
         )
 
         self.assertTrue(isinstance(debug_mode.operators[0], _OpCall))
@@ -111,8 +120,31 @@ class TestDTensorDebugMode(TestCase):
         )
         self.assertTrue(torch.equal(sum_op.record["output"], eager_out.to_local()))
         self.assertTrue(
-            "aten::sum(t: f32[1, 32])  # {'hash': " in debug_mode.debug_string()
+            "aten::sum(t: f32[1, 32])  ->  t: f32[]  # {'hash': "
+            in debug_mode.debug_string()
         )
+
+        # check tuple hash functions
+        with (
+            DebugMode() as debug_mode,
+            DebugMode.log_tensor_hashes(hash_fn=["norm", "hash_tensor"]),
+        ):
+            mm(x_dtensor, y_dtensor)
+
+        output_hash = debug_mode.operators[-1].log["hash"]
+        norm_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
+        hash_ = lambda x: hash_tensor_fn(x, use_scalar=True)  # noqa: E731
+
+        self.assertEqual(output_hash[0], norm_(eager_out))
+        self.assertEqual(output_hash[1], hash_(eager_out))
+
+        # some edge cases
+        self.assertEqual(norm_(torch.tensor(torch.nan)), torch.nan)
+        self.assertEqual(norm_(torch.tensor(torch.inf)), torch.inf)
+        self.assertEqual(norm_(torch.complex(torch.ones(4), torch.zeros(4))), 4)
+        self.assertEqual(hash_(torch.ones(4, dtype=torch.float8_e5m2)), 0)
+        self.assertEqual(hash_(torch.ones(4, dtype=torch.int8)), 0)
+        self.assertEqual(hash_(torch.ones(5, dtype=torch.int8)), 1)
 
     def test_debug_string_inside_context(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
@@ -137,13 +169,13 @@ class TestDTensorDebugMode(TestCase):
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1)], run_check=False)
 
         with DebugMode(
-            record_torchfunction=True, record_stack_trace=True
+            record_torchfunction=True, record_stack_trace=True, record_output=False
         ) as debug_mode:
             z = x_dtensor + y_dtensor
             z.sum().backward()
 
         self.assertExpectedInline(
-            debug_mode.debug_string(),
+            debug_mode.debug_string(show_stack_trace=False),
             """\
   <method 'add' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
     aten::add.Tensor(dt: f32[8, 8]| S(0), dt: f32[8, 8]| S(1))
@@ -154,8 +186,8 @@ class TestDTensorDebugMode(TestCase):
   <method 'sum' of 'torch._C.TensorBase' objects>(dt: f32[8, 8]| S(0))
     aten::sum(dt: f32[8, 8]| S(0))
       aten::sum(t: f32[1, 8])
-  torch._tensor.backward(dt: f32[]| P, gradient=None, retain_graph=None, create_graph=False, inputs=None)
-    aten::ones_like(dt: f32[]| P, pin_memory=False, memory_format=torch.preserve_format)
+  torch._tensor.backward(dt: f32[]| P(sum), gradient=None, retain_graph=None, create_graph=False, inputs=None)
+    aten::ones_like(dt: f32[]| P(sum), pin_memory=False, memory_format=torch.preserve_format)
       aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)
     aten::expand(dt: f32[]| R, [8, 8])
       aten::expand(t: f32[], [8, 8])
@@ -164,8 +196,8 @@ class TestDTensorDebugMode(TestCase):
         aten::clone(t: f32[8, 1])
       aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
       redistribute_input(t: f32[8, 8], trace: R->S(0))
-        aten::detach(t: f32[8, 1])
         aten::split.Tensor(t: f32[8, 8], 1)
+        aten::detach(t: f32[8, 1])
         aten::clone(t: f32[1, 8])
       aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
       aten::detach(t: f32[1, 8])""",
@@ -173,6 +205,48 @@ class TestDTensorDebugMode(TestCase):
 
         # check stack trace
         self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
+
+    def test_stack_trace_in_compiled_region(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(8, 4)
+                self.l2 = torch.nn.Linear(4, 8)
+
+            def forward(self, x):
+                x = x + 2
+                x = self.l1(x)
+                x = x.relu()
+                x = self.l2(x)
+                x = x.sum()
+                return x
+
+        x = torch.randn(16, 8)
+        model = torch.compile(Foo(), backend="aot_eager", fullgraph=True)
+
+        # test forward nodes
+        with DebugMode(
+            record_stack_trace=True, run_compile_with_interpreter=True
+        ) as debug_mode:
+            out = model(x)
+
+        op_calls = [op for op in debug_mode.operators if isinstance(op, _OpCall)]
+        self.assertTrue("x = x + 2" in op_calls[0].stack_trace)
+        self.assertTrue("x = self.l1(x)" in op_calls[1].stack_trace)
+        self.assertTrue("x = x.relu()" in op_calls[3].stack_trace)
+        self.assertTrue("x = x.sum()" in op_calls[-1].stack_trace)
+
+        # test backward nodes
+        with DebugMode(
+            record_stack_trace=True, run_compile_with_interpreter=True
+        ) as debug_mode:
+            out.backward()
+
+        op_calls = [op for op in debug_mode.operators if isinstance(op, _OpCall)]
+        self.assertTrue("out.backward()" in op_calls[0].stack_trace)
+        self.assertTrue("x = x.sum()" in op_calls[1].stack_trace)
+        self.assertTrue("x = self.l2(x)" in op_calls[2].stack_trace)
+        self.assertTrue("x = x.relu()" in op_calls[12].stack_trace)
 
     def test_debug_mode_densor_redistribution_trace(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
@@ -183,32 +257,28 @@ class TestDTensorDebugMode(TestCase):
         y_dtensor = DTensor.from_local(y, mesh, [Shard(1), Shard(1)], run_check=False)
         x_dtensor._spec.shard_order = (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),)
         y_dtensor._spec.shard_order = (ShardOrderEntry(tensor_dim=1, mesh_dims=(0, 1)),)
-        with DebugMode(record_torchfunction=False) as debug_mode:
+        with DebugMode(record_torchfunction=False, record_output=False) as debug_mode:
             torch.mm(x_dtensor, y_dtensor).sum()
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
   aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
-    redistribute_input(0, S(0)[0]S(0)[1] -> S(0)R)
-      redistribute_input(t: f32[16, 8], trace: S(0)[0]S(0)[1]->S(0)R)
-        _c10d_functional::all_gather_into_tensor(t: f32[16, 8], 2, 3)
-        _c10d_functional::wait_tensor(t: f32[32, 8])
-    redistribute_input(1, S(1)[0]S(1)[1] -> RS(1))
-      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR->RS(1))
+    redistribute_input(1, S(1)[0]S(1)[1] -> RR)
+      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
+        _c10d_functional::_wrap_tensor_autograd(t: f32[16, 16])
         _c10d_functional::wait_tensor(t: f32[16, 16])
         aten::chunk(t: f32[16, 16], 2)
         aten::cat(['t: f32[8, 16]', 't: f32[8, 16]'], 1)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 32], 4, 1)
+        _c10d_functional::_wrap_tensor_autograd(t: f32[32, 32])
         _c10d_functional::wait_tensor(t: f32[32, 32])
         aten::chunk(t: f32[32, 32], 4)
         aten::cat(['t: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]'], 1)
-        aten::chunk(t: f32[8, 128], 2, 1)
-        aten::clone(t: f32[8, 64])
-    aten::mm(t: f32[32, 8], t: f32[8, 64])
-  aten::sum(dt: f32[128, 128]| S(0)S(1))
-    aten::sum(t: f32[32, 64])""",
+    aten::mm(t: f32[16, 8], t: f32[8, 128])
+  aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
+    aten::sum(t: f32[16, 128])""",
         )
 
     def test_debug_mode_einsum(self):
@@ -222,56 +292,58 @@ class TestDTensorDebugMode(TestCase):
         b_dt = DTensor.from_local(b, mesh, [Replicate(), Partial()], run_check=False)
 
         # Capture the operator decomposition
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(record_torchfunction=True, record_output=False) as debug_mode:
             torch.einsum("bld,dnh->blnh", a_dt, b_dt)
 
         self.assertExpectedInline(
             debug_mode.debug_string(),
             """\
-  torch.functional.einsum(bld,dnh->blnh, dt: f32[16, 6, 8]| PR, dt: f32[8, 4, 4]| RP)
-    aten::unsqueeze(dt: f32[16, 6, 8]| PR, 3)
+  torch.functional.einsum(bld,dnh->blnh, dt: f32[16, 6, 8]| P(sum)R, dt: f32[8, 4, 4]| RP(sum))
+    aten::unsqueeze(dt: f32[16, 6, 8]| P(sum)R, 3)
       aten::unsqueeze(t: f32[16, 6, 8], 3)
-    aten::unsqueeze(dt: f32[16, 6, 8, 1]| PR, 4)
+    aten::unsqueeze(dt: f32[16, 6, 8, 1]| P(sum)R, 4)
       aten::unsqueeze(t: f32[16, 6, 8, 1], 4)
-    aten::permute(dt: f32[16, 6, 8, 1, 1]| PR, [0, 1, 3, 4, 2])
+    aten::permute(dt: f32[16, 6, 8, 1, 1]| P(sum)R, [0, 1, 3, 4, 2])
       aten::permute(t: f32[16, 6, 8, 1, 1], [0, 1, 3, 4, 2])
-    aten::unsqueeze(dt: f32[8, 4, 4]| RP, 3)
+    aten::unsqueeze(dt: f32[8, 4, 4]| RP(sum), 3)
       aten::unsqueeze(t: f32[8, 4, 4], 3)
-    aten::unsqueeze(dt: f32[8, 4, 4, 1]| RP, 4)
+    aten::unsqueeze(dt: f32[8, 4, 4, 1]| RP(sum), 4)
       aten::unsqueeze(t: f32[8, 4, 4, 1], 4)
-    aten::permute(dt: f32[8, 4, 4, 1, 1]| RP, [3, 4, 1, 2, 0])
+    aten::permute(dt: f32[8, 4, 4, 1, 1]| RP(sum), [3, 4, 1, 2, 0])
       aten::permute(t: f32[8, 4, 4, 1, 1], [3, 4, 1, 2, 0])
-    aten::permute(dt: f32[16, 6, 1, 1, 8]| PR, [0, 1, 4, 2, 3])
+    aten::permute(dt: f32[16, 6, 1, 1, 8]| P(sum)R, [0, 1, 4, 2, 3])
       aten::permute(t: f32[16, 6, 1, 1, 8], [0, 1, 4, 2, 3])
-    aten::view(dt: f32[16, 6, 8, 1, 1]| PR, [1, 96, 8])
+    aten::view(dt: f32[16, 6, 8, 1, 1]| P(sum)R, [1, 96, 8])
       aten::view(t: f32[16, 6, 8, 1, 1], [1, 96, 8])
-    aten::permute(dt: f32[1, 1, 4, 4, 8]| RP, [4, 2, 3, 0, 1])
+    aten::permute(dt: f32[1, 1, 4, 4, 8]| RP(sum), [4, 2, 3, 0, 1])
       aten::permute(t: f32[1, 1, 4, 4, 8], [4, 2, 3, 0, 1])
-    aten::view(dt: f32[8, 4, 4, 1, 1]| RP, [1, 8, 16])
+    aten::view(dt: f32[8, 4, 4, 1, 1]| RP(sum), [1, 8, 16])
       aten::view(t: f32[8, 4, 4, 1, 1], [1, 8, 16])
-    aten::bmm(dt: f32[1, 96, 8]| PR, dt: f32[1, 8, 16]| RP)
-      redistribute_input(0, PR -> S(2)[0]S(2)[1])
-        redistribute_input(t: f32[1, 96, 8], trace: PR->S(2)R->S(2)[0]S(2)[1])
+    aten::bmm(dt: f32[1, 96, 8]| P(sum)R, dt: f32[1, 8, 16]| RP(sum))
+      redistribute_input(0, P(sum)R -> S(2)[0]S(2)[1])
+        redistribute_input(t: f32[1, 96, 8], trace: P(sum)R->S(2)R->S(2)[0]S(2)[1])
           aten::chunk(t: f32[1, 96, 8], 4, 2)
           aten::cat(['t: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]', 't: f32[1, 96, 2]'])
           _c10d_functional::reduce_scatter_tensor(t: f32[4, 96, 2], sum, 4, 1)
+          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 96, 2])
           _c10d_functional::wait_tensor(t: f32[1, 96, 2])
           aten::chunk(t: f32[1, 96, 2], 2, 2)
           aten::clone(t: f32[1, 96, 1])
-      redistribute_input(1, RP -> S(1)[0]S(1)[1])
-        redistribute_input(t: f32[1, 8, 16], trace: RP->S(1)P->S(1)[0]S(1)[1])
+      redistribute_input(1, RP(sum) -> S(1)[0]S(1)[1])
+        redistribute_input(t: f32[1, 8, 16], trace: RP(sum)->S(1)P(sum)->S(1)[0]S(1)[1])
           aten::chunk(t: f32[1, 8, 16], 4, 1)
           aten::clone(t: f32[1, 2, 16])
           aten::chunk(t: f32[1, 2, 16], 2, 1)
           aten::cat(['t: f32[1, 1, 16]', 't: f32[1, 1, 16]'])
           _c10d_functional::reduce_scatter_tensor(t: f32[2, 1, 16], sum, 2, 3)
+          _c10d_functional::_wrap_tensor_autograd(t: f32[1, 1, 16])
           _c10d_functional::wait_tensor(t: f32[1, 1, 16])
       aten::bmm(t: f32[1, 96, 1], t: f32[1, 1, 16])
-    aten::view(dt: f32[1, 96, 16]| PP, [16, 6, 1, 4, 4])
+    aten::view(dt: f32[1, 96, 16]| P(sum)P(sum), [16, 6, 1, 4, 4])
       aten::view(t: f32[1, 96, 16], [16, 6, 1, 4, 4])
-    aten::permute(dt: f32[16, 6, 1, 4, 4]| PP, [0, 1, 3, 4, 2])
+    aten::permute(dt: f32[16, 6, 1, 4, 4]| P(sum)P(sum), [0, 1, 3, 4, 2])
       aten::permute(t: f32[16, 6, 1, 4, 4], [0, 1, 3, 4, 2])
-    aten::view(dt: f32[16, 6, 4, 4, 1]| PP, [16, 6, 4, 4])
+    aten::view(dt: f32[16, 6, 4, 4, 1]| P(sum)P(sum), [16, 6, 4, 4])
       aten::view(t: f32[16, 6, 4, 4, 1], [16, 6, 4, 4])""",
         )
 
@@ -279,7 +351,7 @@ class TestDTensorDebugMode(TestCase):
         x = torch.randn(8, 8, 8)
         linear = torch.nn.Linear(8, 8)
 
-        with DebugMode(record_torchfunction=True) as debug_mode:
+        with DebugMode(record_torchfunction=True, record_output=False) as debug_mode:
             linear(x).sum()
 
         self.assertExpectedInline(
@@ -299,7 +371,9 @@ class TestDTensorDebugMode(TestCase):
             x = torch.randn(8, 8)
             y = torch.randn(8, 8, 8)
 
-        with DebugMode(record_torchfunction=True, record_faketensor=True) as debug_mode:
+        with DebugMode(
+            record_torchfunction=True, record_faketensor=True, record_output=False
+        ) as debug_mode:
             torch.matmul(y, x)
 
         self.assertExpectedInline(
@@ -323,6 +397,7 @@ class TestDTensorDebugMode(TestCase):
             record_faketensor=True,
             record_tensor_attributes=["a1", "a2"],
             store_original_args=True,
+            record_output=False,
         ) as debug_mode:
             torch.matmul(y, x)
 
@@ -384,16 +459,72 @@ class TestDTensorDebugMode(TestCase):
         self.assertIn("torch.ops.higher_order.cond", debug_mode.debug_string())
 
     def test_compile(self):
-        @torch.compile
+        cnt = CompileCounterWithBackend("inductor")
+
+        @torch.compile(backend=cnt)
         def f(x):
             return x.sin().cos()
 
         x = torch.randn(8)
+        f(x)
         with DebugMode() as debug_mode:
             f(x)
-        self.assertEqual(len(debug_mode.debug_string()), 0)
+            self.assertEqual(len(debug_mode.debug_string()), 0)
+            f(x)
+        f(x)
+        self.assertEqual(
+            cnt.frame_count, 1
+        )  # check DebugMode doesn't trigger additional recompilations
 
-    def test_nn_module(self):
+    def test_annotate(self):
+        x = torch.randn(8, 8)
+
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(8, 8)
+
+            def forward(self, x):
+                DebugMode._annotate("Foo")
+                return self.l1(x)
+
+        mod = Foo()
+        with DebugMode(record_nn_module=True) as debug_mode:
+            DebugMode._annotate("forward")
+            mod(x)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [annotate] forward
+    [nn.Mod] Foo
+    [annotate] Foo
+      [nn.Mod] Foo.l1
+        aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
+        aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
+        )
+
+        for backend in ["aot_eager", "inductor"]:
+            with DebugMode(run_compile_with_interpreter=True) as debug_mode:
+                torch.compile(mod, backend=backend, fullgraph=True)(x)
+
+            if backend == "inductor":
+                self.assertExpectedInline(
+                    debug_mode.debug_string(),
+                    """    aten::addmm.out(t: f32[8], t: f32[8, 8], t: f32[8, 8], out=t: f32[8, 8])  ->  t: f32[8, 8]""",
+                )
+            else:
+                self.assertExpectedInline(
+                    debug_mode.debug_string(),
+                    """\
+  [aot_eager region (compile)] enter
+  [annotate] Foo
+    aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
+    aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
+  [aot_eager region (compile)] exit""",
+                )
+
+    def test_nn_module_in_eager(self):
         class Foo(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -414,7 +545,7 @@ class TestDTensorDebugMode(TestCase):
 
         mod = Bar()
         inp = torch.randn(4, 4)
-        with DebugMode(record_nn_module=True) as debug_mode:
+        with DebugMode(record_nn_module=True, record_output=False) as debug_mode:
             _ = mod(inp)
 
         self.assertExpectedInline(
@@ -438,9 +569,208 @@ class TestDTensorDebugMode(TestCase):
             out.backward()
 
         sum_op = [
-            op for op in debug_mode.operators if str(op.op) == "aten.sum.dim_IntList"
+            op
+            for op in debug_mode.operators
+            if isinstance(op, _OpCall) and str(op.op) == "aten.sum.dim_IntList"
         ][-1]
         self.assertTrue("self.l2(self.l1(x))" in sum_op.fwd_stack_trace)
+        self.assertTrue(
+            "self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True)
+        )
+
+        # check that nn_module doesn't graph break in compiled regions
+        fn = torch.compile(mod, backend="eager", fullgraph=True)
+        with DebugMode(record_nn_module=True) as debug_mode:
+            fn(inp)
+
+    def test_nn_module_in_compiled_regions(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(4, 4)
+                self.l2 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.l2(self.l1(x).relu())
+
+        class Bar(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l3 = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.l3(x + 2.0)
+
+        class Baz(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Foo()
+                self.bar = Bar()
+
+            def forward(self, x):
+                return self.bar(self.foo(x))
+
+        # Only region of module is compiled, test nn.Mod call hierarchy
+        mod = Baz()
+        mod.foo = torch.compile(mod.foo, backend="aot_eager", fullgraph=True)
+        inp = torch.randn(4, 4)
+        with DebugMode(
+            record_nn_module=True, run_compile_with_interpreter=True
+        ) as debug_mode:
+            mod(inp).sum()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    [nn.Mod] Baz
+    [aot_eager region (compile)] enter
+      [nn.Mod (compile)] L['self'].l1
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+      aten::relu(t: f32[4, 4])  ->  t: f32[4, 4]
+      [nn.Mod (compile)] L['self'].l2
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    [aot_eager region (compile)] exit
+      [nn.Mod] Baz.bar
+        aten::add.Tensor(t: f32[4, 4], 2.0)  ->  t: f32[4, 4]
+        [nn.Mod] Baz.bar.l3
+          aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+          aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::sum(t: f32[4, 4])  ->  t: f32[]""",
+        )
+
+        # Entire region is aot-eager compiled, with backwards
+        mod = torch.compile(Baz(), backend="aot_eager", fullgraph=True)
+        inp = torch.randn(4, 4)
+        with DebugMode(
+            record_nn_module=True, run_compile_with_interpreter=True
+        ) as debug_mode:
+            out = mod(inp).sum()
+            out.backward()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [aot_eager region (compile)] enter
+    [nn.Mod (compile)] L['self'].foo
+      [nn.Mod (compile)] L['self'].foo.l1
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+      aten::relu(t: f32[4, 4])  ->  t: f32[4, 4]
+      [nn.Mod (compile)] L['self'].foo.l2
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+    [nn.Mod (compile)] L['self'].bar
+      aten::add.Tensor(t: f32[4, 4], 2.0)  ->  t: f32[4, 4]
+      [nn.Mod (compile)] L['self'].bar.l3
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+  [aot_eager region (compile)] exit
+    aten::sum(t: f32[4, 4])  ->  t: f32[]
+    aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
+    aten::expand(t: f32[], [4, 4])  ->  t: f32[4, 4]
+    aten::clone(t: f32[4, 4], memory_format=torch.contiguous_format)  ->  t: f32[4, 4]
+  [aot_eager region (compile)] enter
+    [nn.Mod (compile)] L['self'].bar
+      [nn.Mod (compile)] L['self'].bar.l3
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::mm(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::mm(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::sum.dim_IntList(t: f32[4, 4], [0], True)  ->  t: f32[1, 4]
+        aten::view(t: f32[1, 4], [4])  ->  t: f32[4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+    [nn.Mod (compile)] L['self'].foo
+      [nn.Mod (compile)] L['self'].foo.l2
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::mm(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::mm(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::sum.dim_IntList(t: f32[4, 4], [0], True)  ->  t: f32[1, 4]
+        aten::view(t: f32[1, 4], [4])  ->  t: f32[4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+      aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+      aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+      aten::threshold_backward(t: f32[4, 4], t: f32[4, 4], 0)  ->  t: f32[4, 4]
+      [nn.Mod (compile bwd)] L['self'].foo.l1
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::mm(t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+        aten::sum.dim_IntList(t: f32[4, 4], [0], True)  ->  t: f32[1, 4]
+        aten::view(t: f32[1, 4], [4])  ->  t: f32[4]
+        aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
+  [aot_eager region (compile)] exit
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4])  ->  t: f32[4]
+    aten::detach(t: f32[4, 4])  ->  t: f32[4, 4]
+    aten::detach(t: f32[4])  ->  t: f32[4]
+    aten::detach(t: f32[4])  ->  t: f32[4]""",
+        )
+
+    def test_record_function(self):
+        def fn(x, y):
+            z = x @ y
+            with torch.profiler.record_function("this_is_ignored"):
+                z = z + 1
+            return z.sum()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        y = torch.randn(4, 2, requires_grad=True)
+        with DebugMode(run_compile_with_interpreter=True) as debug_mode:
+            with torch.profiler.record_function("FWD"):
+                out = torch.compile(fn, backend="aot_eager")(x, y)
+            out.backward()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [record function] FWD
+    [aot_eager region (compile)] enter
+      aten::mm(t: f32[8, 4], t: f32[4, 2])  ->  t: f32[8, 2]
+      aten::add.Tensor(t: f32[8, 2], 1)  ->  t: f32[8, 2]
+      aten::sum(t: f32[8, 2])  ->  t: f32[]
+      aten::t(t: f32[8, 4])  ->  t: f32[4, 8]
+      aten::t(t: f32[4, 2])  ->  t: f32[2, 4]
+    [aot_eager region (compile)] exit
+      aten::detach(t: f32[4, 8])  ->  t: f32[4, 8]
+      aten::detach(t: f32[2, 4])  ->  t: f32[2, 4]
+    aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
+  [aot_eager region (compile)] enter
+    aten::expand(t: f32[], [8, 2])  ->  t: f32[8, 2]
+    aten::mm(t: f32[4, 8], t: f32[8, 2])  ->  t: f32[4, 2]
+    aten::mm(t: f32[8, 2], t: f32[2, 4])  ->  t: f32[8, 4]
+  [aot_eager region (compile)] exit
+    aten::detach(t: f32[8, 4])  ->  t: f32[8, 4]
+    aten::detach(t: f32[4, 2])  ->  t: f32[4, 2]""",
+        )
+
+    def test_in_place_mutation(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                y.add_(1)
+                return y
+
+        mod = Foo()
+        inp = torch.tensor(1)
+        with (
+            DebugMode(record_output=True) as debug_mode,
+            DebugMode.log_tensor_hashes(hash_inputs=True),
+        ):
+            _ = mod(inp)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    aten::add.Tensor(t: i64[], 1)  ->  t: i64[]  # {'input_hash': ((1.0, None), {}), 'hash': 2.0}
+    aten::add_.Tensor(t: i64[], 1)  ->  t: i64[]  # {'input_hash': ((2.0, None), {}), 'hash': 3.0}""",
+        )
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
@@ -490,6 +820,32 @@ class TestDTensorDebugMode(TestCase):
         self.assertEqual(
             [call["call"] for call in mismatches], ["aten::sin", "aten::sum"]
         )
+
+    @unittest.skipIf(
+        not torch.cuda.is_available()
+        or torch.cuda.get_device_properties(0).total_memory < 2**26,
+        "Being conservative, test peak memory is 25MB?",
+    )
+    def test_tensor_hash_redistribute(self):
+        # test that hashing collectives gives correct results
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+
+        local_tensor = torch.ones(2**18, device=self.device_type)
+        dt = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
+            dt.redistribute(mesh, [Replicate()])
+
+        # Find all_gather hash
+        all_gather_logs = [
+            op
+            for op in debug_mode.logs
+            if isinstance(op, _OpCall)
+            and op.op == torch.ops._c10d_functional.all_gather_into_tensor.default
+        ]
+        self.assertEqual(len(all_gather_logs), 1)
+        actual_hash = all_gather_logs[0].log["hash"]
+        self.assertEqual(actual_hash, float(local_tensor.numel() * self.world_size))
 
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
@@ -570,6 +926,142 @@ class TestDTensorDebugMode(TestCase):
         # Colored is nice for actual viewing, not using in this test though
         gm_str = gm.print_readable(colored=False, print_output=False)
         self.assertTrue('"DTensor(f32[8, 32], S(0))" = torch.ops.aten.mm' in gm_str)
+
+
+class TestDebugModeUtils(TestCase):
+    """Test DebugMode with NCCL backend without using DTensor."""
+
+    def test_hash_empty_tenor(self):
+        t = torch.tensor([])
+        # hash tensor fn should not error out with empty tensor
+        out = torch.utils._debug_mode.hash_tensor_fn(t)
+        self.assertTrue(isinstance(out, torch.Tensor))
+        out = torch.utils._debug_mode.hash_tensor_fn(t, use_scalar=True)
+        self.assertTrue(isinstance(out, int))
+
+
+class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 2  # Need at least 2 ranks for collectives
+
+    def setUp(self):
+        super().setUp()
+        self._spawn_processes()
+
+    def _init_process_group(self):
+        """Initialize NCCL process group for each spawned process."""
+        torch.cuda.set_device(self.rank)
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+        self.device = f"cuda:{self.rank}"
+
+    def _destroy_process_group(self):
+        """Destroy the process group."""
+        dist.destroy_process_group()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_base(self):
+        self._init_process_group()
+        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+        # Output size must be world_size * input_size
+        output_tensor = torch.zeros(
+            10 * self.world_size, 10, device=torch.device(self.device)
+        )
+
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
+            dist.all_gather_into_tensor(output_tensor, tensor)
+
+        self.assertTrue("c10d::_allgather_base_" in debug_mode.debug_string())
+
+        hash_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
+
+        self.assertEqual(debug_mode.operators[-1].log["hash"][0], hash_(output_tensor))
+
+        # Verify each rank's contribution
+        for i in range(self.world_size):
+            expected_slice = torch.ones(10, 10, device=self.device) * (i + 1)
+            self.assertEqual(output_tensor[i * 10 : (i + 1) * 10], expected_slice)
+
+        self._destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_base_async_op(self):
+        """Test all_gather_into_tensor with async_op=True."""
+        self._init_process_group()
+        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+        # Output size must be world_size * input_size
+        output_tensor = torch.zeros(
+            10 * self.world_size, 10, device=torch.device(self.device)
+        )
+
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes(hash_inputs=True):
+            # Call with async_op=True returns a work handle
+            work = dist.all_gather_into_tensor(output_tensor, tensor, async_op=True)
+            # Wait for the async operation to complete
+            work.wait()
+
+        self.assertTrue("c10d::_allgather_base_" in debug_mode.debug_string())
+        hash_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
+
+        # TODO: the output hash not correct for async op, we should either not log the hash
+        # or wait before logging.
+        # https://github.com/pytorch/pytorch/pull/169295
+        # self.assertEqual(debug_mode.operators[-1].log["hash"][0], hash_(output_tensor))
+        self.assertEqual(
+            debug_mode.operators[-1].log["input_hash"][0][1], hash_(tensor)
+        )
+
+        # Verify each rank's contribution
+        for i in range(self.world_size):
+            expected_slice = torch.ones(10, 10, device=self.device) * (i + 1)
+            self.assertEqual(output_tensor[i * 10 : (i + 1) * 10], expected_slice)
+
+        self._destroy_process_group()
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_allgather_functional_with_async_collective_tensor(self):
+        self._init_process_group()
+        tensor = torch.ones(10, 10, device=torch.device(self.device)) * (self.rank + 1)
+
+        # Use functional collectives which return AsyncCollectiveTensor
+        with DebugMode() as debug_mode, DebugMode.log_tensor_hashes():
+            result = _functional_collectives.all_gather_tensor(
+                tensor, gather_dim=0, group=dist.group.WORLD
+            )
+
+        result = result.wait()
+        hash_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
+
+        self.assertEqual(debug_mode.operators[-1].log["hash"], hash_(result))
+
+        self.assertTrue(
+            "_c10d_functional::all_gather_into_tensor" in debug_mode.debug_string()
+        )
+
+        # Verify the result shape - should be world_size times bigger
+        self.assertEqual(result.shape[0], tensor.shape[0] * self.world_size)
+        # Verify each rank's contribution
+        for i in range(self.world_size):
+            expected_slice = torch.ones(10, 10, device=self.device) * (i + 1)
+            self.assertEqual(result[i * 10 : (i + 1) * 10], expected_slice)
+
+        self._destroy_process_group()
 
 
 instantiate_parametrized_tests(TestDTensorDebugMode)

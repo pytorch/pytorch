@@ -216,9 +216,6 @@ function install_torchrec_and_fbgemm() {
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     pip_uninstall fbgemm-gpu-nightly
 
-    # Set ROCM_HOME isn't available, use ROCM_PATH if set or /opt/rocm
-    ROCM_HOME="${ROCM_HOME:-${ROCM_PATH:-/opt/rocm}}"
-
     # Find rocm_version.h header file for ROCm version extract
     rocm_version_h="${ROCM_HOME}/include/rocm-core/rocm_version.h"
     if [ ! -f "$rocm_version_h" ]; then
@@ -285,7 +282,10 @@ EOF
     rm -rf fbgemm
   else
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
-    pip_build_and_install "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#subdirectory=fbgemm_gpu" dist/fbgemm_gpu
+    # Skip fbgemm for CUDA 13 as it's not compatible yet
+    if [[ "$BUILD_ENVIRONMENT" != *cuda13* ]]; then
+      pip_build_and_install "git+https://github.com/pytorch/FBGEMM.git@${fbgemm_commit}#subdirectory=fbgemm_gpu" dist/fbgemm_gpu
+    fi
   fi
 }
 
@@ -305,6 +305,28 @@ function install_torchao() {
   local commit
   commit=$(get_pinned_commit torchao)
   pip_build_and_install "git+https://github.com/pytorch/ao.git@${commit}" dist/ao
+}
+
+function install_flash_attn_cute() {
+  echo "Installing FlashAttention CuTe from GitHub..."
+  # Grab latest main til we have a pinned commit
+  local flash_attn_commit
+  flash_attn_commit=$(git ls-remote https://github.com/Dao-AILab/flash-attention.git HEAD | cut -f1)
+
+  # Clone the repo to a temporary directory
+  rm -rf flash-attention-build
+  git clone --depth 1 --recursive https://github.com/Dao-AILab/flash-attention.git flash-attention-build
+
+  pushd flash-attention-build
+  git checkout "${flash_attn_commit}"
+
+  # Install only the 'cute' sub-directory
+  pip_install -e flash_attn/cute/
+  popd
+
+  # remove the local repo
+  rm -rf flash-attention-build
+  echo "FlashAttention CuTe installation complete."
 }
 
 function print_sccache_stats() {

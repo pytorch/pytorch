@@ -1,6 +1,6 @@
 import warnings
 from collections.abc import Callable, Iterable
-from typing import Any, NamedTuple, overload, TypeVar, Union
+from typing import Any, NamedTuple, overload, TypeVar
 from typing_extensions import Self
 
 import torch
@@ -110,7 +110,7 @@ class PackedSequence(PackedSequence_):
     @overload
     def to(
         self,
-        device: Union[str, torch.device, int] | None = ...,
+        device: str | torch.device | int | None = ...,
         dtype: torch.dtype | None = ...,
         non_blocking: bool = ...,
         copy: bool = ...,
@@ -238,7 +238,8 @@ def _packed_sequence_init_args(
 
     # support being called as `PackedSequence((data, batch_sizes), *, sorted_indices)`
     else:
-        assert isinstance(data, (list, tuple)) and len(data) == 2
+        if not (isinstance(data, (list, tuple)) and len(data) == 2):
+            raise AssertionError("Expected data to be a list or tuple of length 2")
         return data[0], data[1], sorted_indices, unsorted_indices
 
 
@@ -274,7 +275,7 @@ def invert_permutation(permutation: Tensor | None) -> Tensor | None:
 
 def pack_padded_sequence(
     input: Tensor,
-    lengths: Union[Tensor, list[int]],
+    lengths: Tensor | list[int],
     batch_first: bool = False,
     enforce_sorted: bool = True,
 ) -> PackedSequence:
@@ -420,7 +421,7 @@ def pad_packed_sequence(
 
 # NOTE: for JIT-compatibility, we need to be more restrictive here and use specific types instead of Iterable.
 def pad_sequence(
-    sequences: Union[Tensor, list[Tensor]],
+    sequences: Tensor | list[Tensor],
     batch_first: bool = False,
     padding_value: float = 0.0,
     padding_side: str = "right",

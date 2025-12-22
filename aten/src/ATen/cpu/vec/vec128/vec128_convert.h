@@ -223,6 +223,62 @@ CONVERT_FROM_BF16_TEMPLATE(double)
 CONVERT_FROM_BF16_TEMPLATE(float16_t)
 #endif
 
+#ifdef __ARM_FEATURE_BF16
+
+// clang-[17, 20] crashes when autovectorizing static cast to bf16
+// Below is a workaround to have some vectorization
+// Works decently well for smaller int types
+template <typename from_type>
+inline void convertToBf16Impl(
+    const from_type* __restrict src,
+    c10::BFloat16* __restrict dst,
+    uint64_t n) {
+  bfloat16_t* dstPtr = reinterpret_cast<bfloat16_t*>(dst);
+  uint64_t loopBound = n - (n % 16);
+  uint64_t i = 0;
+  for (; i < loopBound; i += 16) {
+    float32x4_t a, b, c, d;
+    a[0] = static_cast<float>(src[i]);
+    a[1] = static_cast<float>(src[i + 1]);
+    a[2] = static_cast<float>(src[i + 2]);
+    a[3] = static_cast<float>(src[i + 3]);
+    b[0] = static_cast<float>(src[i + 4]);
+    b[1] = static_cast<float>(src[i + 5]);
+    b[2] = static_cast<float>(src[i + 6]);
+    b[3] = static_cast<float>(src[i + 7]);
+    c[0] = static_cast<float>(src[i + 8]);
+    c[1] = static_cast<float>(src[i + 9]);
+    c[2] = static_cast<float>(src[i + 10]);
+    c[3] = static_cast<float>(src[i + 11]);
+    d[0] = static_cast<float>(src[i + 12]);
+    d[1] = static_cast<float>(src[i + 13]);
+    d[2] = static_cast<float>(src[i + 14]);
+    d[3] = static_cast<float>(src[i + 15]);
+
+    vst1q_bf16(dstPtr + i, vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(a), b));
+    vst1q_bf16(dstPtr + i + 8, vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(c), d));
+  }
+
+#pragma clang loop vectorize(disable) interleave(disable) unroll(disable)
+  for (; i < n; i++) {
+    float a = static_cast<float>(src[i]);
+    dstPtr[i] = vcvth_bf16_f32(a);
+  }
+}
+
+#define CONVERT_TO_BF16_TEMPLATE(from_type)                                  \
+  template <>                                                                \
+  inline void convert(const from_type* src, c10::BFloat16* dst, int64_t n) { \
+    return convertToBf16Impl<from_type>(src, dst, n);                        \
+  }
+
+CONVERT_TO_BF16_TEMPLATE(uint8_t)
+CONVERT_TO_BF16_TEMPLATE(int8_t)
+CONVERT_TO_BF16_TEMPLATE(int16_t)
+CONVERT_TO_BF16_TEMPLATE(int32_t)
+
+#endif
+
 inline void convertBoolToBfloat16Impl(
     const bool* __restrict src,
     c10::BFloat16* __restrict dst,

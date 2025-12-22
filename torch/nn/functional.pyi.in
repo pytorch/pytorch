@@ -2,6 +2,7 @@
 # mypy: allow-untyped-defs
 
 from collections.abc import Callable, Sequence
+from enum import Enum
 from typing import Any, Literal, overload, TypeAlias
 
 from torch import Tensor
@@ -715,6 +716,50 @@ def rrelu(
 
 __all__ += ["rrelu"]
 
+def scaled_mm(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    bias: Tensor | None = None,
+    output_dtype: _dtype = ...,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+) -> Tensor: ...
+
+__all__ += ["scaled_mm"]
+
+def grouped_mm(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    *,
+    offs: Tensor | None = None,
+    bias: Tensor | None = None,
+    out_dtype: _dtype | None = None,
+) -> Tensor: ...
+
+__all__ += ["grouped_mm"]
+
+class SwizzleType(Enum):
+    NO_SWIZZLE = 0
+    SWIZZLE_32_4_4 = 1
+
+__all__ += ["SwizzleType"]
+
+class ScalingType(Enum):
+    TensorWise = 0
+    RowWise = 1
+    BlockWise1x16 = 2
+    BlockWise1x32 = 3
+    BlockWise1x128 = 4
+    BlockWise128x128 = 5
+
+__all__ += ["ScalingType"]
+
 def selu(input: Tensor, inplace: bool = ...) -> Tensor: ...
 
 __all__ += ["selu"]
@@ -766,15 +811,15 @@ def softmin(
 
 __all__ += ["softmin"]
 
-def softsign(input: Any): ...
+def softsign(input: Any) -> Tensor: ...
 
 __all__ += ["softsign"]
 
-def tanh(input: Any): ...
+def tanh(input: Any) -> Tensor: ...
 
 __all__ += ["tanh"]
 
-def tanhshrink(input: Any): ...
+def tanhshrink(input: Any) -> Tensor: ...
 
 __all__ += ["tanhshrink"]
 
@@ -829,7 +874,7 @@ def upsample_bilinear(
     input: Any,
     size: Any | None = ...,
     scale_factor: Any | None = ...,
-): ...
+) -> Tensor: ...
 
 __all__ += ["upsample_bilinear"]
 
@@ -837,7 +882,7 @@ def upsample_nearest(
     input: Any,
     size: Any | None = ...,
     scale_factor: Any | None = ...,
-): ...
+) -> Tensor: ...
 
 __all__ += ["upsample_nearest"]
 
@@ -847,7 +892,7 @@ def upsample(
     scale_factor: Any | None = ...,
     mode: str = ...,
     align_corners: Any | None = ...,
-): ...
+) -> Tensor: ...
 
 __all__ += ["upsample"]
 

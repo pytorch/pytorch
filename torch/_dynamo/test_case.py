@@ -97,6 +97,7 @@ class TestCase(TorchTestCase):
             print(k, v.most_common())
         reset()
         utils.counters.clear()
+        torch._C._autograd._saved_tensors_hooks_enable()
         super().tearDown()
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
@@ -115,6 +116,8 @@ class TestCase(TorchTestCase):
     # graph break tests
 
 
+# NB: multiple inheritance with LoggingTestCase is possible - this should be fine
+# since there is no overlap in overridden methods.
 class TestCaseWithNestedGraphBreaks(TestCase):
     def setUp(self) -> None:
         super().setUp()

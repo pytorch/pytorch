@@ -1,4 +1,3 @@
-#include <c10/core/TensorOptions.h>
 #include <torch/csrc/distributed/c10d/python_callback_work.hpp>
 
 namespace c10d {
@@ -40,14 +39,14 @@ bool PythonCallbackWork::wait(std::chrono::milliseconds timeout) {
     }
 
     return success;
-  } catch (py::error_already_set& e) {
+  } catch (py::error_already_set&) {
     // Capture the Python exception and store it
     finish(std::current_exception());
     if (!future_->completed()) {
       future_->setErrorIfNeeded(std::current_exception());
     }
     throw;
-  } catch (const std::exception& e) {
+  } catch (const std::exception&) {
     // Capture any C++ exception and store it
     finish(std::current_exception());
     if (!future_->completed()) {

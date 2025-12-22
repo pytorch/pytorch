@@ -28,7 +28,11 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import IS_MACOS
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 
 
 try:
@@ -70,8 +74,8 @@ class Model2(torch.nn.Module):
 class Model3(torch.nn.Module):
     def __init__(self, n, k):
         super().__init__()
-        self.weight = torch.randn(n, k, device="cuda")
-        self.bias = torch.randn(n, device="cuda")
+        self.weight = torch.randn(n, k, device=GPU_TYPE)
+        self.bias = torch.randn(n, device=GPU_TYPE)
 
     def forward(self, a):
         return torch.nn.functional.linear(a, self.weight, self.bias)
@@ -151,7 +155,7 @@ class TestProvenanceTracingArtifact(TestCase):
                     m = re.match(r"WARNING.* debug trace: (.*)", cm.output[0])
                     self.assertTrue(m)
                     filepath = Path(m.group(1))
-                    if device == "cuda":
+                    if device == "cuda" or device == "xpu":
                         expected_mapping = [
                             (
                                 "cppCodeToPost",
@@ -201,12 +205,19 @@ class TestProvenanceTracingArtifact(TestCase):
                                 },
                             ),
                         ]
-                        if backend == "aot_inductor":
+                        if backend == "aot_inductor" and device == "cuda":
                             expected_mapping[0][1]["aoti_torch_cuda_mm_out:2"] = [
                                 "mm_default"
                             ]
                             expected_mapping[1][1]["mm_default"] = [
                                 "aoti_torch_cuda_mm_out:2"
+                            ]
+                        elif backend == "aot_inductor" and device == "xpu":
+                            expected_mapping[0][1]["aoti_torch_xpu_mm_out:2"] = [
+                                "mm_default"
+                            ]
+                            expected_mapping[1][1]["mm_default"] = [
+                                "aoti_torch_xpu_mm_out:2"
                             ]
                         else:
                             expected_mapping[0][1]["extern_kernels.mm:2"] = [
@@ -254,21 +265,21 @@ class TestProvenanceTracingArtifact(TestCase):
                 if filepath:
                     shutil.rmtree(filepath)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_triton_kernel_to_post_grad_tracing_cuda(self):
-        self._test_triton_kernel_to_post_grad_tracing(device="cuda")
+        self._test_triton_kernel_to_post_grad_tracing(device=GPU_TYPE)
 
     def test_triton_kernel_to_post_grad_tracing_cpu(self):
         self._test_triton_kernel_to_post_grad_tracing(device="cpu")
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_triton_kernel_to_post_grad_tracing_extern_kernel(self):
         M = 8
         N = 6
         K = 16
         model = Model3(N, K)
         batch = 2
-        a = torch.randn(batch, M, K, device="cuda")
+        a = torch.randn(batch, M, K, device=GPU_TYPE)
         example_inputs = (a,)
         filepath = None
 
@@ -302,9 +313,10 @@ class TestProvenanceTracingArtifact(TestCase):
                     else:
                         # backend = aot_inductor
                         expected_data = {
-                            "aoti_torch_cuda_addmm_out:2": ["addmm"],
+                            f"aoti_torch_{GPU_TYPE}_addmm_out:2": ["addmm"],
                             "triton_poi_fused_0:1": ["_tensor_constant1"],
                         }
+
                     self._check_provenance_tracing_kernel_to_post_grad(
                         filepath, expected_data
                     )
@@ -312,12 +324,12 @@ class TestProvenanceTracingArtifact(TestCase):
                 if filepath:
                     shutil.rmtree(filepath)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def _test_pt_tracing_combo_kernel(self, backend):
         """This test checks that generated provenance tracing artifact from triton combo kernel to post grad nodes"""
-        a = torch.randn(10, 10, device="cuda")
-        b = torch.randn(20, 20, device="cuda")
-        c = torch.randn(10, 10, device="cuda")
+        a = torch.randn(10, 10, device=GPU_TYPE)
+        b = torch.randn(20, 20, device=GPU_TYPE)
+        c = torch.randn(10, 10, device=GPU_TYPE)
         example_inputs = (a, b, c)
 
         model = Model2()
@@ -348,7 +360,7 @@ class TestProvenanceTracingArtifact(TestCase):
             expected_data = {"triton_poi_fused_0:1": ["relu", "sigmoid", "tanh"]}
             self._check_provenance_tracing_kernel_to_post_grad(filepath, expected_data)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_triton_kernel_to_post_grad_tracing_combo_kernel(self):
         self._test_pt_tracing_combo_kernel(backend="inductor")
         self._test_pt_tracing_combo_kernel(backend="aot_inductor")
@@ -465,10 +477,10 @@ class TestProvenanceTracingNodeMeta(TestCase):
         """
         return next(iter([node for node in gm.graph.nodes if node.target == target]))
 
-    @requires_cuda_and_triton  # test only works for cuda pattern matcher
+    @requires_gpu_and_triton  # test only works for cuda pattern matcher
     def test_pattern_matcher_transfer_meta(self):
         """
-        Test that stack trace is transfered when node is decomposed in post_grad_passes
+        Test that stack trace is transferred when node is decomposed in post_grad_passes
         """
 
         class Model(torch.nn.Module):
@@ -484,9 +496,9 @@ class TestProvenanceTracingNodeMeta(TestCase):
                 x = self.sigmoid(x)
                 return x * 3
 
-        x = torch.randn(8, 10).to("cuda")
+        x = torch.randn(8, 10).to(GPU_TYPE)
         example_inputs = (x,)
-        model = Model().to("cuda")
+        model = Model().to(GPU_TYPE)
 
         # mimic the before_post_grad graph
         ep = torch.export.export(model, example_inputs).run_decompositions()
@@ -546,9 +558,9 @@ class TestProvenanceTracingStackTraces(TestCase):
         return s.split("\n")[i].strip()
 
     @torch._inductor.config.patch({"trace.provenance_tracking_level": 2})
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_tlparse_kernel_stack_traces(self):
-        device = "cuda"
+        device = GPU_TYPE
         model = Model4().to(device)
         x = torch.randn(8, 10).to(device)
         a = torch.randn(10, 20).to(device)
@@ -642,16 +654,16 @@ class TestProvenanceTracingStackTraces(TestCase):
                 for item in data[field]:
                     self.assertIsInstance(item, str)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     @torch._inductor.config.patch("trace.provenance_tracking_level", 1)
     def test_kernel_information_generation(self):
         """Test basic kernel information generation in AOTI packages."""
 
-        model = Model4().to("cuda")
-        x = torch.randn(8, 10, device="cuda")
-        a = torch.randn(10, 20, device="cuda")
-        b = torch.randn(20, 30, device="cuda")
-        c = torch.randn(10, 30, device="cuda")
+        model = Model4().to(GPU_TYPE)
+        x = torch.randn(8, 10, device=GPU_TYPE)
+        a = torch.randn(10, 20, device=GPU_TYPE)
+        b = torch.randn(20, 30, device=GPU_TYPE)
+        c = torch.randn(10, 30, device=GPU_TYPE)
         inputs = (x, a, b, c)
 
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -712,14 +724,14 @@ class TestProvenanceTracingStackTraces(TestCase):
                     ],
                     "pre_grad_nodes": ["gelu", "addmm"],
                 },
-                "aoti_torch_cuda_mm_out:1": {
+                f"aoti_torch_{GPU_TYPE}_mm_out:1": {
                     "stack_traces": [
                         "x = self.fc1(x)",
                     ],
                     "post_grad_nodes": ["mm_default_1"],
                     "pre_grad_nodes": ["linear"],
                 },
-                "aoti_torch_cuda_mm_out:4": {
+                f"aoti_torch_{GPU_TYPE}_mm_out:4": {
                     "stack_traces": [
                         "y = torch.addmm(c, d, b)",
                     ],

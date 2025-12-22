@@ -256,6 +256,7 @@ def set_logs(
     inductor_metrics: bool = False,
     hierarchical_compile: bool = False,
     compute_dependencies: bool = False,
+    caching: bool = False,
 ) -> None:
     """
     Sets the log level for individual components and toggles individual log
@@ -456,6 +457,9 @@ def set_logs(
         hierarchical_compile (:class:`bool`):
             Whether to emit debug info for hierarchical compilation. Default: ``False``
 
+        caching (:class:`bool`):
+            Whether to emit detailed Inductor caching information. Default: ``False``
+
     Example::
 
         >>> # xdoctest: +SKIP
@@ -570,6 +574,7 @@ def set_logs(
         inductor_metrics=inductor_metrics,
         hierarchical_compile=hierarchical_compile,
         compute_dependencies=compute_dependencies,
+        caching=caching,
     )
 
 
@@ -654,7 +659,8 @@ def _validate_settings(settings):
 
 def help_message(verbose=False):
     def pad_to(s, length=30):
-        assert len(s) <= length
+        if len(s) > length:
+            raise AssertionError(f"string length {len(s)} exceeds max {length}")
         return s + " " * (length - len(s))
 
     if verbose:
@@ -805,7 +811,8 @@ def _parse_log_settings(settings):
             name = "torch"
 
         if log_registry.is_log(name):
-            assert level is not None
+            if level is None:
+                raise AssertionError("level must not be None for log name")
             log_qnames = log_registry.log_alias_to_log_qnames[name]
             log_state.enable_log(log_qnames, level)
         elif log_registry.is_artifact(name):
@@ -847,24 +854,37 @@ def _has_registered_parent(log_qname) -> bool:
     return False
 
 
-def make_module_path_relative(abs_path):
+@functools.lru_cache
+def _make_module_path_relative(abs_path: str, sys_path: tuple[str, ...]) -> str:
     """
-    Given an absolute filepath corresponding to a Python module which was
-    loaded via normal import mechanisms using sys.path, convert it into
-    a relative path relative to one of the Python search paths.
+    The string manipulation here is fairly expensive and we expect very high
+    cache hit rates. Because `sys.path` changes very infrequently it's most
+    performant to convert it into a tuple of strings and use that for the cache
+    key because python has dedicated fast paths for list to tuple conversion
+    and tuple hashing. (Empirically, a single top-level cache is about 2x faster
+    than trying to cache individual parts.)
     """
 
-    abs_path = pathlib.Path(abs_path).resolve()
+    abs_path_resolved = pathlib.Path(abs_path).resolve()
 
-    for path in sys.path:
+    for path in sys_path:
         try:
-            rel_path = abs_path.relative_to(path)
+            rel_path = abs_path_resolved.relative_to(path)
         except ValueError:
             continue
         else:
             return str(rel_path)
 
-    return str(abs_path)
+    return str(abs_path_resolved)
+
+
+def make_module_path_relative(abs_path: str) -> str:
+    """
+    Given an absolute filepath corresponding to a Python module which was
+    loaded via normal import mechanisms using sys.path, convert it into
+    a relative path relative to one of the Python search paths.
+    """
+    return _make_module_path_relative(abs_path, tuple(sys.path))
 
 
 # apply custom formats to artifacts when necessary
@@ -891,10 +911,14 @@ class TorchLogsFormatter(logging.Formatter):
         # exception handling - copied from logging.Formatter.format
         s = record.message
         if record.exc_info:
+            from torch._dynamo import config
+
+            should_format_exc = config.verbose or artifact_name != "graph_breaks"
             # Cache the traceback text to avoid converting it multiple times
             # (it's constant anyway)
-            if not record.exc_text:
-                record.exc_text = self.formatException(record.exc_info)
+            if should_format_exc:
+                if not record.exc_text:
+                    record.exc_text = self.formatException(record.exc_info)
         if record.exc_text:
             if s[-1:] != "\n":
                 s = s + "\n"
@@ -944,7 +968,8 @@ class TorchLogsFormatter(logging.Formatter):
             f"{record.lineno}]{record.traceid}{record.artifactprefix}"
         )
         if self._is_trace:
-            assert s == ""
+            if s != "":
+                raise AssertionError(f"expected empty string for trace, got {s!r}")
             try:
                 r = f"{prefix} {json.dumps(record.metadata)}"
             except TypeError:
@@ -1173,7 +1198,7 @@ class LazyTraceHandler(logging.StreamHandler):
                 ranksuffix = ""
                 if dist.is_available() and dist.is_initialized():
                     ranksuffix = f"rank_{dist.get_rank()}_"
-                self.stream = tempfile.NamedTemporaryFile(
+                self.stream = tempfile.NamedTemporaryFile(  # noqa: SIM115
                     mode="w+",
                     suffix=".log",
                     prefix=f"dedicated_log_torch_trace_{ranksuffix}",
@@ -1322,7 +1347,7 @@ def trace_structured(
     payload is an arbitrary string, which can be arbitrarily long (but expected to have
     newlines so no lines are too long)
     """
-    assert name not in [
+    reserved_names = [
         "rank",
         "compiled_autograd_id",
         "frame_id",
@@ -1333,12 +1358,16 @@ def trace_structured(
         "pathname",
         "thread",
     ]
-    assert callable(metadata_fn), (
-        f"metadata_fn should be callable, but got {type(metadata_fn)}"
-    )
-    assert callable(payload_fn), (
-        f"payload_fn should be callable, but got {type(payload_fn)}"
-    )
+    if name in reserved_names:
+        raise AssertionError(f"name {name!r} is reserved and cannot be used")
+    if not callable(metadata_fn):
+        raise AssertionError(
+            f"metadata_fn should be callable, but got {type(metadata_fn)}"
+        )
+    if not callable(payload_fn):
+        raise AssertionError(
+            f"payload_fn should be callable, but got {type(payload_fn)}"
+        )
     # trace_log never propagates and is ALWAYS DEBUG, so also check that there
     # are handlers instead of checking the log level
     if trace_log.handlers:

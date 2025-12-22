@@ -158,17 +158,6 @@ VECTORIZABLE_DTYPES: list[torch.dtype] = [
     torch.float8_e5m2,
 ]
 
-MASKED_VECTORIZABLE_DTYPES: list[torch.dtype] = [
-    torch.float64,
-    torch.float,
-    torch.bfloat16,
-    torch.float16,
-    torch.uint8,
-    torch.int8,
-    torch.float8_e4m3fn,
-    torch.float8_e5m2,
-]
-
 
 def reduction_init(reduction_type, dtype):
     if dtype in DTYPE_LOWP_FP:
@@ -239,7 +228,10 @@ def reduction_combine(
     if reduction_type in ("min", "max"):
         return f"{reduction_type}_propagate_nan({var}, {next_value})"
     if reduction_type == "welford_reduce":
-        return f"welford_combine({var}, {next_value})"
+        if helper_val:
+            return f"welford_combine({var}, {next_value}, &{helper_val})"
+        else:
+            return f"welford_combine({var}, {next_value})"
     if reduction_type == "welford_combine":
         if isinstance(next_value, tuple):
             mean, m2, weight = next_value
@@ -1640,7 +1632,7 @@ class CppVecOverrides(CppOverrides):
         return code
 
     @staticmethod
-    def to_dtype(x, dtype, src_dtype=None, use_compute_dtypes=True):
+    def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
         assert dtype in [
             torch.bool,
             torch.float64,
@@ -1740,6 +1732,7 @@ class CppVecOverrides(CppOverrides):
                 V.kernel.compute,
                 code,
             )
+            result.is_vec = True
         elif result.is_vec:
             csevar = V.kernel.cse.generate(
                 V.kernel.compute, f"{mask} ? {body_code_vec} : {other_code_vec}"
@@ -1879,16 +1872,13 @@ class CppVecOverrides(CppOverrides):
                 code.writeline(f"for (int i = 0; i < {cexpr_index(size)}; i++)")
                 with code.indent():
                     code.writeline(f"tmpbuf_out[i] = {res};")
+                load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
                 if output_mask:
-                    assert not kernel.tail_size
-                    load_args = "tmpbuf_out.data()"
                     load_fn = f"at::vec::VecMask<{cdtype},{n_vec}>::from"
+                elif n_vec == 1:
+                    load_fn = f"at::vec::Vectorized<{octype}>::loadu"
                 else:
-                    load_args = f"tmpbuf_out.data(), {cexpr_index(size)}"
-                    if n_vec == 1:
-                        load_fn = f"at::vec::Vectorized<{octype}>::loadu"
-                    else:
-                        load_fn = f" at::vec::VectorizedN<{octype}, {n_vec}>::loadu"
+                    load_fn = f" at::vec::VectorizedN<{octype}, {n_vec}>::loadu"
                 code.writeline(f"return {load_fn}({load_args});")
             code.writeline("()")
             return code
@@ -2194,10 +2184,8 @@ class CppKernel(Kernel):
         # sum and welford
         # Note: using helper has non-negligible impact on performance
 
-        # keep the original behavior for welford_reduce
-        # acc helper is not used for scalar welford_reduce
         if reduction_type == "welford_reduce":
-            return not use_scalar
+            return True
 
         # TODO add supports for more data types when needed
         if reduction_type == "sum" and dtype == torch.float:
@@ -2323,9 +2311,15 @@ class CppKernel(Kernel):
             reduction_size = functools.reduce(
                 operator.mul, self.ranges[self.reduction_depth :]
             )
-            helper_val = self.cascade_helper_cse.generate(
-                self.compute, f"reduction {reduction_key}", write=False
-            )
+            # use welford_helper/cascade_helper for vec kernel
+            if reduction_type == "welford_reduce":
+                helper_val = self.welford_helper_cse.generate(
+                    self.compute, f"reduction {reduction_key}", write=False
+                )
+            else:
+                helper_val = self.cascade_helper_cse.generate(
+                    self.compute, f"reduction {reduction_key}", write=False
+                )
             # rename the helper variable to distinguish it from vectorized version
             scalar_helper_val = f"scalar_{helper_val}"
             self._use_acc_helper(
@@ -2538,7 +2532,7 @@ class CppKernel(Kernel):
     @property
     def assert_function(self) -> str:
         if V.graph.aot_mode:
-            return "STD_TORCH_CHECK"
+            return "AOTI_TORCH_CHECK"
         else:
             return "TORCH_CHECK"
 
@@ -2737,7 +2731,7 @@ class CppVecKernel(CppKernel):
         loadbuf = f"{var} + {cexpr_index(index)}" if index != 0 else var
         if dtype == torch.bool:
             # TODO: should we consider load mask here?
-            line = f"{self._get_mask_type()}::from({loadbuf})"
+            line = f"{self._get_mask_type()}::from({loadbuf}, {cexpr_index(self.num_elems)})"
         else:
             line = (
                 f"{load_mask_str}.template loadu<{cpp_type},{num_vectors}>({loadbuf})"
@@ -2859,6 +2853,7 @@ class CppVecKernel(CppKernel):
             )
             with code.indent(), contextlib.ExitStack() as stack:
                 index_c = cexpr_index(index)
+                # pyrefly: ignore [bad-assignment]
                 for indirect_var in replacements:
                     index_c = re.sub(
                         r"\b" + f"{indirect_var}" + r"\b",
@@ -2980,7 +2975,10 @@ class CppVecKernel(CppKernel):
                 cdtype = DTYPE_TO_CPP[dtype]
                 index = ops.index_expr(index, torch.int64).value
                 assert isinstance(index, CppCSEVariable) and index.is_vec
-                line = f"atomic_add_vec<{cdtype}, {n_idx}, {n_src}>({var}, {index}, {value});"
+                if self.tail_size:
+                    line = f"atomic_add_vec<{cdtype}, {n_idx}, {n_src}>({var}, {index}, {value}, {cexpr_index(self.tail_size)});"
+                else:
+                    line = f"atomic_add_vec<{cdtype}, {n_idx}, {n_src}>({var}, {index}, {value});"
                 self.stores.writeline(DeferredLine(name, line))
         else:
             raise NotImplementedError(f"store mode={mode}")
@@ -3092,19 +3090,16 @@ class CppVecKernel(CppKernel):
                 if self.ranges[self.tiling_idx] % self.tiling_factor
                 else sympy.Integer(0)
             )
-            # scalar helper for scalar sum is also needed when vec kernel is included
-            # Note: is it different from welford reduction as welford reduction of scalar version
-            # does not need helper, and the helper needs the information of reduction size to initialize
-            if reduction_type == "sum":
-                scalar_helper_val = f"scalar_{helper_val}"
-                self._use_acc_helper(
-                    reduction_type,
-                    acc,
-                    scalar_helper_val,
-                    reduction_size,
-                    dtype,
-                    use_scalar=True,
-                )
+            # scalar helper for scalar welford_reduce/sum is also needed when vec kernel is included
+            scalar_helper_val = f"scalar_{helper_val}"
+            self._use_acc_helper(
+                reduction_type,
+                acc,
+                scalar_helper_val,
+                reduction_size,
+                dtype,
+                use_scalar=True,
+            )
             self._use_acc_helper(
                 reduction_type, acc, helper_val, helper_vec_range, dtype
             )
@@ -3448,7 +3443,10 @@ class CppVecKernel(CppKernel):
             if isinstance(next_value, CppCSEVariable):
                 assert next_value.dtype == torch.bool
                 (next_value,) = unify_mask_base_type(V.kernel.compute, (next_value,))
-            return f"{var} | {next_value}"
+            if self.tail_size:
+                return f"any_masked_reduce({var}, {next_value}, {cexpr_index(self.tail_size)})"
+            else:
+                return f"{var} | {next_value}"
         else:
             raise NotImplementedError
 
@@ -3781,9 +3779,6 @@ class TilingSelect:
     Implement the heuristic to select the tiling factors and tiling indices.
     In the future, we can implement advanced heuristic in a subclass.
     """
-
-    def __init__(self):
-        super().__init__()
 
     def select_tiling(
         self,
@@ -4357,13 +4352,6 @@ class CppKernelProxy(CppKernel):
                 fn_list, var_sizes_list
             )
             assert len(tiling_factors) == len(tiling_indices)
-            # <TODO> This should be removed after full support for vectorization is implemented.
-            could_masked_vec = True
-            all_dtypes = _get_dtype_from_loopbodies(_get_loop_body(fn_list))
-            if any(dtype not in MASKED_VECTORIZABLE_DTYPES for dtype in all_dtypes):
-                # can be removed after masked vectorizable dtype are same with vectorizable dtype
-                could_masked_vec = False
-
             _inner_loop_reduction_outer_not = False
             _outer_loop = None
             if tiling_indices:
@@ -4390,7 +4378,7 @@ class CppKernelProxy(CppKernel):
                 )
                 tail_size = loop.size - loop.tiled_size
                 vec_kernel.active_ranges = {loop.var: (0, loop.tiled_size)}
-                if config.cpp.enable_loop_tail_vec and could_masked_vec:
+                if config.cpp.enable_loop_tail_vec:
                     tail_kernel = codegen_kernel(
                         self.vec_kernel_cls,
                         tiling_factors[0],
@@ -4437,7 +4425,7 @@ class CppKernelProxy(CppKernel):
                     inner_loop.var: inner_ranges["main"],
                 }
                 tail_kernel = []
-                if config.cpp.enable_loop_tail_vec and could_masked_vec:
+                if config.cpp.enable_loop_tail_vec:
                     for outer_r, inner_r in (
                         ("main", "tail"),
                         ("tail", "main"),

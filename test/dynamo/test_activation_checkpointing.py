@@ -5,6 +5,7 @@ import contextlib
 import copy
 import functools
 import math
+import re
 import unittest  # noqa: F811
 from importlib import import_module
 
@@ -15,7 +16,11 @@ import torch._functorch.config
 import torch.distributed as dist
 import torch.nn as nn
 import torch.utils.checkpoint
-from functorch.compile import min_cut_rematerialization_partition
+from functorch.compile import (
+    default_partition,
+    min_cut_rematerialization_partition,
+    nop,
+)
 from torch._dynamo.backends.common import aot_autograd
 from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
@@ -24,7 +29,7 @@ from torch._dynamo.testing import (
 )
 from torch._higher_order_ops.wrap import tag_activation_checkpoint
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import IS_WINDOWS, skipIfHpu
+from torch.testing._internal.common_utils import IS_WINDOWS, parametrize, skipIfHpu
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
@@ -65,6 +70,11 @@ def checkpoint_wrapper(fn):
         return torch.utils.checkpoint.checkpoint(fn, *args, use_reentrant=True)
 
     return inner
+
+
+@torch._dynamo.allow_in_graph
+def _grad(*args, **kwargs):
+    return torch.autograd.grad(*args, **kwargs)
 
 
 def count_ops(
@@ -281,7 +291,14 @@ class ActivationCheckpointingViaTagsTests(
 
             run(export_compiler)
 
-    def test_tags_function(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_function(self, device, partition_fn):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
 
@@ -297,11 +314,22 @@ class ActivationCheckpointingViaTagsTests(
         bw_compiler = functools.partial(
             count_ops, freq=3, op=torch.ops.aten.mm.default
         )  # mm recomputed in the bwd
-        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
         self._validate(fn, backend, x, y)
 
     @requires_cuda_and_triton
-    def test_tags_function_via_global_checkpoint(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_function_via_global_checkpoint(self, device, partition_fn):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
 
@@ -316,11 +344,46 @@ class ActivationCheckpointingViaTagsTests(
         bw_compiler = functools.partial(
             count_ops, freq=3, op=torch.ops.aten.mm.default
         )  # mm recomputed in the bwd
-        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
         self._validate(fn, backend, x, y)
 
     @requires_cuda_and_triton
-    def test_tags_function_with_kwargs(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_function_with_kwargs(self, device, partition_fn):
+        def gn(x, y):
+            return torch.sigmoid(torch.matmul(x, y))
+
+        def fn(x, y):
+            return torch.utils.checkpoint.checkpoint(
+                gn, torch.sin(x), y, use_reentrant=False
+            )
+
+        x = torch.randn(4, 4, device=device, requires_grad=True)
+        y = torch.randn(4, 4, device=device, requires_grad=True)
+
+        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
+        bw_compiler = functools.partial(
+            count_ops, freq=3, op=torch.ops.aten.mm.default
+        )  # mm recomputed in the bwd
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
+        self._validate(fn, backend, x, y)
+
+    @requires_cuda_and_triton
+    def test_checkpoint_shows_tags_in_tlparse(self, device):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
 
@@ -332,15 +395,29 @@ class ActivationCheckpointingViaTagsTests(
         x = torch.randn(4, 4, device=device, requires_grad=True)
         y = torch.randn(4, 4, device=device, requires_grad=True)
 
-        fw_compiler = functools.partial(count_ops, freq=1, op=torch.ops.aten.mm.default)
-        bw_compiler = functools.partial(
-            count_ops, freq=3, op=torch.ops.aten.mm.default
-        )  # mm recomputed in the bwd
-        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
-        self._validate(fn, backend, x, y)
+        def partition_fn(joint_gm, *args, **kwargs):
+            gm_str = joint_gm.print_readable(print_output=False)
+            # Check for the pattern with any graph ID (the ID depends on test order)
+            self.assertTrue(
+                re.search(r"# ac_graph_id: \d+ - PREFER_RECOMPUTE", gm_str),
+                f"Expected ac_graph_id pattern not found in:\n{gm_str}",
+            )
+            return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
+
+        backend = aot_autograd(
+            fw_compiler=nop, bw_compiler=nop, partition_fn=partition_fn
+        )
+        _ = torch.compile(fn, backend=backend)(x, y)
 
     @requires_cuda_and_triton
-    def test_tags_sequential_layers(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_sequential_layers(self, device, partition_fn):
         def gn(x):
             x = x.cos()
             for _ in range(3):
@@ -361,11 +438,22 @@ class ActivationCheckpointingViaTagsTests(
             freqs=[2, 18],
             ops=[torch.ops.aten.cos.default, torch.ops.aten.mm.default],
         )  # mm recomputed in the bwd
-        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
         self._validate(fn, backend, x)
 
     @requires_cuda_and_triton
-    def test_tags_multiple_checkpoints(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_multiple_checkpoints(self, device, partition_fn):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y))
 
@@ -383,11 +471,22 @@ class ActivationCheckpointingViaTagsTests(
         bw_compiler = functools.partial(
             count_ops, freq=6, op=torch.ops.aten.mm.default
         )  # mm recomputed in the bwd
-        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
         self._validate(fn, backend, x, y)
 
     @requires_cuda_and_triton
-    def test_tags_module(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_module(self, device, partition_fn):
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
                 super().__init__()
@@ -411,11 +510,22 @@ class ActivationCheckpointingViaTagsTests(
         bw_compiler = functools.partial(
             count_ops, freq=1, op=torch.ops.aten.sigmoid.default
         )
-        backend = aot_autograd(fw_compiler=fw_compiler, bw_compiler=bw_compiler)
+        backend = aot_autograd(
+            fw_compiler=fw_compiler,
+            bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
+        )
         self._validate(fn, backend, x)
 
     @requires_cuda_and_triton
-    def test_tags_decomps(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_tags_decomps(self, device, partition_fn):
         # Ensures that tags are passed on through decompositions as well
         class MockModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -443,6 +553,7 @@ class ActivationCheckpointingViaTagsTests(
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
+            partition_fn=partition_fn,
             decompositions=lambda: import_module(
                 "torch._inductor.compile_fx"
             ).select_decomp_table(),
@@ -702,7 +813,14 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_must_recompute(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_must_recompute(self, device, partition_fn):
         def context_fn_must_recompute_mm():
             must_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -723,9 +841,9 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
                 ),
             )
 
-        def _test(context_fn, bw_compiler):
+        def _test(context_fn, bw_compiler, partition_fn):
             def gn(x):
-                return torch.sigmoid(torch.matmul(x, x))
+                return torch.cos(torch.sin(torch.matmul(x, x) @ x))
 
             def fn(x):
                 return torch.utils.checkpoint.checkpoint(
@@ -739,14 +857,14 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
             fw_compiler = functools.partial(
                 count_ops,
-                freq=1,
+                freq=2,
                 op=torch.ops.aten.mm.default,
             )
 
             backend = aot_autograd(
                 fw_compiler=fw_compiler,
                 bw_compiler=bw_compiler,
-                partition_fn=min_cut_rematerialization_partition,
+                partition_fn=partition_fn,
             )
             self._validate(fn, backend, x)
 
@@ -754,17 +872,19 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             context_fn=context_fn_must_recompute_mm,
             bw_compiler=functools.partial(
                 count_ops,
-                freq=3,  # 1 matmul recompute and 2 bwd mm ops per fwd matmul, so 1 + 2 * 1 = 3)
+                freq=6,  # 1 matmul recompute and 2 bwd mm ops per fwd matmul, so 2 + 2 * 2 = 6)
                 op=torch.ops.aten.mm.default,
             ),
+            partition_fn=partition_fn,
         )
         _test(
             context_fn=context_fn_no_recompute_mm,
             bw_compiler=functools.partial(
                 count_ops,
-                freq=2,  # 2 bwd mm ops per fwd matmul
+                freq=4,  # 2 bwd mm ops per fwd matmul
                 op=torch.ops.aten.mm.default,
             ),
+            partition_fn=partition_fn,
         )
 
     def test_sac_with_partial_context_fn(self):
@@ -801,7 +921,16 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_must_not_recompute_gemm(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_must_not_recompute_gemm(
+        self, device, partition_fn
+    ):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -841,15 +970,22 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=partition_fn,
         )
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
     def test_compile_selective_checkpoint_must_not_recompute_gemm_no_functionalization(
-        self, device
+        self, device, partition_fn
     ):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
@@ -889,7 +1025,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=partition_fn,
             disable_functionalization=True,
         )
         self._validate(fn, backend, x, y)
@@ -897,7 +1033,14 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_triton_kernel(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_triton_kernel(self, device, partition_fn):
         # Copy of the above test, but make sure that having a triton kernel in the
         # region does not error.
         def add_one(x):
@@ -957,14 +1100,21 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=partition_fn,
         )
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_tensor_subclass(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_tensor_subclass(self, device, partition_fn):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -1007,14 +1157,21 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=partition_fn,
         )
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_custom_rule(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_custom_rule(self, device, partition_fn):
         def _get_custom_policy(meta):
             no_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -1072,14 +1229,21 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=partition_fn,
         )
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_partial_ctx_fn(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_partial_ctx_fn(self, device, partition_fn):
         def selective_checkpointing_context_fn(no_recompute_list):
             return create_selective_checkpoint_contexts(
                 _get_custom_policy(no_recompute_list=no_recompute_list)
@@ -1118,14 +1282,21 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=partition_fn,
         )
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_outplace_op(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_outplace_op(self, device, partition_fn):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -1163,14 +1334,21 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=partition_fn,
         )
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_list_ops(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_list_ops(self, device, partition_fn):
         def selective_checkpointing_context_fn():
             # recompute everything
             no_recompute_list = []
@@ -1206,7 +1384,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=partition_fn,
         )
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
@@ -1217,7 +1395,14 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         "requires TorchDispatchMode + torch.compile work to complete"
     )
     @requires_cuda_and_triton
-    def test_compile_selective_checkpoint_inplace_op(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_inplace_op(self, device, partition_fn):
         def selective_checkpointing_context_fn():
             no_recompute_list = [
                 torch.ops.aten.mm.default,
@@ -1257,7 +1442,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=partition_fn,
         )
         self._validate(fn, backend, x, y)
         self._compare_orig_and_checkpointed_fns(gn, fn, x, y)
@@ -1265,7 +1450,14 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
     @torch._inductor.config.patch(fallback_random=True)
-    def test_compile_selective_checkpoint_random_op(self, device):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_random_op(self, device, partition_fn):
         for preserve_rng_state in [True, False]:
 
             def selective_checkpointing_context_fn():
@@ -1312,7 +1504,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
             backend = aot_autograd(
                 fw_compiler=fw_compiler,
                 bw_compiler=bw_compiler,
-                partition_fn=min_cut_rematerialization_partition,
+                partition_fn=partition_fn,
             )
 
             # NOTE: when `preserve_rng_state` is False, gradient will mismatch between torch.compile and eager,
@@ -1324,7 +1516,14 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
     @requires_cuda_and_triton
     @unittest.skipIf(IS_WINDOWS, "torch.compile doesn't work with windows")
-    def test_compile_selective_checkpoint_invalid_context(self):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_invalid_context(self, partition_fn):
         def gn(x, y):
             return torch.sigmoid(torch.matmul(x, y)) * y
 
@@ -1353,7 +1552,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=partition_fn,
         )
         with self.assertRaisesRegex(
             Exception, "must generate a tuple of two `TorchDispatchMode`s"
@@ -1362,7 +1561,14 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
 
     @requires_cuda_and_triton
     @torch._dynamo.config.patch(inline_inbuilt_nn_modules=True)
-    def test_compile_selective_checkpoint_parametrization(self):
+    @parametrize(
+        "partition_fn",
+        [
+            min_cut_rematerialization_partition,
+            default_partition,
+        ],
+    )
+    def test_compile_selective_checkpoint_parametrization(self, partition_fn):
         def sac_policy():
             def _recomp_policy():
                 def _custom_policy(ctx, func, *args, **kwargs):
@@ -1425,7 +1631,9 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         bw_compiler = functools.partial(
             count_ops,
             freqs=[
-                2,  # 1 from mul recompute, 1 from mul backward
+                # 1 from mul recompute, 1 from mul backward
+                # w/o CSE, we have one extra mul
+                3 if partition_fn is default_partition else 2,
                 1,
             ],
             ops=[torch.ops.aten.mul.Tensor, torch.ops.aten.sigmoid.default],
@@ -1434,7 +1642,7 @@ Non-primal fwd outputs from model w/o backward hook: {mod_no_hook_fwd_outputs_no
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=bw_compiler,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=partition_fn,
         )
 
         model = MLPModule()
@@ -1681,14 +1889,13 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = True);  wrap_body_0 = l_x_ = None
-        getitem: "f32[4, 4]" = tag_activation_checkpoint[0]
-        getitem_1: "f32[4, 4]" = tag_activation_checkpoint[1];  tag_activation_checkpoint = None
-        return (getitem, getitem_1)
+        getitem: "f32[4, 4]" = tag_activation_checkpoint[0];  tag_activation_checkpoint = None
+        return (getitem,)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[4, 4]"):
             y: "f32[4, 4]" = torch.sin(l_x_);  l_x_ = None
-            return (y, y)
+            return (y,)
 """,
         )
 
@@ -1783,24 +1990,24 @@ class GraphModule(torch.nn.Module):
 
         wrap_body_0 = self.wrap_body_0
         tag_activation_checkpoint = torch.ops.higher_order.tag_activation_checkpoint(wrap_body_0, l_x_, use_reentrant = False);  wrap_body_0 = l_x_ = None
-        out1: "f32[4, 4]" = tag_activation_checkpoint[0]
-        out2: "f32[4, 4]" = tag_activation_checkpoint[1]
-        getitem_4: "f32[4, 4]" = tag_activation_checkpoint[4];  tag_activation_checkpoint = None
+        getitem_6: "f32[4, 4]" = tag_activation_checkpoint[0]
+        getitem_7: "f32[4, 4]" = tag_activation_checkpoint[1]
+        getitem_8: "f32[4, 4]" = tag_activation_checkpoint[2];  tag_activation_checkpoint = None
 
-        add: "f32[4, 4]" = out1 + out2;  out1 = out2 = None
-        return (add, getitem_4)
+        add: "f32[4, 4]" = getitem_6 + getitem_7;  getitem_6 = getitem_7 = None
+        return (add, getitem_8)
 
     class wrap_body_0(torch.nn.Module):
         def forward(self, l_x_: "f32[4, 4]"):
             matmul: "f32[4, 4]" = torch.matmul(l_x_, l_x_)
-            o: "f32[4, 4]" = matmul @ l_x_
+            o: "f32[4, 4]" = matmul @ l_x_;  matmul = None
 
             out: "f32[4, 4]" = l_x_.sin()
 
-            sin_1: "f32[4, 4]" = torch.sin(o)
-            child: "f32[4, 4]" = torch.cos(sin_1)
-            child_1: "f32[4, 4]" = torch.sin(l_x_);  l_x_ = None
-            return (child, child_1, matmul, o, out, sin_1)
+            sin_1: "f32[4, 4]" = torch.sin(o);  o = None
+            cos: "f32[4, 4]" = torch.cos(sin_1);  sin_1 = None
+            sin_2: "f32[4, 4]" = torch.sin(l_x_);  l_x_ = None
+            return (cos, sin_2, out)
 """,
         )
 
@@ -1821,6 +2028,399 @@ class GraphModule(torch.nn.Module):
         add: "f32[4, 4]" = torch.ops.aten.add.Tensor(cos, sin_2);  cos = sin_2 = None
         return (add, sin, primals_1)
 """,
+        )
+
+    def test_frozen_dataclass_pytree_output(self):
+        import dataclasses
+
+        from torch.utils import _pytree as pytree
+
+        @dataclasses.dataclass(frozen=True)
+        class InputNode:
+            x: torch.Tensor
+
+        @dataclasses.dataclass(frozen=True)
+        class OutputNode:
+            y: torch.Tensor
+
+        pytree.register_dataclass(InputNode)
+        pytree.register_dataclass(OutputNode)
+
+        def cleanup():
+            # Clean up pytree registrations to avoid leaking state to other tests.
+            # We manually remove from the registries since _deregister_pytree_node
+            # has issues with classes registered without serialized_type_name.
+            for cls in [InputNode, OutputNode]:
+                pytree.SUPPORTED_NODES.pop(cls, None)
+                pytree.SUPPORTED_SERIALIZED_TYPES.pop(cls, None)
+                pytree.CONSTANT_NODES.discard(cls)
+
+        try:
+
+            class TinyMLP(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc1 = nn.Linear(4, 8)
+                    self.fc2 = nn.Linear(8, 4)
+
+                def forward(self, inp: InputNode) -> OutputNode:
+                    h = self.fc1(inp.x)
+                    h = torch.nn.functional.silu(h)
+                    y = self.fc2(h)
+                    return OutputNode(y=y)
+
+            mlp = TinyMLP()
+
+            def checkpointed_forward(inp):
+                return torch.utils.checkpoint.checkpoint(
+                    mlp.forward,
+                    inp,
+                    use_reentrant=False,
+                    preserve_rng_state=True,
+                )
+
+            input_eager = InputNode(x=torch.randn(2, 4, requires_grad=True))
+            torch.manual_seed(0)
+            output_eager = checkpointed_forward(input_eager)
+            output_eager.y.sum().backward()
+
+            input_compiled = InputNode(
+                x=input_eager.x.detach().clone().requires_grad_(True)
+            )
+            torch.manual_seed(0)
+            compiled_fn = torch.compile(checkpointed_forward, fullgraph=True)
+            output_compiled = compiled_fn(input_compiled)
+            output_compiled.y.sum().backward()
+
+            self.assertEqual(output_eager.y, output_compiled.y)
+            self.assertEqual(input_eager.x.grad, input_compiled.x.grad)
+        finally:
+            cleanup()
+
+
+class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):
+    """Tests for AC reordering optimization in full graph (forward+backward in one graph)."""
+
+    def count_op(self, gm, target):
+        return sum(1 for n in gm.graph.nodes if n.target == target)
+
+    def _compile_and_capture(self, fn, remat_using_tags_for_fwd_loss_bwd_graph, inputs):
+        captured_gm = None
+
+        def compiler(gm, example_inputs):
+            nonlocal captured_gm
+            captured_gm = gm
+            return gm.forward
+
+        backend = aot_autograd(
+            fw_compiler=compiler,
+            bw_compiler=None,
+            partition_fn=None,
+        )
+
+        with torch._functorch.config.patch(
+            remat_using_tags_for_fwd_loss_bwd_graph=remat_using_tags_for_fwd_loss_bwd_graph
+        ):
+            compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+            result = compiled_fn(*inputs)
+
+        return result, captured_gm
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_ac_rematerialize_simple_forward_backward(self):
+        x = torch.randn(4, 4, requires_grad=True)
+        y = torch.randn(4, 4, requires_grad=True)
+
+        def simple_fwd_bwd(x, y):
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a, b: torch.sigmoid(torch.matmul(a, b)),
+                x,
+                y,
+                use_reentrant=False,
+            )
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+                dx, dy = _grad(loss, (x, y))
+
+            return dx.detach(), dy.detach()
+
+        (dx1, dy1), gm_without = self._compile_and_capture(
+            simple_fwd_bwd, False, (x, y)
+        )
+        (dx2, dy2), gm_with = self._compile_and_capture(simple_fwd_bwd, True, (x, y))
+
+        self.assertTrue(torch.allclose(dx1, dx2))
+        self.assertTrue(torch.allclose(dy1, dy2))
+
+        mm_with = self.count_op(gm_with, torch.ops.aten.mm.default)
+        mm_without = self.count_op(gm_without, torch.ops.aten.mm.default)
+        sigmoid_with = self.count_op(gm_with, torch.ops.aten.sigmoid.default)
+        sigmoid_without = self.count_op(gm_without, torch.ops.aten.sigmoid.default)
+        self.assertEqual(mm_with, 4, "mm should be recomputed in backward")
+        self.assertEqual(mm_without, 3)
+        self.assertEqual(sigmoid_with, 2, "sigmoid should be recomputed in backward")
+        self.assertEqual(sigmoid_without, 1)
+
+        self.assertExpectedInline(
+            gm_with.code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    mm = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    sigmoid = torch.ops.aten.sigmoid.default(mm);  mm = None
+    sum_1 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    mm_recomputed = torch.ops.aten.mm.default(arg0_1, arg1_1)
+    sigmoid_recomputed = torch.ops.aten.sigmoid.default(mm_recomputed);  mm_recomputed = None
+    detach_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_2);  expand = detach_2 = None
+    t = torch.ops.aten.t.default(arg0_1);  arg0_1 = None
+    mm_2 = torch.ops.aten.mm.default(t, sigmoid_backward);  t = None
+    t_1 = torch.ops.aten.t.default(arg1_1);  arg1_1 = None
+    mm_3 = torch.ops.aten.mm.default(sigmoid_backward, t_1);  sigmoid_backward = t_1 = None
+    detach_3 = torch.ops.aten.detach.default(mm_3);  mm_3 = None
+    detach_4 = torch.ops.aten.detach.default(mm_2);  mm_2 = None
+    return (detach_3, detach_4)""",
+        )
+
+    def test_ac_rematerialize_with_rng_ops_raises_error(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def fwd_bwd_with_rng(x):
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a: torch.sigmoid(a + torch.rand_like(a)), x, use_reentrant=False
+            )
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+                dx = _grad(loss, x)[0]
+
+            return dx
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.BackendCompilerFailed,
+            "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops in checkpointed regions.",
+        ):
+            self._compile_and_capture(fwd_bwd_with_rng, True, (x,))
+
+    def test_ac_rematerialize_with_no_annotations_warns_and_returns_unchanged(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def fwd_bwd(x):
+            z = torch.utils.checkpoint.checkpoint(
+                lambda a: torch.sigmoid(a + 4), x, use_reentrant=False
+            )
+            loss = z.sum()
+            return _grad(loss, x)[0]
+
+        # Without backward annotations, the pass should warn and return unchanged
+        # We verify this by checking that remat_using_tags=True produces the same
+        # graph as remat_using_tags=False (i.e., no recomputation happens)
+        import warnings
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            result_with, gm_with = self._compile_and_capture(fwd_bwd, True, (x,))
+
+            # Check warning was issued
+            self.assertTrue(
+                any("no backward region" in str(warning.message) for warning in w),
+                f"Expected warning about no backward region, got: {[str(warning.message) for warning in w]}",
+            )
+
+        # Get the graph without the pass for comparison
+        result_without, gm_without = self._compile_and_capture(fwd_bwd, False, (x,))
+
+        # Results should be correct
+        self.assertTrue(torch.allclose(result_with, result_without))
+
+        # Both graphs should have the same number of sigmoid ops (no recomputation)
+        sigmoid_with = self.count_op(gm_with, torch.ops.aten.sigmoid.default)
+        sigmoid_without = self.count_op(gm_without, torch.ops.aten.sigmoid.default)
+        self.assertEqual(sigmoid_with, sigmoid_without)
+
+    def test_ac_rematerialize_with_selective_checkpoint_policy(self):
+        x = torch.randn(4, 128, requires_grad=True)
+        w1 = torch.randn(128, 128, requires_grad=True)
+        b1 = torch.randn(128, requires_grad=True)
+
+        def policy_fn(ctx, op, *args, **kwargs):
+            if op == torch.ops.aten.addmm.default:
+                return torch.utils.checkpoint.CheckpointPolicy.MUST_SAVE
+            return torch.utils.checkpoint.CheckpointPolicy.PREFER_RECOMPUTE
+
+        context_fn = functools.partial(
+            torch.utils.checkpoint.create_selective_checkpoint_contexts, policy_fn
+        )
+
+        def fwd_bwd_with_policy(x, w1, b1):
+            def checkpoint_fn(inp, w, b):
+                linear = torch.nn.functional.linear(inp, w, b)
+                return torch.relu(linear)
+
+            result = torch.utils.checkpoint.checkpoint(
+                checkpoint_fn, x, w1, b1, use_reentrant=False, context_fn=context_fn
+            )
+            loss = result.sum()
+
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+                dx, dw, db = _grad(loss, (x, w1, b1))
+            return dx, dw, db
+
+        result_with, gm_with = self._compile_and_capture(
+            fwd_bwd_with_policy, True, (x, w1, b1)
+        )
+        result_without, gm_without = self._compile_and_capture(
+            fwd_bwd_with_policy, False, (x, w1, b1)
+        )
+
+        torch.testing.assert_close(result_with[0], result_without[0])
+        torch.testing.assert_close(result_with[1], result_without[1])
+        torch.testing.assert_close(result_with[2], result_without[2])
+
+        addmm_without = self.count_op(gm_without, torch.ops.aten.addmm.default)
+        relu_without = self.count_op(gm_without, torch.ops.aten.relu.default)
+
+        addmm_with = self.count_op(gm_with, torch.ops.aten.addmm.default)
+        relu_with = self.count_op(gm_with, torch.ops.aten.relu.default)
+
+        self.assertEqual(addmm_without, addmm_with)
+        self.assertEqual(relu_with, relu_without + 1)
+
+        recomputed_nodes = [
+            n.name for n in gm_with.graph.nodes if "_recomputed" in n.name
+        ]
+        self.assertNotIn("addmm_recomputed", recomputed_nodes)
+
+        self.assertTrue(
+            any("relu" in name for name in recomputed_nodes),
+            f"Expected relu_recomputed but got: {recomputed_nodes}",
+        )
+
+    def _compile_with_joint_graph_pass_and_capture(self, fn, inputs):
+        from torch._inductor.fx_passes.joint_graph import joint_graph_passes
+
+        captured_gm_before = None
+        captured_gm_after = None
+
+        def custom_compiler(gm, example_inputs):
+            nonlocal captured_gm_before, captured_gm_after
+            import copy
+
+            captured_gm_before = copy.deepcopy(gm)
+            joint_graph_passes(gm)
+            captured_gm_after = gm
+            return gm.forward
+
+        backend = aot_autograd(
+            fw_compiler=custom_compiler,
+            bw_compiler=None,
+            partition_fn=None,
+        )
+
+        compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        result = compiled_fn(*inputs)
+
+        return result, captured_gm_before, captured_gm_after
+
+    def test_joint_graph_passes_view_optimization(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def fwd_bwd_with_views(x):
+            def checkpoint_fn(a):
+                b = a.view(16)
+                c = b.view(4, 4)
+                return torch.sigmoid(c)
+
+            z = torch.utils.checkpoint.checkpoint(
+                checkpoint_fn,
+                x,
+                use_reentrant=False,
+            )
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+                dx = _grad(loss, x)[0]
+
+            return dx.detach()
+
+        result, gm_before, gm_after = self._compile_with_joint_graph_pass_and_capture(
+            fwd_bwd_with_views, (x,)
+        )
+
+        result_eager = torch.autograd.grad(torch.sigmoid(x).sum(), x)[0]
+        self.assertTrue(torch.allclose(result, result_eager, atol=1e-5))
+
+        view_count_before = self.count_op(gm_before, torch.ops.aten.view.default)
+        view_count_after = self.count_op(gm_after, torch.ops.aten.view.default)
+        self.assertTrue(view_count_after == 0)
+        self.assertTrue(view_count_before == 6)
+
+        self.assertExpectedInline(
+            gm_after.code.strip(),
+            """\
+def forward(self, arg0_1):
+    sigmoid = torch.ops.aten.sigmoid.default(arg0_1)
+    sum_1 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    sigmoid_recomputed = torch.ops.aten.sigmoid.default(arg0_1);  arg0_1 = None
+    detach_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_2);  expand = detach_2 = None
+    detach_3 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
+    return (detach_3,)""",
+        )
+
+    def test_joint_graph_passes_permute_optimization(self):
+        x = torch.randn(4, 4, requires_grad=True)
+
+        def fwd_bwd_with_permute(x):
+            def checkpoint_fn(a):
+                b = a.permute(1, 0)
+                c = b.permute(1, 0)
+                return torch.sigmoid(c)
+
+            z = torch.utils.checkpoint.checkpoint(
+                checkpoint_fn,
+                x,
+                use_reentrant=False,
+            )
+            loss = z.sum()
+
+            with torch.fx.traceback.annotate({"remat_pass_tag": "is_backward"}):
+                dx = _grad(loss, x)[0]
+
+            return dx.detach()
+
+        result, gm_before, gm_after = self._compile_with_joint_graph_pass_and_capture(
+            fwd_bwd_with_permute, (x,)
+        )
+
+        result_eager = torch.autograd.grad(torch.sigmoid(x).sum(), x)[0]
+        self.assertTrue(torch.allclose(result, result_eager, atol=1e-5))
+
+        permute_count_before = self.count_op(gm_before, torch.ops.aten.permute.default)
+        permute_count_after = self.count_op(gm_after, torch.ops.aten.permute.default)
+        self.assertTrue(permute_count_after == 0)
+        self.assertTrue(permute_count_before == 6)
+
+        self.assertExpectedInline(
+            gm_after.code.strip(),
+            """\
+def forward(self, arg0_1):
+    sigmoid = torch.ops.aten.sigmoid.default(arg0_1)
+    sum_1 = torch.ops.aten.sum.default(sigmoid);  sigmoid = None
+    ones_like = torch.ops.aten.ones_like.default(sum_1, pin_memory = False, memory_format = torch.preserve_format);  sum_1 = None
+    expand = torch.ops.aten.expand.default(ones_like, [4, 4]);  ones_like = None
+    sigmoid_recomputed = torch.ops.aten.sigmoid.default(arg0_1);  arg0_1 = None
+    detach_recomputed = torch.ops.aten.detach.default(sigmoid_recomputed);  sigmoid_recomputed = None
+    detach_2 = torch.ops.aten.detach.default(detach_recomputed);  detach_recomputed = None
+    sigmoid_backward = torch.ops.aten.sigmoid_backward.default(expand, detach_2);  expand = detach_2 = None
+    detach_3 = torch.ops.aten.detach.default(sigmoid_backward);  sigmoid_backward = None
+    return (detach_3,)""",
         )
 
 

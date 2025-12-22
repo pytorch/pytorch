@@ -67,6 +67,7 @@ jobs:
       build_environment: linux-binary-libtorch
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   libtorch-cpu-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -133,6 +134,7 @@ jobs:
       build_environment: linux-binary-libtorch
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   libtorch-cuda12_6-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -201,6 +203,7 @@ jobs:
       build_environment: linux-binary-libtorch
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   libtorch-cuda12_8-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -269,6 +272,7 @@ jobs:
       build_environment: linux-binary-libtorch
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   libtorch-cuda12_9-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -337,6 +341,7 @@ jobs:
       build_environment: linux-binary-libtorch
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   libtorch-cuda13_0-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -406,12 +411,13 @@ jobs:
       build_environment: linux-binary-libtorch
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   libtorch-rocm7_0-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - libtorch-rocm7_0-shared-with-deps-release-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch
@@ -524,12 +530,13 @@ jobs:
       build_environment: linux-binary-libtorch
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
+
   libtorch-rocm7_1-shared-with-deps-release-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
       - libtorch-rocm7_1-shared-with-deps-release-build
       - get-label-type
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: 240
     env:
       PYTORCH_ROOT: /pytorch

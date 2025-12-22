@@ -6,11 +6,14 @@ import torch
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfXPU,
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyOn,
     skipMeta,
+    skipXPUIf,
 )
 from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_WITH_ROCM
+from torch.nn.attention import SDPBackend
 
 class TestMHADeviceType(TestCase):
     @torch.no_grad()
@@ -89,6 +92,7 @@ class TestMHADeviceType(TestCase):
                 torch.testing.assert_close(v, correct_v)
 
     @dtypesIfCUDA(torch.float)
+    @dtypesIfXPU(torch.float)
     @dtypes(torch.float)
     @skipMeta
     def test_transform_bias_rescale_qkv(self, device, dtype):
@@ -99,9 +103,11 @@ class TestMHADeviceType(TestCase):
                 )
 
     @dtypesIfCUDA(torch.float)
+    @dtypesIfXPU(torch.float)
     @dtypes(torch.float)
     @skipMeta
-    @onlyCUDA
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2182")
+    @onlyOn(["cuda", "xpu"])
     def test_transform_bias_rescale_qkv_nested(self, device, dtype):
         for use_padding in (False, True):
             with self.subTest(use_padding=use_padding):
@@ -185,9 +191,9 @@ class TestMHADeviceType(TestCase):
             embed_dim=embed_dim, num_heads=num_heads, qkv=native_qkv, proj=native_proj
         ).to(dtype)
 
-        if device == "cuda":
-            pt = pt.cuda()
-            npt = npt.cuda()
+        if device == "cuda" or device == "xpu":
+            pt = pt.to(device)
+            npt = npt.to(device)
 
         ypt, weight_pt = pt(
             q,
@@ -266,6 +272,7 @@ class TestMHADeviceType(TestCase):
             self.assertEqual(weight_pt, weight_npt)
 
     @dtypesIfCUDA(torch.float, torch.half)
+    @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
     @skipMeta
     @parametrize("use_nt", [False, True])
@@ -285,10 +292,25 @@ class TestMHADeviceType(TestCase):
             with self.subTest(use_padding=use_padding, pad_all=pad_all,
                               use_nt=use_nt, need_weights=need_weights,
                               average_attn_weights=average_attn_weights):
-                with torch.backends.cuda.sdp_kernel(
-                        enable_flash=False, enable_mem_efficient=False
-                ) if not fused else torch.backends.cuda.sdp_kernel(
-                        enable_flash=True, enable_mem_efficient=True
+                sdpa_backends_fused = [
+                    SDPBackend.MATH,
+                    SDPBackend.OVERRIDEABLE,
+                    SDPBackend.CUDNN_ATTENTION,
+                    SDPBackend.FLASH_ATTENTION,
+                    SDPBackend.EFFICIENT_ATTENTION,
+                ]
+                sdpa_backends_not_fused = [
+                    SDPBackend.MATH,
+                    SDPBackend.OVERRIDEABLE,
+                    SDPBackend.CUDNN_ATTENTION,
+                ]
+                if device == "xpu":
+                    sdpa_backends_fused = [SDPBackend.OVERRIDEABLE, SDPBackend.MATH]
+                    sdpa_backends_not_fused = [SDPBackend.MATH]
+                with torch.nn.attention.sdpa_kernel(
+                        sdpa_backends_not_fused
+                ) if not fused else torch.nn.attention.sdpa_kernel(
+                        sdpa_backends_fused
                 ):
                     self._test_multihead_attention_impl(
                         device,
@@ -302,6 +324,7 @@ class TestMHADeviceType(TestCase):
                     )
 
     @dtypesIfCUDA(torch.float, torch.half)
+    @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
     @skipMeta
     @torch.no_grad()
@@ -316,6 +339,7 @@ class TestMHADeviceType(TestCase):
         )
 
     @dtypesIfCUDA(torch.float, torch.half)
+    @dtypesIfXPU(torch.float, torch.half)
     @dtypes(torch.float)
     @skipMeta
     @torch.no_grad()
@@ -330,7 +354,7 @@ class TestMHADeviceType(TestCase):
         )
 
 
-instantiate_device_type_tests(TestMHADeviceType, globals())
+instantiate_device_type_tests(TestMHADeviceType, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

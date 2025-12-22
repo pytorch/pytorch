@@ -8,6 +8,7 @@ from functools import partial
 from collections.abc import Callable
 
 import torch
+import torch.nn.functional as F
 
 from torch.quantization._quantized_conversions import (
     pack_int4_to_int8,
@@ -18,11 +19,9 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
-    SM53OrLater,
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
-    _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -281,8 +280,7 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1.1e-5)})
-    @dtypes(*([torch.float32, torch.float16] +
-              [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),
@@ -404,7 +402,7 @@ class TestMatmulCuda(InductorTestCase):
         b.requires_grad_(True)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
 
-        f = torch._grouped_mm
+        f = F.grouped_mm
         out = f(a, b.t(), offs=offs, out_dtype=dtype)
         gO = torch.rand_like(out)
         out.backward(gO)
@@ -456,7 +454,7 @@ class TestMatmulCuda(InductorTestCase):
             if check_zero_size:
                 offs[0] = offs[1]
 
-            f = torch._grouped_mm
+            f = F.grouped_mm
             out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
             gO = torch.rand_like(out)
             if not check_zero_size:
@@ -501,7 +499,7 @@ class TestMatmulCuda(InductorTestCase):
         b_contig = b if b_row_major else b.transpose(-2, -1)
         self.assertTrue(b_contig.is_contiguous() is not strided)
 
-        f = torch._grouped_mm
+        f = F.grouped_mm
         out = f(a, b.transpose(-2, -1), out_dtype=dtype)
         gO = torch.rand_like(out)
         out.backward(gO)
@@ -541,7 +539,7 @@ class TestMatmulCuda(InductorTestCase):
             if check_zero_size:
                 offs[0] = offs[1]
 
-            f = torch._grouped_mm
+            f = F.grouped_mm
             out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
             gO = torch.rand_like(out)
             if not check_zero_size:
@@ -559,7 +557,7 @@ class TestMatmulCuda(InductorTestCase):
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    # TODO(future PR): enable compile for torch._grouped_mm fallback path
+    # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
@@ -572,7 +570,7 @@ class TestMatmulCuda(InductorTestCase):
 
         align = 16 // dtype_AB.itemsize
 
-        f_ref = torch._grouped_mm
+        f_ref = F.grouped_mm
 
         options = {}
         if max_autotune:
@@ -747,11 +745,13 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
     @parametrize("M", [1, 32, 64])
-    @parametrize("N", [1, 32, 64])
+    @parametrize("N", [1, 64])
     @parametrize("K", [1, 32, 64])
-    @parametrize("batch_size", [None, 1, 32])
+    @parametrize("batch_size", [None, 1])
+    @parametrize("broadcast_self", [False, True])
+    @parametrize("high_precision_self", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
-    def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
+    def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, broadcast_self, high_precision_self, backend):
         if torch.version.hip:
             msg = "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
             if input_dtype == torch.bfloat16 and N == 1 and K == 32 and batch_size:
@@ -766,19 +766,21 @@ class TestMatmulCuda(InductorTestCase):
         device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
-            def create_inputs(B=None):
+            def create_inputs(B, broadcast_self):
                 if B is None:
                     a = torch.randn(M, K, device=device, dtype=dtype)
                     b = torch.randn(K, N, device=device, dtype=dtype)
-                    c = torch.randn(M, N, device=device, dtype=dtype)
+                    c_shape = (M, N) if not broadcast_self else (N)
+                    c = torch.randn(c_shape, device=device, dtype=dtype)
                 else:
                     a = torch.randn(B, M, K, device=device, dtype=dtype)
                     b = torch.randn(B, K, N, device=device, dtype=dtype)
-                    c = torch.randn(B, M, N, device=device, dtype=dtype)
+                    c_shape = (B, M, N) if not broadcast_self else (N)
+                    c = torch.randn(c_shape, device=device, dtype=dtype)
 
                 return a, b, c
 
-            a, b, c = create_inputs(batch_size)
+            a, b, c = create_inputs(batch_size, broadcast_self)
 
             a_fp32, b_fp32, c_fp32 = a.to(torch.float32), b.to(torch.float32), c.to(torch.float32)
 
@@ -800,21 +802,31 @@ class TestMatmulCuda(InductorTestCase):
                         with self.assertRaises(RuntimeError):
                             torch.addmm(c, a, b, out_dtype=output_dtype)
                 else:
+                    if c.dtype != output_dtype and high_precision_self:
+                        c = c.to(output_dtype)
                     if batch_size:
                         out = torch.baddbmm(c, a, b, out_dtype=output_dtype)
                         if output_dtype == torch.float32:
                             baseline = torch.baddbmm(c_fp32, a_fp32, b_fp32)
                         else:
                             baseline = torch.baddbmm(c, a, b)
+                        # test out variant
+                        out_ten = torch.full_like(out, float("nan"))
+                        torch.baddbmm(c, a, b, out_dtype=output_dtype, out=out_ten)
                     else:
                         out = torch.addmm(c, a, b, out_dtype=output_dtype)
                         if output_dtype == torch.float32:
                             baseline = torch.addmm(c_fp32, a_fp32, b_fp32)
                         else:
                             baseline = torch.addmm(c, a, b)
+                        # test out variant
+                        out_ten = torch.full_like(out, float("nan"))
+                        torch.addmm(c, a, b, out_dtype=output_dtype, out=out_ten)
 
                     self.assertEqual(out.dtype, output_dtype)
+                    self.assertEqual(out_ten.dtype, output_dtype)
                     torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
+                    torch.testing.assert_close(out_ten, out, atol=0, rtol=0)
 
 
     @onlyCUDA
@@ -932,16 +944,35 @@ class TestMatmulCuda(InductorTestCase):
         self.assertGreater(t1 - t0, t3 - t2)
 
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
+    @serialTest()
+    def test_greencontext_graphs(self):
+        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
+        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
+        ctx.set_context()
+        partial_res = torch.matmul(a, a)
+        ctx.pop_context()
+        full_res = torch.matmul(a, a)
+        full_res.zero_()
+        partial_res.zero_()
+        torch.cuda.synchronize()
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            ctx.set_context()
+            partial_res = torch.matmul(a, a)
+            ctx.pop_context()
+            full_res = torch.matmul(a, a)
+        g.replay()
+        self.assertEqual(partial_res, full_res)
+
+
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
-        version = _get_torch_cuda_version()
-        if version < (11, 8):
-            self.skipTest("_mixed_dtypes_linear only compiled for CUDA 11.8+")
-
         def run_test(
             batch_shape,
             m,

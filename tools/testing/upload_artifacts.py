@@ -6,7 +6,7 @@ import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from filelock import FileLock, Timeout
 
@@ -154,7 +154,7 @@ def parse_xml_and_upload_json() -> None:
     uploading the same file from multiple processes.
     """
     try:
-        job_id: Optional[int] = int(os.environ.get("JOB_ID", 0))
+        job_id: int | None = int(os.environ.get("JOB_ID", 0))
         if job_id == 0:
             job_id = None
     except (ValueError, TypeError):
@@ -208,3 +208,45 @@ def parse_xml_and_upload_json() -> None:
                     lock.release()
     except Exception as e:
         print(f"Failed to parse and upload json test reports: {e}")
+
+
+def upload_adhoc_failure_json(invoking_file: str, current_failure: str) -> None:
+    """
+    manually upload a json to s3 indicating that the entire test file failed
+    since xml was probably not generated in this case
+    """
+    try:
+        job_id = int(os.environ["JOB_ID"])
+        workflow_id = int(os.environ["GITHUB_RUN_ID"])
+    except Exception as e:
+        print(f"Failed to get job_id or workflow_id: {e}")
+        return
+
+    split_failure = current_failure.split("::")
+    if len(split_failure) >= 2:
+        className = split_failure[-2]
+        testName = split_failure[-1]
+    else:
+        testName = current_failure
+        className = ""
+
+    message = "The test file failed but pytest did not generate xml.  The most likely cause is a segfault"
+    j = {
+        "invoking_file": invoking_file,
+        "file": f"{invoking_file}.py",
+        "name": testName,
+        "classname": className,
+        "workflow_id": workflow_id,
+        "workflow_run_attempt": os.environ.get("GITHUB_RUN_ATTEMPT"),
+        "job_id": job_id,
+        "failure": {"message": message, "text": message},
+    }
+    gzipped = gzip.compress(json.dumps(j).encode("utf-8"))
+    s3_key = f"{invoking_file.replace('/', '_')}_{os.urandom(8).hex()}.json"
+    get_s3_resource().put_object(
+        Body=gzipped,
+        Bucket="gha-artifacts",
+        Key=f"test_jsons_while_running/{workflow_id}/{job_id}/{s3_key}",
+        ContentType="application/json",
+        ContentEncoding="gzip",
+    )

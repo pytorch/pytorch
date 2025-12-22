@@ -23,7 +23,6 @@
 
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/function_schema.h>
-#include <ATen/core/stack.h>
 #include <ATen/record_function.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
@@ -112,59 +111,8 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   std::map<size_t, std::stack<ID>> opStack;
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
+
   std::map<const void*, ID> objectId;
-
-  using weak_storage_ptr = c10::weak_intrusive_ptr<StorageImpl>;
-  std::unordered_map<const void*, ID> data_ptr_to_storage_id;
-  std::unordered_map<const void*, weak_storage_ptr>
-      data_ptr_to_weak_storage_ptr;
-
-  ID get_tensor_storage_ID(const c10::Storage& t_storage) {
-    const std::lock_guard<std::recursive_mutex> lock(gMutex);
-
-    const void* raw_data_ptr = nullptr;
-    bool should_track_liveness = false;
-    // FakeTensor/FunctionalTensor may clear the Storage handle entirely or use
-    // a nullptr data pointer. Treat both cases as a shared cache key but avoid
-    // touching the weak-ref table so they can reuse the same ID without
-    // tripping the liveness check.
-    if (t_storage.unsafeGetStorageImpl()) {
-      raw_data_ptr = t_storage.data();
-      should_track_liveness = raw_data_ptr != nullptr;
-    }
-
-    auto id_iter = data_ptr_to_storage_id.find(raw_data_ptr);
-    if (!should_track_liveness) {
-      if (id_iter != data_ptr_to_storage_id.end()) {
-        return id_iter->second;
-      }
-      ID id = storage_id_++;
-      data_ptr_to_storage_id.emplace(raw_data_ptr, id);
-      return id;
-    }
-
-    auto weak_iter = data_ptr_to_weak_storage_ptr.find(raw_data_ptr);
-    if (weak_iter == data_ptr_to_weak_storage_ptr.end()) {
-      ID id = storage_id_++;
-      data_ptr_to_storage_id.insert_or_assign(raw_data_ptr, id);
-      data_ptr_to_weak_storage_ptr.emplace(
-          raw_data_ptr, t_storage.getWeakStorageImpl());
-      return id;
-    }
-
-    if (weak_iter->second.expired()) {
-      ID id = storage_id_++;
-      data_ptr_to_storage_id.insert_or_assign(raw_data_ptr, id);
-      data_ptr_to_weak_storage_ptr.insert_or_assign(
-          raw_data_ptr, t_storage.getWeakStorageImpl());
-      return id;
-    }
-
-    id_iter = data_ptr_to_storage_id.find(raw_data_ptr);
-    TORCH_INTERNAL_ASSERT(id_iter != data_ptr_to_storage_id.end());
-    return id_iter->second;
-  }
-
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
@@ -227,8 +175,6 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // 1 -> root ID
   // 2 ... -> regular node ID
   std::atomic<ID> id_{2};
-
-  std::atomic<ID> storage_id_{1};
 };
 
 // Using a singleton manager here to allow init and delete the observer object.
@@ -279,7 +225,7 @@ static std::ofstream openOutputFile(const std::string& name) {
   std::ofstream stream;
   stream.open(name, std::ofstream::out | std::ofstream::trunc);
   if (!stream) {
-    LOG(ERROR) << "Failed to open '" << name << "'";
+    LOG(ERROR) << "Failed to open '" << name << '\'';
   } else {
     VLOG(1) << "PyTorch Execution Trace: writing to " << name;
   }
@@ -499,8 +445,8 @@ convertIValue(
     // symbolic sizes/strides implies t->storage_offset() will fail
     if (tensor_impl->has_storage() &&
         !tensor_impl->has_symbolic_sizes_strides()) {
-      const c10::Storage& t_storage = tensor_impl->storage();
-      storage_id = ob.get_tensor_storage_ID(t_storage);
+      auto& t_storage = tensor_impl->storage();
+      storage_id = getObjectID(ob, t_storage.data());
       offset = tensor_impl->storage_offset();
       numel = tensor_impl->numel();
       itemsize = tensor_impl->itemsize();
@@ -754,7 +700,7 @@ static void recordOperatorStart(
                 RecordScope::USER_SCOPE),
             tid,
             0); // fw_tid
-        ob.out << ",";
+        ob.out << ',';
       }
     }
 
@@ -928,7 +874,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
             fc.kernelFile,
             fc.get_string_for_tensor_range(),
             additiona_attrs);
-        ob->out << ",";
+        ob->out << ',';
       }
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name
@@ -977,7 +923,7 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
       // 5 is the length of ".json"
       ob.resourceDir.replace(ext_pos, 5, "_resources/");
       VLOG(1) << "Execution trace resource directory: " << ob.resourceDir
-              << "\n";
+              << '\n';
     } else {
       LOG(WARNING)
           << "Execution trace output file does not end with \".json\".";
