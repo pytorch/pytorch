@@ -112,6 +112,9 @@ class C10_API Stream final {
     return id_;
   }
 
+  // Return the underlying pointer that this c10::Stream warps.
+  void* data_ptr() const;
+
   // Enqueues a wait instruction in the stream's work queue.
   // This instruction is a no-op unless the event is marked
   // for recording. In that case the stream stops processing

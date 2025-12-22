@@ -130,6 +130,17 @@ static PyObject* THPStream_get_device(THPStream* self, void* unused) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStream_data_ptr(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto self = reinterpret_cast<THPStream*>(_self);
+  auto stream = c10::Stream::unpack3(
+      self->stream_id,
+      static_cast<c10::DeviceIndex>(self->device_index),
+      static_cast<c10::DeviceType>(self->device_type));
+  return PyLong_FromVoidPtr(stream.data_ptr());
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPStream_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPStream*>(_self);
@@ -405,6 +416,7 @@ static const std::initializer_list<PyGetSetDef> THPStream_properties = {
     {nullptr}};
 
 static const std::initializer_list<PyMethodDef> THPStream_methods = {
+    {"data_ptr", THPStream_data_ptr, METH_NOARGS, nullptr},
     {"query", THPStream_query, METH_NOARGS, nullptr},
     {"synchronize", THPStream_synchronize, METH_NOARGS, nullptr},
     {"wait_event", THPStream_wait_event, METH_O, nullptr},
