@@ -1194,7 +1194,6 @@ class PythonWrapperCodegen(CodeGen):
             f"""
                 {aot_config_comment}
                 from ctypes import c_void_p, c_long, c_int
-                import builtins
                 import torch
                 import math
                 import random
@@ -1579,14 +1578,14 @@ class PythonWrapperCodegen(CodeGen):
             else:
                 format_kwargs[key] = repr(value)
 
-        # Generate the print call with formatted string using builtins.print
+        # Generate the print call with formatted string using print
         # to avoid any potential shadowing of the print name
         if format_kwargs:
             kwargs_str = ", ".join(f"{k}={v}" for k, v in format_kwargs.items())
-            self.writeline(f"builtins.print({repr(format_str)}.format({kwargs_str}))")
+            self.writeline(f"print({repr(format_str)}.format({kwargs_str}))")
         else:
             # No format kwargs, just print the format string directly
-            self.writeline(f"builtins.print({repr(format_str)})")
+            self.writeline(f"print({repr(format_str)})")
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)
