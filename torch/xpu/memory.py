@@ -346,9 +346,9 @@ def _snapshot(device: Device = None, augment_with_fx_traces: bool = False) -> _S
     Arguments:
         device (torch.device or int or str, optional): selected device. It uses the current device,
             given by :func:`~torch.xpu.current_device`, if :attr:`device` is ``None`` (default).
-        augment_with_fx_traces (bool): If True, augment stack trace frames with FX debug information
+        augment_with_fx_traces (bool, optional): If True, augment stack trace frames with FX debug information
             that maps generated FX code back to original model source code. This adds the FX-related
-            fields (fx_node_op, fx_node_name, fx_original_trace) to Frame objects. Default is False.
+            fields (fx_node_op, fx_node_name, fx_original_trace) to Frame objects. Default is ``False``.
 
     Returns:
         The Snapshot dictionary object
