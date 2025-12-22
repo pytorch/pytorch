@@ -92,11 +92,9 @@ def _no_grad_trunc_normal_(
     generator: torch.Generator | None = None,
 ) -> Tensor:
     """Fill tensor with truncated normal distribution values in no-grad context.
-    
     Helper function that applies truncated normal initialization within a no_grad 
     context to avoid gradient computation during initialization. Uses inverse CDF 
     method for generating truncated normal values.
-    
     Args:
         tensor: Tensor to be filled with truncated normal values
         mean: Mean of the normal distribution
@@ -104,7 +102,6 @@ def _no_grad_trunc_normal_(
         a: Lower bound for truncation
         b: Upper bound for truncation
         generator: Optional random number generator
-        
     Returns:
         The input tensor filled with truncated normal values
     """
