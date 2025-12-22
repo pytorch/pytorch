@@ -43,7 +43,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    xfailIfPy312Plus,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
@@ -59,6 +58,7 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
+from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import skipCUDAIf
 
 
@@ -2298,9 +2298,10 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
-    @xfailIfPy312Plus  # https://github.com/pytorch/pytorch/issues/142032
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
+        counters.clear()
+
         target_size = (8, 2)
         mem_eff_temporal_upsampling_interp_chunks = 2
         from functorch.einops import rearrange
@@ -2310,7 +2311,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         x = rearrange(x, "b c t h w -> b c t (h w)")
 
         def interpolate_chunked(x):
-            # chunk along c
             chunks = x.chunk(chunks=mem_eff_temporal_upsampling_interp_chunks, dim=1)
             r = []
             for t in chunks:
@@ -2319,12 +2319,23 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                         t.float(), size=target_size, mode="nearest"
                     ).to(t.dtype)
                 )
-            out_chunked = torch.cat(r, dim=1)
-            return out_chunked
+            return torch.cat(r, dim=1)
 
         out_eager = interpolate_chunked(x)
         out_compiled = torch.compile(interpolate_chunked)(x)
+
         self.assertEqual(out_eager, out_compiled)
+
+        unique_graphs = counters["stats"].get("unique_graphs", None)
+        self.assertIsNotNone(
+            unique_graphs,
+            "Expected Dynamo to record unique_graphs counter",
+        )
+        self.assertEqual(
+            unique_graphs,
+            1,
+            "Repeated masked loads should compile to a single stable graph",
+        )
 
     def test_max_autotune_nograd(self):
         """
