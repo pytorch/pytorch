@@ -70,3 +70,14 @@ IS_CACHING_MODULE_ENABLED: Callable[[], bool] = partial(
     _CACHING_MODULE_OSS_DEFAULT,
     _CACHING_MODULE_ENV_VAR_OVERRIDE,
 )
+
+
+# Controls whether the Memoizer dumps its cache to a JSON file on destruction.
+# This is useful for debugging and inspection purposes.
+_DUMP_MEMOIZER_CACHE_ENV_VAR: str = "TORCHINDUCTOR_DUMP_MEMOIZER_CACHE"
+_DUMP_MEMOIZER_CACHE_DEFAULT: bool = False
+IS_DUMP_MEMOIZER_CACHE_ENABLED: Callable[[], bool] = partial(
+    _env_var_config,
+    _DUMP_MEMOIZER_CACHE_ENV_VAR,
+    _DUMP_MEMOIZER_CACHE_DEFAULT,
+)
