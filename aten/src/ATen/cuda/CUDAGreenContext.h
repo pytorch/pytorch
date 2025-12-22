@@ -24,6 +24,8 @@ class TORCH_CUDA_CPP_API GreenContext {
 
   void popContext();
 
+  CUDAStream Stream();
+
  private:
   GreenContext(uint32_t device_id, uint32_t num_sms);
   // Implement move operations
@@ -34,5 +36,6 @@ class TORCH_CUDA_CPP_API GreenContext {
   CUgreenCtx green_ctx_ = nullptr;
   CUcontext context_ = nullptr;
   cudaStream_t parent_stream_ = nullptr;
+  CUstream green_ctx_stream_;
 };
 } // namespace at::cuda
