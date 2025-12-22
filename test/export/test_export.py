@@ -13423,6 +13423,29 @@ graph():
         inp = torch.ones(2, 2)
         self.assertEqual(ep.module()(inp, MyInput(4, 4)), Foo()(inp, MyInput(4, 4)))
 
+    def test_opaque_obj_run_decompositions_nonstrict(self):
+        @dataclass(frozen=True)
+        class MyInput:
+            int_1: int
+            int_2: int
+
+            def __fx_repr__(self):
+                return (
+                    f"MyInput(int_1={self.int_1!r}, int_2={self.int_2!r})",
+                    {"MyInput": MyInput},
+                )
+
+        class Foo(torch.nn.Module):
+            def forward(self, x, f):
+                return x + f.int_1 + f.int_2
+
+        torch._library.opaque_object.register_opaque_type(MyInput, typ="value")
+        ep = export(Foo(), (torch.randn(2, 2), MyInput(4, 4)), strict=False)
+        ep = ep.run_decompositions({})
+
+        inp = torch.ones(2, 2)
+        self.assertEqual(ep.module()(inp, MyInput(4, 4)), Foo()(inp, MyInput(4, 4)))
+
     def test_cond_with_module_stack_export_with(self):
         class Bar(torch.nn.Module):
             def __init__(self) -> None:
