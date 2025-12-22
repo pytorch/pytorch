@@ -33,7 +33,7 @@ class TestCudaPrimaryCtx(TestCase):
             )
 
     @skipIfRocm(
-        msg="last checked in ROCm 7, HIP runtime doesn't create context for hipSetDevice()"
+        msg="HIP runtime doesn't create context for hipSetDevice() - no confirmed fix timeline"
     )
     def test_set_device_0(self):
         # In CUDA 12 the behavior of cudaSetDevice has changed. It eagerly creates context on target.

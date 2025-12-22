@@ -959,7 +959,7 @@ class TestQuantizedOps(TestCase):
     (Similar to test_qadd_relu_different_qparams, will probably merge in the future)"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skipIf(TEST_ROCM, "ROCm does not support cudnn_frontend for quantized ops.")
     @unittest.skip("not currently working and feature isn't used")
     def test_qadd_relu_cudnn(self):
         dtype = torch.qint8
@@ -994,7 +994,7 @@ class TestQuantizedOps(TestCase):
     """Tests the correctness of the cudnn add and add_relu op for nhwc format"""
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skipIf(TEST_ROCM, "ROCm does not support cudnn_frontend for quantized ops.")
     @unittest.skip("not currently working and feature isn't used")
     def test_qadd_relu_cudnn_nhwc(self):
         dtype = torch.qint8
@@ -1447,7 +1447,7 @@ class TestQuantizedOps(TestCase):
            padding=st.integers(0, 2),
            ceil_mode=st.booleans())
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skipIf(TEST_ROCM, "ROCm/MIOpen does not support cudnn quantized pooling APIs.")
     def test_max_pool2d_cudnn(self, X, kernel, stride, dilation, padding, ceil_mode):
         X, (scale, zero_point, torch_type) = X
         assume(kernel // 2 >= padding)  # Kernel cannot be overhanging!
@@ -4277,7 +4277,7 @@ class TestQuantizedLinear(TestCase):
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(TEST_CUDNN and torch.backends.cudnn.version() == 90100, "expected failure on cuDNN 9.1.0")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skipIf(TEST_ROCM, "ROCm does not support cudnn_frontend for quantized ops.")
     # TODO: check with yang regarding CUDNN flags
     @unittest.skip("not currently working and feature isn't used")
     def test_qlinear_cudnn(self, batch_size, input_channels, output_channels, use_bias,
@@ -5831,7 +5831,7 @@ class TestQuantizedConv(TestCase):
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skipIf(TEST_ROCM, "ROCm does not support cudnn_frontend for quantized ops.")
     @unittest.skip("not currently working and feature isn't used")
     def test_qconv2d_cudnn(
             self,
@@ -5914,7 +5914,7 @@ class TestQuantizedConv(TestCase):
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skipIf(TEST_ROCM, "ROCm does not support cudnn_frontend for quantized ops.")
     @unittest.skip("not currently working and feature isn't used")
     def test_qconv2d_relu_cudnn(
             self,
@@ -6649,7 +6649,7 @@ class TestQuantizedConv(TestCase):
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skipIf(TEST_ROCM, "ROCm does not support cudnn_frontend for quantized ops.")
     @unittest.skip("not currently working and feature isn't used")
     def test_qconv1d_cudnn(
         self,
@@ -6723,7 +6723,7 @@ class TestQuantizedConv(TestCase):
     @skipIfNoFBGEMM
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
     @unittest.skipIf(not SM80OrLater, "requires sm80 or later.")
-    @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
+    @unittest.skipIf(TEST_ROCM, "ROCm does not support cudnn_frontend for quantized ops.")
     @unittest.skip("not currently working and feature isn't used")
     def test_qconv1d_relu_cudnn(
         self,

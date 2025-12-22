@@ -1562,14 +1562,15 @@ class TestTEFuser(JitTestCase):
                 # torch.round,
                 # torch.trunc,
                 torch.frac,
-                # TODO: broken on ROCm?
-                # F.hardshrink,
+                F.hardshrink,
                 F.leaky_relu,
                 lambda x: torch.threshold(x, 0, -10),
                 # TODO: broken since type promotion was added
                 # lambda x: torch.clamp(x, -10, 10),
             ]
             gpu_only = {torch.erf, torch.erfc}
+            # Operations with known issues on ROCm for TensorExpr CUDA codegen
+            rocm_cuda_skip = {F.hardshrink}
             sizes = [(1,), (2,), (4, 4)]
             for dtype, op, device, size in product(
                 self.dtypes, unary_ops, self.devices, sizes
@@ -1581,6 +1582,8 @@ class TestTEFuser(JitTestCase):
                 if dtype == torch.bfloat16 and op == torch.round:
                     continue
                 if op in gpu_only and device == "cpu":
+                    continue
+                if TEST_WITH_ROCM and device == "cuda" and op in rocm_cuda_skip:
                     continue
                 try:
                     x = self.data_for(dtype, device, size=size)
