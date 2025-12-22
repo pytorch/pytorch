@@ -1147,26 +1147,30 @@ class BuiltinVariable(VariableTracker):
                     # This is important because if we don't realize, the function may
                     # skip compilation entirely (no tensor ops in graph), but we need
                     # the symbolic tracing to happen for unbacked int/float support.
-                    for arg in args:
-                        if (
-                            isinstance(arg, LazyConstantVariable)
-                            and not arg.is_realized()
-                        ):
-                            val_type = arg.peek_type()
-                            if val_type is int and not config.specialize_int:
-                                # Int might become SymNodeVariable - must realize
-                                return obj.call_function(
-                                    tx,
-                                    [v.realize() for v in args],
-                                    kwargs,
-                                )
-                            if val_type is float and not config.specialize_float:
-                                # Float might become SymNodeVariable - must realize
-                                return obj.call_function(
-                                    tx,
-                                    [v.realize() for v in args],
-                                    kwargs,
-                                )
+                    #
+                    # Exception: str.format always produces a string result, so it
+                    # doesn't benefit from symbolic handling and can stay lazy.
+                    if fn is not str.format:
+                        for arg in args:
+                            if (
+                                isinstance(arg, LazyConstantVariable)
+                                and not arg.is_realized()
+                            ):
+                                val_type = arg.peek_type()
+                                if val_type is int and not config.specialize_int:
+                                    # Int might become SymNodeVariable - must realize
+                                    return obj.call_function(
+                                        tx,
+                                        [v.realize() for v in args],
+                                        kwargs,
+                                    )
+                                if val_type is float and not config.specialize_float:
+                                    # Float might become SymNodeVariable - must realize
+                                    return obj.call_function(
+                                        tx,
+                                        [v.realize() for v in args],
+                                        kwargs,
+                                    )
 
                     try:
                         return ComputedLazyConstantVariable.create(
