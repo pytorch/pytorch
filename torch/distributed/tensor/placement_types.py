@@ -496,7 +496,7 @@ class Shard(torch._C._distributed.Shard):
 
 class _StridedShard(torch._C._distributed.StridedShard):
     """
-    _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
+    _StridedShard was originally introduced to support 2D FSDP2 + TP sharding where the tensor
     is sharded on the TP mesh dimension first, then sharded on the FSDP mesh dimension.
     We call this right-to-left sharding which is the opposite of the default
     left-to-right sharding. See the example below::
@@ -553,8 +553,6 @@ class _StridedShard(torch._C._distributed.StridedShard):
     right-to-left. In the example above, the tensor should first be sharded on the "tp"
     dimension into 2 shards before being sharded on the "dp" dimension. Therefore, the
     `split_factor` of the _StridedShard placement on "dp" dim is 2.
-
-    TODO: we should remove _StridedShard placement once we can unify it with Shard
     """
 
     def __hash__(self) -> int:
@@ -849,67 +847,78 @@ class _StridedShard(torch._C._distributed.StridedShard):
     def _compute_padding_info(
         current_logical_shape: list[int],
         num_chunks: int,
-        old_shard_dim: int,
-        new_shard_dim: int,
-        split_factor: int,
-    ) -> tuple[bool, int, int, bool, int, int]:
+        shard_dim: int,
+        split_factor: int = 1,
+    ) -> tuple[bool, int, int]:
         """
-        Compute padding information for _StridedShard's _to_new_shard_dim operation.
+        Compute padding information for _StridedShard collective operations.
 
-        For _StridedShard, the tensor is first split into split_factor pieces,
-        then each piece is split into num_chunks pieces, and the resulting
-        shards are interleaved. This means padding must account for both levels
-        of splitting.
+        This method calculates whether padding is needed and the maximum chunk size
+        for collective operations (e.g., all-to-all) involving _StridedShard tensors.
 
-        Unlike Shard._compute_padding_info where at most 1 partition requires
-        padding, _StridedShard can have multiple trailing partitions requiring
-        the same amount of padding.
+        For _StridedShard with split_factor > 1, the tensor undergoes two-level splitting:
+        1. First level: split into ``split_factor`` pieces
+        2. Second level: each piece is split into ``num_chunks`` pieces
+
+        The resulting shards are interleaved, so padding must account for both levels.
+        Unlike ``Shard._compute_padding_info`` where at most one partition (the last)
+        requires padding, _StridedShard can have multiple trailing partitions that
+        need padding due to the interleaved structure.
+
+        When split_factor=1, this behaves identically to regular Shard padding logic.
+
+        Args:
+            current_logical_shape: The logical shape of the tensor being sharded.
+            num_chunks: Number of chunks to split into (typically the mesh dim size).
+            shard_dim: The dimension along which the tensor is sharded.
+            split_factor: The number of pre-existing splits from right-to-left sharding.
+                Defaults to 1 (no strided sharding effect).
 
         Returns:
-            (old_dim_padding, old_dim_logical_size, old_dim_full_chunk_size,
-             new_dim_padding, new_dim_logical_size, new_dim_full_chunk_size)
+            A tuple of (needs_padding_on_dim, logical_size_on_dim, max_chunk_size):
+                - needs_padding_on_dim: Whether padding is required on the shard dimension.
+                - logical_size_on_dim: The logical size of the tensor on the shard dimension.
+                - max_chunk_size: The maximum chunk size per rank after both levels of splitting.
         """
 
         def _ceil_div(a: int, b: int) -> int:
             return (a + b - 1) // b
 
-        # Compute old_shard_dim padding info (accounts for split_factor)
-        old_dim_logical_size = current_logical_shape[old_shard_dim]
+        if split_factor != 1:
+            # Computing padding info for StridedShard tensor dim
+            logical_size_on_dim = current_logical_shape[shard_dim]
 
-        # First level: split into split_factor pieces
-        first_chunk_size = _ceil_div(old_dim_logical_size, split_factor)
-        num_full_first_chunks = old_dim_logical_size // first_chunk_size
-        remainder = old_dim_logical_size - num_full_first_chunks * first_chunk_size
+            # First level: split into split_factor pieces
+            first_chunk_size = _ceil_div(logical_size_on_dim, split_factor)
+            num_full_first_chunks = logical_size_on_dim // first_chunk_size
+            remainder = logical_size_on_dim - num_full_first_chunks * first_chunk_size
 
-        # Determine if padding is needed:
-        # - remainder > 0 means one chunk has partial size
-        # - (split_factor - num_full_first_chunks - (1 if remainder else 0)) > 0 means empty chunks
-        has_partial_chunk = remainder > 0
-        num_empty_chunks = (
-            split_factor - num_full_first_chunks - (1 if has_partial_chunk else 0)
-        )
-        old_dim_padding = has_partial_chunk or num_empty_chunks > 0
+            # Determine if padding is needed:
+            # - remainder > 0 means one chunk has partial size
+            # - (split_factor - num_full_first_chunks - (1 if remainder else 0)) > 0 means empty chunks
+            has_partial_chunk = remainder > 0
+            num_empty_chunks = (
+                split_factor - num_full_first_chunks - (1 if has_partial_chunk else 0)
+            )
+            needs_padding_on_dim = has_partial_chunk or num_empty_chunks > 0
 
-        # Second level: each first-level chunk is split into num_chunks pieces
-        # Calculate the per-rank chunk size after both levels of splitting
-        old_dim_full_chunk_size = (
-            _ceil_div(first_chunk_size, num_chunks) * num_full_first_chunks
-        )
-        if has_partial_chunk:
-            old_dim_full_chunk_size += _ceil_div(remainder, num_chunks)
-
-        # Compute new_shard_dim padding info (standard chunking, no split_factor)
-        new_dim_logical_size = current_logical_shape[new_shard_dim]
-        new_dim_padding = new_dim_logical_size % num_chunks != 0
-        new_dim_full_chunk_size = _ceil_div(new_dim_logical_size, num_chunks)
+            # Second level: each first-level chunk is split into num_chunks pieces
+            # Calculate the per-rank chunk size after both levels of splitting
+            max_chunk_size = (
+                _ceil_div(first_chunk_size, num_chunks) * num_full_first_chunks
+            )
+            if has_partial_chunk:
+                max_chunk_size += _ceil_div(remainder, num_chunks)
+        else:
+            # Compute padding info for normal shard, no split_factor impact.
+            logical_size_on_dim = current_logical_shape[shard_dim]
+            needs_padding_on_dim = logical_size_on_dim % num_chunks != 0
+            max_chunk_size = _ceil_div(logical_size_on_dim, num_chunks)
 
         return (
-            old_dim_padding,
-            old_dim_logical_size,
-            old_dim_full_chunk_size,
-            new_dim_padding,
-            new_dim_logical_size,
-            new_dim_full_chunk_size,
+            needs_padding_on_dim,
+            logical_size_on_dim,
+            max_chunk_size,
         )
 
     @maybe_run_for_local_tensor
@@ -932,26 +941,31 @@ class _StridedShard(torch._C._distributed.StridedShard):
         (
             old_dim_padding,
             _,
-            old_dim_full_chunk_size,
-            new_dim_padding,
-            _,
-            new_dim_full_chunk_size,
+            old_dim_max_chunk_size,
         ) = _StridedShard._compute_padding_info(
             current_logical_shape,
             num_chunks,
             old_shard_dim,
-            new_shard_dim,
             split_factor,
+        )
+        (
+            new_dim_padding,
+            _,
+            new_dim_max_chunk_size,
+        ) = _StridedShard._compute_padding_info(
+            current_logical_shape,
+            num_chunks,
+            new_shard_dim,
         )
 
         if old_dim_padding:
-            target_size = old_dim_full_chunk_size
+            target_size = old_dim_max_chunk_size
             old_dim_pad_size = target_size - local_tensor.size(old_shard_dim)
             if old_dim_pad_size > 0:
                 local_tensor = pad_tensor(local_tensor, old_shard_dim, old_dim_pad_size)
 
         if new_dim_padding:
-            target_total_size = new_dim_full_chunk_size * num_chunks
+            target_total_size = new_dim_max_chunk_size * num_chunks
             new_dim_pad_size = target_total_size - local_tensor.size(new_shard_dim)
             if new_dim_pad_size > 0:
                 local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
@@ -983,15 +997,20 @@ class _StridedShard(torch._C._distributed.StridedShard):
             _,
             old_dim_logical_size,
             _,
-            new_dim_padding,
-            new_dim_logical_size,
-            new_dim_full_chunk_size,
         ) = _StridedShard._compute_padding_info(
             current_logical_shape,
             num_chunks,
             old_shard_dim,
-            new_shard_dim,
             split_factor,
+        )
+        (
+            new_dim_padding,
+            new_dim_logical_size,
+            new_dim_max_chunk_size,
+        ) = _StridedShard._compute_padding_info(
+            current_logical_shape,
+            num_chunks,
+            new_shard_dim,
         )
 
         # Build sharded indices to understand the strided pattern
@@ -1028,7 +1047,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
             local_shard_size_on_new_dim = Shard.local_shard_size_and_offset(
                 new_dim_logical_size, num_chunks, local_rank
             )[0]
-            new_dim_unpad_size = new_dim_full_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
+            new_dim_unpad_size = new_dim_max_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
             local_tensor = unpad_tensor(local_tensor, new_shard_dim, new_dim_unpad_size)  # type: ignore[possibly-undefined]
         return local_tensor
 
