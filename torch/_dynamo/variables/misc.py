@@ -1841,6 +1841,50 @@ class StringFormatVariable(VariableTracker):
         codegen(variables.ConstDictVariable(kwargs))
         codegen.extend_output(create_call_function_ex(True, False))
 
+    def _try_get_format_value(self) -> tuple[bool, str]:
+        """Try to get the formatted string value without realizing lazy constants.
+
+        Returns (success, value). If any argument cannot be peeked, returns (False, "").
+        """
+        arg_values = []
+        for arg in self.sym_args:
+            can_peek, _is_unrealized, value = arg.try_peek_constant()
+            if not can_peek:
+                return (False, "")
+            arg_values.append(value)
+
+        kwarg_values = {}
+        for k, v in self.sym_kwargs.items():
+            can_peek, _is_unrealized, value = v.try_peek_constant()
+            if not can_peek:
+                return (False, "")
+            kwarg_values[k] = value
+
+        return (True, self.format_string.format(*arg_values, **kwarg_values))
+
+    def is_python_hashable(self) -> bool:
+        # Strings are always hashable, and we can peek at all values
+        success, _ = self._try_get_format_value()
+        return success
+
+    def get_python_hash(self) -> int:
+        success, value = self._try_get_format_value()
+        assert success
+        return hash(value)
+
+    def is_python_equal(self, other: "VariableTracker") -> bool:
+        success, value = self._try_get_format_value()
+        if not success:
+            return False
+        if isinstance(other, StringFormatVariable):
+            other_success, other_value = other._try_get_format_value()
+            if not other_success:
+                return False
+            return value == other_value
+        if other.is_python_constant():
+            return value == other.as_python_constant()
+        return False
+
 
 class DebuggingVariable(VariableTracker):
     """
