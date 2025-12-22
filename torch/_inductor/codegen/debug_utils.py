@@ -104,32 +104,35 @@ class DebugPrinterManager:
     ):
         if self.debug_printer_level == IntermediateValueDebuggingLevel.OFF:
             return
-        if self.debug_printer_level == IntermediateValueDebuggingLevel.SAVE_ONLY:
-            # by default save all the tensor values before launch
-            self.codegen_intermediate_tensor_value_save(
-                self.args_to_print_or_save,
-                self.kernel_name,
-                before_launch,
-                arg_signatures=self.arg_signatures,
-            )
-        if self.debug_printer_level == IntermediateValueDebuggingLevel.PRINT_ONLY:
-            # by default print all the tensor values before launch
-            self.codegen_intermediate_tensor_value_print(
-                self.args_to_print_or_save,
-                self.kernel_name,
-                before_launch,
-                arg_signatures=self.arg_signatures,
-            )
-        if (
-            self.debug_printer_level
-            == IntermediateValueDebuggingLevel.PRINT_KERNEL_NAMES_ONLY
-        ):
-            # Print all kernel names to the console only
-            self.codegen_intermediate_tensor_value_print(
-                [],
-                self.kernel_name,
-                before_launch,
-            )
+        try:
+            if self.debug_printer_level == IntermediateValueDebuggingLevel.SAVE_ONLY:
+                # by default save all the tensor values before launch
+                self.codegen_intermediate_tensor_value_save(
+                    self.args_to_print_or_save,
+                    self.kernel_name,
+                    before_launch,
+                    arg_signatures=self.arg_signatures,
+                )
+            if self.debug_printer_level == IntermediateValueDebuggingLevel.PRINT_ONLY:
+                # by default print all the tensor values before launch
+                self.codegen_intermediate_tensor_value_print(
+                    self.args_to_print_or_save,
+                    self.kernel_name,
+                    before_launch,
+                    arg_signatures=self.arg_signatures,
+                )
+            if (
+                self.debug_printer_level
+                == IntermediateValueDebuggingLevel.PRINT_KERNEL_NAMES_ONLY
+            ):
+                # Print all kernel names to the console only
+                self.codegen_intermediate_tensor_value_print(
+                    [],
+                    self.kernel_name,
+                    before_launch,
+                )
+        finally:
+            V.graph.wrapper_code.writeline('fflush(stdout);')
 
     @functools.lru_cache  # noqa: B019
     def _get_debug_filtered_kernel_names(self) -> list[str]:
