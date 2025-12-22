@@ -27,7 +27,7 @@ class TestTensorCreationOps(JitTestCase):
 
         self.checkScript(randperm, (3,))
 
-    def test_randperm_specifed_dtype(self):
+    def test_randperm_specified_dtype(self):
         def randperm(x: int):
             perm = torch.randperm(x, dtype=torch.float)
             # Have to perform assertion here because TorchScript returns dtypes
