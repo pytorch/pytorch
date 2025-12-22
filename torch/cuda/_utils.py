@@ -21,7 +21,7 @@ def _get_hip_runtime_library() -> ctypes.CDLL:
     return lib
 
 
-def _get_cuda_runtime_library() -> ctypes.CDLL:
+def _get_cuda_library() -> ctypes.CDLL:
     if sys.platform == "win32":
         return ctypes.CDLL("nvcuda.dll")
     else:  # Unix-based systems
@@ -33,7 +33,7 @@ def _get_gpu_runtime_library() -> ctypes.CDLL:
     if torch.version.hip:
         return _get_hip_runtime_library()
     else:
-        return _get_cuda_runtime_library()
+        return _get_cuda_library()
 
 
 # Helper: check CUDA errors
