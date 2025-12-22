@@ -4679,12 +4679,20 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         result = torch.library.opcheck(op, (x,), raise_exception=False)
         self.assertTrue(isinstance(result["test_schema"], RuntimeError))
         del result["test_schema"]
+        # When check_custom_op_aliasing is enabled, test_aot_dispatch_dynamic
+        # will catch the aliasing violation and return a RuntimeError
+        from torch._functorch import config as functorch_config
+
+        aot_dispatch_result = result.pop("test_aot_dispatch_dynamic")
+        if functorch_config.check_custom_op_aliasing:
+            self.assertTrue(isinstance(aot_dispatch_result, RuntimeError))
+        else:
+            self.assertEqual(aot_dispatch_result, "SUCCESS")
         self.assertEqual(
             result,
             {
                 "test_autograd_registration": "SUCCESS",
                 "test_faketensor": "SUCCESS",
-                "test_aot_dispatch_dynamic": "SUCCESS",
             },
         )
 
