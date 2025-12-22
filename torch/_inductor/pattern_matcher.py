@@ -996,7 +996,9 @@ class RepeatedExpr(PatternExpr):
             self.inner_pattern,
         )
         # Check all anchor nodes match the pattern
-        for anchor_node in self.inner_pattern.find_anchor_nodes(ctx, OrderedSet()):
+        for anchor_node in self.inner_pattern.find_anchor_nodes(
+            ctx, OrderedSet([node])
+        ):
             anchor_m = MatchContext([self], graph=node.graph).match(
                 self.inner_pattern, anchor_node
             )
