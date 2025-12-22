@@ -6,6 +6,7 @@ from .expanded_weights_impl import ExpandedWeight
 
 
 def is_batch_first(expanded_args_and_kwargs):
+    """Check consistent batch_first setting across ExpandedWeight arguments."""
     batch_first = None
     # pyrefly: ignore [bad-assignment]
     for arg in expanded_args_and_kwargs:
