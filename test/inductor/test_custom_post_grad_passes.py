@@ -309,6 +309,31 @@ class TestPostGradCustomPrePostPass(TestCustomPassBase):
             x = torch.randn(8, dtype=torch.float32)
             torch.testing.assert_close(torch.compile(f)(x), g(x))
 
+    def test_custom_pass_inference_flg(self):
+        class CustomPass(CustomGraphPass):
+            def __init__(self):
+                super().__init__()
+                self.is_infer = False
+
+            def __call__(self, g: torch.fx.graph.Graph, *, is_inference=False):
+                self.is_infer = is_inference
+
+            def uuid(self) -> bytes:
+                return get_hash_for_files((__file__,))
+
+        custom_pass = CustomPass()
+        with config.patch(post_grad_custom_post_pass=custom_pass):
+
+            def f(x):
+                return x.abs()
+
+            x = torch.randn(8, dtype=torch.float32)
+            torch.testing.assert_close(torch.compile(f)(x), f(x))
+            self.assertTrue(custom_pass.is_infer)
+            x.requires_grad_()
+            torch.testing.assert_close(torch.compile(f)(x), f(x))
+            self.assertFalse(custom_pass.is_infer)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_CPU and torch.backends.mkldnn.is_available():
