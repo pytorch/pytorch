@@ -149,7 +149,7 @@ def get_transform_func(num_tensors, dtype, device, is_fastpath):
 class TestForeach(TestCase):
     @property
     def is_cuda(self):
-        return self.device_type == "cuda"
+        return self.device_type == ("hip" if TEST_WITH_ROCM else "cuda")
 
     def _get_funcs(self, op):
         return (
