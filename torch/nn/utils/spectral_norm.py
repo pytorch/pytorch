@@ -51,10 +51,8 @@ class SpectralNorm:
 
     def reshape_weight_to_matrix(self, weight: torch.Tensor) -> torch.Tensor:
         """Reshape weight tensor to a 2D matrix for spectral normalization.
-        
         Args:
             weight: Weight tensor to reshape
-            
         Returns:
             2D weight matrix with the specified dimension moved to front
         """
