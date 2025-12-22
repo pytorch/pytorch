@@ -1,15 +1,13 @@
 # Owner(s): ["oncall: distributed checkpointing"]
 
 from concurrent.futures import Future
-from unittest import skipIf
 
 import torch
 from torch.distributed.checkpoint._experimental.staging import (
     CheckpointStagerConfig,
     DefaultStager,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_utils import run_tests, TEST_ACCELERATOR, TestCase
+from torch.testing._internal.common_utils import requires_cuda, run_tests, TestCase
 
 
 class TestDefaultStager(TestCase):
@@ -25,7 +23,7 @@ class TestDefaultStager(TestCase):
             "nested": {"inner_tensor": torch.ones(2, 2), "inner_value": 42},
         }
 
-    @skipIf(not TEST_ACCELERATOR, reason="requires GPU")
+    @requires_cuda
     def test_sync_staging(self) -> None:
         """Test synchronous staging."""
         options = CheckpointStagerConfig(use_async_staging=False)
@@ -48,7 +46,7 @@ class TestDefaultStager(TestCase):
         # Clean up
         stager.close()
 
-    @skipIf(not TEST_ACCELERATOR, reason="requires GPU")
+    @requires_cuda
     def test_async_staging(self) -> None:
         """Test asynchronous staging."""
         options = CheckpointStagerConfig(use_async_staging=True)
@@ -74,7 +72,7 @@ class TestDefaultStager(TestCase):
 
     def test_cuda_non_blocking_without_cuda(self) -> None:
         """Test that non-blocking copy fails when CUDA is not available."""
-        if torch.accelerator.is_available():
+        if torch.cuda.is_available():
             self.skipTest("CUDA is available, cannot test CUDA unavailable scenario")
 
         options = CheckpointStagerConfig(use_non_blocking_copy=True)
@@ -144,17 +142,16 @@ class TestDefaultStager(TestCase):
 
                 stager.close()
 
-    @skipIf(not TEST_ACCELERATOR, reason="requires GPU")
+    @requires_cuda
     def test_cuda_tensors_staging(self) -> None:
         """Test staging with CUDA tensors."""
         # Create state dict with CUDA tensors
-        device = torch.accelerator.current_accelerator()
         cuda_state_dict = {
-            "cuda_tensor": torch.randn(3, 4).to(device),
+            "cuda_tensor": torch.randn(3, 4).cuda(),
             "cpu_tensor": torch.randn(2, 3),
             "mixed_model": {
-                "weight": torch.randn(5, 5).to(device),
-                "bias": torch.randn(5).to(device),
+                "weight": torch.randn(5, 5).cuda(),
+                "bias": torch.randn(5).cuda(),
             },
         }
 
@@ -171,7 +168,7 @@ class TestDefaultStager(TestCase):
 
         stager.close()
 
-    @skipIf(not TEST_ACCELERATOR, reason="requires GPU")
+    @requires_cuda
     def test_resource_cleanup(self) -> None:
         """Test that resources are properly cleaned up."""
         options = CheckpointStagerConfig(use_async_staging=False)
@@ -215,8 +212,6 @@ class TestDefaultStager(TestCase):
 
         stager.close()
 
-
-instantiate_device_type_tests(TestDefaultStager, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()
