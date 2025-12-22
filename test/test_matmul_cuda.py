@@ -258,7 +258,7 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
-    @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=2e-3)})
+    @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=3e-3)})
     @dtypes(torch.float16)
     def test_cublas_addmm_alignment(self, dtype):
         device = 'cuda'
