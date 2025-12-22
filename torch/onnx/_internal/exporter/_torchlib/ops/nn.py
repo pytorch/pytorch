@@ -198,7 +198,7 @@ def _attention_repeat_kv_for_group_query(
     Returns:
         Tuple of (expanded_key, expanded_value) where:
             - expanded_key: Tensor of shape [B, q_num_heads, kv_S, E]
-            - expanded_value: Tensor of shape [B, q_num_heads, kv_S, E
+            - expanded_value: Tensor of shape [B, q_num_heads, kv_S, E]
     """
 
     assert (
