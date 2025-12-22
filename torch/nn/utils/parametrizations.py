@@ -328,10 +328,8 @@ class _WeightNorm(Module):
 
     def right_inverse(self, weight):
         """Decompose weight back into magnitude and direction components.
-        
         Args:
             weight: Normalized weight tensor to decompose
-            
         Returns:
             Tuple of (weight_g, weight_v) where weight_g is the magnitude 
             and weight_v is the direction component
