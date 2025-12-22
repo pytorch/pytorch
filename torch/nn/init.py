@@ -69,6 +69,20 @@ _FanMode = Literal["fan_in", "fan_out"]
 def _no_grad_uniform_(
     tensor: Tensor, a: float, b: float, generator: torch.Generator | None = None
 ) -> Tensor:
+    """Fill tensor with uniformly distributed values in no-grad context.
+    
+    Helper function that applies uniform_ initialization within a no_grad context
+    to avoid gradient computation during initialization.
+    
+    Args:
+        tensor: Tensor to be filled with uniform values
+        a: Lower bound of uniform distribution
+        b: Upper bound of uniform distribution  
+        generator: Optional random number generator
+        
+    Returns:
+        The input tensor filled with uniform values
+    """
     with torch.no_grad():
         return tensor.uniform_(a, b, generator=generator)
 
