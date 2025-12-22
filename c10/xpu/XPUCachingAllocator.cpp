@@ -1591,7 +1591,7 @@ class DeviceCachingAllocator {
       SegmentInfo& segment_info = result.back();
       segment_info.device = head_block->device;
       segment_info.address = reinterpret_cast<size_t>(head_block->ptr);
-      segment_info.queue = head_block->queue;
+      segment_info.stream = reinterpret_cast<void*>(head_block->queue);
       segment_info.is_large = (!head_block->pool->is_small);
       segment_info.is_expandable = head_block->expandable_segment;
       segment_info.context_when_allocated =
