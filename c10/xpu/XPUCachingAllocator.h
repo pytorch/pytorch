@@ -21,8 +21,8 @@ struct AllocatorConfigInfo {
 };
 
 struct SnapshotInfo {
-  std::vector<SegmentInfo> segments;
-  std::vector<std::vector<TraceEntry>> device_traces;
+  std::vector<CachingDeviceAllocator::SegmentInfo> segments;
+  std::vector<std::vector<CachingDeviceAllocator::TraceEntry>> device_traces;
   AllocatorConfigInfo config_metadata;
 };
 
@@ -73,9 +73,9 @@ C10_XPU_API void setMemoryFraction(double fraction, DeviceIndex device);
 
 C10_XPU_API void recordHistory(
     bool enabled,
-    c10::CachingDeviceAllocator::CreateContextFn context_recorder,
+    CachingDeviceAllocator::CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
-    RecordContext when,
+    CachingDeviceAllocator::RecordContext when,
     bool clearHistory,
     const std::vector<std::string>& skip_actions);
 

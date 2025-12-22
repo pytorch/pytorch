@@ -54,6 +54,7 @@ using c10::CachingAllocator::kLargeBuffer;
 using c10::CachingDeviceAllocator::AllocatorTraceTracker;
 using c10::CachingDeviceAllocator::CreateContextFn;
 using c10::CachingDeviceAllocator::DeviceStats;
+using c10::CachingDeviceAllocator::RecordContext;
 
 struct AllocatorState {
   virtual ~AllocatorState() = default;
