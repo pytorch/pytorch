@@ -92,8 +92,13 @@ def sample_inputs_fft_with_min(
     yield from sample_inputs_spectral_ops(
         op_info, device, dtype, requires_grad, **kwargs
     )
-    if TEST_WITH_ROCM:
-        # FIXME: Causes floating point exception on ROCm
+
+    # hipFFT/rocFFT crashes with a floating point exception (SIGFPE) when
+    # performing FFT on very small tensors (e.g., size 1 or 2). This is an
+    # upstream issue in hipFFT that needs to be fixed in the ROCm libraries.
+    # See: https://github.com/ROCm/rocFFT/issues/224 for related issues.
+    # Only skip on CUDA devices since CPU FFT works correctly.
+    if TEST_WITH_ROCM and torch.device(device).type == "cuda":
         return
 
     # Check the "Invalid number of data points" error isn't too strict

@@ -5,7 +5,7 @@ import unittest
 
 import torch
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_MULTIGPU
-from torch.testing._internal.common_utils import NoTest, run_tests, skipIfRocm, TestCase
+from torch.testing._internal.common_utils import NoTest, run_tests, skipIfRocmVersionLessThan, TestCase
 
 
 # NOTE: this needs to be run in a brand new process
@@ -32,9 +32,7 @@ class TestCudaPrimaryCtx(TestCase):
                 TestCudaPrimaryCtx.CTX_ALREADY_CREATED_ERR_MSG,
             )
 
-    @skipIfRocm(
-        msg="last checked in ROCm 7, HIP runtime doesn't create context for hipSetDevice()"
-    )
+    @skipIfRocmVersionLessThan((8, 0))
     def test_set_device_0(self):
         # In CUDA 12 the behavior of cudaSetDevice has changed. It eagerly creates context on target.
         # The behavior of `torch.cuda.set_device(0)` should also create context on the device 0.
