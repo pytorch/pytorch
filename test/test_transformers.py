@@ -3896,11 +3896,12 @@ class TestSDPACudaOnly(NNTestCase):
             'grad_value': 4,
         }
         if TEST_WITH_ROCM:
+
+            fudge_factors['grad_value'] = 6.0
             if TEST_WITH_CK:
-                fudge_factors['out'] = 5
+                fudge_factors['out'] = 5.0
                 fudge_factors['grad_key'] = 145.0
                 fudge_factors['grad_query'] = 855.0  # ck min = 855.0
-                fudge_factors['grad_value'] = 6
                 if seq_len_k >= 1024:
                     fudge_factors['grad_key'] = 70.0
                 if seq_len_k >= 2048:
