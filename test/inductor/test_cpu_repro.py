@@ -3948,8 +3948,6 @@ class CPUReproTests(TestCase):
         self.common(fn, (x, y))
         check_metrics_vec_kernel_count(2)
 
-    @xfailIf(IS_ARM64 and IS_CPU_CAPABILITY_SVE256)
-    # see https://github.com/pytorch/pytorch/issues/170877
     def test_transpose_mxn_16_16_bf16_fp16(self):
         def fn(a, b):
             c = a * b
