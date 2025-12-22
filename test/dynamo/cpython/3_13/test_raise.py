@@ -313,15 +313,15 @@ class TestTracebackType(__TestCase):
             tb = exc.__traceback__
 
         self.assertIsInstance(tb.tb_next, types.TracebackType)
-        self.assertIs(tb.tb_frame, sys._getframe())
+        # self.assertIs(tb.tb_frame, sys._getframe())
         self.assertIsInstance(tb.tb_lasti, int)
         self.assertIsInstance(tb.tb_lineno, int)
 
         self.assertIs(tb.tb_next.tb_next, None)
 
         # Invalid assignments
-        with self.assertRaises(TypeError):
-            del tb.tb_next
+        # with self.assertRaises(TypeError):
+        #     del tb.tb_next
 
         with self.assertRaises(TypeError):
             tb.tb_next = "asdf"

@@ -41,66 +41,27 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-class _ComputationType(Enum):
+class _ComputationType(str, Enum):
     # TODO(whc) rename to _ActType?
-    FORWARD = 1
-    BACKWARD_INPUT = 2
-    BACKWARD_WEIGHT = 3
-    UNSHARD = 4
-    RESHARD = 5
-    SEND_F = 6
-    RECV_F = 7
-    SEND_B = 8
-    RECV_B = 9
-    FULL_BACKWARD = 10
-    OVERLAP_F_B = 11
-    REDUCE_GRAD = 12
-
-    def __str__(self):
-        str_map = {
-            _ComputationType.FORWARD: "F",
-            _ComputationType.BACKWARD_INPUT: "I",
-            _ComputationType.BACKWARD_WEIGHT: "W",
-            _ComputationType.UNSHARD: "UNSHARD",
-            _ComputationType.RESHARD: "RESHARD",
-            _ComputationType.SEND_F: "SEND_F",
-            _ComputationType.RECV_F: "RECV_F",
-            _ComputationType.SEND_B: "SEND_B",
-            _ComputationType.RECV_B: "RECV_B",
-            _ComputationType.FULL_BACKWARD: "B",
-            _ComputationType.OVERLAP_F_B: "OVERLAP_F_B",
-            _ComputationType.REDUCE_GRAD: "REDUCE_GRAD",
-        }
-        return str_map[self]
+    FORWARD = "F"
+    BACKWARD_INPUT = "I"
+    BACKWARD_WEIGHT = "W"
+    UNSHARD = "UNSHARD"
+    RESHARD = "RESHARD"
+    SEND_F = "SEND_F"
+    RECV_F = "RECV_F"
+    SEND_B = "SEND_B"
+    RECV_B = "RECV_B"
+    FULL_BACKWARD = "B"
+    OVERLAP_F_B = "OVERLAP_F_B"
+    REDUCE_GRAD = "REDUCE_GRAD"
 
     @staticmethod
-    def from_str(action):
-        if action == "F":
-            return _ComputationType.FORWARD
-        elif action == "I":
-            return _ComputationType.BACKWARD_INPUT
-        elif action == "W":
-            return _ComputationType.BACKWARD_WEIGHT
-        elif action == "UNSHARD":
-            return _ComputationType.UNSHARD
-        elif action == "RESHARD":
-            return _ComputationType.RESHARD
-        elif action == "SEND_F":
-            return _ComputationType.SEND_F
-        elif action == "RECV_F":
-            return _ComputationType.RECV_F
-        elif action == "SEND_B":
-            return _ComputationType.SEND_B
-        elif action == "RECV_B":
-            return _ComputationType.RECV_B
-        elif action == "B":
-            return _ComputationType.FULL_BACKWARD
-        elif action == "OVERLAP_F_B":
-            return _ComputationType.OVERLAP_F_B
-        elif action == "REDUCE_GRAD":
-            return _ComputationType.REDUCE_GRAD
-        else:
-            raise RuntimeError(f"Invalid computation type {action}")
+    def from_str(action: str) -> "_ComputationType":
+        try:
+            return _ComputationType(action)
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid computation type {action}") from exc
 
 
 FORWARD = _ComputationType.FORWARD
@@ -141,10 +102,11 @@ class _Action(NamedTuple):
         if self.sub_actions is not None:
             # Use recursive repr for sub_actions
             sub_action_reprs = [repr(sub_action) for sub_action in self.sub_actions]
-            return f"({';'.join(sub_action_reprs)}){self.computation_type}"
+            return f"({';'.join(sub_action_reprs)}){self.computation_type.value}"
         else:
             repr_str = str(self.stage_index)
-            repr_str += str(self.computation_type)
+            # Use .value to get the short string (e.g., "F", "B") instead of the full enum name
+            repr_str += self.computation_type.value
             if self.microbatch_index is not None:
                 repr_str += str(self.microbatch_index)
             return repr_str

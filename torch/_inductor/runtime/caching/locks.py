@@ -15,7 +15,7 @@ from contextlib import _GeneratorContextManager, contextmanager, ExitStack
 from typing import TYPE_CHECKING, TypeAlias
 from typing_extensions import Protocol
 
-from filelock import FileLock, Timeout
+from filelock import BaseFileLock, Timeout
 
 from . import exceptions
 
@@ -119,7 +119,7 @@ def _unsafe_acquire_lock_with_timeout(lock: Lock, timeout: float | None = None) 
 
 @contextmanager
 def _acquire_flock_with_timeout(
-    flock: FileLock,
+    flock: BaseFileLock,
     timeout: float | None = None,
 ) -> Generator[None, None, None]:
     """Context manager that safely acquires a FileLock with timeout and automatically releases it.
@@ -155,7 +155,10 @@ def _acquire_flock_with_timeout(
         flock.release()
 
 
-def _unsafe_acquire_flock_with_timeout(flock: FileLock, timeout: float | None) -> None:
+def _unsafe_acquire_flock_with_timeout(
+    flock: BaseFileLock,
+    timeout: float | None,
+) -> None:
     """Acquire a FileLock with timeout without automatic release (unsafe).
 
     This function acquires a file lock with timeout support but does NOT automatically

@@ -3392,7 +3392,7 @@ def gather_object(
 
     if object_gather_list is None:
         raise AssertionError("Must provide object_gather_list on dst rank")
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]

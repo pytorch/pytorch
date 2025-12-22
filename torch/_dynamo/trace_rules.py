@@ -32,7 +32,6 @@ import os
 import random
 import re
 import sys
-import traceback
 import types
 import unittest
 from collections import defaultdict
@@ -3307,7 +3306,6 @@ BUILTIN_SKIPLIST = (
     abc,
     copy,
     random,
-    traceback,
     linecache,
 )
 

@@ -364,10 +364,7 @@ inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& inpu
   // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
   // See https://github.com/pytorch/pytorch/issues/64427.
   // non static variable is used to be able to change environment variable in runtime for testing
-  // enabled by default for ROCm >= 7.0.0 with miopen 3.5
-  int miopen_version = detail::getCUDAHooks().compiledWithMIOpen() ? detail::getCUDAHooks().versionMIOpen() : 0;
-  bool is_miopen_3_5 = miopen_version >= 30500;  // ROCm 7.0
-  bool suggest_nhwc = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(is_miopen_3_5);
+  bool suggest_nhwc = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false);
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();

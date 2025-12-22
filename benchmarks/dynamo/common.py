@@ -2216,6 +2216,7 @@ class BenchmarkRunner:
                 log.warning(
                     "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
                     name,
+                    exc_info=True,
                 )
                 self.args.cosine = True
                 fp64_outputs = None

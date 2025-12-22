@@ -257,3 +257,8 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
+register_artifact(
+    "caching",
+    "Detailed Inductor caching information.",
+    off_by_default=True,
+)

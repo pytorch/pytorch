@@ -424,6 +424,14 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
                 templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
 
+            if (
+                inductor_config.is_fbcode()
+                and inductor_config.triton.enable_tlx_templates
+            ):
+                from torch._inductor.fb.tlx_templates.mm_templates import append_tlx
+
+                templates_to_use = append_tlx(templates_to_use)
+
         templates_to_use.append(mm_contiguous_subgraph_template)
 
     choices.extend(

@@ -25,9 +25,11 @@ import itertools
 import random
 import re
 import sys
+import traceback
 import types
 import warnings
-from typing import Optional, TYPE_CHECKING
+from collections.abc import Sequence
+from typing import Optional, TYPE_CHECKING, Union
 
 import torch._C
 import torch._numpy as tnp
@@ -406,6 +408,121 @@ class SuperVariable(VariableTracker):
         )
 
 
+class FrameSummaryVariable(VariableTracker):
+    def __init__(self, frame_summary: traceback.FrameSummary, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self.frame_summary = frame_summary
+
+    def var_getattr(self, tx, name):
+        if name == "lineno":
+            return variables.ConstantVariable.create(self.frame_summary.lineno)
+        elif name == "filename":
+            return variables.ConstantVariable.create(self.frame_summary.filename)
+        elif name == "name":
+            return variables.ConstantVariable.create(self.frame_summary.name)
+        elif name == "line":
+            return variables.ConstantVariable.create(self.frame_summary.line)
+        return super().var_getattr(tx, name)
+
+
+class TracebackVariable(VariableTracker):
+    def __init__(
+        self,
+        frame_summary: FrameSummaryVariable,
+        tb_next,
+        **kwargs,
+    ) -> None:
+        # The traceback holds four attributes:
+        #  - tb_frame
+        #  - tb_lineno
+        #  - tb_lasti
+        #  - tb_next
+
+        super().__init__(**kwargs)
+        self.frame_summary = frame_summary
+        # the next traceback in the chain
+        assert tb_next is not None
+        self.tb_next = tb_next
+
+    @classmethod
+    def from_frame_summary(
+        cls,
+        frame_summary: traceback.FrameSummary,
+        tb_next: Union["TracebackVariable", ConstantVariable],
+    ):
+        return cls(FrameSummaryVariable(frame_summary), tb_next=tb_next)
+
+    @staticmethod
+    def is_valid_traceback(obj: VariableTracker) -> bool:
+        return istype(obj, TracebackVariable) or (
+            istype(obj, ConstantVariable) and obj.is_constant_none()
+        )
+
+    def extract_tb(self) -> list[traceback.FrameSummary]:
+        if istype(self.tb_next, ConstantVariable):
+            return [self.frame_summary]
+        return [self.frame_summary] + self.tb_next.extract_tb()
+
+    def has_reference_cycle(self, tb: "TracebackVariable") -> bool:
+        # checks if `tb` is in the chain of tb_next starting from `self`
+        curr_tb = self
+        while istype(curr_tb, TracebackVariable):
+            if curr_tb is tb:
+                return True
+            curr_tb = curr_tb.tb_next
+        return False
+
+    def python_type(self):
+        return types.TracebackType
+
+    def call_setattr(
+        self,
+        tx: "InstructionTranslator",
+        name_var: VariableTracker,
+        val: VariableTracker,
+    ):
+        name = name_var.as_python_constant()
+        if name == "tb_next":
+            if not self.is_valid_traceback(val):
+                raise_observed_exception(TypeError, tx)
+            if self.has_reference_cycle(val) or (
+                istype(val, TracebackVariable) and val.has_reference_cycle(self)
+            ):
+                raise_observed_exception(ValueError, tx)
+            self.tb_next = val
+        return variables.ConstantVariable(None)
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        if name == "tb_next":
+            return self.tb_next
+        elif name == "tb_lineno":
+            return self.frame_summary.var_getattr(tx, "lineno")
+        elif name == "frame_summary":
+            return self.frame_summary
+        elif name == "tb_lasti":
+            unimplemented(
+                gb_type="traceback.tb_lasti not supported",
+                context=f"{self} accessing 'tb_lasti'",
+                explanation="Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
+                hints=[*graph_break_hints.SUPPORTABLE],
+            )
+        return super().var_getattr(tx, name)
+
+    def call_method(
+        self,
+        tx: "InstructionTranslator",
+        name: str,
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ):
+        if name == "__eq__":
+            # Two traceback variables are only equal if they are the same object
+            return variables.ConstantVariable.create(self is args[0])
+        elif name == "__setattr__":
+            return self.call_setattr(tx, *args)
+        return super().call_method(tx, name, args, kwargs)
+
+
 class ExceptionVariable(VariableTracker):
     # The ExceptionVariable corresponds to the BaseException class in Python
     def __init__(
@@ -430,8 +547,7 @@ class ExceptionVariable(VariableTracker):
         self.__cause__ = ConstantVariable(None)
         # Boolean flag that controls whether the __context__ attribute is set
         self.__suppress_context__ = ConstantVariable(False)
-        # Contains the call stack where the exception was raised. Dynamo does
-        # not track traceback. So, this variable is always set to None
+        # Contains the call stack where the exception was raised.
         self.__traceback__ = ConstantVariable(None)
         # The user stack at the time this exception was first raised.
         # Used to preserve the original exception location when re-raising.
@@ -496,20 +612,17 @@ class ExceptionVariable(VariableTracker):
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__traceback__":
-            if val.is_constant_none():
-                self.__traceback__ = val
-            else:
-                unimplemented(
-                    gb_type="Set Exception object `__traceback__` attribute to not-`None`",
-                    context=f"call_setattr {self} {name}",
-                    explanation="Dynamo does not support setting the attribute "
-                    "'__traceback__' on tracked exception objects to anything "
-                    "other than None.",
-                    hints=[
-                        "Avoid setting '__traceback__' on exception objects "
-                        "within traced code, or set it to None."
+            if not TracebackVariable.is_valid_traceback(val):
+                raise_observed_exception(
+                    TypeError,
+                    tx,
+                    args=[
+                        ConstantVariable.create(
+                            "__traceback__ must be a traceback object or None"
+                        )
                     ],
                 )
+            self.__traceback__ = val
         else:
             unimplemented(
                 gb_type="Unsupported attribute assignment on Exception object",
@@ -531,7 +644,7 @@ class ExceptionVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx, name):
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "__context__":
             return self.__context__
         elif name == "__cause__":
@@ -539,7 +652,7 @@ class ExceptionVariable(VariableTracker):
         elif name == "__suppress_context__":
             return self.__suppress_context__
         elif name == "__traceback__":
-            return variables.ConstantVariable(None)
+            return self.__traceback__
         elif name == "args":
             return variables.ListVariable(self.args, source=self.source)
         return super().var_getattr(tx, name)

@@ -2190,7 +2190,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
         self.assertTrue(any("aten" in e.name for e in p.events()))
 
-        self.assertTrue(any(device in e.name for e in p.events()))
+        self.assertTrue(any(device in e.name.lower() for e in p.events()))
 
         self.assertTrue(any("kernel" in e.name.lower() for e in p.events()))
 
@@ -2316,9 +2316,15 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             if "cat" in event and event["cat"] in cuda_external_id_events:
                 if disable_external_correlation:
                     self.assertTrue("External id" not in event["args"])
-                elif event["name"] != "cudaDeviceSynchronize":
-                    self.assertTrue("External id" in event["args"])
-                    self.assertTrue(event["args"]["External id"] > 0)
+                else:
+                    excluded_events = (
+                        {"hipDeviceSynchronize"}
+                        if TEST_WITH_ROCM
+                        else {"cudaDeviceSynchronize"}
+                    )
+                    if event["name"] not in excluded_events:
+                        self.assertTrue("External id" in event["args"])
+                        self.assertTrue(event["args"]["External id"] > 0)
 
         def validate_json(prof, disable_external_correlation):
             with TemporaryFileName(mode="w+") as fname:

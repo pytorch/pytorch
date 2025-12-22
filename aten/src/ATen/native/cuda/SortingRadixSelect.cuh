@@ -126,24 +126,14 @@ struct TopKTypeConfig<at::Half> {
   typedef uint32_t RadixType;
 
   static inline __device__ RadixType convert(at::Half v) {
-#if defined(__CUDA_ARCH__) || defined(USE_ROCM)
     RadixType x = __half_as_ushort(v);
     RadixType mask = (x & 0x00008000) ? 0x0000ffff : 0x00008000;
     return (v == v) ? (x ^ mask) : 0xffff;
-#else
-    CUDA_KERNEL_ASSERT(false);
-    return 0u;
-#endif
   }
 
   static inline __device__ at::Half deconvert(RadixType v) {
-#if defined(__CUDA_ARCH__) || defined(USE_ROCM)
     RadixType mask = (v & 0x00008000) ? 0x00008000 : 0x0000ffff;
     return __ushort_as_half(v ^ mask);
-#else
-    CUDA_KERNEL_ASSERT(false);
-    return static_cast<at::Half>(0);
-#endif
   }
 };
 

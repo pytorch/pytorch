@@ -170,6 +170,7 @@ from .variables.misc import (
     GetAttrVariable,
     NullVariable,
     PythonModuleVariable,
+    TracebackVariable,
     UnknownVariable,
 )
 from .variables.nn_module import NNModuleVariable, UnspecializedNNModuleVariable
@@ -2093,6 +2094,26 @@ class InstructionTranslatorBase(
             val = val.call_function(self, [], {})  # type: ignore[arg-type]
         return val
 
+    def _attach_traceback_to_exception(self, exc: ExceptionVals) -> None:
+        # based on CPython's PyTraceBack_Here impl
+        frame_summary = self.frame_summary()
+        tb = exc.var_getattr(
+            # pyrefly: ignore [bad-argument-type]
+            self,
+            "__traceback__",
+        )
+        assert isinstance(
+            tb, (ConstantVariable, TracebackVariable)
+        )  # make pyrefly happy
+        new_tb = TracebackVariable.from_frame_summary(frame_summary, tb)
+        exc.call_method(
+            # pyrefly: ignore [bad-argument-type]
+            self,
+            "__setattr__",
+            [ConstantVariable("__traceback__"), new_tb],
+            {},
+        )
+
     def _raise_exception_variable(self, val: VariableTracker) -> NoReturn:
         # User can raise exception in 2 ways
         #   1) raise exception type - raise NotImplementedError
@@ -2121,17 +2142,18 @@ class InstructionTranslatorBase(
         ):
             val.python_stack = torch._guards.TracingContext.extract_stack()  # type: ignore[union-attr]
 
-        # Save the exception in a global data structure
-        self.exn_vt_stack.set_current_exception(val)  # type: ignore[arg-type]
-
         # 2) when user raises exception instance
         if self._isinstance_exception(val):
+            # Save the exception in a global data structure
+            self.exn_vt_stack.set_current_exception(val)  # type: ignore[arg-type]
+
             observed_exception_type = exc.get_dynamo_observed_exception(val.exc_type)  # type: ignore[attr-defined, union-attr]
             # Pass the stored python_stack to preserve the original exception location
             python_stack = getattr(val, "python_stack", None)
             raise observed_exception_type(
                 f"raised exception {val}", real_stack=python_stack
             )
+
         unimplemented(
             gb_type="Failed to raise exception",
             context=str(exc),
@@ -2154,7 +2176,12 @@ class InstructionTranslatorBase(
         elif inst.arg == 1:
             # raise TOS
             val = self.stack[-1]  # type: ignore[assignment]
-            self._raise_exception_variable(val)
+            try:
+                self._raise_exception_variable(val)
+            finally:
+                # Update __traceback__ in the raised exception
+                curr_exc = self.exn_vt_stack.get_current_exception()
+                self._attach_traceback_to_exception(curr_exc)
         else:
             # raise .. from ...
             from_vt = self.pop()
@@ -2164,6 +2191,7 @@ class InstructionTranslatorBase(
             finally:
                 # Update __cause__/__suppress_context__ in the raised exception
                 curr_exc = self.exn_vt_stack.get_current_exception()
+                self._attach_traceback_to_exception(curr_exc)
                 cause = self._create_exception_type(from_vt)
                 curr_exc.call_setattr(self, ConstantVariable("__cause__"), cause)  # type: ignore[arg-type, union-attr, assignment]
 
@@ -2205,14 +2233,7 @@ class InstructionTranslatorBase(
             self._raise_exception_variable(val)
 
     def _isinstance_exception(self, val: VariableTracker) -> TypeIs[ExceptionVals]:
-        return isinstance(
-            val,
-            (
-                variables.ExceptionVariable,
-                UserDefinedExceptionClassVariable,
-                UserDefinedExceptionObjectVariable,
-            ),
-        )
+        return isinstance(val, ExceptionVals)
 
     def WITH_EXCEPT_START(self, inst: Instruction) -> None:
         args: list[VariableTracker] = []
@@ -2232,7 +2253,11 @@ class InstructionTranslatorBase(
             val = self.stack[-1]
             assert self._isinstance_exception(val)
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined, union-attr]
-            tb = ConstantVariable(None)
+            tb = val.var_getattr(
+                # pyrefly: ignore[bad-argument-type]
+                self,
+                "__traceback__",
+            )
             if sys.version_info >= (3, 14):
                 if not isinstance(self.stack[-4], NullVariable):
                     args.append(self.stack[-4])
@@ -2242,7 +2267,7 @@ class InstructionTranslatorBase(
             val = self.stack[-2]
             assert self._isinstance_exception(val)
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
-            tb = ConstantVariable(None)
+            tb = val.var_getattr(self, "__traceback__")
 
         args += [typ, val, tb]
         self.call_function(fn, args, {})
@@ -2294,6 +2319,11 @@ class InstructionTranslatorBase(
                 # No handler found. Bubble the exception to the parent
                 # instruction translator. We use special exception for this.
                 self.stack.clear()
+
+                # attach traceback to the exception and set it as current exception
+                curr_exc = self.exn_vt_stack.get_current_exception()
+                self._attach_traceback_to_exception(curr_exc)
+
                 if type(self) is InstructionTranslator:
                     bubble_exception_to_interpreter()
                 raise raised_exception

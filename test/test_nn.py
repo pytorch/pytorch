@@ -5226,16 +5226,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.skipTest("Failed on CUDA")
 
         if torch.version.hip:
-            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16") \
-                    and _get_torch_rocm_version() < (6, 4):
-                # NCHW bfloat16 path uses native kernels for rocm<=6.3
-                # train failed on rocm<=6.3 due to native accuracy issue
-                # https://github.com/pytorch/pytorch/issues/156513
-                self.skipTest("bfloat16 NHWC train failed on ROCm <= 6.3")
-
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_native_mixed_bfloat16",
                                         "test_batchnorm_3D_train_NCHW_vs_native_mixed_bfloat16") \
                     and _get_torch_rocm_version() >= (6, 4):
@@ -7554,6 +7544,39 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with warnings.catch_warnings(record=True) as w:
             pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
         self.assertEqual(len(w), 0)
+
+    def test_rnn_cell_gate_weights_size(self):
+        def test_rnn_cell(cell_fn, gate_count):
+            input_size = 8
+            hidden_size = 16
+            x = torch.randn(4, input_size)
+            hx = torch.randn(4, hidden_size)
+            cx = torch.randn(4, hidden_size)
+
+            w_ih_invalid = torch.randn((gate_count * hidden_size) + 1, 8)
+            w_ih = torch.randn(gate_count * hidden_size, 8)
+            w_hh_invalid = torch.randn((gate_count * hidden_size) + 1, 16)
+            w_hh = torch.randn(gate_count * hidden_size, 16)
+            b_ih = torch.randn(gate_count * hidden_size)
+            b_hh = torch.randn(gate_count * hidden_size)
+
+            if cell_fn is torch.lstm_cell:
+                state = (hx, cx)
+            else:
+                state = hx
+
+            with self.assertRaisesRegex(RuntimeError, "weight_ih"):
+                cell_fn(x, state, w_ih_invalid, w_hh, b_ih, b_hh)
+
+            with self.assertRaisesRegex(RuntimeError, "weight_hh"):
+                cell_fn(x, state, w_ih, w_hh_invalid, b_ih, b_hh)
+        for cell_fn, gate_count in [
+            (torch.lstm_cell, 4),
+            (torch.gru_cell, 3),
+            (torch.rnn_relu_cell, 1),
+            (torch.rnn_tanh_cell, 1),
+        ]:
+            test_rnn_cell(cell_fn, gate_count)
 
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)

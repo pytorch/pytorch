@@ -924,6 +924,9 @@ class LocalTensor(torch.Tensor):
                 "Make a custom autograd function and make sure you detach the inner tensors."
             )
 
+        if len(local_tensors) == 0:
+            raise ValueError("LocalTensor cannot be empty!")
+
         (shape, strides, device, dtype, layout, extra_dispatch_keys) = (
             _compute_local_tensor_meta(local_tensors)
         )

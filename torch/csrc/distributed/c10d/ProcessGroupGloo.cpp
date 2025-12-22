@@ -237,12 +237,24 @@ std::chrono::milliseconds ProcessGroupGloo::AsyncWork::getTimeout() const {
 namespace {
 c10::intrusive_ptr<c10::ivalue::Future> createFutureAsOutput(
     const std::vector<std::vector<at::Tensor>>& outputTensors) {
+  // We need to set device in future construction otherwise CUDA streams in
+  // futures are ignored.
+  std::vector<at::Device> devices{};
+  for (const auto& outputTensor : outputTensors) {
+    for (const auto& tensor : outputTensor) {
+      auto device = tensor.device();
+      if (!device.is_cpu()) {
+        devices.push_back(device);
+      }
+    }
+  }
   if (outputTensors.size() > 1) {
     return c10::make_intrusive<c10::ivalue::Future>(
-        c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
+        c10::ListType::create(c10::ListType::create(c10::TensorType::get())),
+        devices);
   }
   return c10::make_intrusive<c10::ivalue::Future>(
-      c10::ListType::create(c10::TensorType::get()));
+      c10::ListType::create(c10::TensorType::get()), devices);
 }
 
 void returnFutureWithOutput(

@@ -12,8 +12,6 @@
 #define USE_CUSOLVER_64_BIT_XSYEV_BATCHED
 #endif
 
-#if defined(CUDART_VERSION) || defined(USE_ROCM)
-
 namespace at {
 namespace cuda {
 namespace solver {
@@ -817,5 +815,3 @@ void xsyevBatched<c10::complex<double>, double>(
 } // namespace solver
 } // namespace cuda
 } // namespace at
-
-#endif // CUDART_VERSION

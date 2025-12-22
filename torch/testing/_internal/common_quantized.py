@@ -7,13 +7,17 @@ import numpy as np
 import torch
 from torch import Tensor
 from contextlib import contextmanager
-from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS
+from torch.testing._internal.common_utils import TEST_WITH_TSAN, IS_PPC, IS_MACOS, IS_WINDOWS, IS_ARM64
 
-supported_qengines = torch.backends.quantized.supported_engines
+supported_qengines = list(torch.backends.quantized.supported_engines)
 # Note: We currently do not run QNNPACK tests on WINDOWS and MACOS as it is flaky. Issue #29326
 # QNNPACK is not supported on PPC
 if 'qnnpack' in supported_qengines and any([IS_PPC, TEST_WITH_TSAN, IS_MACOS, IS_WINDOWS]):
     supported_qengines.remove('qnnpack')
+# FBGEMM and x86 engines require x86 architecture with AVX2/AVX512 support
+# They are not supported on ARM64 architectures
+if IS_ARM64:
+    supported_qengines = [qe for qe in supported_qengines if qe not in ('fbgemm', 'x86')]
 
 def _conv_output_shape(input_size, kernel_size, padding, stride, dilation,
                        output_padding=0):
