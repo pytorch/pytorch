@@ -2279,7 +2279,6 @@ class TestTorchDeviceType(TestCase):
                     check(x, correction, fw, aw)
 
     @skipIfNoSciPy
-    @skipIfTorchDynamo("FIXME: Skip due to dynamo failure on scipy.stats: https://github.com/pytorch/pytorch/issues/170509")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_uniform_kstest(self, device, dtype):
         from scipy import stats
@@ -2292,7 +2291,6 @@ class TestTorchDeviceType(TestCase):
                     self.assertTrue(res.statistic < 0.1)
 
     @skipIfNoSciPy
-    @skipIfTorchDynamo("FIXME: Skip due to dynamo failure on scipy.stats: https://github.com/pytorch/pytorch/issues/170509")
     @dtypes(*floating_types_and(torch.half))
     @dtypesIfCUDA(*floating_types_and(torch.half, torch.bfloat16))
     def test_normal_kstest(self, device, dtype):
@@ -2306,7 +2304,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipIfTorchDynamo("FIXME: Skip due to dynamo failure on scipy.stats: https://github.com/pytorch/pytorch/issues/170509")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_lognormal_kstest(self, device, dtype):
         from scipy import stats
@@ -2322,7 +2319,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipIfTorchDynamo("FIXME: Skip due to dynamo failure on scipy.stats: https://github.com/pytorch/pytorch/issues/170509")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_exponential_kstest(self, device, dtype):
         from scipy import stats
@@ -2334,7 +2330,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipIfTorchDynamo("FIXME: Skip due to dynamo failure on scipy.stats: https://github.com/pytorch/pytorch/issues/170509")
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_cauchy_kstest(self, device, dtype):
         from scipy import stats
