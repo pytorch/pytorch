@@ -469,7 +469,6 @@ static void initXpuMethodBindings(PyObject* module) {
     py::str active_pending_free_s = "active_pending_free";
     py::str inactive_s = "inactive";
     py::str addr_s = "addr";
-    py::str cpp_frames_s = "cpp_frames";
     py::str blocks_s = "blocks";
     py::str is_expandable_s = "is_expandable";
     py::str frames_s = "frames";
