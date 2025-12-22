@@ -28,7 +28,11 @@ from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
-from ..utils import prefix_is_reduction, triton_version_uses_attrs_dict
+from ..utils import (
+    tlx_only_cuda_options,
+    prefix_is_reduction,
+    triton_version_uses_attrs_dict,
+)
 from . import triton_helpers
 from .autotune_cache import AutotuneCache
 from .benchmarking import benchmarker
@@ -711,6 +715,7 @@ class CachingAutotuner(KernelInterface):
             compile_meta["num_buffers_warp_spec"] = getattr(
                 cfg, "num_buffers_warp_spec", 0
             )
+
         compile_meta["debug"] = self.inductor_meta.get(
             "assert_indirect_indexing", True
         ) and not self.inductor_meta.get("is_hip", False)
@@ -718,6 +723,10 @@ class CachingAutotuner(KernelInterface):
         # device type will be "hip" rather than "cuda" here
         compile_meta["device_type"] = self.device_props.type
         compile_meta["cc"] = self.device_props.cc
+
+        for k in tlx_only_cuda_options():
+            if v := getattr(cfg, k, None):
+                compile_meta[k] = v
 
         return compile_meta
 
@@ -754,6 +763,10 @@ class CachingAutotuner(KernelInterface):
                     "launch_pdl": compile_meta.get("launch_pdl", False),  # True
                 }
             )
+            for k in tlx_only_cuda_options():
+                if v := getattr(cfg, k, None):
+                    options[k] = v
+
         if self.device_props.type == "hip":
             if "waves_per_eu" in compile_meta:
                 options["waves_per_eu"] = compile_meta["waves_per_eu"]
@@ -3570,6 +3583,7 @@ def template(
     num_buffers_warp_spec=0,
     filename=None,
     inductor_meta=None,
+    **kwargs,
 ):
     """
     Compile a triton template
@@ -3588,6 +3602,11 @@ def template(
                 "num_buffers_warp_spec": num_buffers_warp_spec,
             }
         )
+
+    for k in tlx_only_cuda_options():
+        if v := triton_meta.get(k, None):
+            config_args[k] = v
+
     return cached_autotune(
         None,
         [triton.Config({}, **config_args)],
