@@ -41,6 +41,7 @@ import torch._C
 import torch._refs
 import torch.fx
 import torch.nn
+import torch.utils._pytree as _pytree
 from torch._guards import TracingContext
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
@@ -75,6 +76,7 @@ from .base import raise_type_error_exc, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
+    ProfilerRecordFunctionContextVariable,
     TorchFunctionDisableVariable,
 )
 from .dicts import ConstDictVariable
@@ -413,12 +415,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
-            # NOTE any class added here must align with the semantic
-            # requirements of `ProfilerContextVariable`.
-            torch.profiler.profile,
             torch.profiler.record_function,
-            torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
+        ):
+            return ProfilerRecordFunctionContextVariable.create(
+                func=self.value, record_args=args, record_kwargs=kwargs
+            )
+        elif self.value in (
+            torch.profiler.profile,
+            torch.autograd.profiler.profile,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
             return ProfilerContextVariable()
@@ -1775,10 +1780,12 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         args: Sequence[VariableTracker],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
-        import torch._higher_order_ops.flat_apply as flat_apply
         from torch._higher_order_ops.flat_apply import (
+            flat_apply,
             func_to_graphable,
             is_graphable_type,
+            is_valid_output,
+            to_graphable,
         )
         from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.utils._pytree import tree_flatten
@@ -1908,13 +1915,45 @@ For now, dynamo will explicitly graph break when it encounters user code with th
 
         # 2. Create a proxy call to `flat_apply`, then fake-tensor propagate
         # the call and wrap output into a VariableTracker.
-        proxy = tx.output.create_proxy("call_function", flat_apply, all_args, {})
+
+        # What's going on here? The output of the nonstrict-traced function must
+        # be something we can put into the graph. This means it has to be Tuple,
+        # int, str, etc or lists/tuples of those (or lists of lists of those,
+        # etc). So by default we don't handle PyTree-able outputs.
+
+        # To handle PyTree-able outputs we flatten the output to a flattened
+        # list of graph types and then trace the unflattening into the graph.
+        captured_spec = None
+
+        def flat_apply_capture(*args):
+            nonlocal captured_spec
+            out = flat_apply(*args, checked_output=False)
+            # Output is handled similar to flat_apply input but reverse by
+            # tree_flattening the output and trace the unflattening. Note that
+            # wrapped functions must return the same pytree structure every time
+            # they're called.
+            flat_out, spec = to_graphable(out)
+            if captured_spec is None:
+                captured_spec = spec
+            else:
+                assert captured_spec == spec, (
+                    "Error: nonstrict-traced functions must return the same "
+                    f"output shape every time. got {spec!r} vs but expected {captured_spec!r}"
+                )
+            assert is_valid_output(flat_out)
+            return flat_out
+
+        proxy = tx.output.create_proxy(
+            "call_function", flat_apply_capture, all_args, {}
+        )
+
+        # Instead of calling tree_unflatten at runtime, symbolically trace it
+        # just like we did for tree_flatten on inputs. This lets Dynamo
+        # capture the unflatten into the FX graph as well.
+
+        # Build VTs representing (flat_output_list, out_spec)
         try:
-            # TODO support more output types once `flat_apply` supports
-            # pytree-able output types. We can have Dynamo trace through an
-            # unflatten call (just like we traced through a flatten above)
-            # to rebuild the actual output VT.
-            out_vt = wrap_fx_proxy(tx, proxy)
+            proxy_list_vt = wrap_fx_proxy(tx, proxy)
         except (
             # From `handle_traced_output`.
             torch._dynamo.exc.Unsupported,
@@ -1930,6 +1969,17 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                 ),
                 hints=[*graph_break_hints.SUPPORTABLE],
             )
+            # pyrefly error: why doesn't it recognize unimplemented() as NoReturn?
+            raise AssertionError("unreachable")  # noqa: B904
+
+        assert captured_spec is not None
+        out_spec_vt = VariableTracker.build(tx, captured_spec)
+
+        # Reuse the same pattern used above for tree_flatten: call the python
+        # function through Dynamo so it symbolically interprets it.
+        out_vt = variables.UserFunctionVariable(_pytree.tree_unflatten).call_function(
+            tx, [proxy_list_vt, out_spec_vt], {}
+        )
 
         return out_vt
 
