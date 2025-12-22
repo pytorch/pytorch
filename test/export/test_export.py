@@ -78,6 +78,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfCrossRef,
+    skipIfRocm,
     skipIfXpu,
     TEST_TRANSFORMERS,
     TEST_WITH_CROSSREF,
@@ -13423,6 +13424,7 @@ graph():
         inp = torch.ones(2, 2)
         self.assertEqual(ep.module()(inp, MyInput(4, 4)), Foo()(inp, MyInput(4, 4)))
 
+    @skipIfRocm
     def test_opaque_obj_run_decompositions_nonstrict(self):
         @dataclass(frozen=True)
         class MyInput:
