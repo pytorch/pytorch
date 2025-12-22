@@ -135,12 +135,10 @@ from torch.testing._internal.inductor_utils import (  # noqa: F401
     HAS_GPU,
     HAS_MPS,
     HAS_MULTIGPU,
-    HAS_TPU,
     IS_BIG_GPU,
     requires_gpu,
     RUN_CPU,
     RUN_GPU,
-    RUN_TPU,
     skipCPUIf,
     skipCUDAIf,
 )
@@ -6639,7 +6637,7 @@ class CommonTemplate:
     @skip_if_gpu_halide
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
-    @unittest.skipIf(config.triton.native_matmul, "native matmul has better precision")
+    @unittest.skipIf(False, "native matmul has better precision")
     @torch._inductor.config.patch(
         joint_graph_constant_folding=True,
         # Numerical accuracy failure for triton fp16
@@ -7077,7 +7075,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         max_autotune_gemm_backends="ATEN",
     )
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
-    @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
+    @unittest.skipIf(False, "matmul is now generated")
     def test_deterministic_codegen_with_suffix(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
@@ -8890,7 +8888,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.common(kv_cache_module, (inp, 1), check_lowp=False)
 
         if (
-            config.triton.native_matmul
+            False
             and config.cuda_backend == "triton"
             and self.device == "cuda"
         ):
@@ -10178,7 +10176,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
         if (
-            config.triton.native_matmul
+            False
             and config.cuda_backend == "triton"
             and self.device == "cuda"
         ):
@@ -10258,7 +10256,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_mps
     @config.patch(search_autotune_cache=False)
-    @unittest.skipIf(config.triton.native_matmul, "matmul count is different")
+    @unittest.skipIf(False, "matmul count is different")
     def test_dropout3(self):
         m = torch.nn.Sequential(
             torch.nn.Linear(32, 32, bias=False),
@@ -11560,9 +11558,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         with config.patch(
             {
-                "triton.prefer_nd_tiling": prefer_nd_tiling,
                 "triton.use_block_ptr": use_block_ptr,
-                "triton.native_matmul": False,
             }
         ):
             # Check accuracy
@@ -14589,7 +14585,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     # If matmul is implemented by triton there is more reuse
     @config.patch(max_autotune_gemm_backends="ATEN")
-    @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
+    @unittest.skipIf(False, "matmul is now generated")
     def test_allow_reuse_disable_if_exceed_peak(self):
         @torch.compile
         def fn(inp):  # 1*N^2
@@ -15824,7 +15820,7 @@ if RUN_GPU:
                 self.assertTrue("ymask = yindex < ynumel" in code)
                 self.assertTrue("xmask = xindex < xnumel" in code)
 
-        @config.patch("triton.native_matmul", False)
+        # @config.patch("triton.native_matmul", False)
         def test_kernel_names_descriptive(self):
             @torch.compile(backend="inductor")
             def fn1(x):
