@@ -103,6 +103,18 @@ def _reparametrize_module(
     strict: bool = False,
     stack_weights: bool = False,
 ):
+    """Context manager for temporarily replacing module parameters and buffers.
+    
+    Args:
+        module: The module to reparametrize
+        parameters_and_buffers: Dict mapping parameter names to new values
+        tie_weights: Whether to respect tied weights in the module
+        strict: Whether parameter names must match exactly 
+        stack_weights: Whether to stack weights
+        
+    Yields:
+        The module with temporarily replaced parameters and buffers
+    """
     if tie_weights:
         untied_parameters_and_buffers = _untie_named_tensors_map(
             module, parameters_and_buffers
