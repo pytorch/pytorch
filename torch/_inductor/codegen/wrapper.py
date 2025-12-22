@@ -1594,26 +1594,18 @@ class PythonWrapperCodegen(CodeGen):
         if format_args or format_kwargs:
             args_str = ", ".join(format_args)
             kwargs_str = ", ".join(f"{k}={v}" for k, v in format_kwargs.items())
-<<<<<<< HEAD
-            self.writeline(f"print({repr(format_str)}.format({kwargs_str}))")
-        else:
-            # No format kwargs, just print the format string directly
-            self.writeline(f"print({repr(format_str)})")
-=======
+
             if args_str and kwargs_str:
                 self.writeline(
-                    f"builtins.print({repr(format_str)}.format({args_str}, {kwargs_str}))"
+                    f"print({repr(format_str)}.format({args_str}, {kwargs_str}))"
                 )
             elif args_str:
-                self.writeline(f"builtins.print({repr(format_str)}.format({args_str}))")
+                self.writeline(f"print({repr(format_str)}.format({args_str}))")
             else:
-                self.writeline(
-                    f"builtins.print({repr(format_str)}.format({kwargs_str}))"
-                )
+                self.writeline(f"print({repr(format_str)}.format({kwargs_str}))")
         else:
             # No format args or kwargs, just print the format string directly
-            self.writeline(f"builtins.print({repr(format_str)})")
->>>>>>> 0b6406f780d (Fix comments)
+            self.writeline(f"print({repr(format_str)})")
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)

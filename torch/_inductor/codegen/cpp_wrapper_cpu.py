@@ -2377,65 +2377,6 @@ class CppWrapperCpu(PythonWrapperCodegen):
             assert isinstance(output_name, list), type(output_name)
             output_args = output_name
 
-<<<<<<< HEAD
-=======
-        # Special handling for torch.ops.higher_order.print
-        # Format the string with args and kwargs values at codegen time
-        if (
-            isinstance(op_overload, torch._ops.HigherOrderOperator)
-            and python_kernel_name == "torch.ops.higher_order.print"
-        ):
-            # Extract format string, args, and kwargs from raw_args
-            # raw_args is (args_tuple, kwargs_dict) from FallbackKernel
-            if len(raw_args) >= 2 and isinstance(raw_args[1], dict):
-                args_tuple = raw_args[0] if raw_args[0] else ()
-                kwargs_dict = raw_args[1]
-                format_str = args_tuple[0] if args_tuple else ""
-                positional_args = args_tuple[1:] if len(args_tuple) > 1 else ()
-            else:
-                format_str = raw_args[0] if raw_args else ""
-                positional_args = ()
-                kwargs_dict = {}
-
-            # Build format args from positional arguments
-            format_args: list[object] = []
-            for value in positional_args:
-                if isinstance(value, ir.IRNode):
-                    # For tensor nodes, use their buffer name as placeholder
-                    format_args.append(f"<Tensor:{value.get_name()}>")
-                else:
-                    # For scalar values, use them directly
-                    format_args.append(value)
-
-            # Build format kwargs from the dict
-            format_kwargs: dict[str, object] = {}
-            for key, value in kwargs_dict.items():
-                if isinstance(value, ir.IRNode):
-                    # For tensor nodes, use their buffer name as placeholder
-                    # Using buffer names avoids expensive tensor materialization and device-to-host copies
-                    # that would be required to print actual tensor values. This keeps codegen fast and
-                    # device-agnostic, while still providing useful debugging information about which
-                    # tensors are being referenced.
-                    format_kwargs[key] = f"<Tensor:{value.get_name()}>"
-                else:
-                    # For scalar values, use them directly
-                    # Scalars are already host-side values, so no performance penalty for printing them
-                    format_kwargs[key] = value
-
-            # Format the string with args and kwargs
-            try:
-                formatted_str = format_str.format(*format_args, **format_kwargs)
-            except (KeyError, ValueError, IndexError):
-                # If formatting fails, use the original string
-                formatted_str = format_str
-
-            # Escape special characters for C++ string literal
-            escaped_str = formatted_str.replace("\\", "\\\\").replace('"', '\\"')
-            # Generate std::cout statement with endl to flush
-            self.writeline(f'std::cout << "{escaped_str}" << std::endl;')
-            return
-
->>>>>>> 0b6406f780d (Fix comments)
         # In AOT mode, we use a ProxyExecutor to run fallback kernels.
         if V.graph.aot_mode:
             self.generate_fallback_kernel_with_runtime_lookup_aot(
