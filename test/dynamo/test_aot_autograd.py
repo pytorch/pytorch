@@ -753,6 +753,12 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    # This test is specifically testing duplicate returns (maybe_dup custom op) but our new
+    # custom op check is very strict in that it doesn't accept aliasing
+    # between inputs for functional ops. When we change the schema of this
+    # to aliasing one, auto-functionalization also doesn't support it. So patching
+    # this flag here to bypass the check.
+    @torch._functorch.config.patch(check_custom_op_aliasing=False)
     @patch("torch._functorch.config.debug_assert", True)
     def test_multiple_aot_autograd_calls_dupe_args(self):
         # this is just dealing with the fact that

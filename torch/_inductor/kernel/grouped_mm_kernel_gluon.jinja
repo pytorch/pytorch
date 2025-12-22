@@ -111,6 +111,83 @@ class PartitionArgs:
         self.NUM_STORE_WARPS = gl.constexpr(NUM_STORE_WARPS)
 
 
+@aggregate
+class GroupTileIterator:
+    tidx: gl.tensor
+    iterated_tiles: gl.tensor
+    num_tiles: gl.tensor
+    num_m_tiles: gl.tensor
+    num_n_tiles: gl.tensor
+    m_start_offset: gl.tensor
+    n_start_offset: gl.tensor
+    m_offset: gl.tensor
+    n_offset: gl.tensor
+    m_tile_offset: gl.tensor
+    n_tile_offset: gl.tensor
+    BLOCK_M: gl.constexpr
+    BLOCK_N: gl.constexpr
+    NUM_BLOCKS: gl.constexpr
+
+    @gluon.constexpr_function
+    def __init__(self, tidx, iterated_tiles, num_tiles, num_m_tiles, num_n_tiles,
+                 m_start_offset, n_start_offset, m_offset, n_offset, m_tile_offset, n_tile_offset,
+                 BLOCK_M, BLOCK_N, NUM_BLOCKS):
+        self.tidx = tidx
+        self.iterated_tiles = iterated_tiles
+        self.num_tiles = num_tiles
+        self.num_m_tiles = num_m_tiles
+        self.num_n_tiles = num_n_tiles
+        self.m_start_offset = m_start_offset
+        self.n_start_offset = n_start_offset
+        self.m_offset = m_offset
+        self.n_offset = n_offset
+        self.m_tile_offset = m_tile_offset
+        self.n_tile_offset = n_tile_offset
+        self.BLOCK_M = gl.constexpr(BLOCK_M)
+        self.BLOCK_N = gl.constexpr(BLOCK_N)
+        self.NUM_BLOCKS = gl.constexpr(NUM_BLOCKS)
+
+    @gluon.jit
+    def initialize(tidx, iterated_tiles, m_start_offset, m_size, n_start_offset, n_size,
+                   BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr):
+        num_m_tiles = gl.cdiv(m_size, BLOCK_M)
+        num_n_tiles = gl.cdiv(n_size, BLOCK_N)
+        num_tiles = num_m_tiles * num_n_tiles
+
+        gidx = tidx - iterated_tiles
+        tile_m_idx = gidx % num_m_tiles
+        tile_n_idx = gidx // num_m_tiles
+        m_tile_offset = tile_m_idx * BLOCK_M
+        n_tile_offset = tile_n_idx * BLOCK_N
+        m_offset = m_start_offset + m_tile_offset
+        n_offset = n_start_offset + n_tile_offset
+
+        return GroupTileIterator(tidx, iterated_tiles, num_tiles, num_m_tiles, num_n_tiles,
+                                m_start_offset, n_start_offset, m_offset, n_offset,
+                                m_tile_offset, n_tile_offset, BLOCK_M, BLOCK_N, NUM_BLOCKS)
+
+    @gluon.jit
+    def should_process(self):
+        return (self.tidx >= self.iterated_tiles) & (self.tidx < self.iterated_tiles + self.num_tiles)
+
+    @gluon.must_use_result
+    @gluon.jit
+    def next(self):
+        new_tidx = self.tidx + self.NUM_BLOCKS
+        gidx = new_tidx - self.iterated_tiles
+        tile_m_idx = gidx % self.num_m_tiles
+        tile_n_idx = gidx // self.num_m_tiles
+        m_tile_offset = tile_m_idx * self.BLOCK_M
+        n_tile_offset = tile_n_idx * self.BLOCK_N
+        m_offset = self.m_start_offset + m_tile_offset
+        n_offset = self.n_start_offset + n_tile_offset
+
+        return GroupTileIterator(new_tidx, self.iterated_tiles, self.num_tiles,
+                                self.num_m_tiles, self.num_n_tiles, self.m_start_offset,
+                                self.n_start_offset, m_offset, n_offset,
+                                m_tile_offset, n_tile_offset, self.BLOCK_M, self.BLOCK_N, self.NUM_BLOCKS)
+
+
 # Counter abstraction for tracking barrier index and phase.
 @aggregate
 class Counter:
@@ -167,19 +244,10 @@ def load_partition(pargs: PartitionArgs):
         n_size = N
         k_size = K
 
-        num_m_tiles = gl.cdiv(m_size, BLOCK_M)
-        num_n_tiles = gl.cdiv(n_size, BLOCK_N)
-        num_tiles = num_m_tiles * num_n_tiles
+        iter = GroupTileIterator.initialize(tidx, iterated_tiles, m_start_offset, m_size,
+                                           n_start_offset, n_size, BLOCK_M, BLOCK_N, pargs.NUM_BLOCKS)
 
-        while tidx >= iterated_tiles and tidx < iterated_tiles + num_tiles:
-            gidx = tidx - iterated_tiles
-            tile_m_idx = gidx % num_m_tiles
-            tile_n_idx = gidx // num_m_tiles
-            m_tile_offset = tile_m_idx * BLOCK_M
-            n_tile_offset = tile_n_idx * BLOCK_N
-            m_offset = m_start_offset + m_tile_offset
-            n_offset = n_start_offset + n_tile_offset
-
+        while iter.should_process():
             for k in range(0, k_size, BLOCK_K):
                 load_buf_empty_bar = load_buf_empty_bars.index(state.index)
                 load_buf_full_bar = load_buf_full_bars.index(state.index)
@@ -197,17 +265,18 @@ def load_partition(pargs: PartitionArgs):
 
                 with pl.scope("load_tma_async"):
                     tma.async_copy_global_to_shared(
-                        pargs.a_desc, [m_offset, k], load_buf_full_bar, a_smem
+                        pargs.a_desc, [iter.m_offset, k], load_buf_full_bar, a_smem
                     )
                     tma.async_copy_global_to_shared(
-                        pargs.b_desc, [g, n_offset, k], load_buf_full_bar, b_smem
+                        pargs.b_desc, [g, iter.n_offset, k], load_buf_full_bar, b_smem
                     )
 
                 state = state.next()
 
-            tidx += pargs.NUM_BLOCKS
+            iter = iter.next()
 
-        iterated_tiles += num_tiles
+        tidx = iter.tidx
+        iterated_tiles += iter.num_tiles
 
     pl.exit_scope("load_partition")
 
@@ -245,19 +314,10 @@ def compute_partition(pargs: PartitionArgs):
         n_size = N
         k_size = K
 
-        num_m_tiles = gl.cdiv(m_size, BLOCK_M)
-        num_n_tiles = gl.cdiv(n_size, BLOCK_N)
-        num_tiles = num_m_tiles * num_n_tiles
+        iter = GroupTileIterator.initialize(tidx, iterated_tiles, m_start_offset, m_size,
+                                           n_start_offset, n_size, BLOCK_M, BLOCK_N, pargs.NUM_BLOCKS)
 
-        while tidx >= iterated_tiles and tidx < iterated_tiles + num_tiles:
-            gidx = tidx - iterated_tiles
-            tile_m_idx = gidx % num_m_tiles
-            tile_n_idx = gidx // num_m_tiles
-            m_tile_offset = tile_m_idx * BLOCK_M
-            n_tile_offset = tile_n_idx * BLOCK_N
-            m_offset = m_start_offset + m_tile_offset
-            n_offset = n_start_offset + n_tile_offset
-
+        while iter.should_process():
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
 
             with pl.scope("compute_barrier_wait_acc_empty"):
@@ -294,9 +354,10 @@ def compute_partition(pargs: PartitionArgs):
 
             acc_state = acc_state.next()
 
-            tidx += pargs.NUM_BLOCKS
+            iter = iter.next()
 
-        iterated_tiles += num_tiles
+        tidx = iter.tidx
+        iterated_tiles += iter.num_tiles
 
     pl.exit_scope("compute_partition")
 
@@ -346,24 +407,10 @@ def store_partition(pargs: PartitionArgs):
         n_size = N
         k_size = K
 
-        num_m_tiles = gl.cdiv(m_size, BLOCK_M)
-        num_n_tiles = gl.cdiv(n_size, BLOCK_N)
-        num_tiles = num_m_tiles * num_n_tiles
+        iter = GroupTileIterator.initialize(tidx, iterated_tiles, m_start_offset, m_size,
+                                           n_start_offset, n_size, BLOCK_M, BLOCK_N, pargs.NUM_BLOCKS)
 
-        while tidx >= iterated_tiles and tidx < iterated_tiles + num_tiles:
-            gidx = tidx - iterated_tiles
-            tile_m_idx = gidx % num_m_tiles
-            tile_n_idx = gidx // num_m_tiles
-{%- if not USE_RAGGED_TENSOR_DESCRIPTOR %}
-            m_offset = tile_m_idx * BLOCK_M
-            n_offset = tile_n_idx * BLOCK_N
- {%- else %}
-            m_tile_offset = tile_m_idx * BLOCK_M
-            n_tile_offset = tile_n_idx * BLOCK_N
-            m_offset = m_start_offset + m_tile_offset
-            n_offset = n_start_offset + n_tile_offset
-{%- endif %}
-
+        while iter.should_process():
             # fixme: add epilogue here!
 
             acc_buf_full_bar = acc_buf_full_bars.index(acc_state.index)
@@ -387,24 +434,22 @@ def store_partition(pargs: PartitionArgs):
             with pl.scope("store_smem_write"):
                 c_smem.store(c)
 
-            # After usage of acc, we're sure that smem/tmem buffer
-            # is free for reuse
             with pl.scope("store_barrier_arrive"):
                 mbarrier.arrive(acc_buf_empty_bar, count=1)
 
             with pl.scope("store_fence_and_tma"):
                 fence_async_shared()
 {%- if not USE_RAGGED_TENSOR_DESCRIPTOR %}
-                tma.async_copy_shared_to_global(c_desc, [m_offset, n_offset], c_smem)
+                tma.async_copy_shared_to_global(c_desc, [iter.m_offset, iter.n_offset], c_smem)
 {%- else %}
-                # Reshape to 4D for ragged descriptor and use store_ragged
                 c_smem_4d = c_smem.reshape([1, 1, BLOCK_M, BLOCK_N])
-                store_ragged(c_desc, m_start_offset, m_size, [m_tile_offset, n_offset], c_smem_4d, ragged_dim=0)
+                store_ragged(c_desc, m_start_offset, m_size, [iter.m_tile_offset, iter.n_offset], c_smem_4d, ragged_dim=0)
 {%- endif %}
 
-            tidx += pargs.NUM_BLOCKS
+            iter = iter.next()
 
-        iterated_tiles += num_tiles
+        tidx = iter.tidx
+        iterated_tiles += iter.num_tiles
 
     with pl.scope("store_final_tma_wait"):
         tma.store_wait(pendings=0)
@@ -474,7 +519,6 @@ def grouped_mm_kernel(
         layout=c_layout,
     )
 {%- else %}
-    # C tensor ragged descriptor using ragged_tma utilities
     c_desc = create_ragged_descriptor_device_2d(
         c_ptr,
         dim0=M, dim1=N,
