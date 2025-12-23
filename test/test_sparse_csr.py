@@ -87,7 +87,7 @@ def _test_addmm_addmv(
     """
     dtype = t.dtype
     numpy_dtype = dtype
-    if dtype in {torch.bfloat16}:
+    if dtype == torch.bfloat16:
         numpy_dtype = torch.float
     if dtype.is_complex:
         alpha = 0.9 + 0.3j if alpha is None else alpha
@@ -4066,11 +4066,11 @@ class TestSparseCompressedTritonKernels(TestCase):
         else:
             BM, BK = (blocksize,) * 2
 
-        if op in {"bsr_dense_linear"} and BM != BK:
+        if op == "bsr_dense_linear" and BM != BK:
             # todo: eliminate this skip
             self.skipTest(f"{op} does not support non-square blocks")
 
-        if op in {"bsr_dense_linear"} and dtype is torch.int8:
+        if op == "bsr_dense_linear" and dtype is torch.int8:
             # todo: eliminate this skip
             self.skipTest(f"{op} does not support int8")
 
