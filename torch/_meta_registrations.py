@@ -6562,7 +6562,7 @@ def _check_scaled_mm_sizes_v2(
         )
 
     def is_fp4_type(dtype):
-        return dtype in (torch.float4_e2m1fn_x2,)
+        return dtype == torch.float4_e2m1fn_x2
 
     torch._check(
         self.dim() == 2 and mat2.dim() == 2,
