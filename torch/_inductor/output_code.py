@@ -1042,15 +1042,16 @@ class RegionalOutputCode(OutputCode):
             self._serialized_graph_module = None
             self._serialized_wrappers, graph_module = self._unwrap_graph_module()
 
-            for mod in graph_module.modules():
-                if isinstance(mod, torch.fx.GraphModule):
-                    for node in mod.graph.nodes:
-                        node.meta.pop("source_fn_stack", None)
-                        node.meta.pop("nn_module_stack", None)
-                        node.meta.pop("fwd_source_fn_stack", None)
-
             self._serialized_graph_module = GraphPickler.dumps(
-                graph_module, options=Options(ops_filter=None)
+                graph_module,
+                options=Options(
+                    ops_filter=None,
+                    ignore_metadata_fields=(
+                        "source_fn_stack",
+                        "nn_module_stack",
+                        "fwd_source_fn_stack",
+                    ),
+                ),
             )
             # Clear the graph module to avoid pickling it with standard pickle
             self._graph_module = None
