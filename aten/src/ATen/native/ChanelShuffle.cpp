@@ -81,7 +81,7 @@ Tensor math_channel_shuffle(const Tensor& self, int64_t groups) {
   // TODO: contiguous can be made to preserve the memory format
   // of the input. However since the above reshape clobbers h and w
   // it may not be safe to do that, since channels_last contiguous
-  // may think oc and and the last dim correspond to h,w?
+  // may think oc and the last dim correspond to h,w?
   // It is not clear, however from initial looking around it feels that
   // this may not be correct.
   // In this case channels last will likely require custom implementation

@@ -39,10 +39,11 @@ import types
 import unittest
 import warnings
 import weakref
+from collections.abc import Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 from unittest.mock import patch
 
 import sympy
@@ -67,7 +68,7 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._export.utils import _compiling_state_context
 from torch._subclasses.fake_tensor import unset_fake_temporarily
-from torch._utils_internal import justknobs_check, log_export_usage
+from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
     _combine_args,
     _DimHint,
@@ -77,7 +78,7 @@ from torch.export.dynamic_shapes import (
     _RelaxedConstraint,
     Constraint,
 )
-from torch.fx import GraphModule
+from torch.fx import GraphModule, traceback as fx_traceback
 from torch.fx.experimental._dynamism import (
     clone_and_convert_to_meta,
     track_dynamism_across_examples,
@@ -112,7 +113,7 @@ from .utils import (
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable, Sequence
+    from collections.abc import Callable, Iterable, Sequence
 
     from torch._dynamo.package import CompilePackage
     from torch._dynamo.repro.after_dynamo import WrapBackendDebug
@@ -144,17 +145,23 @@ cached_backends: dict[int, CompilerFn] = {}
 
 unset = Unset.token
 
+_in_optimized_module = False
 
-def _maybe_set_eval_frame(callback: DynamoCallback) -> DynamoCallback:
-    # A wrapper on set_eval_frame that is guarded by a Justknob.
-    # Users can disable torchDynamo by setting the JK to False.
-    if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
-        torch._dynamo.utils.warn_once(
-            "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
-        )
-        return callback
-    else:
-        return set_eval_frame(callback)
+
+if DISABLE_JUSTKNOBS:
+    _maybe_set_eval_frame = set_eval_frame
+else:
+
+    def _maybe_set_eval_frame(callback: DynamoCallback) -> DynamoCallback:
+        # A wrapper on set_eval_frame that is guarded by a Justknob.
+        # Users can disable torchDynamo by setting the JK to False.
+        if not justknobs_check("pytorch/compiler:enable_compiler_set_eval_frame"):
+            torch._dynamo.utils.warn_once(
+                "Dynamo disabled by Justknob: enable_compiler_set_eval_frame, skipping set_eval_frame"
+            )
+            return callback
+        else:
+            return set_eval_frame(callback)
 
 
 @dataclass
@@ -198,10 +205,32 @@ def get_example_inputs(key: str) -> list[Any]:
     return _EXAMPLE_INPUTS[key]
 
 
+@contextlib.contextmanager
+def _set_in_optimized_module():
+    # Set in dynamo's OptimizedModule forward, to have better coverage than is_compiling().
+    # Prevents graph-breaking forward hooks from being registered & traced.
+    # TODO(pianpwk): subsume this flag with better is_compiling() coverage
+    global _in_optimized_module
+    _old_in_optimized_module = (
+        _in_optimized_module  # do we need this? can we just set it to False after
+    )
+    _in_optimized_module = True
+    try:
+        yield
+    finally:
+        _in_optimized_module = _old_in_optimized_module
+
+
+def _is_in_optimized_module() -> bool:
+    global _in_optimized_module
+    return _in_optimized_module
+
+
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
     if _stance.stance == "default":
         # force_backend
         if _stance.backend is not None and callback not in (False, None):
+            # pyrefly: ignore [bad-argument-type]
             callback = _create_wrapped_callback(get_compiler_fn(_stance.backend))
 
         return callback
@@ -231,7 +260,11 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
             if not convert_frame.has_tensor_in_frame(frame):
                 return ConvertFrameReturn()
 
-            from torch._C._dynamo.eval_frame import _debug_get_precompile_entries
+            from torch._C._dynamo.eval_frame import (
+                _debug_get_cache_entry_list,
+                _debug_get_precompile_entries,
+            )
+            from torch._dynamo.guards import get_and_maybe_log_recompilation_reasons
 
             message = (
                 "Detected recompile when torch.compile stance is 'fail_on_recompile'. "
@@ -239,6 +272,17 @@ def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
                 + f"function name: '{frame.f_code.co_name}', "
                 + f"line number: {frame.f_lineno}"
             )
+            cache_entries = _debug_get_cache_entry_list(frame.f_code)
+            if cache_entries:
+                reasons = get_and_maybe_log_recompilation_reasons(
+                    cache_entries[0], frame, innermost_fn(callback), skip_logging=True
+                )
+                if reasons:
+                    failures = textwrap.indent("\n".join(reasons), "- ")
+                    guard_failure_details = (
+                        f"triggered by the following guard failure(s):\n{failures}"
+                    )
+                    message += f"\n{textwrap.indent(guard_failure_details, '    ')}"
             precompile_entries = _debug_get_precompile_entries(frame.f_code)
             if len(precompile_entries) > 0:
                 message += "\nFailed on the following precompiled guards: "
@@ -293,6 +337,7 @@ def _create_delayed_compile_callback(
                 )
             elif stance == "aot_eager_then_compile":
                 aot_eager_fn = get_compiler_fn("aot_eager")
+                # pyrefly: ignore [bad-argument-type]
                 return _create_wrapped_callback(aot_eager_fn)(*args, **kwargs)
 
         dynamism = track_dynamism_across_examples(example_inputs)
@@ -376,21 +421,28 @@ class OptimizedModule(torch.nn.Module):
         self._initialize()
         self.training = self._orig_mod.training
 
+    def __len__(self) -> int:
+        # Proxy the len call to the original module
+        # pyrefly: ignore [invalid-argument]
+        if isinstance(self._orig_mod, Sized):
+            return len(self._orig_mod)
+        # Mimic python's default behavior for objects without a length
+        raise TypeError(f"{type(self._orig_mod).__name__} does not support len()")
+
     def _initialize(self) -> None:
         # Do this stuff in constructor to lower overhead slightly
         if isinstance(self.dynamo_ctx, DisableContext):
             # No need to check trace rules
+            # pyrefly: ignore [bad-argument-type]
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif config.wrap_top_frame or (
             isinstance(self._orig_mod.forward, types.MethodType)
-            and (
-                trace_rules.check(self._orig_mod.forward)
-                or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
-            )
+            and (trace_rules.check(self._orig_mod.forward))
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
             # frame we can capture
+            # pyrefly: ignore [bad-argument-type]
             self.forward = self.dynamo_ctx(external_utils.wrap_inline(self._orig_mod))
         else:
             # Invoke hooks outside of dynamo then pickup the inner frame
@@ -411,7 +463,59 @@ class OptimizedModule(torch.nn.Module):
                 ", or use the per-module hooks instead",
                 stacklevel=2,
             )
-        return super().__call__(*args, **kwargs)
+        with _set_in_optimized_module():
+            return super().__call__(*args, **kwargs)
+
+    def _aot_compile(self, inputs: list[torch._dynamo.aot_compile.ModelInput]) -> None:
+        """
+        Experimental: AOT Compile a set of inputs and use that as the forward function
+        """
+        model = self._orig_mod
+        hooks = self.dynamo_ctx._hooks
+        assert hooks is not None
+        if not config.enable_aot_compile:
+            raise RuntimeError(
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
+            )
+        if not self.dynamo_ctx.fullgraph:
+            raise RuntimeError(
+                "Graph breaks are not supported with aot compile. Please use torch.compile(fullgraph=True)."
+            )
+
+        if not callable(self.dynamo_ctx.callback):
+            raise RuntimeError("aot compile requires a callable dynamo callback.")
+
+        backend = innermost_fn(
+            self.dynamo_ctx.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
+        )
+        from torch._dynamo.aot_compile import aot_compile_module
+
+        self.forward = aot_compile_module(model, inputs, hooks, backend)
+
+    def _save_aot_compiled_module(self, path: Optional[str] = None) -> bytes:
+        if not config.enable_aot_compile:
+            raise RuntimeError(
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
+            )
+        from torch._dynamo.aot_compile import AOTCompiledModel
+
+        assert isinstance(self.forward, AOTCompiledModel)
+        result: bytes = self.forward.serialize()
+        if path is not None:
+            with open(path, "wb") as f:
+                f.write(result)
+        return result
+
+    def _load_aot_compiled_module(self, data: bytes) -> None:
+        if not config.enable_aot_compile:
+            raise RuntimeError(
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
+            )
+        from torch._dynamo.aot_compile import AOTCompiledModel
+
+        compiled_forward = AOTCompiledModel.deserialize(self._orig_mod, data)
+        assert isinstance(compiled_forward, AOTCompiledModel)
+        self.forward = compiled_forward
 
     def __reduce__(
         self,
@@ -429,6 +533,7 @@ class OptimizedModule(torch.nn.Module):
         self._initialize()
 
     @property
+    # pyrefly: ignore [bad-override]
     def training(self) -> bool:
         return self._orig_mod.training
 
@@ -687,25 +792,34 @@ class _TorchDynamoContext:
         # If self._package is lazily initialized, we should check the dynamo cache now
         if config.caching_precompile:
             if self._package is not None and not self._package.is_initialized():
-                result = DynamoCache.load(fn)
+                fn_key = fn.forward if isinstance(fn, torch.nn.Module) else fn
+                result = DynamoCache.load(fn_key)
                 if result is None:
                     # Create a fresh CompilePackage
-                    self._package.initialize(fn, None, ignore_inlined_sources=False)
+                    self._package.initialize(fn_key, None, ignore_inlined_sources=False)
                 else:
-                    cache_entry, backends = result
                     try:
                         self._package.initialize(
-                            fn, cache_entry, ignore_inlined_sources=False
+                            fn_key, result.dynamo, ignore_inlined_sources=False
                         )
-                        self._package.install(backends)
-                    except RuntimeError as e:
-                        log.warning("Failed to load entry from dynamo cache: %s", e)
-                        self._package.initialize(fn, None, ignore_inlined_sources=False)
+                        self._package.install(result.backends)
+                    except RuntimeError:
+                        log.warning(
+                            "Failed to load entry from dynamo cache", exc_info=True
+                        )
+                        self._package.initialize(
+                            fn_key, None, ignore_inlined_sources=False
+                        )
 
         fn = innermost_fn(fn)
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
             from torch._dynamo.aot_compile import aot_compile_fullgraph
+
+            if torch._inductor.config.force_disable_caches:
+                raise RuntimeError(
+                    "Cannot precompile with torch._inductor.config.force_disable_caches=True; caching is required."
+                )
 
             if not self.fullgraph:
                 raise RuntimeError(
@@ -716,6 +830,7 @@ class _TorchDynamoContext:
                 raise RuntimeError("aot compile requires a callable dynamo callback.")
 
             assert self._hooks is not None
+
             return aot_compile_fullgraph(
                 fn,
                 example_inputs,
@@ -761,6 +876,17 @@ class _TorchDynamoContext:
             f"A callable function is expected, but {type(fn)} is provided."
         )
 
+        # NOTE [Top-level TorchInGraph functions]
+        # Some callables (e.g. torch.exp) are represented as TorchInGraphFunctionVariable
+        # when traced inside a frame. When such a function is passed directly to
+        # torch.compile, we detect it here so we can force it through wrap_inline.
+        from .variables import TorchInGraphFunctionVariable
+
+        rule = trace_rules.lookup(fn)
+        top_level_in_graph = isinstance(rule, type) and issubclass(
+            rule, TorchInGraphFunctionVariable
+        )
+
         try:
             filename = inspect.getsourcefile(fn)
         except TypeError:
@@ -768,7 +894,7 @@ class _TorchDynamoContext:
         if config.debug_force_nested_calls:
             fn = external_utils.wrap_inline(fn)
         elif config.wrap_top_frame or (
-            (filename is None or trace_rules.check(fn))
+            (filename is None or trace_rules.check(fn) or top_level_in_graph)
             and (
                 getattr(fn, "__name__", "")
                 not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
@@ -792,6 +918,22 @@ class _TorchDynamoContext:
         def compile_wrapper(*args: Any, **kwargs: Any) -> Any:
             prior = set_eval_frame(None)
             try:
+                # We shouldn't compile inside kernel invocation.
+                if tracing_context := torch._guards.TracingContext.try_get():
+                    if (
+                        tracing_context.fake_mode is not None
+                        and tracing_context.fake_mode.in_kernel_invocation
+                    ):
+                        return fn(*args, **kwargs)
+                # Skip nested compile during export (but not HOP internal compile)
+                # Only skip if there's an active TracingContext (nested), not for top-level export
+                if torch.compiler.is_exporting():
+                    from torch._higher_order_ops.utils import _in_hop_compile
+
+                    if not _in_hop_compile():
+                        if torch._guards.TracingContext.try_get() is not None:
+                            return fn(*args, **kwargs)
+                # Skip nested compile - just inline the function
                 if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
@@ -838,6 +980,7 @@ class _TorchDynamoContext:
                     while cur_exn.__cause__ is not None:
                         cur_exn.__cause__.with_traceback(None)
                         cur_exn = cur_exn.__cause__
+                    # pyrefly: ignore [invalid-inheritance]
                     raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
@@ -966,7 +1109,10 @@ class OptimizeContext(_TorchDynamoContext):
                 assert rebuild_ctx is not None
                 compiler_fn = rebuild_ctx()
                 ctx = torch._dynamo.compiled_autograd._enable(
-                    compiler_fn, dynamic=_dynamic, ignore_active_disable_ctx=False
+                    compiler_fn,
+                    # pyrefly: ignore [bad-argument-type]
+                    dynamic=_dynamic,
+                    ignore_active_disable_ctx=False,
                 )
                 ctx.__enter__()
                 return functools.partial(ctx.__exit__, None, None, None)
@@ -1029,6 +1175,7 @@ class DisableContext(_TorchDynamoContext):
             cls_obj.__call__ = self(cls_obj.__call__)
             if issubclass(cls_obj, torch.nn.Module):
                 # NN module variable tracker directly inlines the _call_impl. Disable it.
+                # pyrefly: ignore [missing-attribute]
                 cls_obj._call_impl = self(cls_obj._call_impl)
             return cls_obj
 
@@ -1041,6 +1188,24 @@ class DisableContext(_TorchDynamoContext):
             try:
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
+                    fn_name = getattr(fn, "__name__", type(fn).__name__)
+                    # Skip annotation for __torch_dispatch__ to avoid polluting
+                    # node metadata during export. The disable on __torch_dispatch__
+                    # is an internal implementation detail, not user-facing.
+                    # TODO: Ideally we shouldn't need this check because nested
+                    # annotate() calls shouldn't override existing keys.
+                    if (
+                        torch.compiler.is_exporting()
+                        and fn_name != "__torch_dispatch__"
+                    ):
+                        with fx_traceback.annotate(
+                            {
+                                "_torchdynamo_disable": True,
+                                "_torchdynamo_disable_recursive": True,
+                                "_torchdynamo_disable_method": fn_name,
+                            }
+                        ):
+                            return fn(*args, **kwargs)
                     return fn(*args, **kwargs)
                 finally:
                     set_eval_frame(None)
@@ -1061,6 +1226,8 @@ class DisableContext(_TorchDynamoContext):
         # Save the function pointer to find the original callable while nesting
         # of decorators.
         _fn._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+
+        _fn._torchdynamo_disable_recursive = True  # type: ignore[attr-defined]
 
         return _fn
 
@@ -1124,9 +1291,94 @@ class _NullDecorator(contextlib.nullcontext):  # type: ignore[type-arg]
         return fn
 
 
+# Make dynamo graph to have same input/output spec as user code
+def argument_names(
+    f_sig: inspect.Signature,
+    args: Union[list[Any], tuple[Any, ...]],
+    kwargs: dict[str, Any],
+) -> list[str]:
+    def signature_to_fullargspec(sig: inspect.Signature) -> inspect.FullArgSpec:
+        # Get a list of Parameter objects from the Signature object
+        params = list(sig.parameters.values())
+        # Separate positional arguments, keyword-only arguments and varargs/varkw
+        args = [
+            p.name for p in params if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+        ]
+        kwonlyargs = [
+            p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
+        ]
+        varargs = next(
+            (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL),
+            None,
+        )
+        varkw = next(
+            (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD),
+            None,
+        )
+        # Get default values for positional arguments and keyword-only arguments
+        defaults = tuple(
+            p.default
+            for p in params
+            if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
+            and p.default is not inspect.Parameter.empty
+        )
+        kwonlydefaults = {
+            p.name: p.default
+            for p in params
+            if p.kind == inspect.Parameter.KEYWORD_ONLY
+            and p.default is not inspect.Parameter.empty
+        }
+        # Get annotations for parameters and return value
+        annotations = {}
+        if sig.return_annotation:
+            annotations = {"return": sig.return_annotation}
+        for parameter in params:
+            annotations[parameter.name] = parameter.annotation
+        # Return a FullArgSpec object with the extracted attributes
+        return inspect.FullArgSpec(
+            args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations
+        )
+
+    fullargspec = signature_to_fullargspec(f_sig)
+
+    # 1. Map `args` 1-to-1 to positional arguments in original signature.
+    input_strs = fullargspec.args[: len(args)]
+
+    if len(args) > len(fullargspec.args):
+        # 2. If there are more arguments left in `args`, they map to varargs in original
+        # signature. Assign names as {varargs}_0, {varargs}_1, ...
+        assert fullargspec.varargs is not None, "More arguments than expected"
+        input_strs += [
+            f"{fullargspec.varargs}_{i}" for i in range(len(args) - len(input_strs))
+        ]
+    elif len(args) < len(fullargspec.args):
+        # 3. If there are fewer arguments in `args` than `fullargspec.args`,
+        # it implies these are arguments either with default values, or provided in
+        # `kwargs`. The former can be safely ignored. Because Dynamo.export does not
+        # export them as part of the function signature. The latter will be handled
+        # in the next step.
+        for unprovided_arg in fullargspec.args[
+            len(args) : -len(fullargspec.defaults or [])
+        ]:
+            assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
+
+    # 4. Keyword arguments provided in `kwargs`.
+    input_strs += list(kwargs.keys())
+
+    # 5. Keyword-only arguments with default values if not provided are not exported
+    # as part of the function signature.
+    for kwonly_arg in fullargspec.kwonlyargs:
+        kwonlydefaults = fullargspec.kwonlydefaults or {}
+        assert kwonly_arg in kwargs or kwonly_arg in kwonlydefaults, (
+            f"Missing keyword only argument {kwonly_arg}"
+        )
+
+    return input_strs
+
+
 def check_if_dynamo_supported() -> None:
-    if sys.version_info >= (3, 14):
-        raise RuntimeError("Python 3.14+ not yet supported for torch.compile")
+    if sys.version_info >= (3, 15):
+        raise RuntimeError("Python 3.15+ not yet supported for torch.compile")
     elif sysconfig.get_config_var("Py_GIL_DISABLED") == 1 and sys.version_info < (
         3,
         13,
@@ -1188,7 +1440,8 @@ def _optimize(
     error_on_graph_break: Optional[bool] = None,
     guard_export_fn: Optional[Callable[[_guards.GuardsSet], None]] = None,
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
-    guard_filter_fn: Optional[Callable[[list[GuardFilterEntry]], list[bool]]] = None,
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
     disable: bool = False,
     dynamic: Optional[bool] = None,
     package: Optional[CompilePackage] = None,
@@ -1270,6 +1523,7 @@ def _optimize(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame(
+            # pyrefly: ignore [bad-argument-type]
             backend,
             hooks,
             package=package,
@@ -1387,7 +1641,7 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
         }
 
         self.new_args = []
-        for i in range(0, len(flat_args)):
+        for i in range(len(flat_args)):
             arg = super().placeholder(f"arg{i}", (), {})
             if i in matched_input_elements_to_fake:
                 arg.node.meta["val"] = matched_input_elements_to_fake[i]
@@ -1516,13 +1770,13 @@ def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
             stack = s
             break
         if stack is None:
-            msg = f"{source.name()}, a closed over free variable"
+            msg = f"{source.name}, a closed over free variable"
         else:
             tb = "".join(traceback.format_list(stack))
             extra = ""
             if len(user_stacks) > 1:
                 extra = f"(elided {len(user_stacks) - 1} more accesses)"
-            msg = f"{source.name()}, accessed at:\n{tb}{extra}"
+            msg = f"{source.name}, accessed at:\n{tb}{extra}"
         # TODO: option to print ALL of the stack traces at once
         input_errors.append(msg)
 
@@ -1539,6 +1793,39 @@ def check_signature_rewritable(graph: torch.fx.GraphModule) -> None:
         )
 
 
+def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -> None:
+    supported_types = [
+        torch.Tensor,
+        torch.SymInt,
+        torch.SymFloat,
+        torch.SymBool,
+        torch._C.ScriptObject,
+        _IntWrapper,
+    ] + list(common_constant_types)
+
+    def is_supported_type(val: Any) -> bool:
+        return isinstance(val, tuple(supported_types))
+
+    value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
+    # We only check that the outputs are not None. Inputs can be None.
+    for v in flat_values:
+        if not is_supported_type(v):
+            if error_type == UserErrorType.INVALID_INPUT and v is None:
+                continue
+
+            raise UserError(
+                error_type,
+                f"It looks like one of the {value_type}s with type `{type(v)}` "
+                "is not supported or pytree-flattenable. \n"
+                f"Exported graphs {value_type}s can only contain the "
+                f"following supported types: {supported_types}. \n"
+                "If you are using a custom class object, "
+                "please register a pytree_flatten/unflatten function "
+                "using `torch.utils._pytree.register_pytree_node` or "
+                "`torch.export.register_dataclass`.",
+            )
+
+
 def rewrite_signature(
     f_sig: inspect.Signature,
     graph: torch.fx.GraphModule,
@@ -1553,40 +1840,6 @@ def rewrite_signature(
 ) -> torch.fx.GraphModule:
     orig_args, orig_kwargs = pytree.tree_unflatten(flat_args, in_spec)
 
-    def check_user_input_output(
-        flat_values: list[Any], error_type: UserErrorType
-    ) -> None:
-        supported_types = [
-            torch.Tensor,
-            torch.SymInt,
-            torch.SymFloat,
-            torch.SymBool,
-            torch._C.ScriptObject,
-            _IntWrapper,
-        ] + list(common_constant_types)
-
-        def is_supported_type(val: Any) -> bool:
-            return isinstance(val, tuple(supported_types))
-
-        value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
-        # We only check that the outputs are not None. Inputs can be None.
-        for v in flat_values:
-            if not is_supported_type(v):
-                if error_type == UserErrorType.INVALID_INPUT and v is None:
-                    continue
-
-                raise UserError(
-                    error_type,
-                    f"It looks like one of the {value_type}s with type `{type(v)}` "
-                    "is not supported or pytree-flattenable. \n"
-                    f"Exported graphs {value_type}s can only contain the "
-                    f"following supported types: {supported_types}. \n"
-                    "If you are using a custom class object, "
-                    "please register a pytree_flatten/unflatten function "
-                    "using `torch.utils._pytree.register_pytree_node` or "
-                    "`torch.export.register_dataclass`.",
-                )
-
     check_user_input_output(flat_args, UserErrorType.INVALID_INPUT)
     flat_results_traced, out_spec_traced = pytree.tree_flatten(dynamo_traced_result)
     check_user_input_output(flat_results_traced, UserErrorType.INVALID_OUTPUT)
@@ -1595,16 +1848,21 @@ def rewrite_signature(
         # Check if function has optional input.
         for name, param in f_sig.parameters.items():
             if param.default is not inspect.Parameter.empty:
-                from torch._dynamo.exc import Unsupported
+                import torch._dynamo.graph_break_hints as graph_break_hints
+                from torch._dynamo.exc import unimplemented
 
                 log.error(
                     "Parameter %s is optional with a default value of %s",
                     name,
                     param.default,
                 )
-                raise Unsupported(
-                    "Tracing through optional input is not supported yet",
-                    case_name="optional_input",
+                unimplemented(
+                    gb_type="rewrite_signature: cannot trace optional function input",
+                    context="",
+                    explanation=f"Parameter {name} is optional with a default value of {param.default}. This is not supported yet.",
+                    hints=[
+                        *graph_break_hints.SUPPORTABLE,
+                    ],
                 )
 
     def produce_matching(
@@ -1615,7 +1873,7 @@ def rewrite_signature(
         for i, val in enumerate(sources):
             dict_of_source_vals[id(val)] = i
 
-        for i, val in enumerate(candidates):
+        for val in candidates:
             if isinstance(val, tuple(common_constant_types)):
                 matched_elements_positions.append(None)
             elif id(val) not in dict_of_source_vals:
@@ -1649,91 +1907,6 @@ def rewrite_signature(
         flat_args_dynamic_dims,
         fake_mode,
     ).transform()
-
-    # Make dynamo graph to have same input/output spec as user code
-    def argument_names(
-        f_sig: inspect.Signature, args: list[Any], kwargs: dict[str, Any]
-    ) -> list[str]:
-        def signature_to_fullargspec(sig: inspect.Signature) -> inspect.FullArgSpec:
-            # Get a list of Parameter objects from the Signature object
-            params = list(sig.parameters.values())
-            # Separate positional arguments, keyword-only arguments and varargs/varkw
-            args = [
-                p.name
-                for p in params
-                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-            ]
-            kwonlyargs = [
-                p.name for p in params if p.kind == inspect.Parameter.KEYWORD_ONLY
-            ]
-            varargs = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_POSITIONAL),
-                None,
-            )
-            varkw = next(
-                (p.name for p in params if p.kind == inspect.Parameter.VAR_KEYWORD),
-                None,
-            )
-            # Get default values for positional arguments and keyword-only arguments
-            defaults = tuple(
-                p.default
-                for p in params
-                if p.kind == inspect.Parameter.POSITIONAL_OR_KEYWORD
-                and p.default is not inspect.Parameter.empty
-            )
-            kwonlydefaults = {
-                p.name: p.default
-                for p in params
-                if p.kind == inspect.Parameter.KEYWORD_ONLY
-                and p.default is not inspect.Parameter.empty
-            }
-            # Get annotations for parameters and return value
-            annotations = {}
-            if sig.return_annotation:
-                annotations = {"return": sig.return_annotation}
-            for parameter in params:
-                annotations[parameter.name] = parameter.annotation
-            # Return a FullArgSpec object with the extracted attributes
-            return inspect.FullArgSpec(
-                args, varargs, varkw, defaults, kwonlyargs, kwonlydefaults, annotations
-            )
-
-        fullargspec = signature_to_fullargspec(f_sig)
-
-        # 1. Map `args` 1-to-1 to positional arguments in original signature.
-        input_strs = fullargspec.args[: len(args)]
-
-        if len(args) > len(fullargspec.args):
-            # 2. If there are more arguments left in `args`, they map to varargs in original
-            # signature. Assign names as {varargs}_0, {varargs}_1, ...
-            assert fullargspec.varargs is not None, "More arguments than expected"
-            input_strs += [
-                f"{fullargspec.varargs}_{i}"
-                for i in range(0, len(args) - len(input_strs))
-            ]
-        elif len(args) < len(fullargspec.args):
-            # 3. If there are fewer arguments in `args` than `fullargspec.args`,
-            # it implies these are arguments either with default values, or provided in
-            # `kwargs`. The former can be safely ignored. Because Dynamo.export does not
-            # export them as part of the function signature. The latter will be handled
-            # in the next step.
-            for unprovided_arg in fullargspec.args[
-                len(args) : -len(fullargspec.defaults or [])
-            ]:
-                assert unprovided_arg in kwargs, f"Missing argument {unprovided_arg}"
-
-        # 4. Keyword arguments provided in `kwargs`.
-        input_strs += list(kwargs.keys())
-
-        # 5. Keyword-only arguments with default values if not provided are not exported
-        # as part of the function signature.
-        for kwonly_arg in fullargspec.kwonlyargs:
-            kwonlydefaults = fullargspec.kwonlydefaults or {}
-            assert kwonly_arg in kwargs or kwonly_arg in kwonlydefaults, (
-                f"Missing keyword only argument {kwonly_arg}"
-            )
-
-        return input_strs
 
     new_graph.graph._codegen = _PyTreeCodeGen(
         _PyTreeInfo(
@@ -1936,6 +2109,7 @@ def export(
                         path: KeyPath, t: Union[torch.Tensor, _IntWrapper, Any]
                     ) -> Any:
                         if isinstance(t, torch.Tensor):
+                            # pyrefly: ignore [missing-attribute]
                             return ambient_fake_mode.from_tensor(t, static_shapes=True)
                         elif isinstance(t, _IntWrapper):
                             if (
@@ -1986,7 +2160,12 @@ def export(
                 automatic_dynamic_shapes=False,
                 capture_dynamic_output_shape_ops=True,
                 capture_scalar_outputs=True,
+                constant_fold_autograd_profiler_enabled=True,
                 prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+                # install_free_tensors ensures that params and buffers are still
+                # added as graph attributes, and makes Dynamo emits graphs that
+                # follow export pytree-able input requirements
+                install_free_tensors=config.install_free_tensors_for_export,
             ),
             _compiling_state_context(),
         ):
@@ -2016,7 +2195,9 @@ def export(
             and not trace_rules.check(call_to_inspect)
         ):
             dim_constraints.solve()
+
             forced_specializations = dim_constraints.forced_specializations()
+
             msg = dim_constraints.prettify_results(
                 original_signature,
                 dynamic_shapes,
@@ -2037,7 +2218,8 @@ def export(
                     )
 
             # Error if we have any constraints on static values
-            for k in shape_env.var_to_range.keys():
+
+            for k in shape_env.var_to_range:
                 if isinstance(k, sympy.Integer):
                     constraint_violation_error = ConstraintViolationError(
                         f"{''.join(traceback.format_list(shape_env.var_to_stack[k]))}\n"
@@ -2223,6 +2405,7 @@ def _optimize_assert(
 
     return _optimize_catch_errors(
         convert_frame.convert_frame_assert(
+            # pyrefly: ignore [bad-argument-type]
             backend,
             export=export,
             export_constraints=export_constraints,

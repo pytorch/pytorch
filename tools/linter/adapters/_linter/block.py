@@ -5,7 +5,7 @@ import itertools
 import token
 from enum import Enum
 from functools import cached_property, total_ordering
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import Self
 
 
@@ -38,11 +38,8 @@ class Block:
     # The index of the very first token in the block (the "class" or "def" keyword)
     begin: int
 
-    # The index of the first INDENT token for this block
-    indent: int
-
-    # The index of the DEDENT token for this end of this block
-    dedent: int
+    # The index of the last token for this block
+    end: int
 
     # The docstring for the block
     docstring: str
@@ -64,7 +61,7 @@ class Block:
     is_method: bool = dc.field(default=False, repr=False)
 
     # A block index to the parent of this block, or None for a top-level block.
-    parent: Optional[int] = None
+    parent: int | None = None
 
     # A list of block indexes for the children
     children: list[int] = dc.field(default_factory=list)
@@ -76,19 +73,15 @@ class Block:
 
     @property
     def end_line(self) -> int:
-        if 0 <= self.dedent < len(self.tokens):
-            return self.tokens[self.dedent].start[0] - 1
-        else:
-            return self.tokens[-1].start[0]
-            # Only happens in one case so far: a file whose last line was
-            #
-            #    def function(): ...
-            #
-            # and the dedent correctly pointed to one past the end of self.tokens
+        return self.tokens[self.end].start[0]
 
     @property
     def line_count(self) -> int:
-        return self.end_line - self.start_line
+        return self.end_line - self.start_line + 1
+
+    @property
+    def line_range(self) -> range:
+        return range(self.start_line, self.end_line + 1)
 
     @property
     def is_class(self) -> bool:

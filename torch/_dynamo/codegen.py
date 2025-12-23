@@ -15,9 +15,9 @@ import dataclasses
 import re
 import sys
 import types
-from collections import Counter
-from collections.abc import Iterable
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections import Counter, deque
+from collections.abc import Callable, Iterable
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
@@ -26,7 +26,10 @@ from . import config, graph_break_hints, utils
 from .bytecode_transformation import (
     add_push_null,
     add_push_null_call_function_ex,
+    create_binary_subscr,
+    create_build_tuple,
     create_call_function,
+    create_call_function_ex,
     create_call_method,
     create_dup_top,
     create_instruction,
@@ -35,7 +38,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import IncorrectUsage, unimplemented_v2
+from .exc import IncorrectUsage, unimplemented
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -150,7 +153,7 @@ class PyCodegen:
             self.clear_tos()
 
     def __call__(
-        self, value: Union[VariableTracker, Source], allow_cache: bool = True
+        self, value: Union[VariableTracker, Source, None], allow_cache: bool = True
     ) -> None:
         """
         Generate code such that top-of-stack (TOS) is set to value.
@@ -185,7 +188,7 @@ class PyCodegen:
             value to handle aliasing (check side_effects.py and search for
             allow_cache=False).
 
-            b) If value.source is None, this is not allowed. TODO - assert this.
+            b) If value.source is None, this is not allowed
 
         Notable effects:
         1. `self.top_of_stack` will be set to `value`, if we don't codegen
@@ -194,6 +197,7 @@ class PyCodegen:
             `top_of_stack` or cached `tempvars`, or (b). `value` has special VT
             types like `NNModuleVariable`, etc.
         """
+        assert value is not None
         if isinstance(value, Source):
             # If the source needs to be overridden, use the new one.
             source = self.overridden_sources.get(value, value)
@@ -211,7 +215,7 @@ class PyCodegen:
             try:
                 self.call_reconstruct(source)
             except NotImplementedError:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Reconstruction failure: source.reconstruct not implemented",
                     context=str(source),
                     explanation=f"Dynamo has no bytecode reconstruction implemented for {type(source)} variable {source}.",
@@ -286,13 +290,14 @@ class PyCodegen:
             self.load_graph_output(graph_outputs[graph_outputs_key].index)
             output.append(
                 self.create_load_global(
-                    value.global_mangled_class_name(self.tx), add=True
+                    value.global_mangled_class_name(self.tx),  # type: ignore[arg-type]
+                    add=True,
                 )
             )
             output.extend(create_call_function(2, False))
         elif (
             isinstance(value, SymNodeVariable)
-            and value.python_type() == float
+            and value.python_type() is float
             and not self.tx.export
         ):
             # This is a little unusual; force the output convention to be a
@@ -354,7 +359,7 @@ class PyCodegen:
             try:
                 self.call_reconstruct(value)
             except NotImplementedError:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Reconstruction failure",
                     context=str(value),
                     explanation=f"Dynamo has no bytecode reconstruction implemented for sourceless variable {value}.",
@@ -397,7 +402,7 @@ class PyCodegen:
             self(i)
 
     def create_binary_subscr(self) -> Instruction:
-        return create_instruction("BINARY_SUBSCR")
+        return create_binary_subscr()
 
     def setup_globally_cached(self, name: str, value: Any) -> list[Instruction]:
         """Store value in a new global"""
@@ -513,10 +518,10 @@ class PyCodegen:
         except AttributeError:
             # desired rotate bytecode doesn't exist, generate equivalent bytecode
             return [
-                create_instruction("BUILD_TUPLE", arg=n),
+                create_build_tuple(n),
                 self.create_load_const_unchecked(rot_n_helper(n)),
                 *create_rot_n(2),
-                create_instruction("CALL_FUNCTION_EX", arg=0),
+                *create_call_function_ex(False, False),
                 create_instruction("UNPACK_SEQUENCE", arg=n),
             ]
 
@@ -537,51 +542,33 @@ class PyCodegen:
 
     def make_function_with_closure(
         self,
-        tx: "InstructionTranslatorBase",
         fn_name: str,
         code: types.CodeType,
-        push_null: bool,
-        num_on_stack: int = 0,
     ) -> None:
-        freevars = code.co_freevars
-        assert freevars
+        """Creates a closure with code object `code`.
+
+        Expects the TOS to be the tuple of cells to use for this closure.
+        TOS will be popped to create the closure.
+        Args:
+            - fn_name: name of the function
+            - code: code object of the function
+                (does not include the tuple of cells on the TOS)
+        """
         output = self._output
 
-        def gen_fn() -> None:
-            self.clear_tos()
-            # Emitting `LOAD_FAST/LOAD_CLOSURE` with names in `co_freevars`
-            # requires that in the generated bytecode, these cells would keep
-            # their original local names, which we ensure via
-            # `CellVariable.local_name`.
-            for var in freevars:
-                if tx is self.tx:  # root frame
-                    assert var in self.cell_and_freevars()
-                    output.append(self.create_load_closure(var))
-                else:  # nested frame
-                    assert var in tx.cell_and_freevars()
-                    assert tx.post_prune_cell_and_freevars
-                    self(tx.post_prune_cell_and_freevars[var])
-            output.append(create_instruction("BUILD_TUPLE", arg=len(freevars)))
-            output.append(self.create_load_const(code))
-            if sys.version_info < (3, 11):
-                output.append(self.create_load_const(fn_name))
-            if sys.version_info >= (3, 13):
-                output.extend(
-                    [
-                        create_instruction("MAKE_FUNCTION"),
-                        create_instruction("SET_FUNCTION_ATTRIBUTE", arg=0x08),
-                    ]
-                )
-            else:
-                output.append(create_instruction("MAKE_FUNCTION", arg=0x08))
-
-        if push_null and sys.version_info >= (3, 11):
-            self.add_push_null(gen_fn)
-            output.extend(self.rot_n(num_on_stack + 2))
-            output.extend(self.rot_n(num_on_stack + 2))
+        output.append(self.create_load_const(code))
+        if sys.version_info < (3, 11):
+            output.append(self.create_load_const(fn_name))
+        if sys.version_info >= (3, 13):
+            output.extend(
+                [
+                    create_instruction("MAKE_FUNCTION"),
+                    create_instruction("SET_FUNCTION_ATTRIBUTE", arg=0x08),
+                ]
+            )
         else:
-            gen_fn()
-            output.extend(self.rot_n(num_on_stack + 1))
+            output.append(create_instruction("MAKE_FUNCTION", arg=0x08))
+
         self.clear_tos()
 
     def create_load_python_module(self, mod: types.ModuleType) -> Instruction:
@@ -610,32 +597,35 @@ class PyCodegen:
 
         graphargs = self.tx.output.graphargs
 
-        seen_sources: OrderedSet[Source] = OrderedSet()
-
-        def collect_temp_source(source: Source) -> None:
-            if source in seen_sources:
-                # This source is used at least twice, so it can be reused
-                self.mark_source_temp(source)
-                # Dont trace source further. This prevents us from marking too
-                # many nodes as temp sources.
-                return
-
-            seen_sources.add(source)
-
+        def extract_nested_sources(source: Source) -> list[Source]:
+            nested_sources: list[Source] = []
             if isinstance(source, ChainedSource):
-                collect_temp_source(source.base)
-
+                nested_sources.append(source.base)
             if isinstance(source, DictGetItemSource) and isinstance(
                 source.index, Source
             ):
-                collect_temp_source(source.index)
+                nested_sources.append(source.index)
+            return nested_sources
+
+        def collect_temp_sources(sources: deque[Source], codegen: PyCodegen) -> None:
+            seen_sources: OrderedSet[Source] = OrderedSet()
+            while sources:
+                current_source = sources.popleft()
+                if current_source in seen_sources:
+                    # This source is used at least twice, so it can be reused
+                    codegen.mark_source_temp(current_source)
+                    # Dont trace source further. This prevents us from marking too
+                    # many nodes as temp sources.
+                    continue
+                seen_sources.add(current_source)
+                sources.extend(extract_nested_sources(current_source))
 
         # Collect all the sources that are used more than once, so that we can
         # generate tmp variables in the generated pre-graph bytecode. This
         # essentially implements CSE.
-        for arg in graphargs:
-            if arg.source is not None:
-                collect_temp_source(arg.source)
+        collect_temp_sources(
+            deque([arg.source for arg in graphargs if arg.source is not None]), self
+        )
 
         cm_var = None
         if config.record_runtime_overhead:

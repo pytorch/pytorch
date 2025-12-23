@@ -52,7 +52,7 @@ struct maybe_bool {
 template <typename src_t>
 struct maybe_bool<true, src_t> {
   C10_HOST_DEVICE static inline decltype(auto) apply(src_t src) {
-    // Don't use bool operator so as to to also compile for ComplexHalf.
+    // Don't use bool operator so as to also compile for ComplexHalf.
     return src.real() || src.imag();
   }
 };

@@ -1,0 +1,252 @@
+name: Build vLLM wheels
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/build-vllm-wheel.yml
+      - .github/ci_commit_pins/vllm.txt
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - .github/workflows/build-vllm-wheel.yml
+      - .github/ci_commit_pins/vllm.txt
+  schedule:
+    # every morning at 01:30PM UTC, 9:30AM EST, 6:30AM PST
+    - cron: 30 13 * * *
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  build-wheel:
+    if: github.repository_owner == 'pytorch'
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: [ '3.12' ]
+        platform: [ 'manylinux_2_28_x86_64', 'manylinux_2_28_aarch64' ]
+        device: [ 'cu128', 'cu129', 'cu130' ]
+        include:
+          - platform: manylinux_2_28_x86_64
+            device: cu128
+            manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.8'
+            runner: linux.12xlarge.memory
+          - platform: manylinux_2_28_x86_64
+            device: cu129
+            manylinux-image: 'pytorch/manylinux2_28-builder:cuda12.9'
+            runner: linux.12xlarge.memory
+          - platform: manylinux_2_28_x86_64
+            device: cu130
+            manylinux-image: 'pytorch/manylinux2_28-builder:cuda13.0'
+            runner: linux.12xlarge.memory
+          - platform: manylinux_2_28_aarch64
+            device: cu128
+            manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.8'
+            runner: linux.arm64.r7g.12xlarge.memory
+          - platform: manylinux_2_28_aarch64
+            device: cu129
+            manylinux-image: 'pytorch/manylinuxaarch64-builder:cuda12.9'
+            runner: linux.arm64.r7g.12xlarge.memory
+        exclude:
+          # TODO (huydhn): Add cu130 aarch64 once PyTorch is on 2.9+ and
+          # xformers is update to support 13.0
+          - platform: manylinux_2_28_aarch64
+            device: cu130
+    name: "Build ${{ matrix.device }} vLLM wheel on ${{ matrix.platform }}"
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 480
+    env:
+      PY_VERS: ${{ matrix.python-version }}
+      MANYLINUX_IMAGE: ${{ matrix.manylinux-image }}
+      PLATFORM: ${{ matrix.platform }}
+      BUILD_DEVICE: ${{ matrix.device }}
+    steps:
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          submodules: false
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
+      - name: Get latest PyTorch nightly
+        shell: bash
+        run: |
+          set -eux
+
+          # Determine python executable for given version (copied from build-triton-wheel)
+          case $PY_VERS in
+          3.10)
+            PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
+            ;;
+          3.11)
+            PYTHON_EXECUTABLE=/opt/python/cp311-cp311/bin/python
+            ;;
+          3.12)
+            PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
+            ;;
+          3.13)
+            PYTHON_EXECUTABLE=/opt/python/cp313-cp313/bin/python
+            ;;
+          3.13t)
+            PYTHON_EXECUTABLE=/opt/python/cp313-cp313t/bin/python
+            ;;
+          3.14)
+            PYTHON_EXECUTABLE=/opt/python/cp314-cp314/bin/python
+            ;;
+          3.14t)
+            PYTHON_EXECUTABLE=/opt/python/cp314-cp314t/bin/python
+            ;;
+          *)
+            echo "Unsupported python version ${PY_VERS}"
+            exit 1
+            ;;
+          esac
+
+          # Keep PyTorch nightly wheel here so that we can install it later during
+          # vLLM build process
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+
+          container_name=$(docker run \
+            --tty \
+            --detach \
+            -e PLATFORM \
+            -e PYTHON_EXECUTABLE="${PYTHON_EXECUTABLE}" \
+            -v "${GITHUB_WORKSPACE}:/pytorch" \
+            -v "${RUNNER_TEMP}/artifacts:/artifacts" \
+            -w /artifacts/ \
+            "${MANYLINUX_IMAGE}"
+          )
+
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -mpip install \
+            --pre torch torchvision torchaudio \
+            --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
+
+          # I wonder if there is a command to both download and install the wheels
+          # in one go
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -mpip download \
+            --pre torch torchvision torchaudio \
+            --index-url "https://download.pytorch.org/whl/nightly/${BUILD_DEVICE}"
+
+          # Save this for later
+          echo "container_name=${container_name}" >> "$GITHUB_ENV"
+
+      - name: Build vLLM wheel
+        uses: ./.github/actions/build-external-packages
+        with:
+          build-targets: vllm
+          docker-image: ${{ env.MANYLINUX_IMAGE }}
+          cuda-arch-list: '8.0;8.9;9.0;10.0;12.0'
+          torch-wheel-dir: ${{ runner.temp }}/artifacts
+          output-dir: ${{ runner.temp }}/artifacts/externals
+
+      - name: Prepare vLLM wheel
+        shell: bash
+        run: |
+          set -eux
+
+          # Get these wheels ready, the vllm renaming logic is copied from its .buildkite/scripts/upload-wheels.sh
+          docker exec -t "${container_name}" bash -c /pytorch/.github/scripts/prepare_vllm_wheels.sh
+          docker exec -t "${container_name}" chown -R 1000:1000 /artifacts
+
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: vllm-wheel-${{ matrix.device }}-${{ matrix.platform }}-${{ matrix.python-version }}
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/externals/vllm/wheels/*.whl
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always()
+
+  # Copied from build-triton-wheel workflow (mostly)
+  upload-wheel:
+    name: "Upload ${{ matrix.device }} vLLM wheel on ${{ matrix.platform }}"
+    needs:
+      - build-wheel
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [ 'manylinux_2_28_x86_64', 'manylinux_2_28_aarch64' ]
+        device: [ 'cu128', 'cu129', 'cu130' ]
+        exclude:
+          # TODO (huydhn): Add cu130 aarch64 once PyTorch is on 2.9+ and
+          # xformers is update to support 13.0
+          - platform: manylinux_2_28_aarch64
+            device: cu130
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      BUILD_DEVICE: ${{ matrix.device }}
+    permissions:
+      id-token: write
+      contents: read
+    container:
+      image: continuumio/miniconda3:4.12.0
+    environment: ${{ ((github.event_name == 'push' && github.event.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') && 'nightly-wheel-upload' || '' }}
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+
+      - name: Configure AWS credentials(PyTorch account) for main
+        if: ${{ (github.event_name == 'push' && github.event.ref == 'refs/heads/main') || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_nightly_build_wheels
+          aws-region: us-east-1
+
+      - name: Configure AWS credentials(PyTorch account) for RC builds
+        if: ${{ github.event_name == 'push' &&  (startsWith(github.event.ref, 'refs/tags/') && !startsWith(github.event.ref, 'refs/tags/ciflow/')) }}
+        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+        with:
+          role-to-assume: arn:aws:iam::749337293305:role/gha_workflow_test_build_wheels
+          aws-region: us-east-1
+
+      - name: Download Build Artifacts
+        uses: actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e # v4.1.7
+        with:
+          # Download all available artifacts
+          path: ${{ runner.temp }}/artifacts-all
+
+      - name: Select Wheel Artifacts
+        shell: bash
+        run: |
+          set -eux
+          mkdir -p "${RUNNER_TEMP}/artifacts/"
+          mv "${RUNNER_TEMP}"/artifacts-all/vllm-wheel-"${BUILD_DEVICE}"-"${PLATFORM}"-*/* "${RUNNER_TEMP}/artifacts/"
+
+      - name: Set DRY_RUN
+        if: ${{ (github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v'))) || github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
+        shell: bash
+        run: |
+          echo "DRY_RUN=disabled" >> "$GITHUB_ENV"
+
+      - name: Set UPLOAD_CHANNEL
+        if: ${{ github.event_name == 'push' && startsWith(github.event.ref, 'refs/tags/v') }}
+        shell: bash
+        run: |
+          set -ex
+
+          if [[ "${GITHUB_REF_NAME}" = *-rc[0-9]* ]]; then
+            echo "UPLOAD_CHANNEL=test" >> "$GITHUB_ENV"
+          fi
+
+      - name: Upload binaries
+        env:
+          PACKAGE_TYPE: wheel
+          UPLOAD_SUBFOLDER: ${{ env.BUILD_DEVICE }}
+          PKG_DIR: ${{ runner.temp }}/artifacts
+        shell: bash
+        run: |
+          set -ex
+          bash .circleci/scripts/binary_upload.sh

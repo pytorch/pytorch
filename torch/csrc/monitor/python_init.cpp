@@ -1,3 +1,4 @@
+#include <c10/util/Exception.h>
 #include <utility>
 
 #include <c10/util/WaitCounter.h>
@@ -23,7 +24,7 @@ struct type_caster<torch::monitor::data_value_t> {
   PYBIND11_TYPE_CASTER(torch::monitor::data_value_t, _("data_value_t"));
 
   // Python -> C++
-  bool load(handle src, bool) {
+  bool load(handle src, bool /*unused*/) {
     PyObject* source = src.ptr();
     if (THPUtils_checkLong(source)) {
       this->value = THPUtils_unpackLong(source);
@@ -58,7 +59,7 @@ struct type_caster<torch::monitor::data_value_t> {
       std::string& str = std::get<std::string>(src);
       return THPUtils_packString(str);
     }
-    throw std::runtime_error("unknown data_value_t type");
+    TORCH_CHECK(false, "unknown data_value_t type");
   }
 };
 } // namespace pybind11::detail

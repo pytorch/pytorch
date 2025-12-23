@@ -1,7 +1,6 @@
 //  Copyright © 2023 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UpSample.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
@@ -61,6 +60,7 @@ static void upsample_out_template(const Tensor& input,
                                   const Tensor& output,
                                   bool align_corners,
                                   const std::string_view resize_mode_str) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!input.is_complex(), "upsample for MPS does not support complex inputs");
   if (input.numel() == 0) {
     return;
   }

@@ -30,6 +30,7 @@ from typing import (  # noqa: UP035, F401  # (Dict, List, Tuple) imported by tor
     get_origin,
     List,
     Optional,
+    Protocol,
     Tuple,
     TypeVar,
     Union,
@@ -49,18 +50,14 @@ from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
 
 
+class HasGetattr(Protocol):
+    def __getattr__(self, key: str) -> Any: ...
+
+
 _P = ParamSpec("_P")
 _R = TypeVar("_R")
 
-IS_PY310_PLUS: Final[bool] = sys.version_info >= (3, 10)
-
-BuiltinUnionType: Union[type, tuple[type, ...]]
-if sys.version_info >= (3, 10):
-    # NOTE: IS_PY310_PLUS doesn't work with mypy.
-    # cf. https://mypy.readthedocs.io/en/stable/common_issues.html#python-version-and-system-platform-checks
-    BuiltinUnionType = types.UnionType
-else:
-    BuiltinUnionType = ()  # trick: this makes isinstance short circuit.
+BuiltinUnionType: type | tuple[type, ...] = types.UnionType
 
 LockType: type
 try:
@@ -155,7 +152,7 @@ def _qualified_name(obj, mangle_name=True) -> str:
 
     # If the module is actually a torchbind module, then we should short circuit
     if module_name == "torch._classes":
-        return obj.qualified_name
+        return obj.qualified_name  # pyrefly: ignore [missing-attribute]
 
     # The Python docs are very clear that `__module__` can be None, but I can't
     # figure out when it actually would be.
@@ -210,7 +207,7 @@ class SourceLoader:
 loader = SourceLoader()
 
 
-def createResolutionCallbackFromEnv(lookup_base):
+def createResolutionCallbackFromEnv(lookup_base: HasGetattr) -> Callable[[str], Any]:
     """
     Creates a resolution callback that will look up qualified names in an
     environment, starting with `lookup_base` for the base of any qualified
@@ -220,7 +217,7 @@ def createResolutionCallbackFromEnv(lookup_base):
     createResolutionCallbackFrom* functions.
     """
 
-    def lookupInModule(qualified_name, module):
+    def lookupInModule(qualified_name: str, module: Any) -> Any:
         if "." in qualified_name:
             base, remaining_pieces = qualified_name.split(".", maxsplit=1)
             module_value = getattr(module, base)
@@ -228,7 +225,7 @@ def createResolutionCallbackFromEnv(lookup_base):
         else:
             return getattr(module, qualified_name)
 
-    def parseNestedExpr(expr, module) -> tuple[Any, int]:
+    def parseNestedExpr(expr: str, module: Any) -> tuple[Any, int]:
         i = 0
         while i < len(expr) and expr[i] not in (",", "[", "]"):
             i += 1
@@ -239,11 +236,13 @@ def createResolutionCallbackFromEnv(lookup_base):
             return (), i
 
         base = lookupInModule(expr[:i].strip(), module)
-        assert base is not None, f"Unresolvable type {expr[:i]}"
+        if base is None:
+            raise AssertionError(f"Unresolvable type {expr[:i]}")
         if i == len(expr) or expr[i] != "[":
             return base, i
 
-        assert expr[i] == "["
+        if expr[i] != "[":
+            raise AssertionError(f"expected '[' at position {i}, got {expr[i]!r}")
         parts = []
         while expr[i] != "]":
             part_len = 0
@@ -256,12 +255,13 @@ def createResolutionCallbackFromEnv(lookup_base):
         else:
             return base[parts[0]], i + 1
 
-    def parseExpr(expr, module):
+    def parseExpr(expr: str, module: Any) -> Any:
         try:
             value, len_parsed = parseNestedExpr(expr, module)
-            assert len_parsed == len(expr), (
-                "whole expression was not parsed, falling back to c++ parser"
-            )
+            if len_parsed != len(expr):
+                raise AssertionError(
+                    "whole expression was not parsed, falling back to c++ parser"
+                )
             return value
         except Exception:
             """
@@ -275,7 +275,7 @@ def createResolutionCallbackFromEnv(lookup_base):
     return lambda expr: parseExpr(expr, lookup_base)
 
 
-def createResolutionCallbackFromFrame(frames_up: int = 0):
+def createResolutionCallbackFromFrame(frames_up: int = 0) -> Callable[[str], Any]:
     """
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
@@ -307,16 +307,18 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
     frame = inspect.currentframe()
     i = 0
     while i < frames_up + 1:
-        assert frame is not None
+        if frame is None:
+            raise AssertionError(f"frame is None at iteration {i}")
         frame = frame.f_back
         i += 1
 
-    assert frame is not None
+    if frame is None:
+        raise AssertionError("frame is None after traversing frames_up")
     f_locals = frame.f_locals
     f_globals = frame.f_globals
 
     class env:
-        def __getattr__(self, key):
+        def __getattr__(self, key: str) -> Any:
             if key in f_locals:
                 return f_locals[key]
             elif key in f_globals:
@@ -385,7 +387,7 @@ def get_closure(fn):
 # This could be worked around by manually adding it to `global()` dictionary.
 
 
-def createResolutionCallbackFromClosure(fn):
+def createResolutionCallbackFromClosure(fn) -> Callable[[str], Any]:
     """
     Create a resolutionCallback by introspecting the function instead of
     looking up the stack for the enclosing scope
@@ -395,7 +397,7 @@ def createResolutionCallbackFromClosure(fn):
     class closure_lookup:
         # This is a class since `closure` is a dict and it's easier in
         # `env_helper` if everything just works with `getattr` calls
-        def __getattr__(self, key):
+        def __getattr__(self, key: str) -> Any:
             if key in closure:
                 return closure[key]
             elif hasattr(typing, key):
@@ -451,7 +453,7 @@ def get_callable_argument_names(fn) -> list[str]:
     for name, param in callable_signature.parameters.items():
         # All four other types of arguments do not map to individual values
         # with a keyword as name.
-        if not param.kind == param.POSITIONAL_OR_KEYWORD:
+        if param.kind != param.POSITIONAL_OR_KEYWORD:
             continue
 
         argument_names.append(name)
@@ -568,7 +570,7 @@ def get_type_hint_captures(fn):
     return annotation_to_type
 
 
-def createResolutionCallbackForClassMethods(cls):
+def createResolutionCallbackForClassMethods(cls: type) -> Callable[[str], Any]:
     """
     This looks at all the methods defined in a class and pulls their closed-over
     variables into a dictionary and uses that to resolve variables.
@@ -590,7 +592,7 @@ def createResolutionCallbackForClassMethods(cls):
         captures.update(get_closure(fn))
         captures.update(get_type_hint_captures(fn))
 
-    def lookup_in_class(key):
+    def lookup_in_class(key: str) -> Any:
         if key in captures:
             return captures[key]
         else:
@@ -767,7 +769,7 @@ def unused(fn: Callable[_P, _R]) -> Callable[_P, _R]:
                 prop.fset, "_torchscript_modifier", FunctionModifiers.UNUSED
             )
 
-        return prop
+        return prop  # pyrefly: ignore [bad-return]
 
     fn._torchscript_modifier = FunctionModifiers.UNUSED  # type: ignore[attr-defined]
     return fn
@@ -852,6 +854,7 @@ def ignore(drop=False, **kwargs):
         #   @torch.jit.ignore
         #   def fn(...):
         fn = drop
+        # pyrefly: ignore [missing-attribute]
         fn._torchscript_modifier = FunctionModifiers.IGNORE
         return fn
 
@@ -866,6 +869,7 @@ def ignore(drop=False, **kwargs):
         warnings.warn(
             "ignore(drop_on_export=True) has been deprecated. TorchScript will now drop the function "
             "call on compilation. Use torch.jit.unused now. {}",
+            stacklevel=2,
             category=FutureWarning,
         )
 
@@ -874,6 +878,7 @@ def ignore(drop=False, **kwargs):
         warnings.warn(
             "ignore(True) has been deprecated. TorchScript will now drop the function "
             "call on compilation. Use torch.jit.unused now. {}",
+            stacklevel=2,
             category=FutureWarning,
         )
 
@@ -999,7 +1004,8 @@ def _check_overload_body(func):
         # Parsing the function definition can raise an OSError if source is unavailable.
         # Since this is just an initial check, just raise a warning if this is the case.
         warnings.warn(
-            f"Unable to retrieve source for @torch.jit._overload function: {func}."
+            f"Unable to retrieve source for @torch.jit._overload function: {func}.",
+            stacklevel=2,
         )
         return
 
@@ -1048,13 +1054,13 @@ def get_class_name_lineno(method) -> tuple[str, int]:
     current_frame = inspect.currentframe()
 
     # one for the get_class_name call, one for _overload_method call
-    for _ in range(2):
-        assert (
-            current_frame is not None
-        )  # assert current frame is not an Optional[FrameType]
+    for i in range(2):
+        if current_frame is None:
+            raise AssertionError(f"current_frame is None at iteration {i}")
         current_frame = current_frame.f_back
 
-    assert current_frame is not None  # same here
+    if current_frame is None:
+        raise AssertionError("current_frame is None after traversing frames")
     class_name = current_frame.f_code.co_name
     line_no = current_frame.f_code.co_firstlineno
     return class_name, line_no
@@ -1081,13 +1087,13 @@ def _overload_method(func):
     _check_overload_body(func)
     qual_name = _qualified_name(func)
     global _overloaded_methods
-    class_name_map = _overloaded_methods.get(qual_name, None)
+    class_name_map = _overloaded_methods.get(qual_name)
     if class_name_map is None:
         class_name_map = {}
         _overloaded_methods[qual_name] = class_name_map
 
     class_name, line_no = get_class_name_lineno(func)
-    method_overloads = class_name_map.get(class_name, None)
+    method_overloads = class_name_map.get(class_name)
     if method_overloads is None:
         method_overloads = []
         class_name_map[class_name] = method_overloads
@@ -1109,7 +1115,7 @@ def _get_overloaded_methods(method, mod_class):
     if not hasattr(method, "__name__"):
         return None
     qual_name = _qualified_name(method)
-    class_name_map = _overloaded_methods.get(qual_name, None)
+    class_name_map = _overloaded_methods.get(qual_name)
     if class_name_map is None:
         return None
     overloads = class_name_map.get(mod_class.__name__, None)
@@ -1240,13 +1246,16 @@ def _try_get_dispatched_fn(fn):
 
 def _get_named_tuple_properties(
     obj,
-    loc: Optional[torch._C._jit_tree_views.SourceRange] = None,
+    loc: torch._C._jit_tree_views.SourceRange | None = None,
     rcb=None,
 ):
     if loc is None:
         loc = fake_range()
 
-    assert issubclass(obj, tuple) and hasattr(obj, "_fields")
+    if not issubclass(obj, tuple) or not hasattr(obj, "_fields"):
+        raise AssertionError(
+            f"expected namedtuple (tuple subclass with _fields), got {obj}"
+        )
     if hasattr(obj, "_field_defaults"):
         defaults = [
             obj._field_defaults[field]
@@ -1255,14 +1264,13 @@ def _get_named_tuple_properties(
         ]
     else:
         defaults = []
-    # In 3.10 recommended way to get annotations is to call `inspect.get_annotations` function
-    # Also, annotations from base class are not inherited so they need to be queried explicitly
-    if sys.version_info[:2] < (3, 10):
-        obj_annotations = getattr(obj, "__annotations__", {})
-    else:
-        obj_annotations = inspect.get_annotations(obj)
-        if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
-            obj_annotations = inspect.get_annotations(obj.__base__)
+
+    obj_annotations = inspect.get_annotations(obj)
+    if len(obj_annotations) == 0 and hasattr(obj, "__base__"):
+        obj_annotations = inspect.get_annotations(
+            # pyrefly: ignore [bad-argument-type]
+            obj.__base__
+        )
 
     annotations = []
     for field in obj._fields:
@@ -1393,7 +1401,8 @@ def check_empty_containers(obj) -> None:
             "calling torch.jit.isinstance in eager mode. For "
             "example, List[int] would become list and "
             "therefore falsely return True for List[float] or"
-            " List[str]."
+            " List[str].",
+            stacklevel=2,
         )
 
 
@@ -1451,7 +1460,9 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Union or issubclass(
-        origin_type, BuiltinUnionType
+        # pyrefly: ignore [bad-argument-type]
+        origin_type,
+        BuiltinUnionType,
     ):  # also handles Optional
         if obj is None:  # check before recursion because None is always fine
             return True
@@ -1533,7 +1544,7 @@ def _extract_tensors(obj):
     return tensors
 
 
-def _get_model_id(obj) -> Optional[str]:
+def _get_model_id(obj) -> str | None:
     if isinstance(obj, torch.jit.ScriptModule):
         return str(obj._c._type())
     elif isinstance(obj, torch.jit.ScriptFunction):

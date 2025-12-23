@@ -1,9 +1,11 @@
+# pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
 import gc
 import typing
-from typing import Callable, Optional, overload, TYPE_CHECKING, Union
-from typing_extensions import ParamSpec, Self, TypeAlias, TypeVar
+from collections.abc import Callable
+from typing import overload, TYPE_CHECKING, TypeAlias, Union
+from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
 from torch import Tensor
@@ -37,11 +39,7 @@ if not hasattr(torch._C, "_CudaStreamBase"):
         "_cuda_isCurrentStreamCapturing"
     )
 
-from torch._C import (  # noqa: F401
-    _cuda_isCurrentStreamCapturing,
-    _CUDAGraph,
-    _graph_pool_handle,
-)
+from torch._C import _cuda_isCurrentStreamCapturing, _CUDAGraph, _graph_pool_handle
 
 
 def is_current_stream_capturing() -> bool:
@@ -65,7 +63,7 @@ def graph_pool_handle() -> _POOL_HANDLE:
 
 
 # Python shim helps Sphinx process docstrings more reliably.
-class CUDAGraph(torch._C._CUDAGraph):
+class CUDAGraph(_CUDAGraph):
     r"""Wrapper around a CUDA graph.
 
     Arguments:
@@ -96,7 +94,7 @@ class CUDAGraph(torch._C._CUDAGraph):
         return super().__new__(cls, keep_graph)
 
     def capture_begin(
-        self, pool: Optional[_POOL_HANDLE] = None, capture_error_mode: str = "global"
+        self, pool: _POOL_HANDLE | None = None, capture_error_mode: str = "global"
     ) -> None:
         r"""Begin capturing CUDA work on the current stream.
 
@@ -211,24 +209,22 @@ class graph:
         https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
     """  # noqa: B950
 
-    default_capture_stream: Optional[torch.cuda.Stream] = None
+    default_capture_stream: torch.cuda.Stream | None = None
 
     def __init__(
         self,
         cuda_graph: CUDAGraph,
-        pool: Optional[_POOL_HANDLE] = None,
-        stream: Optional[torch.cuda.Stream] = None,
+        pool: _POOL_HANDLE | None = None,
+        stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
         # restriction that only one capture may be underway at a time in the process.
-        if self.__class__.default_capture_stream is None:
+        if stream is None and self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.cuda.Stream()
 
-        self.pool: Union[tuple[()], tuple[_POOL_HANDLE]] = (
-            () if pool is None else (pool,)
-        )
+        self.pool: tuple[()] | tuple[_POOL_HANDLE] = () if pool is None else (pool,)
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )
@@ -250,6 +246,8 @@ class graph:
             gc.collect()
 
         torch.cuda.empty_cache()
+        # pyrefly: ignore [missing-attribute]
+        torch._C._host_emptyCache()
 
         # Stackoverflow seems comfortable with this pattern
         # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
@@ -258,6 +256,7 @@ class graph:
         self.cuda_graph.capture_begin(
             # type: ignore[misc]
             *self.pool,
+            # pyrefly: ignore [bad-keyword-argument]
             capture_error_mode=self.capture_error_mode,
         )
 
@@ -276,7 +275,7 @@ def make_graphed_callables(
     sample_args: tuple[Tensor, ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: Optional[_POOL_HANDLE] = None,
+    pool: _POOL_HANDLE | None = None,
 ) -> _ModuleOrCallable: ...
 
 
@@ -286,17 +285,17 @@ def make_graphed_callables(
     sample_args: tuple[tuple[Tensor, ...], ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: Optional[_POOL_HANDLE] = None,
+    pool: _POOL_HANDLE | None = None,
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
 def make_graphed_callables(
-    callables: Union[_ModuleOrCallable, tuple[_ModuleOrCallable, ...]],
-    sample_args: Union[tuple[Tensor, ...], tuple[tuple[Tensor, ...], ...]],
+    callables: _ModuleOrCallable | tuple[_ModuleOrCallable, ...],
+    sample_args: tuple[Tensor, ...] | tuple[tuple[Tensor, ...], ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: Optional[_POOL_HANDLE] = None,
-) -> Union[_ModuleOrCallable, tuple[_ModuleOrCallable, ...]]:
+    pool: _POOL_HANDLE | None = None,
+) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
     Each graphed callable's forward pass runs its source callable's
@@ -518,11 +517,12 @@ def make_graphed_callables(
         output_unflatten_spec: torch.utils._pytree.TreeSpec,
         static_input_surface: tuple[Tensor, ...],
         static_outputs: tuple[Tensor, ...],
-        static_grad_outputs: tuple[Optional[Tensor], ...],
+        static_grad_outputs: tuple[Tensor | None, ...],
         static_grad_inputs: tuple[Tensor, ...],
     ) -> Callable[..., object]:
         class Graphed(torch.autograd.Function):
             @staticmethod
+            # pyrefly: ignore [bad-override]
             def forward(ctx: object, *inputs: Tensor) -> tuple[Tensor, ...]:
                 # At this stage, only the user args may (potentially) be new tensors.
                 for i in range(len_user_args):
@@ -534,6 +534,7 @@ def make_graphed_callables(
 
             @staticmethod
             @torch.autograd.function.once_differentiable
+            # pyrefly: ignore [bad-override]
             def backward(ctx: object, *grads: Tensor) -> tuple[Tensor, ...]:
                 assert len(grads) == len(static_grad_outputs)
                 for g, grad in zip(static_grad_outputs, grads):
@@ -547,7 +548,9 @@ def make_graphed_callables(
                 # Input args that didn't require grad expect a None gradient.
                 assert isinstance(static_grad_inputs, tuple)
                 return tuple(
-                    b.detach() if b is not None else b for b in static_grad_inputs
+                    # pyrefly: ignore [bad-argument-type]
+                    b.detach() if b is not None else b
+                    for b in static_grad_inputs
                 )
 
         def functionalized(*user_args: object) -> object:

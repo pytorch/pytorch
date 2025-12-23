@@ -12,8 +12,8 @@ import os
 import textwrap
 import warnings
 from collections import defaultdict
-from collections.abc import Iterable, Sequence
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable, Collection, Iterable, Sequence
+from typing import Any, cast, Optional, TYPE_CHECKING, TypeGuard, TypeVar, Union
 from typing_extensions import ParamSpec
 from unittest.mock import patch
 
@@ -26,8 +26,9 @@ import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters
 from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (
+from torch._prims_common import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -47,7 +48,13 @@ from torch.fx.experimental.symbolic_shapes import (
     resolve_unbacked_bindings,
 )
 from torch.utils._ordered_set import OrderedSet
-from torch.utils._sympy.functions import CeilDiv, FloorDiv, Identity, ModularIndexing
+from torch.utils._sympy.functions import (
+    CeilDiv,
+    FloorDiv,
+    Identity,
+    Mod,
+    ModularIndexing,
+)
 
 from .._dynamo.utils import import_submodule
 from . import config, inductor_prims, ir, test_operators  # NOQA: F401
@@ -65,7 +72,6 @@ from .ir import (
     PermuteView,
     Pointwise,
     Reduction,
-    ShapeAsConstantBuffer,
     SqueezeView,
     TensorBox,
     validate_ir,
@@ -125,7 +131,7 @@ inplaceable_foreach_ops: dict[torch._ops.OpOverload, torch._ops.OpOverload] = {}
 quantized_decomposed = torch.ops.quantized_decomposed
 
 
-def cur_node_has_non_foreach_users():
+def cur_node_has_non_foreach_users() -> bool:
     for node in V.graph.current_node.users:
         for user in node.users:
             if not (user.op == "call_function" and (user.target in foreach_ops)):
@@ -137,7 +143,9 @@ def cur_node_has_non_foreach_users():
 # group by device, whether any of the inputs are dynamic
 # note arg_pairs may or may not be a pair
 # foreach_map for example just passes output buffers here
-def group_foreach_args(arg_pairs: Iterable[Union[tuple[Any, Any], Any]]):
+def group_foreach_args(
+    arg_pairs: Iterable[Any],
+) -> defaultdict[tuple[Any, bool], list[tuple[int, Any]]]:
     out = defaultdict(list)
     unpack_args = False
     for i, args in enumerate(arg_pairs):
@@ -154,6 +162,7 @@ def group_foreach_args(arg_pairs: Iterable[Union[tuple[Any, Any], Any]]):
                 break
         assert device is not None, "foreach op should have at least one tensor arg"
         if unpack_args:
+            # pyrefly: ignore [bad-unpacking]
             (args,) = args
         out[(device, use_foreach)].append((i, args))
     return out
@@ -173,7 +182,9 @@ def maybe_layout_constraints(fn: Callable[..., Any]) -> Optional[Callable[..., A
     return None
 
 
-def tag_to_layout_constraint(tag):
+def tag_to_layout_constraint(
+    tag: torch._C.Tag,
+) -> Optional[Callable[..., tuple[Any, Any]]]:
     if tag == torch._C.Tag.needs_exact_strides:
         return constrain_to_fake_tensors
     if tag == torch._C.Tag.needs_contiguous_strides:  # type: ignore[attr-defined]
@@ -185,22 +196,34 @@ def tag_to_layout_constraint(tag):
     raise AssertionError(f"Unknown layout constraint tag: {tag}")
 
 
-def assert_nyi(cond, msg):
+def assert_nyi(cond: bool, msg: str) -> None:
     if not cond:
         raise NotImplementedError(f"inductor does not support {msg}")
 
 
-def add_needs_realized_inputs(fn):
+def add_needs_realized_inputs(
+    fn: Union[
+        Collection[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]],
+        torch._ops.OpOverload,
+        torch._ops.OpOverloadPacket,
+    ],
+) -> Optional[list[Any]]:
     if isinstance(fn, (list, set, tuple, OrderedSet)):  # noqa: set_linter
+        # pyrefly: ignore [bad-argument-type]
         return [add_needs_realized_inputs(x) for x in fn]
-    needs_realized_inputs.add(fn)
-    if isinstance(fn, torch._ops.OpOverloadPacket):
+    if isinstance(fn, torch._ops.OpOverload):
+        needs_realized_inputs.add(fn)
+    elif isinstance(fn, torch._ops.OpOverloadPacket):
         needs_realized_inputs.update(
             getattr(fn, overload) for overload in fn.overloads()
         )
+    return None
 
 
-def add_layout_constraint(fn, constraint):
+def add_layout_constraint(
+    fn: Union[torch._ops.OpOverloadPacket, torch._ops.OpOverload],
+    constraint: Callable[..., tuple[Any, Any]],
+) -> None:
     if isinstance(fn, torch._ops.OpOverloadPacket):
         for overload in fn.overloads():
             _maybe_layout_constraints[getattr(fn, overload)] = constraint
@@ -252,15 +275,16 @@ DTYPE_ID_LOOKUP = {
 }
 
 
-def decode_dtype(dtype: int):
+def decode_dtype(dtype: Union[int, torch.dtype]) -> torch.dtype:
     if not isinstance(dtype, int):
         return dtype
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
+    # pyrefly: ignore [bad-assignment]
     dtype = DTYPE_ID_LOOKUP[dtype]
     return dtype
 
 
-def is_integer_type(x):
+def is_integer_type(x: Any) -> TypeGuard[Union[TensorBox, sympy.Expr, int]]:
     if isinstance(x, TensorBox):
         return is_integer_dtype(x.get_dtype()) or is_boolean_dtype(x.get_dtype())
     elif isinstance(x, sympy.Expr):
@@ -269,15 +293,17 @@ def is_integer_type(x):
         return isinstance(x, int)
 
 
-def is_boolean_type(x):
+def is_boolean_type(x: Any) -> TypeGuard[Union[TensorBox, bool]]:
     if isinstance(x, TensorBox):
         return is_boolean_dtype(x.get_dtype())
     else:
         return isinstance(x, bool)
 
 
-def get_promoted_dtype(*args, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND):
-    def construct_input(inp):
+def get_promoted_dtype(
+    *args: Any, type_promotion_kind: ELEMENTWISE_TYPE_PROMOTION_KIND
+) -> torch.dtype:
+    def construct_input(inp: Any) -> Any:
         if isinstance(inp, (Number, sympy.Basic)):
             return inp
         else:
@@ -306,12 +332,34 @@ def get_overloads(aten_fn):
     return aten_fn
 
 
-def in_namespace(op, namespace):
+def in_namespace(
+    op: Union[Any, torch._ops.OpOverloadPacket, torch._ops.OpOverload], namespace: str
+) -> bool:
     if isinstance(op, torch._ops.OpOverloadPacket):
         return namespace in op._qualified_op_name
     elif isinstance(op, torch._ops.OpOverload):
         return namespace in op.name()
     return False
+
+
+def maybe_copy_cpu_scalar(x: TensorBox, device: torch.device) -> TensorBox:
+    """
+    Copy cpu scalar if doesn't not match with given `device`
+    """
+    if not isinstance(x.data, ir.ReinterpretView) or has_free_unbacked_symbols(
+        x.get_size()
+    ):
+        return x
+    size = [V.graph.sizevars.size_hint_or_throw(s) for s in x.get_size()]
+    cur_device = x.get_device()
+    if (
+        cur_device is not None
+        and cur_device.type == "cpu"
+        and cur_device != device
+        and (len(size) == 0 or (len(size) == 1 and size[0] == 1))
+    ):
+        return TensorBox(ir.StorageBox(ir.DeviceCopy.create(x, cur_device, False)))
+    return x
 
 
 def transform_args(
@@ -321,6 +369,10 @@ def transform_args(
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
     convert_input_to_bool: bool,
 ) -> tuple[list[Any], dict[str, Any]]:
+    """
+    Transforms arguments for broadcasting and type promotion
+    """
+
     args_indices = [i for i, x in enumerate(args) if isinstance(x, TensorBox)]
     kwargs_indices = [k for k, v in kwargs.items() if isinstance(v, TensorBox)]
     # check that there's something to transform
@@ -348,8 +400,14 @@ def transform_args(
             args[args_indices[0]] if args_indices else kwargs[kwargs_indices[0]]
         ).get_device()
 
+        for i in args_indices:
+            args[i] = maybe_copy_cpu_scalar(args[i], device)
+
+        for k in kwargs_indices:
+            kwargs[k] = maybe_copy_cpu_scalar(kwargs[k], device)
+
         # sometimes args are an immutable list so we can't mutate them
-        def promote(arg):
+        def promote(arg: Any) -> Any:
             if isinstance(arg, TensorBox):
                 return to_dtype(arg, dtype)
             elif isinstance(arg, ir.Constant):
@@ -386,7 +444,9 @@ def transform_args(
     return args, kwargs
 
 
-def _register_foreach_lowering(aten_fn, decomp_fn):
+def _register_foreach_lowering(
+    aten_fn: torch._ops.OpOverload, decomp_fn: Callable[..., Any]
+) -> Callable[..., Any]:
     """
     Add a foreach lowering to lowerings dict.
 
@@ -399,7 +459,7 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
     """
 
     @functools.wraps(decomp_fn)
-    def wrapped(*args, **kwargs):
+    def wrapped(*args: Any, **kwargs: Any) -> Any:
         assert len(args) <= 2
         out = decomp_fn(*args, **kwargs)
         validate_ir(out)
@@ -413,11 +473,11 @@ def _register_foreach_lowering(aten_fn, decomp_fn):
 
 def _register_lowering(
     aten_fn,
-    decomp_fn,
-    broadcast,
+    decomp_fn: Callable[..., Any],
+    broadcast: bool,
     type_promotion_kind: Optional[ELEMENTWISE_TYPE_PROMOTION_KIND],
-    convert_input_to_bool,
-    lowering_dict,
+    convert_input_to_bool: bool,
+    lowering_dict: dict[Union[Callable[..., Any], str], Callable[..., Any]],
 ):
     """
     Add a lowering to lowerings dict
@@ -444,9 +504,7 @@ def _register_lowering(
             (fn in fallbacks or in_namespace(fn, "_c10d_functional")) for fn in aten_fn
         ):
             # explicitly assert for "out=" ops for better error messages
-            assert not any(x == "out" for x in kwargs.keys()), (
-                "out= ops aren't yet supported"
-            )
+            assert not any(x == "out" for x in kwargs), "out= ops aren't yet supported"
 
         args, kwargs = transform_args(
             args, kwargs, broadcast, type_promotion_kind, convert_input_to_bool
@@ -495,15 +553,15 @@ def broadcast_symbolic_shapes(a, b):
     We give the shapes 0 and 1 concrete values, while all other shapes
     are symbolic sympy formulas.
     """
+    b = tuple(b)
+    if not a or a == b:
+        return b
+
     output = []
     for x, y in itertools.zip_longest(reversed(a), reversed(b), fillvalue=sympy.S.One):
-        if V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(y, 1), fallback_value=False
-        ):
+        if V.graph.sizevars.is_size_one_or_false(y):
             output.append(x)
-        elif V.graph.sizevars.shape_env.evaluate_expr(
-            sympy.Eq(x, 1), fallback_value=False
-        ):
+        elif V.graph.sizevars.is_size_one_or_false(x):
             output.append(y)
         else:
             V.graph.sizevars.check_equals(x, y)
@@ -526,7 +584,9 @@ def promote_constants(inputs, override_return_dtype=None, type_promotion_kind=No
         return inputs
     if all(isinstance(x, (int, float, sympy.Basic)) for x in inputs):
         dtype = override_return_dtype or get_promoted_dtype(
-            *inputs, type_promotion_kind=type_promotion_kind
+            *inputs,
+            # pyrefly: ignore [bad-argument-type]
+            type_promotion_kind=type_promotion_kind,
         )
 
         def const_func(x):
@@ -583,7 +643,9 @@ def make_pointwise(
         inputs = promote_constants(inputs, override_return_dtype)
         if allow_alpha:
             if alpha is not None and alpha != 1:
+                # pyrefly: ignore [bad-assignment]
                 inputs = list(inputs)
+                # pyrefly: ignore [unsupported-operation]
                 inputs[-1] = mul(inputs[-1], alpha)
         else:
             assert alpha is None
@@ -605,8 +667,8 @@ def make_pointwise(
             and getattr(V.graph, "current_node", None) is not None
             and V.graph.current_node.meta is not None
             and V.graph.current_node.meta.get("low_precision_pointwise_barrier", False)
-            and dtype in low_pr_fp
         )
+        emulate_output_cast = emulate_precision_casts and dtype in low_pr_fp
 
         def inner_fn(index):
             assert len(index) == len(ranges), f"wrong ndim {index} {ranges}"
@@ -623,7 +685,7 @@ def make_pointwise(
                     inputs_loaded.append(out)
 
                 out = fn(*inputs_loaded)
-                if emulate_precision_casts:
+                if emulate_output_cast:
                     # fp16/bf16 kernels are computed in fp32. Casting down to fp16/bf16 here,
                     # then upcasting again, to emulate casts that eager would do.
                     downcast = ops.to_dtype(out, dtype, use_compute_types=False)
@@ -633,12 +695,14 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
+                # pyrefly: ignore [missing-attribute]
                 if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
             if not device:
                 device = inputs[0].get_device()
 
+        # pyrefly: ignore [unbound-name]
         device = override_device or device
 
         return Pointwise.create(
@@ -693,6 +757,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                 outputs[output_ind] = output
 
                 if (
+                    # pyrefly: ignore [unbound-name]
                     V.graph.has_feature(device, BackendFeature.FOREACH)
                     and use_foreach
                     and realize_outputs
@@ -701,6 +766,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
                     operation_list.append(output.get_operation_name())
 
             if operation_list:
+                # pyrefly: ignore [unbound-name]
                 V.graph.register_operation_list(operation_list)
 
         assert all(x is not None for x in outputs)
@@ -709,9 +775,7 @@ def make_foreach_pointwise(pw_fn, allow_alpha=False):
     return inner
 
 
-def to_dtype(
-    x: Union[TensorBox, ShapeAsConstantBuffer], dtype: torch.dtype, copy: bool = False
-):
+def to_dtype(x: TensorBox, dtype: torch.dtype, copy: bool = False):
     src_dtype = x.get_dtype()
     if src_dtype == dtype:
         return clone(x) if copy else x
@@ -940,22 +1004,22 @@ def where(cond, a, b):
 
 @register_lowering(aten.broadcast_tensors, broadcast=False, type_promotion_kind=None)
 def broadcast_tensors(*inputs):
-    if len(inputs) == 1 and isinstance(inputs[0], (list, tuple)):
-        return broadcast_tensors(*inputs[0])
+    if len(inputs) == 1:
+        if isinstance(inputs[0], (list, tuple)):
+            return broadcast_tensors(*inputs[0])
+        return inputs
     target: list[sympy.Expr] = functools.reduce(
-        broadcast_symbolic_shapes, [x.get_size() for x in inputs], []
+        broadcast_symbolic_shapes, (x.get_size() for x in inputs), ()
     )
     outputs = []
     for x in inputs:
-        sizes = x.get_size()
+        if (sizes := tuple(x.get_size())) == target:
+            pass
 
-        def is_length_one(size: sympy.Expr):
-            return V.graph.sizevars.shape_env.evaluate_expr(
-                sympy.Eq(size, 1), fallback_value=False
-            )
-
-        if len(sizes) != len(target) or any(
-            is_length_one(a) != is_length_one(b) for a, b in zip(sizes, target)
+        elif len(sizes) != len(target) or any(
+            V.graph.sizevars.is_size_one_or_false(a)
+            != V.graph.sizevars.is_size_one_or_false(b)
+            for a, b in zip(sizes, target)
         ):
             x = expand(x, target)
         outputs.append(x)
@@ -1172,23 +1236,147 @@ def permute(x, dims):
 
 @register_lowering(aten.slice, type_promotion_kind=None)
 def slice_(x, dim=0, start=0, end=2**63, step=1, clamp=True):
+    """
+    Lowers a slice call, creating ExternKernels for the output size & storage offset symbols,
+    if the indices are unbacked and appropriate semantics aren't known.
+    If they are known (indices are static/backed/unbacked with info), a SliceView is created.
+    """
+
+    from torch.fx.experimental.symbolic_shapes import (
+        CallMethodKey,
+        resolve_unbacked_bindings,
+    )
+
     assert isinstance(x, TensorBox)
     dim = _validate_dim(x, dim, 0)
-    return TensorBox(ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp))
+    size = x.get_size()[dim]
+    step = sympy.expand(step)
+    assert isinstance(step, sympy.Expr) or step > 0, step
+
+    # maybe apply slice optimization
+    try:
+        if (
+            start == 0
+            and V.graph.sizevars.statically_known_leq(size, end)
+            and step == 1
+        ):
+            return x
+    except TypeError:
+        pass
+
+    # try to avoid dynamic (unbacked) slice
+    def compute_slice_index(index, size, default=None):
+        if index is None:
+            return default
+
+        fn = lambda x: V.graph.sizevars.guard_or_false(x)  # noqa: E731
+        index = sympy.expand(index)
+        size = sympy.expand(size)
+        if fn(sympy.Ge(index, 0)) and fn(sympy.Le(index, size)):
+            return index
+        elif fn(sympy.Lt(index, 0)) and fn(sympy.Ge(index, -size)):
+            return index + size
+        elif fn(sympy.Gt(index, size)):
+            return size
+        elif fn(sympy.Lt(index, -size)):
+            return 0
+        return None
+
+    start_index, end_index = None, None
+    ambiguous_slice = clamp
+    if ambiguous_slice:
+        start_index = compute_slice_index(start, size, 0)
+        end_index = compute_slice_index(end, size, size)
+        if start_index is not None and end_index is not None:
+            start, end = start_index, end_index
+            ambiguous_slice = False
+
+    # ambiguous_slice=False means we know what semantics this slice call follows,
+    # and don't need to generate an extern kernel to represent the output size.
+    # This is assumed True for clamp=False
+    # (meant to follow standard indexing semantics: 0 <= index < size)
+    if not ambiguous_slice:
+        return TensorBox(
+            ir.SliceView.create(x.data, dim, start, end, step, clamp=clamp)
+        )  # go to SliceView/ReinterpretView
+
+    # unbacked territory: create DynamicSlice ExternKernel
+    # clamp is True, unbacked start / end
+    assert clamp
+    unbacked_bindings = resolve_unbacked_bindings(
+        V.graph.sizevars.shape_env, V.graph.current_node.meta["unbacked_bindings"]
+    )
+    assert unbacked_bindings is not None
+    assert len(unbacked_bindings) <= 2, unbacked_bindings
+    sym_size, sym_storage = None, None
+    for sym, keypath in unbacked_bindings.items():
+        if keypath == (CallMethodKey("size"), pytree.SequenceKey(dim)):
+            sym_size = sym
+        elif keypath == (CallMethodKey("storage_offset"),):
+            sym_storage = sym
+
+    assert start_index is None or end_index is None
+    b_size = ir.DynamicSliceSize(
+        sym_size,
+        start,
+        end,
+        step,
+        x.get_size()[dim],
+    )
+    b_size.name = V.graph.register_buffer(b_size)
+    V.graph.register_operation(b_size)
+    new_size = sym_size
+
+    if x.maybe_get_layout() is None:
+        # realize tensor before accessing layout
+        x.realize()
+
+    if start_index is not None:
+        # we shouldn't have allocated storage offset symbol if start index was determinable
+        assert sym_storage is None
+        new_storage_offset = x.get_layout().offset + start_index * x.get_stride()[dim]
+    else:
+        b_storage = ir.DynamicSelectStorageOffset(
+            sym_storage,
+            start,
+            x.get_layout().offset,
+            x.get_stride()[dim],
+            x.get_size()[dim],
+            clamp=True,
+        )
+        b_storage.name = V.graph.register_buffer(b_storage)
+        V.graph.register_operation(b_storage)
+        new_storage_offset = sym_storage
+
+    new_sizes = list(x.get_size())
+    new_strides = list(x.get_stride())
+    new_sizes[dim] = new_size
+    new_strides[dim] *= step
+    return as_strided(x, new_sizes, new_strides, new_storage_offset)
 
 
 @register_lowering(aten.as_strided, type_promotion_kind=None)
 def as_strided(x, size, stride, storage_offset=None):
+    new_device = None
+    new_dtype = None
     if isinstance(x, TensorBox) and isinstance(x.data, ir.BaseView):
-        # as_strided ignores views
+        # Note: Merging views
+        # When we use as_strided, we can rewrite the size/stride/offset
+        # of the incoming buffer x. If x is a view, we would overwrite
+        # its metadata. Except for dtype, which we need to propagate.
+
+        # Technically device is not needed because it is not possible
+        # to have a cross-device view today.
+        new_device = x.get_device()
+        new_dtype = x.dtype
         x = x.data.unwrap_view()
     x.realize()
     if not ir.is_storage_and_layout(x):
         raise NotImplementedError(f"unrealized as_strided({x}, ...)")
     storage, old_layout = ir.as_storage_and_layout(x)
     new_layout = ir.FixedLayout(
-        old_layout.device,
-        old_layout.dtype,
+        new_device if new_device else old_layout.device,
+        new_dtype if new_dtype else old_layout.dtype,
         [sympy.expand(s) for s in size],
         [sympy.expand(s) for s in stride],
         sympy.expand(storage_offset or 0),
@@ -1287,7 +1475,7 @@ def quantized_decomposed_quantize_per_channel(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
 
@@ -1370,7 +1558,7 @@ def quantized_decomposed_dequantize_per_channel(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert len(scales.get_size()) == 1, "expect scales 1 dim"
     assert len(zero_points.get_size()) == 1, "expect zero_points 1 dim"
     assert input.get_dtype() == dtype, (
@@ -1420,7 +1608,7 @@ def quantized_decomposed_quantize_per_tensor_default(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
     assert input.get_dtype() == torch.float32, (
@@ -1461,7 +1649,7 @@ def quantized_decomposed_dequantize_per_tensor_default(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert input.get_dtype() == dtype, (
         f"Expecting input to have dtype {dtype}, but got dtype: {input.get_dtype()}"
     )
@@ -1498,7 +1686,7 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     quant_min: int,
     quant_max: int,
     dtype: torch.dtype,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     if input.get_dtype() == torch.bfloat16:
         input = to_dtype(input, torch.float32)
     assert input.get_dtype() == torch.float32, (
@@ -1548,7 +1736,7 @@ def quantized_decomposed_dequantize_per_tensor_tensor(
     dtype: torch.dtype,
     *,
     out_dtype: Optional[torch.dtype] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     assert len(scale.get_size()) == 0 or (
         len(scale.get_size()) == 1 and scale.get_size()[0] == 1
     ), "expect scale as scalar tensor"
@@ -1797,6 +1985,9 @@ def select(x, dim, idx):
             # Additionally, we want to avoid accidental unbacked unsqueeze semantics. To resolve this,
             # we use as_strided instead.
             # Removing this branch will cause test_unbacked_select_index_with_check to fail.
+
+            # before accessing size, stride, and offset we need to realize.
+            x.realize()
             new_size = x.get_size()
             new_stride = x.get_stride()
             new_storage_offset = x.get_layout().offset + new_stride[dim] * actual_index
@@ -1805,7 +1996,8 @@ def select(x, dim, idx):
             del new_stride[dim]
             return as_strided(x, new_size, new_stride, new_storage_offset)
         else:
-            slice_result = slice_(x, dim, actual_index, actual_index + 1)
+            # no need to clamp, this function handles negative indexing itself
+            slice_result = slice_(x, dim, actual_index, actual_index + 1, clamp=False)
             return squeeze(slice_result, dim)
 
     # Unbacked Semantics:
@@ -1819,6 +2011,8 @@ def select(x, dim, idx):
     assert len(unbacked_bindings) == 1, unbacked_bindings
     unbacked_offset_sym, _ = next(iter(unbacked_bindings.items()))
 
+    # before accessing size, stride, and offset we need to realize.
+    x.realize()
     new_size = x.get_size()
     new_stride = x.get_stride()
     new_storage_offset = unbacked_offset_sym
@@ -1828,6 +2022,7 @@ def select(x, dim, idx):
         x.get_layout().offset,
         new_stride[dim],
         x.get_size()[dim],
+        clamp=False,
     )
     buffer.name = V.graph.register_buffer(buffer)
     V.graph.register_operation(buffer)
@@ -1884,7 +2079,7 @@ def unfold(x, dimension, size, step):
     dim = canonicalize_dim(ndim, dimension)
 
     if ndim == 0:
-        return slice_(unsqueeze(x, 0), end=size)
+        return slice_(unsqueeze(x, 0), end=size, clamp=False)
 
     dim_size = sizes[dim]
     sizevars = V.graph.sizevars
@@ -1937,8 +2132,9 @@ def glu(x, dim=-1):
     dim = _validate_dim(x, dim, 0)
     # TODO: don't guard on static shape here
     new_len = V.graph.sizevars.guard_int(x.get_size()[dim]) // 2
-    a = slice_(x, dim, 0, new_len)
-    b = slice_(x, dim, new_len, new_len * 2)
+    # no need to clamp, index is int based on input size
+    a = slice_(x, dim, 0, new_len, clamp=False)
+    b = slice_(x, dim, new_len, new_len * 2, clamp=False)
     return mul(a, sigmoid(b))
 
 
@@ -1977,6 +2173,9 @@ def unsupported_input_tensor(t: torch.Tensor, node=None):
         return True
 
     if t.is_meta:
+        return True
+
+    if t.is_sparse:
         return True
 
     if t.dtype == torch.float8_e8m0fnu:
@@ -2210,10 +2409,14 @@ fallback_randn_default = fallback_handler(aten.randn.default)
 fallback_randn_generator = fallback_handler(aten.randn.generator)
 make_fallback(aten.randint)
 
+# TODO: mlazos reevaluate if we want to codegen something different
+make_fallback(torch.ops.streams.record_event.default)
+make_fallback(torch.ops.streams.wait_event.default)
+
 
 @register_lowering(aten.rand)
 def rand(*args, **kwargs):
-    if kwargs.get("generator", None) is not None:
+    if kwargs.get("generator") is not None:
         return fallback_rand_generator(*args, **kwargs)
     elif config.fallback_random:
         kwargs.pop("generator", None)
@@ -2223,7 +2426,7 @@ def rand(*args, **kwargs):
 
 @register_lowering(aten.randn)
 def randn(*args, **kwargs):
-    if kwargs.get("generator", None) is not None:
+    if kwargs.get("generator") is not None:
         return fallback_randn_generator(*args, **kwargs)
     elif config.fallback_random:
         kwargs.pop("generator", None)
@@ -2319,11 +2522,18 @@ def inductor_randint(
 
 
 def _boundaries_helper(tb: TensorBox) -> tuple[str, sympy.Expr, sympy.Expr, sympy.Expr]:
+    # Calculate the maximum offset for the boundaries tensor
+    # For a strided tensor, this is sum((size[i] - 1) * stride[i]) + stride[-1]
+    # This ensures the mask check in bucketize_binary_search works correctly
+    # for both contiguous and non-contiguous tensors.
+    size = tb.get_size()
+    stride = tb.get_stride()
+    max_offset = sum((s - 1) * st for s, st in zip(size, stride)) + stride[-1]
     return (
         tb.get_name(),
-        tb.get_size()[-1],
-        tb.get_size()[0] * tb.get_stride()[0],
-        tb.get_stride()[-1],
+        size[-1],
+        max_offset,
+        stride[-1],
     )
 
 
@@ -2340,7 +2550,7 @@ def searchsorted(
     right: bool = False,
     side: Optional[str] = None,
     sorter: Optional[TensorBox] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     validate_bucketize = lambda tb: V.graph.has_feature(  # noqa: E731
         tb, BackendFeature.BUCKETIZE
     )
@@ -2521,15 +2731,17 @@ def require_channels_last(_, *args, **kwargs):
 
 
 def constrain_to_fake_tensor(arg, fake_arg):
+    if fake_arg is None:
+        return arg
+    if isinstance(fake_arg, FakeScriptObject):
+        return arg
     if isinstance(arg, ir.IRNode):
         meta_stride_expr = [
             s.node.expr if isinstance(s, torch.SymInt) else s for s in fake_arg.stride()
         ]
         return ir.ExternKernel.require_exact_strides(arg, meta_stride_expr)
     if isinstance(arg, dict):
-        return {
-            key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg.keys()
-        }
+        return {key: constrain_to_fake_tensor(arg[key], fake_arg[key]) for key in arg}
     elif isinstance(arg, (tuple, list)):
         return type(arg)(
             constrain_to_fake_tensor(a, f_a) for (a, f_a) in zip(arg, fake_arg)
@@ -2554,7 +2766,7 @@ def constrain_to_fx_strides(fx_node, *args, **kwargs):
             )
             return ir.ExternKernel.require_stride_order(arg, stride_order)
         if isinstance(arg, dict):
-            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg.keys()}
+            return {key: apply_constraint(arg[key], fx_arg[key]) for key in arg}
         return arg
 
     args = tuple(
@@ -2575,8 +2787,8 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         meta_stride_expr = [
             s.node.expr if isinstance(s, torch.SymInt) else s for s in meta_val.stride()
         ]
-
-        stride_order = ir.get_stride_order(meta_val.stride())
+        shape_env = V.graph.sizevars.shape_env
+        stride_order = ir.get_stride_order(meta_val.stride(), shape_env)
 
         if stride_order and stride_order[-1] != 0:
             # contiguous stride order
@@ -2612,7 +2824,7 @@ def sdpa_constraint(fx_node, *args, **kwargs):
         if len(arg.get_size()) not in (3, 4):
             return arg
 
-        is_aligned_tensor = ir.is_aligned_realized_tensor_hint(arg, ALIGNMENT)
+        is_aligned_tensor = ir.is_aligned_realized_tensor(arg, ALIGNMENT)
         if is_aligned_tensor:
             return ir.try_match_insignificant_strides(
                 ir.ExternKernel.realize_input(arg), meta_stride_expr
@@ -2680,7 +2892,9 @@ def sdpa_constraint(fx_node, *args, **kwargs):
             )
 
         def is_aligned(x):
-            return (V.graph.sizevars.size_hint(x.get_size()[-1]) % ALIGNMENT) == 0
+            return V.graph.sizevars.guard_or_false(
+                sympy.Eq(Mod(x.get_size()[-1], ALIGNMENT), 0)
+            )
 
         if isinstance(arg.data, ir.BaseView):
             if not is_aligned(arg):
@@ -2716,6 +2930,10 @@ if torch.xpu.is_available():
         aten.embedding_dense_backward, warn=False
     )  # (XPU-only and faster than decomp)
 
+if torch.mtia._is_compiled():
+    make_fallback(
+        aten.native_layer_norm, warn=False
+    )  # (MTIA-only and faster than decomp)
 
 # 1.5) Easy or Impossible
 make_fallback(aten._cdist_forward)  # p=2 should be feasible
@@ -2748,6 +2966,8 @@ make_fallback(aten._grouped_mm, require_dense)
 make_fallback(aten.convolution_backward, constrain_to_fx_strides)
 make_fallback(aten._cudnn_rnn, require_dense)
 make_fallback(aten._cudnn_rnn_backward, require_contiguous)
+make_fallback(aten.miopen_rnn, require_dense)
+make_fallback(aten.miopen_rnn_backward, require_contiguous)
 
 # Haven't checked but sound difficult / impossible
 make_fallback(aten._embedding_bag, require_contiguous)
@@ -2772,7 +2992,7 @@ make_fallback(aten.replication_pad2d_backward)
 make_fallback(aten.upsample_linear1d_backward)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.upsample_trilinear3d_backward)
-make_fallback(aten.grid_sampler_2d_backward, require_dense)
+make_fallback(aten.grid_sampler_2d_backward)
 make_fallback(aten._pdist_backward)
 
 
@@ -2909,15 +3129,21 @@ make_fallback(aten._efficient_attention_backward.default, sdpa_constraint)
 make_fallback(aten.index_reduce)
 make_fallback(aten.repeat_interleave.Tensor, override_decomp=True)
 
+make_fallback(aten._weight_norm_interface_backward.default, require_contiguous)
+
 
 # Register with type_promotion_kind None.
 # For example, fp16.copy_(fp32) should **not** promote the first input's dtype.
 @register_lowering(aten.copy, type_promotion_kind=None)
 def copy(self, src, non_blocking=False):
+    if not isinstance(src, ir.IRNode):
+        src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
     x = src
     if self.get_device() != src.get_device():
+        # pyrefly: ignore [bad-argument-type]
         x = to_device(x, self.get_device())
     if self.get_dtype() != src.get_dtype():
+        # pyrefly: ignore [bad-argument-type]
         x = to_dtype(x, self.get_dtype())
 
     if self.get_size() != src.get_size():
@@ -2941,6 +3167,7 @@ def clone_preserve_reinterpret_view(x):
     reinterpret_view_layouts = []
     if isinstance(x, TensorBox) and isinstance(x.data, ir.ReinterpretView):
         x = x.data  # unwrap TensorBox
+        # pyrefly: ignore [bad-assignment]
         while isinstance(x, ir.ReinterpretView):
             reinterpret_view_layouts.append(x.get_layout())
             x = x.data
@@ -2987,8 +3214,14 @@ def select_scatter(x, src, dim: int, index: int):
     assert x.get_dtype() == src.get_dtype()
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
-    if V.graph.sizevars.evaluate_expr(sympy.Lt(index, 0)):
+    if V.graph.sizevars.guard_or_false(sympy.Lt(index, 0)):
         index = index + x.get_size()[dim]
+    elif V.graph.sizevars.guard_or_false(sympy.Ge(index, 0)):
+        pass
+    else:
+        # unbacked index
+        return fallback_handler(aten.select_scatter.default)(x, src, dim, index)
+
     V.graph.sizevars.check_leq(0, index)  # type: ignore[arg-type]
     V.graph.sizevars.check_lt(index, x.get_size()[dim])  # type: ignore[arg-type]
     src = expand(unsqueeze(src, dim), x.get_size())
@@ -3019,6 +3252,7 @@ def slice_scatter(x, src, dim=0, start=None, end=None, step=1):
     dim = _validate_dim(x, dim, 0)
     dim_size = x.get_size()[dim]
 
+    # pyrefly: ignore [bad-argument-type]
     start, end = ir.SliceView.normalize_start_end(x, dim, start, end)
 
     src_size = list(x.get_size())
@@ -3341,6 +3575,7 @@ def new_constant(fill_value):
         assert isinstance(size, (list, tuple))
         assert_nyi(not pin_memory, "pin_memory")
         assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+        # pyrefly: ignore [bad-argument-type]
         dtype = decode_dtype(dtype) or x.get_dtype()
         device = device or x.get_device()
         size = [sympy.Integer(s) for s in size]
@@ -3373,6 +3608,7 @@ def empty_strided(
     assert isinstance(stride, (list, tuple, type(None)))
     assert_nyi(not pin_memory, "pin_memory")
     assert_nyi(layout in (None, torch.strided), f"layout={layout}")
+    # pyrefly: ignore [bad-argument-type]
     dtype = decode_dtype(dtype) or torch.get_default_dtype()
     device = device or torch.tensor(0.0).device
     device = decode_device(device)
@@ -3544,7 +3780,7 @@ def index_output_size_and_inner_fn(
     # Then, a[:,x,:,x,:] will have shape 2,3,5,7 as due to x,:,x then 2 will
     # be pulled to the front.
     non_consecutive_tensors = False
-    for previous, current in zip(tensor_indices, tensor_indices[1:]):
+    for previous, current in itertools.pairwise(tensor_indices):
         if current - previous != 1:
             non_consecutive_tensors = True
 
@@ -3694,8 +3930,25 @@ def index_put_as_masked_fill(self, indices, value, accumulate):
 
 
 def index_put_fallback(self, indices, values, accumulate):
-    assert isinstance(V.graph.current_node.target, torch._ops.OpOverload)
-    ir.IndexPutFallback(V.graph.current_node.target, self, indices, values, accumulate)
+    from .utils import _fx_node_is_input_dependent_cudagraph_unsafe
+
+    op_overload = getattr(aten.index_put_, V.graph.current_node.target._overloadname)  # type: ignore[union-attr]
+
+    # Check if any index is a boolean tensor - if so, mark as cudagraph-unsafe
+    # because boolean indices trigger .nonzero() during CUDA graph capture
+    # When graph_partition is enabled, skip - partitioning handles this
+    fx_node = V.graph.current_node
+    if (
+        not config.graph_partition
+        and fx_node is not None
+        and _fx_node_is_input_dependent_cudagraph_unsafe(fx_node)
+    ):
+        msg = "index_put_ fallback with boolean indexing is not compatible with CUDA graphs"
+        if stack_trace := fx_node.meta.get("stack_trace", None):
+            msg = f"{msg} Found from : \n {stack_trace}"
+        V.graph.disable_cudagraphs_reason = msg
+
+    ir.IndexPutFallback(op_overload, self, indices, values, accumulate)
     return self
 
 
@@ -3716,15 +3969,6 @@ def _unsafe_index_put_(self, indices, values, accumulate=False):
 def index_put_impl_(self, indices, values, accumulate, check, may_realize=False):
     if may_realize:
 
-        def try_get_name(x):
-            if isinstance(x, ir.TensorBox):
-                x = x.data
-            if isinstance(x, ir.BaseView):
-                x = x.unwrap_view()
-            if isinstance(x, ir.StorageBox):
-                x = x.data
-            return x.get_name() if isinstance(x, ir.Buffer) else None
-
         def indice_slice_from_randperm(indice):
             # Refer to: https://github.com/pytorch/pytorch/pull/139366#discussion_r1825424660
             # For this specific pattern, indices is unique as coming from torch.randperm.
@@ -3735,11 +3979,11 @@ def index_put_impl_(self, indices, values, accumulate, check, may_realize=False)
                     isinstance(indice, ir.StorageBox)
                     and isinstance(indice.data, ir.ExternKernel)
                     and getattr(indice.data, "fx_node", None)
-                    and indice.data.fx_node.target == torch.ops.aten.randperm.default
+                    and indice.data.fx_node.target is torch.ops.aten.randperm.default
                 )
             return False
 
-        if try_get_name(self) in values.get_read_names() and not all(
+        if ir.try_get_name(self) in values.get_read_names() and not all(
             indice_slice_from_randperm(indice) for indice in indices
         ):
             # Fix issue: https://github.com/pytorch/pytorch/issues/138908
@@ -3920,6 +4164,7 @@ def scatter_fallback(
         reduce,
         self.get_dtype(),
         cast(torch.dtype, src.get_dtype() if src_is_tensor else type(src)),
+        # pyrefly: ignore [missing-attribute]
         src.get_device().type if src_is_tensor else "not impl",
         src_is_tensor,
     ):
@@ -4031,6 +4276,7 @@ def scatter_reduce_(self, dim: int, index, src, reduce, *, include_self: bool = 
             return src_loader(idx)
         else:
             # src is a scalar
+            # pyrefly: ignore [bad-argument-type]
             return ops.constant(src, self.get_dtype())
 
     def backend_reduce_str(reduce):
@@ -4295,7 +4541,7 @@ def inplace_constant_pad_nd(
         layout.offset,
     )
 
-    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad)
+    sliced_x = slice_(resized_x, dim=1, start=rowsize, end=rowsize + npad, clamp=False)
     fill_(sliced_x, fill_value)
 
     counters["inductor"]["inplace_padding"] += 1
@@ -4384,6 +4630,7 @@ def constant_boundary_condition(
 ):
     h = x.get_size()[-dim:]
     x_loader = x.make_loader()
+    # pyrefly: ignore [unsupported-operation]
     padding_h = padding or [0] * dim
 
     def load(index):
@@ -4392,6 +4639,7 @@ def constant_boundary_condition(
 
         mask = functools.reduce(
             ops.and_,
+            # pyrefly: ignore [no-matching-overload]
             [range_mask(ih[i], h[i] + padding_h[i], -padding_h[i]) for i in range(dim)],
         )
         return (
@@ -4592,7 +4840,7 @@ def _pool_offsets_to_indices(
         [Sequence[Union[int, torch.SymInt]], Sequence[Union[int, torch.SymInt]]],
         torch._inductor.virtualized.OpsValue,
     ],
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     n_dim = len(kernel_size)
     offsets_loader = offsets.make_loader()
     window_size = sympy.sympify(functools.reduce(operator.mul, kernel_size))
@@ -4758,11 +5006,11 @@ def max_pool2d_with_indices_backward(
     new_size = list(x.get_size())
 
     h_window_size = max(
-        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        max(FloorDiv(h, stride[0]) - max(0, FloorDiv(h - kernel_size[0], stride[0])), 1)
         for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        max(FloorDiv(w, stride[1]) - max(0, FloorDiv(w - kernel_size[1], stride[1])), 1)
         for w in range(kernel_size[1] * 2)
     )
 
@@ -5008,7 +5256,7 @@ def _adaptive_avg_pool2d(x, output_size):
         o_size = [*batch, h_out, w_out]
         return empty(o_size, dtype=x.get_dtype(), device=x.get_device())
     if h_in % h_out == 0 and w_in % w_out == 0:
-        kernel_size = [h_in // h_out, w_in // w_out]
+        kernel_size = [FloorDiv(h_in, h_out), FloorDiv(w_in, w_out)]
         return avg_pool2d(x, kernel_size)
 
     h_kernel_max = ceildiv((h_in + h_out - 1), h_out)
@@ -5273,10 +5521,13 @@ def upsample_nearest2d_backward(
     inp_h = V.graph.sizevars.guard_int(inp_h)
     inp_w = V.graph.sizevars.guard_int(inp_w)
 
+    # pyrefly: ignore [not-iterable]
     *_batch, out_h, out_w = input_size
 
     if inp_h % out_h == 0 and inp_w % out_w == 0:
-        return avg_pool2d(x, [inp_h // out_h, inp_w // out_w], divisor_override=1)
+        return avg_pool2d(
+            x, [FloorDiv(inp_h, out_h), FloorDiv(inp_w, out_w)], divisor_override=1
+        )
 
     h_kernel_max = ceildiv(inp_h, out_h)
     w_kernel_max = ceildiv(inp_w, out_w)
@@ -5303,6 +5554,7 @@ def upsample_nearest2d_backward(
         device=x.get_device(),
         dtype=x.get_dtype(),
         inner_fn=fn,
+        # pyrefly: ignore [no-matching-overload]
         ranges=list(input_size),
     )
 
@@ -5530,11 +5782,11 @@ def avg_pool2d_backward(
     dtype = x.get_dtype()
 
     h_window_size = max(
-        max(h // stride[0] - max(0, (h - kernel_size[0]) // stride[0]), 1)
+        max(FloorDiv(h, stride[0]) - max(0, FloorDiv(h - kernel_size[0], stride[0])), 1)
         for h in range(kernel_size[0] * 2)
     )
     w_window_size = max(
-        max(w // stride[1] - max(0, (w - kernel_size[1]) // stride[1]), 1)
+        max(FloorDiv(w, stride[1]) - max(0, FloorDiv(w - kernel_size[1], stride[1])), 1)
         for w in range(kernel_size[1] * 2)
     )
 
@@ -5877,7 +6129,9 @@ def _validate_reduction_axis(x, axis):
     return axis
 
 
-def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
+def _make_reduction_inner(
+    x, *, axis, keepdims, dtype, override_return_dtype, reduction_type=None
+):
     if dtype is not None:
         x = to_dtype(x, dtype)
     size = x.get_size()
@@ -5895,6 +6149,23 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
             kept_idx.append(i)
             kept_sizes.append(size[i])
 
+    # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
+    should_compute_logical_index = False
+    if (
+        reduction_type in ("argmax", "argmin")
+        and len(reduced_sizes) > 1
+        and is_triton(x)
+    ):
+        if isinstance(x.data, PermuteView):
+            should_compute_logical_index = True
+        elif isinstance(x.data, ir.ReinterpretView) or (
+            isinstance(x.data, ir.StorageBox) and isinstance(x.data.data, ir.Buffer)
+        ):
+            layout = x.get_layout()
+            should_compute_logical_index = (
+                layout.is_transposed() or not layout.is_contiguous()
+            )
+
     def loader(index, reduction_index):
         assert len(reduction_index) == len(reduced_idx)
         if keepdims:
@@ -5906,7 +6177,21 @@ def _make_reduction_inner(x, *, axis, keepdims, dtype, override_return_dtype):
             zip(kept_idx, index), zip(reduced_idx, reduction_index)
         ):
             new_index[idx] = var
-        return inner_loader(new_index)
+        value = inner_loader(new_index)
+
+        # For argmax/argmin, return tuple with logical linear index if needed
+        if should_compute_logical_index:
+            rindex = [sympy.expand(i) for i in reduction_index]
+
+            # Compute linear index in row-major order
+            # For reduction_ranges = [4, 6]: linear_index = r0 * 6 + r1
+            linear_idx = rindex[0]
+            for i in range(1, len(rindex)):
+                linear_idx = linear_idx * reduced_sizes[i] + rindex[i]
+
+            return (value, ops.index_expr(linear_idx, torch.int64))
+
+        return value
 
     if keepdims:
         new_size = list(size)
@@ -5934,6 +6219,7 @@ def make_reduction(reduction_type: ReductionType, override_return_dtype=None):
             keepdims=keepdims,
             dtype=dtype,
             override_return_dtype=override_return_dtype,
+            reduction_type=reduction_type,
         )
         result = Reduction.create(reduction_type=reduction_type, input_node=x, **kwargs)
         if isinstance(
@@ -6158,6 +6444,7 @@ def pow(a, b):
     if isinstance(a, Number):
         if a == 1:
             return full_like(b, 1)
+        # pyrefly: ignore [missing-attribute]
         if a == 2 and is_float_dtype(b.get_dtype()):
             return exp2(b)
 
@@ -6305,6 +6592,7 @@ def div_prim(a, b):
     # see https://github.com/pytorch/pytorch/issues/157959
     if (divisor := get_constant_value(b)) is not None and a.get_device().type != "cpu":
         # Replace divide by constant with multiply by reciprocal
+
         if divisor.value == 0:
             reciprocal = math.copysign(float("inf"), divisor.value)
         else:
@@ -6859,30 +7147,19 @@ def sym_constrain_range(a, min=None, max=None):
 @register_lowering(aten.sym_size.int)
 def sym_size(a, dim):
     val = V.graph.current_node.meta["val"]
-    # Note [Can val be an int?]
-    # ~~~~~~~~~~~~~~~~~~~~~~~~~
-    # In principle, someone could construct an FX graph where
-    # a call to size/stride has a val that is a plain int (not
-    # SymInt).  However, we will maintain the invariant that
-    # this is not possible: if you are constructing an FX graph
-    # where there is a call to size/stride that returns an
-    # int, but you KNOW that int must always be a constant,
-    # then you do not need trace that call at all (and just
-    # constant propagate the integer as is.)
-    assert isinstance(val, torch.SymInt), (
-        f"Expect val to be torch.SymInt but got val={val}"
-    )
-    return val.node.expr
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
 
 
 @register_lowering(aten.sym_stride.int)
 def sym_stride(a, dim):
     val = V.graph.current_node.meta["val"]
-    # See Note [Can val be an int?]
-    assert isinstance(val, torch.SymInt), (
-        f"Expect val to be torch.SymInt but got val={val}"
-    )
-    return val.node.expr
+    if isinstance(val, torch.SymInt):
+        return val.node.expr
+    else:
+        return int(val)
 
 
 @register_lowering(aten.sym_numel)
@@ -7030,7 +7307,11 @@ def triton_kernel_wrap_(
 
 
 @register_lowering(torch.ops.higher_order.cond, type_promotion_kind=None)
-def cond(pred, true_fn, false_fn, operands):
+def cond(
+    pred, true_fn, false_fn, operands
+) -> list[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]]:
+    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
+    # we run into memory cleanup issue
     if any(isinstance(x, IRNode) and is_triton(x) for x in [pred, *operands]):
         msg = "control flow operator: torch.cond."
         if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
@@ -7038,12 +7319,14 @@ def cond(pred, true_fn, false_fn, operands):
         V.graph.disable_cudagraphs_reason = msg
 
     result = ir.Conditional.create(pred, true_fn, false_fn, operands)
-    return list(map(TensorBox.create, result))
+    return list(map(TensorBox.create, result))  # pyrefly: ignore no-matching-overload
 
 
 @register_lowering(torch.ops.higher_order.while_loop, type_promotion_kind=None)
-def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
-    if any(
+def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs, stack_output=False):
+    # TODO: when graph_partition is enabled, skip - partitioning handles control flow
+    # we run into memory cleanup issue
+    if not config.graph_partition and any(
         isinstance(x, IRNode) and is_triton(x)
         for x in carried_inputs + additional_inputs
     ):
@@ -7052,25 +7335,108 @@ def while_loop(cond_fn, body_fn, carried_inputs, additional_inputs):
             msg = f"{msg} Found from : \n {stack_trace}"
         V.graph.disable_cudagraphs_reason = msg
 
-    def _map_output(out: Any):
-        if isinstance(out, TensorBox):
-            return out
-        elif isinstance(out, ir.StorageBox):
-            return TensorBox(out)
-        elif isinstance(out, ir.MultiOutput):
-            return TensorBox.create(out)
-        else:
-            raise RuntimeError(f"NYI unsupported output type: {type(out)}")
-
-    result = ir.WhileLoop.create(cond_fn, body_fn, carried_inputs, additional_inputs)
+    result = ir.WhileLoop.create(
+        cond_fn, body_fn, carried_inputs, additional_inputs, stack_output
+    )
     assert isinstance(result, Sequence)
-    return list(map(_map_output, result))
+    return list(map(ir.WhileLoop._maybe_wrap_as_tensor_box, result))
+
+
+register_lowering(
+    torch.ops.higher_order.while_loop_stack_output, type_promotion_kind=None
+)(functools.partial(while_loop, stack_output=True))
 
 
 @register_lowering(torch.ops.higher_order.invoke_subgraph, type_promotion_kind=None)
 def invoke_subgraph(subgraph_fn: ir.Subgraph, identifier: str, *operands):
     result = ir.InvokeSubgraph.create(subgraph_fn, *operands)
     return list(map(TensorBox.create, result))  # type: ignore[call-overload]
+
+
+def process_subgraph_nodes(graph_module: torch.fx.GraphModule, args: list[Any]):
+    """Process nodes from a FX graph by executing them through V.graph.
+
+    This is a common pattern for executing a subgraph's nodes:
+    - Placeholder nodes are mapped to the provided args
+    - Output nodes return their result
+    - Other nodes are executed via V.graph.run_node
+
+    """
+    output = None
+
+    for i, node in enumerate(graph_module.graph.nodes):
+        if node.op == "placeholder":
+            assert node not in V.graph.env
+            V.graph.env[node] = args[i]
+            continue
+        elif node.op == "output":
+            output_args, kwargs = V.graph.fetch_args_kwargs_from_env(node)
+            output = torch.fx.Interpreter.output(V.graph, node, output_args, kwargs)
+        else:
+            assert node not in V.graph.env
+            # Track current node for error diagnostics; restore after run_node to handle nested calls correctly
+            saved_current_node = V.graph.current_node
+            try:
+                V.graph.current_node = node
+                V.graph.env[node] = V.graph.run_node(node)
+            finally:
+                V.graph.current_node = saved_current_node
+
+    if output is None:
+        raise RuntimeError("No output node found in graph")
+
+    return output
+
+
+# Import the control_deps_op HOP for lowering
+from torch._inductor.fx_passes.control_dependencies import control_deps
+
+
+@register_lowering(control_deps, type_promotion_kind=None)
+def control_deps_op_lowering(additional_deps, subgraph_fn, *args):
+    """
+    Lower control_deps_op by ensuring dependencies are realized and tracking them.
+
+    The control_deps_op HOP makes dependencies explicit in the graph. During lowering:
+    1. Realize all additional dependencies to ensure they're computed
+    2. Execute the target operation normally
+    3. Track the dependencies for the scheduler
+    """
+    # Realize all additional dependencies
+    dep_names = []
+    for dep in additional_deps:
+        if not isinstance(dep, IRNode):
+            continue
+
+        dep.realize()
+        dep_names.append(dep.get_name())
+
+    original_args = V.graph.current_node.args
+    arg_offset = 2  # first two args (additional_deps, subgraph)
+    assert len(args) + arg_offset == len(original_args)
+
+    operation_len = len(V.graph.operations)
+    assert len(subgraph_fn.graph_module.graph.find_nodes(op="placeholder")) == len(args)
+
+    # Process subgraph nodes using the shared helper
+    output = process_subgraph_nodes(subgraph_fn.graph_module, list(args))
+
+    assert output is not None and additional_deps
+
+    # some operators, like wait_tensor, just return their input,
+    # so its more robust to add dep to the operation itself,
+    # otherwise you can have a cycle of
+    # a = coll
+    # b = control_deps(a, mm, ...)
+    # c = control_deps(b, wait, ...)
+    # if c == a, then you have a cycle.
+    for op in V.graph.operations[operation_len:]:
+        for dep_name in dep_names:
+            op_name = op.operation_name
+            assert op_name is not None
+            V.graph.additional_buffer_deps[op_name].add(dep_name)
+
+    return output
 
 
 @register_lowering(torch._higher_order_ops.invoke_quant, type_promotion_kind=None)
@@ -7143,26 +7509,93 @@ def _sink_tokens(tokens):
     return None
 
 
+@register_lowering(torch.ops.prims._make_token.default)
+def _make_token():
+    return None
+
+
 @register_lowering(torch.ops.higher_order.with_effects, type_promotion_kind=None)
 def with_effects(token, op, *args, **kwargs):
-    result = ir.EffectfulKernel.create(op, *args, **kwargs)
+    """
+    We lower the operator directly, and then we add StarDep dependencies to all
+    the newly created nodes in the graph.
+    """
+    from torch._higher_order_ops.effects import _get_effect, _get_schema
 
-    from torch._higher_order_ops.effects import get_effect_key
+    # Get effect type
+    effect_type = _get_effect(op)
+    if effect_type is None and op is torch.ops.higher_order.invoke_subgraph:
+        from torch._guards import InvokeSubgraphCache, TracingContext
 
-    effect_type = get_effect_key(op, args, kwargs)
-    assert effect_type is not None
-    effectful_kernel = V.graph.effectful_ops[effect_type]
+        tracing_ctx = TracingContext.try_get()
+        if tracing_ctx:
+            invoke_subgraph_cache = tracing_ctx.hop_dispatch_set_cache.get_cache(
+                torch.ops.higher_order.invoke_subgraph
+            )
+            if invoke_subgraph_cache:
+                assert isinstance(invoke_subgraph_cache, InvokeSubgraphCache)
+                # args[1] is identifier
+                effects = invoke_subgraph_cache.get_effects(args[1])
+                if effects:
+                    assert len(effects) == 1, "Multiple effects NYI"
+                    effect_type = next(iter(effects))
 
-    if result is None:
-        return (effectful_kernel,)
+    # Track operations before
+    operation_len = len(V.graph.operations)
 
-    result = pytree.tree_map_only(ir.MultiOutput, TensorBox.create, result)
-    # See [NOTE: with_effects return type]
-    # Only return `result` if it is a tuple, not list.
-    if not isinstance(result, tuple):
-        return (effectful_kernel, result)
+    # Lower the op
+    if op in lowerings:
+        result = lowerings[op](*args, **kwargs)
+        # Realize so that we can get the ops to show up in V.graph.operations
+        pytree.tree_map_only(TensorBox, lambda a: a.realize(), result)
     else:
-        return (effectful_kernel, *result)
+
+        def wrap_tensors(x):
+            return TensorBox.create(x) if isinstance(x, ir.IRNode) else x
+
+        result = pytree.tree_map(
+            wrap_tensors, ir.FallbackKernel.create(op, *args, **kwargs)
+        )
+
+    # Get all the operations created during the lowering above, and add StarDeps
+    # to the previous node with the same effect
+    assert len(V.graph.operations[operation_len:]) > 0, (
+        f"No operation nodes were generated when lowering effectful operator {op}."
+    )
+    if effect_type:
+        prev_effect_buffer = V.graph.effectful_ops.get(effect_type)
+        for new_op in V.graph.operations[operation_len:]:
+            # Patch has_side_effects to return True
+            new_op.has_side_effects = lambda: True  # pyrefly: ignore[missing-attribute]
+            if prev_effect_buffer:
+                op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
+                V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
+        # Update the effectful ops chain to point to the latest operation
+        V.graph.effectful_ops[effect_type] = (  # pyrefly: ignore[missing-attribute]
+            new_op  # pyrefly: ignore[unsupported-operation]
+        )
+
+    try:
+        args, kwargs = pytree.tree_map_only(
+            ir.TorchBindObject, lambda a: a.get_value(), (args, kwargs)
+        )
+        schema = _get_schema(op, args, kwargs)
+    except RuntimeError as e:
+        error_msg = str(e)
+        log.warning(
+            "Failed to get schema for %s: %s. Assuming list output", op, error_msg
+        )
+        if isinstance(result, (tuple, list)):
+            return (token, *result)
+        else:
+            return (token, result)
+
+    if len(schema.returns) == 0:
+        return (token, result)
+    elif len(schema.returns) == 1:
+        return (token, result)
+    else:
+        return (token, *result)
 
 
 from .comm_lowering import register_comm_lowerings
@@ -7188,9 +7621,8 @@ def prepare_softmax_online(x, dim):
         reduction_numel=rnumel,
     )
 
-    if (
-        num_split == 1
-        and V.graph.sizevars.size_hint(rnumel) >= config.unroll_reductions_threshold
+    if num_split == 1 and V.graph.sizevars.statically_known_geq(
+        rnumel, config.unroll_reductions_threshold
     ):
         max_tensor, sum_tensor = OnlineSoftmaxReduction.create(
             input_node=x, num_output=2, reduction_hint=hint, **kwargs

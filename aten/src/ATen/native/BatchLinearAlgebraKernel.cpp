@@ -2,6 +2,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/native/BatchLinearAlgebra.h>
 #include <ATen/native/LinearAlgebraUtils.h>
@@ -15,6 +16,8 @@
 #else
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
+
+#include <algorithm>
 #endif
 namespace at::native {
 
@@ -136,6 +139,59 @@ Tensor& cholesky_inverse_kernel_impl(Tensor& result, Tensor& infos, bool upper) 
   return result;
 }
 
+// This function returns complex-valued eigenvectors that is obtained from LAPACK GEEV's real-valued output
+// This function is also used for the MAGMA path because intermediate MAGMA's results live on CPU
+template <typename scalar_t>
+static void linalg_eig_make_complex_eigenvectors_cpu_impl(const Tensor& result, const Tensor& complex_values, const Tensor& real_vectors) {
+  // From GEEV documentation:
+  // Complex conjugate pairs of eigenvalues appear consecutively with the eigenvalue having the positive imaginary part first
+  // If the j-th eigenvalue is real, then v(j) = VR(:,j), the j-th column of VR.
+  // If the j-th and (j+1)-st eigenvalues form a complex conjugate pair, then v(j) = VR(:,j) + i*VR(:,j+1) and v(j+1) = VR(:,j) - i*VR(:,j+1).
+
+  auto batch_size = batchCount(real_vectors);
+  auto n = real_vectors.size(-1);
+  auto matrix_stride = matrixStride(real_vectors);
+
+  auto result_data = result.data_ptr<c10::complex<scalar_t>>();
+  auto real_vectors_data = real_vectors.const_data_ptr<scalar_t>();
+  auto values_data = complex_values.const_data_ptr<c10::complex<scalar_t>>();
+
+  for (auto b = decltype(batch_size){0}; b < batch_size; b++) {
+    const scalar_t* vecs = &real_vectors_data[b * matrix_stride];
+    c10::complex<scalar_t>* res = &result_data[b * matrix_stride];
+    const c10::complex<scalar_t>* vals = &values_data[b * n];
+    for (auto j = decltype(n){0}; j < n; j++) {
+      if (vals[j].imag() == 0.0) {  // eigenvalue is real, then v(j) = VR(:,j)
+        for (auto i = decltype(n){0}; i < n; i++) {
+          res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i], 0);
+        }
+      } else {
+        for (auto i = decltype(n){0}; i < n; i++) {
+          res[j * n + i] = c10::complex<scalar_t>(vecs[j * n + i],  vecs[(j+1) * n + i]);      // v(j)   = VR(:,j) + i*VR(:,j+1)
+          res[(j+1) * n + i] = c10::complex<scalar_t>(vecs[j * n + i], -vecs[(j+1) * n + i]);  // v(j+1) = VR(:,j) - i*VR(:,j+1)
+        }
+        j++;
+      }
+    }
+  }
+}
+
+// CPU dispatch kernel
+void linalg_eig_make_complex_eigenvectors_cpu(const Tensor& complex_vectors, const Tensor& complex_values, const Tensor& real_vectors) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_vectors.mT().is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(complex_values.is_contiguous());
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(real_vectors.mT().is_contiguous());
+
+  AT_DISPATCH_V2(
+    real_vectors.scalar_type(),
+    "linalg_eig_make_complex_eigenvectors_cpu",
+    AT_WRAP([&] {
+      linalg_eig_make_complex_eigenvectors_cpu_impl<scalar_t>(
+        complex_vectors, complex_values, real_vectors);
+    }),
+    AT_EXPAND(AT_FLOATING_TYPES));
+}
+
 /*
  LAPACK query functions return workspace size as floating point value, which means
  that it might not be accurately represented if it's size exceed mantissa of the
@@ -143,13 +199,13 @@ Tensor& cholesky_inverse_kernel_impl(Tensor& result, Tensor& infos, bool upper) 
  For more info see https://github.com/pytorch/pytorch/issues/145801#issuecomment-2631781776
 */
 template <typename T>
-static inline
+inline
 std::enable_if_t<std::is_floating_point_v<T>, int> lapack_work_to_int(const T val) {
     const auto next_after = std::nextafter(val, std::numeric_limits<T>::infinity());
     return std::max<int>(1, std::ceil(next_after));
 }
 template <typename T>
-static inline
+inline
 std::enable_if_t<c10::is_complex<T>::value, int> lapack_work_to_int(const T val) {
     return lapack_work_to_int(val.real());
 }
@@ -343,7 +399,7 @@ void linalg_eigh_kernel(const Tensor& eigenvalues, const Tensor& eigenvectors, c
   For further details, please see the LAPACK documentation for GEQRF.
 */
 template <typename scalar_t>
-static void apply_geqrf(const Tensor& input, const Tensor& tau) {
+void apply_geqrf(const Tensor& input, const Tensor& tau) {
 #if !AT_BUILD_WITH_LAPACK()
   TORCH_CHECK(
       false,
@@ -513,7 +569,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   auto n = A.size(-1);
   auto nrhs = B.size(-1);
   auto lda = std::max<int64_t>(1, m);
-  auto ldb = std::max<int64_t>(1, std::max(m, n));
+  auto ldb = std::max<int64_t>({static_cast<int64_t>(1), m, n});
   auto infos_data = infos.data_ptr<int>();
 
   // only 'gels' driver does not compute the rank
@@ -946,10 +1002,10 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
     }
   };
   // avoid overflow
-  float matrix_rank = float(std::min(m, n));
+  auto matrix_rank = std::min(m, n);
   // A heuristic tested on a 32 core/socket ICX system
   // https://github.com/pytorch/pytorch/pull/93037#discussion_r1090112948
-  int64_t chunk_size_per_thread = int64_t(
+  int64_t chunk_size_per_thread = static_cast<int64_t>(
       std::min(1.0, 3200.0 / (matrix_rank * matrix_rank * matrix_rank)));
   int64_t grain_size = chunk_size_per_thread * at::get_num_threads();
   at::parallel_for(0, batch_size, grain_size, loop);
@@ -1039,7 +1095,7 @@ void lu_solve_kernel(const Tensor& LU, const Tensor& pivots, const Tensor& B, Tr
 }
 
 template <typename scalar_t>
-static void apply_svd(const Tensor& A,
+void apply_svd(const Tensor& A,
                       const bool full_matrices,
                       const bool compute_uv,
                       const Tensor& U,
@@ -1165,6 +1221,13 @@ REGISTER_AVX2_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
 REGISTER_VSX_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
 REGISTER_ZVECTOR_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
 REGISTER_SVE256_DISPATCH(cholesky_inverse_stub, &cholesky_inverse_kernel_impl)
+
+REGISTER_ARCH_DISPATCH(linalg_eig_make_complex_eigenvectors_stub, DEFAULT, &linalg_eig_make_complex_eigenvectors_cpu)
+REGISTER_AVX512_DISPATCH(linalg_eig_make_complex_eigenvectors_stub, &linalg_eig_make_complex_eigenvectors_cpu)
+REGISTER_AVX2_DISPATCH(linalg_eig_make_complex_eigenvectors_stub, &linalg_eig_make_complex_eigenvectors_cpu)
+REGISTER_VSX_DISPATCH(linalg_eig_make_complex_eigenvectors_stub, &linalg_eig_make_complex_eigenvectors_cpu)
+REGISTER_ZVECTOR_DISPATCH(linalg_eig_make_complex_eigenvectors_stub, &linalg_eig_make_complex_eigenvectors_cpu)
+REGISTER_SVE256_DISPATCH(linalg_eig_make_complex_eigenvectors_stub, &linalg_eig_make_complex_eigenvectors_cpu)
 
 REGISTER_ARCH_DISPATCH(linalg_eig_stub, DEFAULT, &linalg_eig_kernel)
 REGISTER_AVX512_DISPATCH(linalg_eig_stub, &linalg_eig_kernel)

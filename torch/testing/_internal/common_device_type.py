@@ -9,10 +9,10 @@ import sys
 import threading
 import unittest
 from collections import namedtuple
-from collections.abc import Iterable, Sequence
+from collections.abc import Callable, Iterable, Sequence
 from enum import Enum
 from functools import partial, wraps
-from typing import Any, Callable, ClassVar, Optional, TypeVar, Union
+from typing import Any, ClassVar, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     is_privateuse1_backend_available,
     IS_REMOTE_GPU,
+    IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
     NATIVE_DEVICES,
@@ -45,6 +46,7 @@ from torch.testing._internal.common_utils import (
     TEST_MPS,
     TEST_WITH_ASAN,
     TEST_WITH_MIOPEN_SUGGEST_NHWC,
+    TEST_WITH_MTIA,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHINDUCTOR,
     TEST_WITH_TSAN,
@@ -389,8 +391,8 @@ class DeviceTypeTestBase(TestCase):
         return test.tolerance_overrides.get(dtype, tol(self.precision, self.rel_tol))
 
     def _apply_precision_override_for_test(self, test, param_kwargs):
-        dtype = param_kwargs["dtype"] if "dtype" in param_kwargs else None
-        dtype = param_kwargs["dtypes"] if "dtypes" in param_kwargs else dtype
+        dtype = param_kwargs.get("dtype")
+        dtype = param_kwargs.get("dtypes", dtype)
         if dtype:
             self.precision = self._get_precision_override(test, dtype)
             self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
@@ -628,8 +630,17 @@ class XPUTestBase(DeviceTypeTestBase):
     @classmethod
     def get_all_devices(cls):
         # currently only one device is supported on MPS backend
+        primary_device_idx = int(cls.get_primary_device().split(":")[1])
+        num_devices = torch.xpu.device_count()
+
         prim_device = cls.get_primary_device()
-        return [prim_device]
+        xpu_str = "xpu:{0}"
+        non_primary_devices = [
+            xpu_str.format(idx)
+            for idx in range(num_devices)
+            if idx != primary_device_idx
+        ]
+        return [prim_device] + non_primary_devices
 
     @classmethod
     def setUpClass(cls):
@@ -693,8 +704,13 @@ def get_device_type_test_bases():
 
     if IS_SANDCASTLE or IS_FBCODE:
         if IS_REMOTE_GPU:
-            # Skip if sanitizer is enabled
-            if not TEST_WITH_ASAN and not TEST_WITH_TSAN and not TEST_WITH_UBSAN:
+            # Skip if sanitizer is enabled or we're on MTIA machines
+            if (
+                not TEST_WITH_ASAN
+                and not TEST_WITH_TSAN
+                and not TEST_WITH_UBSAN
+                and not TEST_WITH_MTIA
+            ):
                 test_bases.append(CUDATestBase)
         else:
             test_bases.append(CPUTestBase)
@@ -1139,7 +1155,7 @@ class ops(_TestParametrizer):
                             tracked_input = get_tracked_input()
                             if PRINT_REPRO_ON_FAILURE and tracked_input is not None:
                                 e_tracked = Exception(  # noqa: TRY002
-                                    f"Caused by {tracked_input.type_desc} "
+                                    f"{str(e)}\n\nCaused by {tracked_input.type_desc} "
                                     f"at index {tracked_input.index}: "
                                     f"{_serialize_sample(tracked_input.val)}"
                                 )
@@ -1322,6 +1338,10 @@ def _has_sufficient_memory(device, size):
     else:
         effective_size = size
 
+    # don't try using all RAM on s390x, leave some for service processes
+    if IS_S390X:
+        effective_size = effective_size * 2
+
     if psutil.virtual_memory().available < effective_size:
         gc.collect()
     return psutil.virtual_memory().available >= effective_size
@@ -1366,8 +1386,9 @@ def largeTensorTest(size, device=None, inductor=TEST_WITH_TORCHINDUCTOR):
 
 
 class expectedFailure:
-    def __init__(self, device_type):
+    def __init__(self, device_type, dtype=None):
         self.device_type = device_type
+        self.dtype = dtype
 
     def __call__(self, fn):
         @wraps(fn)
@@ -1381,7 +1402,13 @@ class expectedFailure:
             else:
                 target_device_type = slf.device_type
 
-            if self.device_type is None or self.device_type == target_device_type:
+            target_dtype = kwargs.get("dtype", getattr(slf, "dtype", None))
+            device_matches = (
+                self.device_type is None or self.device_type == target_device_type
+            )
+            dtype_matches = self.dtype is None or self.dtype == target_dtype
+
+            if device_matches and dtype_matches:
                 try:
                     fn(slf, *args, **kwargs)
                 except Exception:
@@ -1395,14 +1422,20 @@ class expectedFailure:
 
 
 class onlyOn:
-    def __init__(self, device_type):
+    def __init__(self, device_type: Union[str, list]):
         self.device_type = device_type
 
     def __call__(self, fn):
         @wraps(fn)
         def only_fn(slf, *args, **kwargs):
-            if self.device_type != slf.device_type:
+            if slf.device_type not in self.device_type:
                 reason = f"Only runs on {self.device_type}"
+                if IS_SANDCASTLE or IS_FBCODE:
+                    print(
+                        f"Skipping {fn.__name__} on sandcastle for following reason: {reason}",
+                        file=sys.stderr,
+                    )
+                    return
                 raise unittest.SkipTest(reason)
 
             return fn(slf, *args, **kwargs)
@@ -1428,6 +1461,12 @@ class deviceCountAtLeast:
         def multi_fn(slf, devices, *args, **kwargs):
             if len(devices) < self.num_required_devices:
                 reason = f"fewer than {self.num_required_devices} devices detected"
+                if IS_SANDCASTLE or IS_FBCODE:
+                    print(
+                        f"Skipping {fn.__name__} on sandcastle for following reason: {reason}",
+                        file=sys.stderr,
+                    )
+                    return
                 raise unittest.SkipTest(reason)
 
             return fn(slf, devices, *args, **kwargs)
@@ -1489,7 +1528,7 @@ class precisionOverride:
         assert isinstance(d, dict), (
             "precisionOverride not given a dtype : precision dict!"
         )
-        for dtype in d.keys():
+        for dtype in d:
             assert isinstance(dtype, torch.dtype), (
                 f"precisionOverride given unknown dtype {dtype}"
             )
@@ -1699,6 +1738,10 @@ def expectedFailureHPU(fn):
 
 def expectedFailureMPS(fn):
     return expectedFailure("mps")(fn)
+
+
+def expectedFailureMPSComplex(fn):
+    return expectedFailure("mps", torch.complex64)(fn)
 
 
 def expectedFailureMPSPre15(fn):
@@ -1960,6 +2003,10 @@ def skipHPU(fn):
     return skipHPUIf(True, "test doesn't work on HPU backend")(fn)
 
 
+def skipXPU(fn):
+    return skipXPUIf(True, "test doesn't work on XPU backend")(fn)
+
+
 def skipPRIVATEUSE1(fn):
     return skipPRIVATEUSE1If(True, "test doesn't work on privateuse1 backend")(fn)
 
@@ -1991,7 +2038,11 @@ flex_attention_supported_platform = unittest.skipUnless(
     ),
     "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
 )
-if torch.version.hip and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
+if (
+    torch.version.hip
+    and torch.cuda.device_count() > 0
+    and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName
+):
     e4m3_type = torch.float8_e4m3fnuz
     e5m2_type = torch.float8_e5m2fnuz
     E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max

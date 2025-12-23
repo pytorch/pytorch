@@ -14,6 +14,7 @@
 #include <torch/nativert/kernels/HigherOrderKernel.h>
 #include <torch/nativert/kernels/KernelFactory.h>
 #include <torch/nativert/kernels/PrimKernelRegistry.h>
+#include <torch/nativert/kernels/TritonKernel.h>
 
 namespace torch::nativert {
 
@@ -130,6 +131,11 @@ ExecutionKernels KernelFactory::initializeNodeKernels(
     } else if (c10::starts_with(
                    node.target(), "torch.ops.higher_order.call_torchbind")) {
       nodeKernels.push_back(std::make_unique<CallTorchBindKernel>(&node));
+    } else if (c10::starts_with(
+                   node.target(),
+                   "torch.ops.higher_order.triton_kernel_wrapper_functional")) {
+      nodeKernels.push_back(
+          std::make_unique<TritonKernel>(&node, pytorchStreamReader.get()));
     } else if (
         c10::starts_with(
             node.target(),

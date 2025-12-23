@@ -38,9 +38,9 @@
 
 // The following files are implemented in a header-only way and are guarded by
 // test/cpp/aoti_abi_check
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
-#include <c10/util/complex.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/complex.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -175,6 +175,28 @@ AOTI_TORCH_EXPORT void aoti_torch_grad_mode_set_enabled(bool enabled);
 // Free the tensor object
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_delete_tensor_object(AtenTensorHandle tensor);
+
+// c10::IValue <int64_t> object conversion
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_int64_to_ivalue(int64_t val, C10IValueHandle* ivalue);
+
+// c10::IValue <const char** > object conversions
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_strlist_to_ivalue(
+    const char** val,
+    int64_t len,
+    C10IValueHandle* ivalue);
+
+// c10::IValue <const char* > object conversions
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_str_to_ivalue(const char* val, C10IValueHandle* ivalue);
+
+// c10::IValue <at::Tensor> object conversions
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_tensor_to_ivalue(AtenTensorHandle val, C10IValueHandle* ivalue);
+
+// Free the c10::IValue object
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_delete_c10_value_object(C10IValueHandle handle);
 
 // Get a pointer to the underlying storage data
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
@@ -578,6 +600,15 @@ aoti_torch_delete_cuda_stream_guard(CUDAStreamGuardHandle guard);
 
 AOTI_TORCH_EXPORT AOTITorchError
 aoti_torch_get_current_cuda_stream(int32_t device_index, void** ret_stream);
+
+// CUDA memory allocation using CUDACachingAllocator
+AOTI_TORCH_EXPORT AOTITorchError aoti_torch_cuda_caching_allocator_raw_alloc(
+    uint64_t nbytes,
+    void** ret_ptr // returns raw GPU memory pointer
+);
+
+AOTI_TORCH_EXPORT AOTITorchError
+aoti_torch_cuda_caching_allocator_raw_delete(void* ptr);
 
 #endif // USE_CUDA
 

@@ -6,6 +6,8 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 
+#include <algorithm>
+
 namespace at::functorch {
 
 typedef std::tuple<Tensor, std::optional<int64_t>> oneOutput;
@@ -39,7 +41,7 @@ Tensor vdot_decomp(const Tensor& A, const Tensor& B) {
 // NB: I wrote this like this because we *might* want its for a future matmul
 // batch rule that isn't decomposed...
 // "tv" = tensor @ vector
-static std::tuple<Tensor, std::optional<int64_t>> tv_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> tv_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   if (self_bdim && other_bdim) {
@@ -66,7 +68,7 @@ static std::tuple<Tensor, std::optional<int64_t>> tv_batch_rule(
   TORCH_INTERNAL_ASSERT(false, "can't get here");
 }
 
-static std::tuple<Tensor, std::optional<int64_t>> mv_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> mv_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -79,7 +81,7 @@ static std::tuple<Tensor, std::optional<int64_t>> mv_batch_rule(
   return tv_batch_rule(self, self_bdim, other, other_bdim);
 }
 
-static std::tuple<Tensor, std::optional<int64_t>> mm_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> mm_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -94,7 +96,7 @@ static std::tuple<Tensor, std::optional<int64_t>> mm_batch_rule(
   return std::make_tuple( at::matmul(self_, other_), 0 );
 }
 
-static std::tuple<Tensor, std::optional<int64_t>> bmm_batch_rule(
+std::tuple<Tensor, std::optional<int64_t>> bmm_batch_rule(
     const Tensor& self, std::optional<int64_t> self_bdim,
     const Tensor& other, std::optional<int64_t> other_bdim) {
   auto self_logical_rank = rankWithoutBatchDim(self, self_bdim);
@@ -176,7 +178,7 @@ struct LinalgCheckMatrixUnaryRuleHelper;
 
 template <char const *op_name, typename F, F Func, typename A, typename... T>
 struct LinalgCheckMatrixUnaryRuleHelper<op_name, F, Func, typelist<A, T...>> {
-  static inline Tensor check_and_reshape_input(const Tensor& tensor, std::optional<int64_t> batch_dim) {
+  static Tensor check_and_reshape_input(const Tensor& tensor, std::optional<int64_t> batch_dim) {
     TORCH_CHECK(rankWithoutBatchDim(tensor, batch_dim) >= 2, op_name, ": The input tensor A must have at least 2 dimensions.");
     return moveBatchDimToFront(tensor, batch_dim);
   }
@@ -222,7 +224,7 @@ struct LinalgCheckMatrixBinaryRuleHelper;
 
 template <char const *op_name, typename F, F Func, typename A, typename B, typename... T>
 struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>> {
-  static inline std::tuple<Tensor, Tensor> check_inputs_and_reshape_inputs(
+  static std::tuple<Tensor, Tensor> check_inputs_and_reshape_inputs(
       const Tensor& first, std::optional<int64_t> first_bdim,
       const Tensor& second, std::optional<int64_t> second_bdim) {
     TORCH_CHECK(rankWithoutBatchDim(first, first_bdim) >= 2,
@@ -250,7 +252,7 @@ struct LinalgCheckMatrixBinaryRuleHelper<op_name, F, Func, typelist<A, B, T...>>
   }
 };
 
-static void expect_at_least_rank(
+void expect_at_least_rank(
     const Tensor& tensor,
     std::optional<int64_t> tensor_bdim,
     int64_t expected_rank,
@@ -315,7 +317,7 @@ oneOutput linalg_lu_solve_batch_rule(
   const auto LU_num_batch_dims = rankWithoutBatchDim(LU_, LU_bdim) - LU_min_rank;
   const auto pivots_num_batch_dims = rankWithoutBatchDim(pivots_, pivots_bdim) - pivots_min_rank;
   const auto B_num_batch_dims = rankWithoutBatchDim(B_, B_bdim) - B_min_rank;
-  const auto max_num_batch_dims = std::max(std::max(LU_num_batch_dims, pivots_num_batch_dims), B_num_batch_dims);
+  const auto max_num_batch_dims = std::max({LU_num_batch_dims, pivots_num_batch_dims, B_num_batch_dims});
 
   LU_ = maybePadToLogicalRank(LU_, LU_bdim, max_num_batch_dims + LU_min_rank);
   pivots_ = maybePadToLogicalRank(pivots_, pivots_bdim, max_num_batch_dims + pivots_min_rank);
@@ -384,7 +386,7 @@ fourOutputs solve_ex_batch_rule(
 
   // NOTE [ solve_ex Batch Rule Contiguity ]
   // A determines whether or not linalg_solve takes an optimized path. We need the check on A_ to match the one run on
-  // A as BatchedTensor since it might have been saved by autograd (specifically by the jvp) and the autograd behvaior
+  // A as BatchedTensor since it might have been saved by autograd (specifically by the jvp) and the autograd behavior
   // differs based on whether or not the optimized path was taken
   const auto batched_A_was_contiguous = A_bdim.has_value() ? at::select(A, *A_bdim, 0).is_contiguous() : A.is_contiguous();
   if (batched_A_was_contiguous && !A.is_complex()) {
@@ -472,7 +474,7 @@ atol_rtol_tensor_batch_rule(
   return std::make_tuple(Func(input_, atol_, rtol_, hermitian), 0);
 }
 
-static std::tuple<Tensor, std::optional<int64_t>>
+std::tuple<Tensor, std::optional<int64_t>>
 pinv_batch_rule(
     const Tensor& input, std::optional<int64_t> input_bdim, const std::optional<Tensor>& atol,
     const std::optional<int64_t> atol_bdim, const std::optional<Tensor>& rtol,

@@ -11,7 +11,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <c10/macros/Macros.h>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
 // *************************************************************************
 // PROCESS GROUP collective communication API IS BEING CHANGED BETWEEN
 // versions 1.7 and 1.8.
@@ -1015,7 +1014,9 @@ class TORCH_API ProcessGroup : public torch::CustomClassHolder {
 
   // Backend classes for this ProcessGroup
   std::unordered_set<c10::DeviceType> deviceTypes_;
-  std::unordered_map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
+  // This mapping is ordered, as splitGroup must call split on the underlying
+  // backends in a consistent order.
+  std::map<c10::DeviceType, BackendType> deviceTypeToBackendType_;
   std::unordered_map<c10::DeviceType, c10::intrusive_ptr<Backend>>
       deviceTypeToBackend_;
   std::unordered_map<BackendType, c10::intrusive_ptr<Backend>>

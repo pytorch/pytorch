@@ -22,7 +22,7 @@ class ExportStatus:
     torch_export_strict: bool | None = None
     # Whether torch.export.export(..., strict=False) succeeds
     torch_export_non_strict: bool | None = None
-    # Whether torch.export._draft_export.draft_export() succeeds
+    # Whether torch.export.draft_export() succeeds
     torch_export_draft_export: bool | None = None
     # Whether decomposition succeeds
     decomposition: bool | None = None
@@ -47,7 +47,7 @@ def _format_export_status(status: ExportStatus) -> str:
         f"```\n"
         f"{_status_emoji(status.torch_export_non_strict)} Obtain model graph with `torch.export.export(..., strict=False)`\n"
         f"{_status_emoji(status.torch_export_strict)} Obtain model graph with `torch.export.export(..., strict=True)`\n"
-        f"{_status_emoji(status.torch_export_draft_export)} Obtain model graph with `torch.export._draft_export.draft_export`\n"
+        f"{_status_emoji(status.torch_export_draft_export)} Obtain model graph with `torch.export.draft_export`\n"
         f"{_status_emoji(status.decomposition)} Decompose operators for ONNX compatibility\n"
         f"{_status_emoji(status.onnx_translation)} Translate the graph into ONNX\n"
         f"{_status_emoji(status.onnx_checker)} Run `onnx.checker` on the ONNX model\n"
@@ -149,7 +149,7 @@ def create_torch_export_error_report(
     *,
     export_status: ExportStatus,
     profile_result: str | None,
-):
+) -> None:
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# PyTorch ONNX Conversion Error Report\n\n")
         f.write(_format_export_status(export_status))
@@ -175,7 +175,7 @@ def create_onnx_export_report(
     model: ir.Model | None = None,
     registry: _registration.ONNXRegistry | None = None,
     verification_result: str | None = None,
-):
+) -> None:
     with open(filename, "w", encoding="utf-8") as f:
         f.write("# PyTorch ONNX Conversion Report\n\n")
         f.write(_format_export_status(export_status))

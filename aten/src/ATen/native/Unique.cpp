@@ -124,7 +124,7 @@ struct IsUnique {};
 
 template <typename scalar_t>
 struct IsUnique<scalar_t, false> {
-  inline bool operator() (scalar_t* data_ptr, int64_t i) {
+  bool operator() (scalar_t* data_ptr, int64_t i) {
     if (i == 0) { return true; }
     return c10::load(&data_ptr[i]) != c10::load(&data_ptr[i - 1]);
   }
@@ -132,7 +132,7 @@ struct IsUnique<scalar_t, false> {
 
 template <typename scalar_t>
 struct IsUnique<scalar_t, true> {
-  inline bool operator() (scalar_t* data_ptr, int64_t i) {
+  bool operator() (scalar_t* data_ptr, int64_t i) {
     if (i == 0) { return true; }
     return (c10::load(&data_ptr[i]) != c10::load(&data_ptr[i - 1]))
         && !(_isnan(data_ptr[i]) && _isnan(data_ptr[i - 1]));

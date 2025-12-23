@@ -13,6 +13,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TEST_WITH_DEV_DBG_ASAN
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     with_comms,
 )
@@ -167,7 +168,7 @@ class TestEmbeddingOp(DTensorTestBase):
         self._run_embedding_op_test(mesh, 0, [6, 7, 6], 13, 22)
         self._run_embedding_op_test(mesh, 0, [34], 15, 14, padding_idx=10)
 
-        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+        from torch.distributed.tensor.placement_types import _MaskPartial
 
         # test collectives
         embedding_mod = torch.nn.Embedding(10, 20, device=self.device_type)
@@ -191,7 +192,7 @@ class TestEmbeddingOp(DTensorTestBase):
         inp = torch.randint(0, 10, (4, 4), device=self.device_type)
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
 
-        from torch.distributed.tensor._ops._embedding_ops import _MaskPartial
+        from torch.distributed.tensor.placement_types import _MaskPartial
 
         # case 1: two embeddings with the same shape, thus sharing the underlying _MaskPartial
         # and MaskBuffer, because of cache hit from sharding propagation
@@ -227,6 +228,10 @@ class TestEmbeddingOp(DTensorTestBase):
         # not equal because of different logical_shape, despite of same logical_dim_size
         self.assertNotEqual(partial_placement1, partial_placement3)
 
+
+TestEmbeddingOpWithLocalTensor = create_local_tensor_test_class(
+    TestEmbeddingOp,
+)
 
 if __name__ == "__main__":
     run_tests()
