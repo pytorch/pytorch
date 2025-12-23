@@ -2734,7 +2734,7 @@ def get_innermost_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
     return get_proxy_mode()
 
 
-def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
+def get_proxy_mode() -> ProxyTorchDispatchMode | None:
     """
     Current the currently active proxy tracing mode, or None if
     we are not currently tracing.  This includes pre-dispatch proxy
@@ -2747,7 +2747,7 @@ def get_proxy_mode() -> Optional[ProxyTorchDispatchMode]:
     assert pre_dispatch_mode is None or mode is None, (
         f"pre_dispatch_mode={pre_dispatch_mode}, mode={mode}"
     )
-    return pre_dispatch_mode or mode
+    return pre_dispatch_mode or mode  # pyrefly: ignore[bad-return]
 
 
 def handle_sym_dispatch(
@@ -2832,7 +2832,9 @@ def _set_unbacked_bindings(out: object, out_proxy: _NestedProxys) -> None:
     # will fail.  Very strange, it probably isn't right for them to be using
     # two fake modes there...
     fake_mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
-    if fake_mode and fake_mode.shape_env:
-        if symbol_to_path := compute_unbacked_bindings(fake_mode.shape_env, out):
+    if fake_mode and fake_mode.shape_env:  # pyrefly: ignore[missing-attribute]
+        if symbol_to_path := compute_unbacked_bindings(
+            fake_mode.shape_env, out
+        ):  # pyrefly: ignore[bad-argument-type]
             assert isinstance(out_proxy, Proxy), out_proxy
             out_proxy.node.meta["unbacked_bindings"] = symbol_to_path
