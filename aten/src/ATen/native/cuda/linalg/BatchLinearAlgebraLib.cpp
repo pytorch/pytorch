@@ -78,12 +78,6 @@ void apply_ldl_factor_cusolver(
     const Tensor& pivots,
     const Tensor& info,
     bool upper) {
-#if !defined(USE_LINALG_SOLVER)
-  TORCH_CHECK(
-      false,
-      "Calling torch.linalg.ldl_factor on a CUDA tensor requires compiling ",
-      "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
-#else
   auto batch_size = batchCount(A);
   auto n = cuda_int_cast(A.size(-2), "A.size(-2)");
   auto lda = cuda_int_cast(A.stride(-1), "A.stride(-1)");
@@ -118,7 +112,6 @@ void apply_ldl_factor_cusolver(
         lwork,
         info_working_ptr);
   }
-#endif
 }
 
 template <typename scalar_t>
@@ -246,8 +239,6 @@ void ldl_solve_cusolver(
         apply_ldl_solve_cusolver<scalar_t>(LD, pivots, B, upper);
       });
 }
-
-#if defined(USE_LINALG_SOLVER)
 
 // call cusolver gesvd function to calculate svd
 template<typename scalar_t>
@@ -1835,7 +1826,5 @@ void lu_solve_looped_cusolver(const Tensor& LU, const Tensor& pivots, const Tens
     }
   });
 }
-
-#endif  // USE_LINALG_SOLVER
 
 } // namespace at::native
