@@ -46,6 +46,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
 )
 
 
@@ -63,6 +64,7 @@ if TEST_WITH_DEV_DBG_ASAN:
 device_type = (
     acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
 )
+device_name = "hip" if TEST_WITH_ROCM else "cuda"
 
 
 class MyModel(nn.Module):
@@ -882,7 +884,7 @@ class TestFSDPMiscMultiThread(FSDPTestMultiThread):
         context = (
             (
                 self.assertRaisesRegex(
-                    ValueError, f"Inconsistent.*cuda:{self.rank} vs cuda:0"
+                    ValueError, f"Inconsistent.*{device_name}:{self.rank} vs {device_name}:0"
                 )
             )
             if self.rank != 0
@@ -1061,8 +1063,8 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         inp = torch.randn((2, 10))
         with self.assertRaisesRegex(
             RuntimeError,
-            "An FSDP-managed module unexpectedly has parameters on cpu. Make "
-            "sure to move the module to cuda:0 before training.",
+            f"An FSDP-managed module unexpectedly has parameters on cpu. Make "
+            f"sure to move the module to {device_name}:0 before training.",
         ):
             fsdp_model(inp)
 
@@ -1073,9 +1075,9 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
         inp = torch.randn((2, 10))
         with self.assertRaisesRegex(
             RuntimeError,
-            "An FSDP-managed module with parameter CPU offloading enabled has "
-            "parameters on cuda:0. Make sure to not move the module from CPU "
-            "when offloading parameters.",
+            f"An FSDP-managed module with parameter CPU offloading enabled has "
+            f"parameters on {device_name}:0. Make sure to not move the module from CPU "
+            f"when offloading parameters.",
         ):
             fsdp_model(inp)
 
