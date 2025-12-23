@@ -3,7 +3,7 @@
 
 namespace c10 {
 
-void* Stream::data_ptr() const {
+void* Stream::stream_handle() const {
   impl::VirtualGuardImpl impl{device_.type()};
   return impl.getStreamHandle(*this);
 }

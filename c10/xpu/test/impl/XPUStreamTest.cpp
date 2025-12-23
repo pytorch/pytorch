@@ -108,10 +108,10 @@ TEST(XPUStreamTest, GenericStream) {
   EXPECT_EQ(xpu_stream, wrapped_stream);
   EXPECT_EQ(
       (sycl::queue*)xpu_stream,
-      reinterpret_cast<sycl::queue*>(generic_stream.data_ptr()));
+      reinterpret_cast<sycl::queue*>(generic_stream.stream_handle()));
   EXPECT_EQ(
       &(xpu_stream.queue()),
-      reinterpret_cast<sycl::queue*>(generic_stream.data_ptr()));
+      reinterpret_cast<sycl::queue*>(generic_stream.stream_handle()));
 }
 
 static void thread_fun(std::optional<c10::xpu::XPUStream>& cur_thread_stream) {

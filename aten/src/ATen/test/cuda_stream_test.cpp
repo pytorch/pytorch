@@ -96,10 +96,10 @@ TEST(TestStream, GenericStream) {
   EXPECT_EQ(cuda_stream, wrapped_stream);
   EXPECT_EQ(
       (cudaStream_t)cuda_stream,
-      reinterpret_cast<cudaStream_t>(generic_stream.data_ptr()));
+      reinterpret_cast<cudaStream_t>(generic_stream.stream_handle()));
   EXPECT_EQ(
       cuda_stream.stream(),
-      reinterpret_cast<cudaStream_t>(generic_stream.data_ptr()));
+      reinterpret_cast<cudaStream_t>(generic_stream.stream_handle()));
 }
 
 // Verifies streams are set properly

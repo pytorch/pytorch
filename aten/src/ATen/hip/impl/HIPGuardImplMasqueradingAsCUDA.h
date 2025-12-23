@@ -100,6 +100,10 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
     setCurrentHIPStreamMasqueradingAsCUDA(cs);
     return old_stream.unwrap();
   }
+  void* getStreamHandle(const Stream s) const override {
+    HIPStreamMasqueradingAsCUDA stream{s};
+    return reinterpret_cast<void*>(stream.stream());
+  }
   DeviceIndex deviceCount() const noexcept override {
     int deviceCnt;
     hipError_t _err;
