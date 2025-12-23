@@ -4968,11 +4968,12 @@ print(value, end="")
         uuids = subprocess.check_output(cmd, shell=True, text=True).strip().split("\n")
         uuids = [s.strip() for s in uuids]
         raw_uuids = torch.cuda._raw_device_uuid_amdsmi()
+        # Verify each UUID from rocminfo is found in AMDSMI output
         for uuid in uuids:
-            matching = True
-            if not any(uuid in raw_id for raw_id in raw_uuids):
-                matching = False
-        self.assertEqual(True, matching)
+            self.assertTrue(
+                any(uuid in raw_id for raw_id in raw_uuids),
+                f"UUID {uuid} from rocminfo not found in AMDSMI output: {raw_uuids}",
+            )
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     @unittest.skipIf(not TEST_WITH_ROCM, "amdsmi specific test")
