@@ -2096,11 +2096,14 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
         N = 10
         temperature = 0.8
-        row = torch.arange(1, N + 1, dtype=torch.float, device=GPU_TYPE).log() * temperature
-        expected_distributed = []
+        row = (
+            torch.arange(1, N + 1, dtype=torch.float, device=GPU_TYPE).log()
+            * temperature
+        )
+        expected_distribution = []
         tot_val = N * (N + 1) / 2
         for i in range(1, N + 1):
-            expected_distributed.append(float(i) / tot_val)
+            expected_distribution.append(float(i) / tot_val)
 
         # Item 0 expect to appear M / (1 + 2 +...+ N) times. Make M large enough
         # so the test is less flaky.
@@ -2110,13 +2113,14 @@ class TestPatternMatcherLogging(LoggingTestCase):
         output = sample(logits, temperature=temperature)
         stat = (torch.bincount(output.flatten()) / M).tolist()
 
-        for expected, actual in zip(expected_distributed, stat):
+        for expected, actual in zip(expected_distribution, stat):
             tol = 0.1
             ratio = actual / expected
 
             self.assertTrue(abs(ratio - 1) < tol, f"{expected} v.s. {actual}")
 
         self.assertTrue(counters["inductor"]["apply_gumbel_max_trick"] == 1)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:

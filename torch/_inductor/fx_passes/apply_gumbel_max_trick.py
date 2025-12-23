@@ -1,17 +1,11 @@
-import torch
-from .pre_grad import apply_gumbel_max_trick_pass
-from ..pattern_matcher import (
-    CallFunction,
-    CallMethod,
-    Arg,
-    KeywordArg,
-    CallFunctionVarArgs,
-    CallModuleVarArgs,
-    Match,
-    register_graph_pattern,
-)
 import operator
+
+import torch
 from torch._dynamo.utils import counters
+
+from ..pattern_matcher import CallFunction, KeywordArg, Match, register_graph_pattern
+from .pre_grad import apply_gumbel_max_trick_pass
+
 
 @register_graph_pattern(
     CallFunction(
@@ -26,6 +20,7 @@ from torch._dynamo.utils import counters
         dim=-1,
         keepdim=True,
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=apply_gumbel_max_trick_pass,
 )
 def apply_gumbel_max_trick(match: Match, softmax, rand_exp):
@@ -33,7 +28,18 @@ def apply_gumbel_max_trick(match: Match, softmax, rand_exp):
         return
 
     logits = softmax.args[0]
-    if rand_exp.op != "call_method" or rand_exp.target != "exponential_" or len(rand_exp.users) != 1:
+    if (
+        rand_exp.op != "call_method"
+        or rand_exp.target != "exponential_"
+        or len(rand_exp.users) != 1
+    ):
+        return
+
+    if (
+        softmax.op != "call_function"
+        or softmax.target != torch.softmax
+        or len(softmax.users) != 1
+    ):
         return
 
     empty_node, rate = rand_exp.args
@@ -52,6 +58,7 @@ def apply_gumbel_max_trick(match: Match, softmax, rand_exp):
         log = graph.call_function(torch.log, (rand_exp,))
         gumbel_noise = graph.call_function(operator.neg, (log,))
         argmax_input = graph.call_function(operator.add, (logits, gumbel_noise))
+        # pyrefly: ignore [missing-attribute]
         argmax.args[0].replace_all_uses_with(argmax_input)
 
     # erase nodes
