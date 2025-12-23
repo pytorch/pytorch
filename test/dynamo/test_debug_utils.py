@@ -1,11 +1,16 @@
 # Owner(s): ["module: dynamo"]
 
 import os
+import subprocess
 from unittest.mock import patch
 
 import torch
 from torch._dynamo import debug_utils
-from torch._dynamo.debug_utils import aot_graph_input_parser, generate_env_vars_string
+from torch._dynamo.debug_utils import (
+    _cuda_system_info_comment,
+    aot_graph_input_parser,
+    generate_env_vars_string,
+)
 from torch._dynamo.test_case import TestCase
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
@@ -77,6 +82,44 @@ def forward(self, x_1):
 """,
             env_strings,
         )
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("subprocess.check_output")
+    def test_cuda_system_info_nvcc_file_not_found(self, mock_check_output, mock_cuda):
+        """Test that FileNotFoundError from nvcc is handled gracefully."""
+        # Clear the cache to ensure fresh call
+        _cuda_system_info_comment.cache_clear()
+        mock_check_output.side_effect = FileNotFoundError("nvcc not found")
+
+        result = _cuda_system_info_comment()
+        self.assertIn("nvcc not found", result)
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("subprocess.check_output")
+    def test_cuda_system_info_nvcc_permission_error(self, mock_check_output, mock_cuda):
+        """Test that PermissionError from nvcc is handled gracefully.
+
+        This can happen on ROCm docker images where nvcc exists but is not
+        executable, causing a PermissionError that should not crash the
+        entire inference pipeline.
+        """
+        _cuda_system_info_comment.cache_clear()
+        mock_check_output.side_effect = PermissionError("Permission denied: 'nvcc'")
+
+        result = _cuda_system_info_comment()
+        self.assertIn("nvcc not found", result)
+
+    @patch("torch.cuda.is_available", return_value=True)
+    @patch("subprocess.check_output")
+    def test_cuda_system_info_nvcc_called_process_error(
+        self, mock_check_output, mock_cuda
+    ):
+        """Test that CalledProcessError from nvcc is handled gracefully."""
+        _cuda_system_info_comment.cache_clear()
+        mock_check_output.side_effect = subprocess.CalledProcessError(1, "nvcc")
+
+        result = _cuda_system_info_comment()
+        self.assertIn("nvcc not found", result)
 
 
 class TestDebugUtilsDevice(TestCase):
