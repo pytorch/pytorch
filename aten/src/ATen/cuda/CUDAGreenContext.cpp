@@ -91,16 +91,18 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
   }
 
   // Implement move operations
-  GreenContext::GreenContext(GreenContext&& other) noexcept{
 #if HAS_CUDA_GREEN_CONTEXT()
-    device_id_ = std::exchange(other.device_id_, -1);
-    green_ctx_ = std::exchange(other.green_ctx_, nullptr);
-    context_ = std::exchange(other.context_, nullptr);
-    parent_stream_ = std::exchange(other.parent_stream_, nullptr);
-#else
-    TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
-#endif
+  GreenContext::GreenContext(GreenContext&& other) noexcept
+      : device_id_(std::exchange(other.device_id_, -1)),
+        green_ctx_(std::exchange(other.green_ctx_, nullptr)),
+        context_(std::exchange(other.context_, nullptr)),
+        parent_stream_(std::exchange(other.parent_stream_, nullptr)) {
   }
+#else
+  GreenContext::GreenContext(GreenContext&& other) {
+    TORCH_CHECK(false, "Green Context move constructor is only supported on CUDA 12.8+!");
+  }
+#endif
 
   GreenContext& GreenContext::operator=(GreenContext&& other) noexcept{
 #if HAS_CUDA_GREEN_CONTEXT()
