@@ -73,7 +73,9 @@ def generate_print_python(
 
     # First arg is the format string
     if not codegen_args:
-        raise ValueError("generate_print_python requires a format string as the first positional argument")
+        raise ValueError(
+            "generate_print_python requires a format string as the first positional argument"
+        )
     format_str: str = codegen_args[0]
 
     if codegen_kwargs:
