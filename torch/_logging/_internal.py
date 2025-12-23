@@ -506,10 +506,8 @@ def set_logs(
                     log_registry.log_alias_to_log_qnames.get(alias, alias), val
                 )
             elif _is_valid_module(alias):
-                # Get the module and all its submodules if it's a package
                 found_modules = _get_module_and_submodules(alias)
                 if found_modules:
-                    # Register and enable logging for all modules
                     for module_name in found_modules:
                         if not _has_registered_parent(module_name):
                             log_registry.register_log(module_name, module_name)
@@ -874,34 +872,23 @@ def _get_module_and_submodules(qname):
     Returns:
         A list of fully qualified module names, or None if the module doesn't exist
     """
-    try:
-        spec = importlib.util.find_spec(qname)
-        if spec is None:
-            return None
-
-        modules = [qname]
-
-        # Check if this is a package (has submodules)
-        if spec.submodule_search_locations is not None:
-            # It's a package, walk through all submodules
-            try:
-                # Import the package to be able to walk it
-                package = importlib.import_module(qname)
-                if hasattr(package, "__path__"):
-                    # Use pkgutil.walk_packages to find all submodules
-                    for importer, modname, ispkg in pkgutil.walk_packages(
-                        path=package.__path__,
-                        prefix=qname + ".",
-                        onerror=lambda x: None,  # Ignore errors when walking packages
-                    ):
-                        modules.append(modname)
-            except Exception:
-                # If we can't import or walk the package, just use the package itself
-                pass
-
-        return modules
-    except (ImportError, ValueError, AttributeError):
+    spec = importlib.util.find_spec(qname)
+    if spec is None:
         return None
+
+    modules = [qname]
+
+    if spec.submodule_search_locations is not None:
+        package = importlib.import_module(qname)
+        if hasattr(package, "__path__"):
+            for importer, modname, ispkg in pkgutil.walk_packages(
+                path=package.__path__,
+                prefix=qname + ".",
+                onerror=lambda x: None,
+            ):
+                modules.append(modname)
+
+    return modules
 
 
 def _update_log_state_from_env() -> None:
