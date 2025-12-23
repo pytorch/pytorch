@@ -202,9 +202,10 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results to OSS benchmark database for the dashboard
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@reland-7619
         with:
           benchmark-results-dir: vllm-project/vllm/benchmarks/results
           benchmark-name: 'PyTorch x vLLM benchmark'
           dry-run: false
           github-token: ${{ secrets.GITHUB_TOKEN }}
+          if-no-files-found: error
