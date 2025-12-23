@@ -35,73 +35,53 @@ class TestHopPrint(TestCase):
     def test_args_kwargs_print(self):
         """Test print with kwargs, positional args, and mixed args/kwargs."""
 
-        # Test kwargs only
-        def f_kwargs(x):
+        # Test positional args, kwargs, and mixed only
+        def f(x):
             x = x + x
-            torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
-            x = x * x
-            return x
-
-        # Test positional args only
-        def f_args(x):
-            x = x + x
-            torch._higher_order_ops.print("moo {} {}", 1, 2)
-            x = x * x
-            return x
-
-        # Test mixed args and kwargs
-        def f_mixed(x):
-            x = x + x
-            torch._higher_order_ops.print("moo {} {y}", 1, y=2)
+            torch._higher_order_ops.print("moo kwargs {x} {y}", x=1, y=2)
+            torch._higher_order_ops.print("moo args {} {}", 1, 2)
+            torch._higher_order_ops.print("moo mixed {} {y}", 1, y=2)
             x = x * x
             return x
 
         x = torch.randn(3, 3)
 
-        # Test all three variants produce same output
-        for f in [f_kwargs, f_args, f_mixed]:
-            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-                f(x)
-                printed_output = mock_stdout.getvalue().strip()
-            self.assertEqual(printed_output, "moo 1 2")
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f(x)
+            printed_output = mock_stdout.getvalue().strip()
+        self.assertEqual(printed_output, "moo kwargs 1 2\nmoo args 1 2\nmoo mixed 1 2")
 
-            # Test with make_fx
-            fx_f = make_fx(f)(x)
-            new_inp = torch.randn(3, 3)
+        # Test with make_fx
+        fx_f = make_fx(f)(x)
+        new_inp = torch.randn(3, 3)
 
-            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-                fx_f(new_inp)
-                fx_printed_output = mock_stdout.getvalue().strip()
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            fx_f(new_inp)
+            fx_printed_output = mock_stdout.getvalue().strip()
 
-            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-                f(new_inp)
-                ori_printed_output = mock_stdout.getvalue().strip()
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f(new_inp)
+            ori_printed_output = mock_stdout.getvalue().strip()
 
-            self.assertEqual(ori_printed_output, fx_printed_output)
+        self.assertEqual(ori_printed_output, fx_printed_output)
 
     def test_args_kwargs_with_tensor(self):
         """Test print with args/kwargs including tensors."""
 
         # Test with kwargs
-        def f_kwargs(x):
+        def f(x):
             x = x + x
             torch._higher_order_ops.print("tensor: {t} value: {v}", t=x, v=42)
-            return x
-
-        # Test with positional args
-        def f_args(x):
-            x = x + x
             torch._higher_order_ops.print("tensor: {} value: {}", x, 42)
             return x
 
         x = torch.tensor([1.0, 2.0, 3.0])
-        expected = f"tensor: {x + x} value: 42"
+        expected = f"tensor: {x + x} value: 42\ntensor: {x + x} value: 42"
 
-        for f in [f_kwargs, f_args]:
-            with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-                f(x)
-                printed_output = mock_stdout.getvalue().strip()
-            self.assertEqual(printed_output, expected)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            f(x)
+            printed_output = mock_stdout.getvalue().strip()
+        self.assertEqual(printed_output, expected)
 
     def test_print_with_proxy_graph(self):
         """Test print with both kwargs and positional args in proxy graph."""
@@ -147,30 +127,23 @@ def forward(self, arg0_1):
     def test_print_with_side_effect(self):
         """Test print with kwargs and positional args with side effects."""
 
-        class M_kwargs(torch.nn.Module):
+        class M(torch.nn.Module):
             def forward(self, x):
                 torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
                 res = x + x
-                torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
+                torch._higher_order_ops.print("values {} {}", 3, res)
                 return (res,)
 
-        class M_args(torch.nn.Module):
-            def forward(self, x):
-                torch._higher_order_ops.print("values {} {}", 1, 2)
-                res = x + x
-                torch._higher_order_ops.print("values {} {}", 3, 4)
-                return (res,)
 
         inputs = (torch.randn(3),)
 
         # With functionalization, it should appear wrapped with with_effects()
-        for M in [M_kwargs, M_args]:
-            gm, gs = aot_export_module(M(), inputs, trace_joint=False)
-            self.assertEqual(len(gs.input_tokens), 1)
-            self.assertEqual(len(gs.output_tokens), 1)
+        gm, gs = aot_export_module(M(), inputs, trace_joint=False)
+        self.assertEqual(len(gs.input_tokens), 1)
+        self.assertEqual(len(gs.output_tokens), 1)
 
         # Check detailed output for kwargs version
-        gm, gs = aot_export_module(M_kwargs(), inputs, trace_joint=False)
+        gm, gs = aot_export_module(M(), inputs, trace_joint=False)
         self.assertExpectedInline(
             str(gm.code).strip(),
             """\
@@ -179,8 +152,8 @@ def forward(self, arg0_1, arg1_1):
 arg0_1 = None
     getitem = with_effects[0];  with_effects = None
     add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  \
-getitem = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'values {} {}', 3, add);\
+  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     return (getitem_2, add)""",
         )
@@ -273,59 +246,40 @@ x = add_1, y = add_2);  getitem = None
     def test_reorder_print_no_graph_break(self, backend):
         """Test print with kwargs and positional args across different backends."""
 
-        # Test with kwargs
-        def f_kwargs(x):
+        # Test with kwargs, args, and mixed
+        def f(x):
             x1 = x + x
-            torch._higher_order_ops.print("moo {x}", x=x1)
+            torch._higher_order_ops.print("moo kwargs {x}", x=x1)
             x2 = x1 * x1
-            torch._higher_order_ops.print("moo {x}", x=x2)
-            x3 = x2 + x2
-            return (x1, x3)
-
-        # Test with positional args
-        def f_args(x):
-            x1 = x + x
-            torch._higher_order_ops.print("value: {}", x1)
-            x2 = x1 * x1
-            torch._higher_order_ops.print("values: {} {}", x1, x2)
+            torch._higher_order_ops.print("moo args {}", x2)
             x3 = x2 + x2
             return (x1, x3)
 
         x = torch.randn(3, 3)
 
         # Test kwargs version
-        opt_f_kwargs = torch.compile(backend=backend, fullgraph=True)(f_kwargs)
+        opt_f = torch.compile(backend=backend, fullgraph=True)(f)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            opt_out = opt_f_kwargs(x)
+            opt_out = opt_f(x)
             printed_output = mock_stdout.getvalue().strip()
-            orig_out = f_kwargs(x)
+            orig_out = f(x)
 
         self.assertEqual(
             printed_output,
-            f"moo {x * 2}\nmoo {x * 2 * x * 2}",
+            f"moo kwargs {x * 2}\nmoo args {x * 2 * x * 2}",
         )
         self.assertEqual(orig_out, opt_out)
 
-        # Test args version
-        opt_f_args = torch.compile(backend=backend, fullgraph=True)(f_args)
-        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            opt_f_args(x)
-            printed_output = mock_stdout.getvalue().strip()
-
-        x1_expected = x * 2
-        x2_expected = x1_expected * x1_expected
-        expected = f"value: {x1_expected}\nvalues: {x1_expected} {x2_expected}"
-        self.assertEqual(printed_output, expected)
 
         # Test recompilation with different input shape
         x_new = torch.randn(2, 2)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
-            opt_f_kwargs(x_new)
+            opt_f(x_new)
             printed_output = mock_stdout.getvalue().strip()
 
         self.assertEqual(
             printed_output,
-            f"moo {x_new * 2}\nmoo {x_new * 2 * x_new * 2}",
+            f"moo kwargs {x_new * 2}\nmoo args {x_new * 2 * x_new * 2}",
         )
 
     @parametrize("backend", ["eager", "aot_eager", "inductor"])
@@ -359,27 +313,21 @@ x = add_1, y = add_2);  getitem = None
         which is more efficient and avoids unnecessary overhead.
         """
 
-        # Test with kwargs
-        def f_kwargs(x):
+        # Test with kwargs, args
+        def f(x):
             torch._higher_order_ops.print("value: {val}", val=x)
             res = x + x
-            return res
-
-        # Test with positional args
-        def f_args(x):
             torch._higher_order_ops.print("values: {} {}", x, 42)
-            res = x + x
             return res
 
         inputs = (torch.randn(2, 3),)
 
-        for f in [f_kwargs, f_args]:
-            # Compile and get the generated code
-            compiled_f = torch.compile(f, backend="inductor")
-            _, codes = run_and_get_code(compiled_f, *inputs)
+        # Compile and get the generated code
+        compiled_f = torch.compile(f, backend="inductor")
+        _, codes = run_and_get_code(compiled_f, *inputs)
 
-            # Concatenate all generated code chunks to simplify assertions
-            merged_code = "\n".join(codes)
+        # Concatenate all generated code chunks to simplify assertions
+        merged_code = "\n".join(codes)
 
         # Verify that the merged code uses python print
         self.assertIn(
