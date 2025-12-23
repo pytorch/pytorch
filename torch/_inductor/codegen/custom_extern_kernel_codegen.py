@@ -25,12 +25,13 @@ Usage:
 
 from __future__ import annotations
 
-from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from .. import ir
 
     # Type alias for codegen function signature (only used for type checking)
@@ -73,7 +74,9 @@ def generate_print_python(
 
     # First arg is the format string
     if not codegen_args:
-        raise ValueError("generate_print_python requires a format string as the first positional argument")
+        raise ValueError(
+            "generate_print_python requires a format string as the first positional argument"
+        )
     format_str: str = codegen_args[0]
 
     if codegen_kwargs:
