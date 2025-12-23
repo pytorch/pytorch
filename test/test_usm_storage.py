@@ -27,6 +27,10 @@ from torch.testing._internal.common_device_type import (
 )
 from torch.testing._internal.common_cuda import TEST_CUDA, CUDA_DEVICE
 
+# Check for MPS availability
+TEST_MPS = torch.backends.mps.is_available()
+MPS_DEVICE = torch.device("mps") if TEST_MPS else None
+
 
 class TestUsmStorage(TestCase):
     """Test cases for USM storage functionality."""
@@ -505,6 +509,237 @@ class TestUsmCudaErrorInjection(TestCase):
         result = empty_storage.usm_share_(torch.device('cuda:0'))
         self.assertEqual(result.nbytes(), 0)
         self.assertEqual(result.device.type, 'cuda')
+
+
+class TestUsmStorageMPS(TestCase):
+    """Test cases for USM storage functionality on MPS devices."""
+
+    def tearDown(self):
+        """Clean up MPS resources after each test."""
+        if torch.backends.mps.is_available():
+            torch.mps.empty_cache()
+
+    @unittest.skipIf(not TEST_MPS, "MPS not available")
+    def test_usm_share_cpu_to_mps(self):
+        """Test usm_share_ from CPU to MPS device."""
+        # Create CPU storage
+        cpu_storage = torch.UntypedStorage(1024)
+        for i in range(1024):
+            cpu_storage[i] = i % 256
+        
+        # Share to MPS
+        mps_storage = cpu_storage.usm_share_(torch.device('mps'))
+        
+        # Verify storage properties
+        self.assertEqual(mps_storage.device.type, 'mps')
+        self.assertEqual(mps_storage.nbytes(), cpu_storage.nbytes())
+
+    @unittest.skipIf(not TEST_MPS, "MPS not available")
+    def test_usm_share_cpu_to_mps_with_tensor(self):
+        """Test usm_share_ with tensors created from storage on MPS."""
+        # Create CPU storage with USM allocator using temp file
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            temp_file = f.name
+            f.write(b'\x00' * 4000)
+        
+        try:
+            cpu_storage = torch.UntypedStorage.from_file(
+                temp_file,
+                shared=False,
+                nbytes=4000,
+                usm=True
+            )
+            
+            # Fill with data as float32
+            cpu_tensor = torch.tensor([], dtype=torch.float32).set_(cpu_storage)
+            cpu_tensor = cpu_tensor[:1000]
+            cpu_tensor.copy_(torch.arange(1000, dtype=torch.float32))
+            
+            # Share storage to MPS
+            mps_storage = cpu_storage.usm_share_(torch.device('mps'))
+            
+            # Create MPS tensor from shared storage
+            mps_tensor = torch.empty(0, dtype=torch.float32, device='mps').set_(mps_storage)
+            mps_tensor = mps_tensor[:1000]
+            
+            # Verify data
+            self.assertTrue(torch.allclose(cpu_tensor, mps_tensor.cpu()))
+        finally:
+            os.unlink(temp_file)
+
+    @unittest.skipIf(not TEST_MPS, "MPS not available")
+    def test_usm_share_mps_storage_copy(self):
+        """Test copying data between CPU and MPS storages."""
+        # Create source CPU storage
+        src_storage = torch.UntypedStorage(100)
+        for i in range(100):
+            src_storage[i] = i
+        
+        # Share to MPS
+        mps_storage = src_storage.usm_share_(torch.device('mps'))
+        
+        # Verify data is accessible on MPS device
+        mps_tensor = torch.tensor([], dtype=torch.uint8, device='mps').set_(mps_storage)
+        self.assertEqual(mps_tensor.device.type, 'mps')
+
+    @unittest.skipIf(not TEST_MPS, "MPS not available")
+    def test_usm_share_mps_preservation(self):
+        """Test that shared storage preserves data after modifications."""
+        # Create and populate CPU storage with USM allocator using temp file
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            temp_file = f.name
+            f.write(b'\x00' * 256)
+        
+        try:
+            cpu_storage = torch.UntypedStorage.from_file(
+                temp_file,
+                shared=False,
+                nbytes=256,
+                usm=True
+            )
+            for i in range(256):
+                cpu_storage[i] = i
+            
+            # Share to MPS
+            mps_storage = cpu_storage.usm_share_(torch.device('mps'))
+            
+            # Verify initial data
+            errors = 0
+            for i in range(256):
+                if cpu_storage[i] != i:
+                    errors += 1
+            self.assertEqual(errors, 0)
+            
+            # Verify MPS storage can be used
+            mps_tensor = torch.tensor([], dtype=torch.uint8, device='mps').set_(mps_storage)
+            self.assertEqual(mps_tensor.device.type, 'mps')
+        finally:
+            os.unlink(temp_file)
+
+    @unittest.skipIf(not TEST_MPS, "MPS not available")
+    def test_usm_share_mps_tensor_operations(self):
+        """Test tensor operations on MPS with shared storage."""
+        # Create CPU storage
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            temp_file = f.name
+            f.write(b'\x00' * 1024)
+        
+        try:
+            cpu_storage = torch.UntypedStorage.from_file(
+                temp_file,
+                shared=False,
+                nbytes=1024,
+                usm=True
+            )
+            
+            # Create float tensor on CPU
+            cpu_tensor = torch.tensor([], dtype=torch.float32).set_(cpu_storage)
+            cpu_tensor = cpu_tensor[:256]
+            cpu_tensor.copy_(torch.randn(256))
+            
+            # Share to MPS
+            mps_storage = cpu_storage.usm_share_(torch.device('mps'))
+            
+            # Create MPS tensor and perform operations
+            mps_tensor = torch.empty(0, dtype=torch.float32, device='mps').set_(mps_storage)
+            mps_tensor = mps_tensor[:256]
+            
+            # Perform some operations
+            result = mps_tensor * 2.0 + 1.0
+            result_cpu = result.cpu()
+            
+            # Verify computation worked
+            self.assertEqual(result_cpu.shape, torch.Size([256]))
+            self.assertTrue(torch.isfinite(result_cpu).all())
+        finally:
+            os.unlink(temp_file)
+
+    @unittest.skipIf(not TEST_MPS, "MPS not available")
+    def test_usm_share_mps_zero_size(self):
+        """Test edge case with zero-sized storage on MPS."""
+        # Create zero-size storage
+        empty_storage = torch.UntypedStorage(0)
+        
+        # Should handle gracefully
+        result = empty_storage.usm_share_(torch.device('mps'))
+        self.assertEqual(result.nbytes(), 0)
+        self.assertEqual(result.device.type, 'mps')
+
+    @unittest.skipIf(not TEST_MPS, "MPS not available")
+    def test_usm_share_mps_errors(self):
+        """Test error conditions for usm_share_ on MPS."""
+        # Test with non-CPU source (if MPS storage is available)
+        try:
+            mps_storage = torch.UntypedStorage(100, device='mps')
+            with self.assertRaisesRegex(RuntimeError, "source storage must be on CPU"):
+                mps_storage.usm_share_(torch.device('mps'))
+        except RuntimeError:
+            # If MPS storage creation is not supported, skip this part
+            self.skipTest("MPS storage creation not supported")
+
+    @unittest.skipIf(not TEST_MPS, "MPS not available")
+    def test_usm_share_mps_multiple_operations(self):
+        """Test multiple consecutive usm_share_ calls."""
+        # Create CPU storage
+        cpu_storage = torch.UntypedStorage(512)
+        for i in range(512):
+            cpu_storage[i] = i % 128
+        
+        # Share to MPS
+        mps_storage = cpu_storage.usm_share_(torch.device('mps'))
+        
+        # Verify it works
+        self.assertEqual(mps_storage.device.type, 'mps')
+        self.assertEqual(mps_storage.nbytes(), 512)
+        
+        # Try sharing the same storage again
+        mps_storage2 = cpu_storage.usm_share_(torch.device('mps'))
+        self.assertEqual(mps_storage2.device.type, 'mps')
+        self.assertEqual(mps_storage2.nbytes(), 512)
+
+
+class TestUsmMPSPython(TestCase):
+    """Test Python API for USM storage with MPS."""
+    
+    @unittest.skipIf(not TEST_MPS, "MPS not available")
+    def test_storage_usm_share_mps_api(self):
+        """Test that usm_share_ method works with MPS device."""
+        storage = torch.UntypedStorage(100)
+        
+        # Check method exists
+        self.assertTrue(hasattr(storage, 'usm_share_'))
+        
+        # Check it's callable with MPS device
+        self.assertTrue(callable(storage.usm_share_))
+        
+        # Should not raise with MPS device
+        result = storage.usm_share_(torch.device('mps'))
+        self.assertIsNotNone(result)
+
+    @unittest.skipIf(not TEST_MPS, "MPS not available")
+    def test_from_file_usm_parameter_with_mps(self):
+        """Test from_file with USM allocator followed by MPS sharing."""
+        if IS_WINDOWS:
+            self.skipTest("UsmAllocator is not supported on Windows")
+        
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            temp_file = f.name
+            f.write(b'\x00' * 100)
+        
+        try:
+            # Create storage with USM allocator
+            storage = torch.UntypedStorage.from_file(
+                temp_file,
+                shared=False,
+                nbytes=100,
+                usm=True
+            )
+            
+            # Share to MPS
+            mps_storage = storage.usm_share_(torch.device('mps'))
+            self.assertEqual(mps_storage.device.type, 'mps')
+        finally:
+            os.unlink(temp_file)
 
 
 if __name__ == '__main__':

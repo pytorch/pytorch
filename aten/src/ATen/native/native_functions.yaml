@@ -16109,3 +16109,4 @@
   variants: function
   dispatch:
     CUDA: usm_share_from_cuda
+    MPS: usm_share_from_mps
