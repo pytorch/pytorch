@@ -417,7 +417,7 @@ static const std::initializer_list<PyGetSetDef> THPStream_properties = {
      nullptr,
      nullptr,
      nullptr},
-    nullptr};
+    {nullptr}};
 
 static const std::initializer_list<PyMethodDef> THPStream_methods = {
     {"query", THPStream_query, METH_NOARGS, nullptr},
