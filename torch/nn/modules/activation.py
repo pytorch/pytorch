@@ -1060,7 +1060,6 @@ def _check_arg_device(x: torch.Tensor | None) -> bool:
         return x.device.type in [
             "cpu",
             "cuda",
-            "xpu",
             torch.utils.backend_registration._privateuse1_backend_name,
         ]
     return True
@@ -1416,7 +1415,7 @@ class MultiheadAttention(Module):
             elif not all(_check_arg_device(x) for x in tensor_args):
                 why_not_fast_path = (
                     "some Tensor argument's device is neither one of "
-                    f"cpu, cuda, xpu or {torch.utils.backend_registration._privateuse1_backend_name}"
+                    f"cpu, cuda or {torch.utils.backend_registration._privateuse1_backend_name}"
                 )
             elif torch.is_grad_enabled() and any(
                 _arg_requires_grad(x) for x in tensor_args
