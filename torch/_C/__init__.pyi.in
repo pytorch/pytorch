@@ -2253,6 +2253,7 @@ class _CudaDeviceProperties:
     memory_clock_rate: _int
     memory_bus_width: _int
     shared_memory_per_block: _int
+    shared_memory_per_multiprocessor: _int
 
 # Functions related to SDPA
 class _SDPAParams:
