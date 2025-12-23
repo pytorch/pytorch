@@ -506,7 +506,7 @@ def set_logs(
                     log_registry.log_alias_to_log_qnames.get(alias, alias), val
                 )
             elif _is_valid_module(alias):
-                found_modules = _get_module_and_submodules(alias) or alias
+                found_modules = _get_module_and_submodules(alias) or (alias,)
                 for module_name in found_modules:
                     if not _has_registered_parent(module_name):
                         log_registry.register_log(module_name, module_name)
