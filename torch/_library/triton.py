@@ -33,6 +33,9 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
 
     It also recursively analyzes called functions to find triton kernels hidden
     behind helper function calls.
+
+    That said, it is best effort. There are cases (e.g., recursion > MAX_RECURSION_DEPTH)
+    that are not accounted for, so keep that in mind.
     """
 
     # prevent infinite recursion
@@ -256,8 +259,10 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                     if kernel_id not in seen_ids:
                         seen_ids.add(kernel_id)
                         resolved.append(kernel)
-            except Exception as e:
-                logger.debug("failed to analyze called function %s: %s", func_name, e)
+            except Exception:
+                logger.debug(
+                    "failed to analyze called function %s", func_name, exc_info=True
+                )
 
         return resolved
 
