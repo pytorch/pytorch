@@ -18,7 +18,7 @@ import warnings
 from collections import defaultdict
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Generic, Optional, Union
+from typing import Any, Generic, Optional, Sequence, Union
 from typing_extensions import ParamSpec
 from weakref import WeakSet
 
@@ -506,27 +506,17 @@ def set_logs(
                     log_registry.log_alias_to_log_qnames.get(alias, alias), val
                 )
             elif _is_valid_module(alias):
-                found_modules = _get_module_and_submodules(alias)
-                if found_modules:
-                    for module_name in found_modules:
-                        if not _has_registered_parent(module_name):
-                            log_registry.register_log(module_name, module_name)
-                        else:
-                            log_registry.register_child_log(module_name)
-                        log_state.enable_log(
-                            log_registry.log_alias_to_log_qnames.get(
-                                module_name, module_name
-                            ),
-                            val,
-                        )
-                else:
-                    # Fallback to the original behavior
-                    if not _has_registered_parent(alias):
-                        log_registry.register_log(alias, alias)
+                found_modules = _get_module_and_submodules(alias) or alias
+                for module_name in found_modules:
+                    if not _has_registered_parent(module_name):
+                        log_registry.register_log(module_name, module_name)
                     else:
-                        log_registry.register_child_log(alias)
+                        log_registry.register_child_log(module_name)
                     log_state.enable_log(
-                        log_registry.log_alias_to_log_qnames.get(alias, alias), val
+                        log_registry.log_alias_to_log_qnames.get(
+                            module_name, module_name
+                        ),
+                        val,
                     )
             else:
                 raise ValueError(
@@ -859,7 +849,7 @@ def _is_valid_module(qname):
     return spec is not None
 
 
-def _get_module_and_submodules(qname):
+def _get_module_and_submodules(qname: str) -> Sequence[str] | None:
     """
     Get a module and all its submodules (recursively).
 
