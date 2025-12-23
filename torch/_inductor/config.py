@@ -1750,7 +1750,7 @@ class triton:
         os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
     )
 
-    # Map for storing the amount of kernel runs with dumped imput tensors
+    # Map for storing the amount of kernel runs with dumped input tensors
     # Based on hash of Triton source code to avoid bloating the folder
     debug_dump_kernel_inputs: dict[str, int] = {}
 
