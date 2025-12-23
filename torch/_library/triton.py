@@ -1,6 +1,7 @@
 import ast
 import contextlib
 import inspect
+import logging
 import threading
 from collections.abc import Callable, Generator, Iterable
 from typing import Any, Optional, Union
@@ -10,6 +11,8 @@ from torch.utils._exposed_in import exposed_in
 from .custom_ops import custom_op, CustomOpDef
 from .infer_schema import infer_schema
 
+
+logger = logging.getLogger(__name__)
 
 triton_ops_to_kernels: dict[str, list[object]] = {}
 
@@ -23,11 +26,23 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
     Inspect the source of an arbitrary callable passed to torch._library.triton_op,
     and grab all of the triton kernels that are wrapped inside of it.
 
+    This function traces local variable assignments to handle patterns like:
+        kernel_fn = _my_kernel  # global JITFunction
+        wrapped = some_wrapper(kernel_fn)
+        capture_triton(wrapped)[grid](...)
+
     TODO: This check is best effort. It does *not* handle the case where the triton
     kernel is hidden behind recursive function calls.
     """
 
     def find_triton_kernels(fn: Callable[..., Any]) -> list[object]:
+        try:
+            from triton.runtime.autotuner import Autotuner
+            from triton.runtime.jit import JITFunction
+        except ImportError:
+            logger.warning("Triton not available, find_triton_kernels = []")
+            return []
+
         try:
             source = inspect.getsource(fn)
         except (OSError, TypeError):
@@ -39,10 +54,18 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
         buffer.splice(source, strip=True)
         tree = ast.parse(buffer.getrawvalue())
 
-        # Visitor to collect function calls and triton kernels
+        # Visitor to collect function calls, assignments, and triton kernels
         class Visitor(ast.NodeVisitor):
             def __init__(self) -> None:
                 self.triton_kernels: list[Any] = []
+                # track local variable assignments: var_name -> list of RHS expressions
+                self.assignments: dict[str, list[ast.expr]] = {}
+
+            def visit_Assign(self, node: ast.Assign) -> None:
+                for target in node.targets:
+                    if isinstance(target, ast.Name):
+                        self.assignments.setdefault(target.id, []).append(node.value)
+                self.generic_visit(node)
 
             def visit_Call(self, node: ast.Call) -> None:
                 triton_func_names = ("capture_triton", "wrap_triton")
@@ -70,15 +93,118 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
         collector = Visitor()
         collector.visit(tree)
         closure_vars = inspect.getclosurevars(fn)
-        resolved = []
-        # First, resolve triton kernel names
-        for name in collector.triton_kernels:
+
+        # build combined globals from closure and function's __globals__
+        all_globals: dict[str, Any] = {}
+        all_globals.update(closure_vars.globals)
+        if hasattr(fn, "__globals__"):
+            all_globals.update(fn.__globals__)
+
+        def extract_names_from_expr(expr: ast.expr) -> list[str]:
+            """Extract all Name references from an AST expression."""
+            names: list[str] = []
+
+            class NameExtractor(ast.NodeVisitor):
+                def visit_Name(self, node: ast.Name) -> None:
+                    names.append(node.id)
+
+                def visit_Call(self, node: ast.Call) -> None:
+                    # for function calls, visit the function and all args
+                    self.generic_visit(node)
+
+            NameExtractor().visit(expr)
+            return names
+
+        def resolve_to_kernel(obj: object) -> object | None:
+            """Check if obj is a triton kernel or wrapper and return the kernel."""
+            if isinstance(obj, (JITFunction, Autotuner)):
+                return obj
+            # handle wrappers that have a .fn attribute pointing to JITFunction
+            if callable(obj) and hasattr(obj, "fn"):
+                inner = obj.fn
+                if isinstance(inner, JITFunction):
+                    return inner
+            return None
+
+        def trace_to_global_kernels(
+            name: str, visited: set[str] | None = None
+        ) -> list[object]:
+            """
+            Trace a name through local assignments back to global triton kernels.
+
+            This handles patterns like:
+                kernel_fn = _my_kernel  # global
+                wrapped = wrapper(kernel_fn)
+                autotuned = autotune(wrapped)
+                capture_triton(autotuned)  # traces back to _my_kernel
+            """
+            if visited is None:
+                visited = set()
+
+            if name in visited:
+                return []
+
+            visited = visited | {name}
+
+            # try direct resolution from globals
+            if name in all_globals:
+                kernel = resolve_to_kernel(all_globals[name])
+                if kernel is None:
+                    logger.warning(
+                        "failed to resolve all_globals[%s] to a triton kernel", name
+                    )
+                    return []
+                return [kernel]
+
+            # try closure nonlocals
             if name in closure_vars.nonlocals:
-                resolved.append(closure_vars.nonlocals[name])
-            elif name in closure_vars.globals:
-                resolved.append(closure_vars.globals[name])
-            elif name in closure_vars.builtins:
-                resolved.append(closure_vars.builtins[name])
+                kernel = resolve_to_kernel(closure_vars.nonlocals[name])
+                if kernel is None:
+                    logger.warning(
+                        "failed to resolve closure_vars.nonlocals[%s] to a triton kernel",
+                        name,
+                    )
+                    return []
+                return [kernel]
+
+            # try builtins (this seems unlikely, but for completeness/bc why not)
+            if name in closure_vars.builtins:
+                kernel = resolve_to_kernel(closure_vars.builtins[name])
+                if kernel is None:
+                    logger.warning(
+                        "failed to resolve closure_vars.builtins[%s] to a triton kernel",
+                        name,
+                    )
+                    return []
+                return [kernel]
+
+            # not in globals/nonlocals/builtins, check if it's a local assignment
+            if name not in collector.assignments:
+                logger.warning("%s not in collector.assignments", name)
+                return []
+
+            # trace through assignments - collect all names referenced in RHS
+            results: list[object] = []
+            for rhs_expr in collector.assignments[name]:
+                referenced = extract_names_from_expr(rhs_expr)
+                for ref_name in referenced:
+                    traced = trace_to_global_kernels(ref_name, visited)
+                    results.extend(traced)
+
+            return results
+
+        # resolve kernel names, tracing through local variables if needed
+        resolved: list[object] = []
+        seen_ids: set[int] = set()
+
+        for name in collector.triton_kernels:
+            traced_objects = trace_to_global_kernels(name)
+            for obj in traced_objects:
+                obj_id = id(obj)
+                if obj_id not in seen_ids:
+                    seen_ids.add(obj_id)
+                    resolved.append(obj)
+
         return resolved
 
     return find_triton_kernels(fn)
