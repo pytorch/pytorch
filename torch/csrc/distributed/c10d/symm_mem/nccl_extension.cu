@@ -3,10 +3,12 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <cuda/atomic>
 
 namespace c10d::nccl_extension {
 
 #define THREADS_PER_BLOCK 512
+#define WARP_SIZE 32
 
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
 __device__ __forceinline__ char* get_remote_ptr(
@@ -122,17 +124,17 @@ __global__ void lsa_put_signal_kernel(
     // 2) system fence + signal set
     if (threadIdx.x == 0) {
         // This block is done; increment global completion counter
-        unsigned int prev = atomicAdd(blocks_done, 1);
+        cuda::atomic_ref<unsigned int, cuda::thread_scope_device> blocks_done_ref(*blocks_done);
+        unsigned int prev = blocks_done_ref.fetch_add(1, cuda::memory_order_relaxed);
 
         // If this was the last block to finish:
         if (prev == gridDim.x - 1) {
             uint64_t* signal_pad_peer =
             reinterpret_cast<uint64_t*>(signal_pad[dst_peer]);
 
-            // Single-writer: atomicExch is conservative but safe.
-            atomicExch(
-                reinterpret_cast<unsigned long long*>(signal_pad_peer),
-                static_cast<unsigned long long>(signal_value));
+            cuda::atomic_ref<uint64_t, cuda::thread_scope_system> signal_ref(*signal_pad_peer);
+            // Relaxed order is sufficient due to the system wide fence after put
+            signal_ref.store(signal_value, cuda::memory_order_relaxed);
         }
     }
 }
@@ -143,12 +145,13 @@ __global__ void nccl_wait_for_signal_kernel(
     uint64_t  target_signal_value
 ) {
     if (blockIdx.x == 0 && threadIdx.x == 0) {
-        volatile unsigned long long* sig_ptr =
-            reinterpret_cast<volatile unsigned long long*>(signal_pad[cur_rank]);
+        uint64_t* sig_ptr =
+            reinterpret_cast<uint64_t*>(signal_pad[cur_rank]);
+        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> sig_ref(*sig_ptr);
 
         while (true) {
-            unsigned long long val = *sig_ptr;
-            if (val >= static_cast<unsigned long long>(target_signal_value)) break;
+            uint64_t val = sig_ref.load(cuda::memory_order_relaxed);
+            if (val >= target_signal_value) break;
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 700)
             __nanosleep(64);
 #endif
@@ -187,7 +190,7 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
   auto stream = at::cuda::getCurrentCUDAStream();
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
   int cur_rank = symm_mem->get_rank();
-  nccl_wait_for_signal_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
+  nccl_wait_for_signal_kernel<<<1, WARP_SIZE, 0, stream>>>(
     symm_mem->get_signal_pad_ptrs_dev(),
     cur_rank,
     signal);
