@@ -2846,50 +2846,96 @@ def _reduction_configs(
     result_configs = []
 
     # For 3d tiling, default to more autotuning initially
-    if not (max_autotune_enabled or "y" in size_hints):
-        if reduction_hint == ReductionHint.INNER:
-            result_configs = configs + [contiguous_config]
-        elif reduction_hint == ReductionHint.OUTER:
-            result_configs = configs + [outer_config]
-        elif reduction_hint == ReductionHint.OUTER_TINY:
-            result_configs = configs + [tiny_config]
-        else:
-            result_configs = configs + [make_config(32, 128)]
-    else:
-        result_configs = configs + [
-            contiguous_config,
-            outer_config,
-            tiny_config,
-            make_config(64, 64),
-            make_config(8, 512),
-            # halve the XBLOCK/Rn_BLOCK compared to outer_config
-            # TODO: this may only be beneficial when each iteration of the reduction
-            # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
-            make_config(64, 4, num_warps=8),
-        ]
+    if "y" in size_hints:
+        pass
+    elif max_autotune_enabled:
+        pass  # skip all these cases
+    elif reduction_hint == ReductionHint.INNER:
+        return configs + [contiguous_config]
+    elif reduction_hint == ReductionHint.OUTER:
+        return configs + [outer_config]
+    elif reduction_hint == ReductionHint.OUTER_TINY:
+        return configs + [tiny_config]
 
-        if torch.version.hip:
-            result_configs.extend(
-                [
-                    make_config(1024, 8, num_warps=4, num_stages=1, waves_per_eu=2),
-                    make_config(512, 8, num_warps=4, num_stages=1, waves_per_eu=1),
-                    make_config(
-                        128, 4, num_warps=2, num_stages=1, waves_per_eu=1
-                    ),  # wrt2: 3X # triton_red_fused_index_add_index_select_mul_native_layer_norm_native_layer_norm_backward_new_zeros_sigmoid_8
-                    make_config(
-                        1, 512, num_warps=8, num_stages=1, waves_per_eu=1
-                    ),  # wrt2: 2X # triton_red_fused_index_add_index_select_mul_native_layer_norm_native_layer_norm_backward_new_zeros_sigmoid_8-v2 & v3 & v4
-                    make_config(
-                        1, 4096, num_warps=8, num_stages=1, waves_per_eu=1
-                    ),  # wrt3: 380 us # triton_red_fused__to_copy__unsafe_view_clone_native_layer_norm_native_layer_norm_backward_slice_tanh_tanh_backward_153
-                    make_config(
-                        64, 128, num_warps=4, num_stages=1, waves_per_eu=1
-                    ),  # wrt3: 170 us # triton_red_fused__to_copy__unsafe_view_add_addmm_cat_clone_native_layer_norm_permute_tanh_view_16
-                    make_config(
-                        2, 2048, num_warps=8, num_stages=1, waves_per_eu=1
-                    ),  # wrt3: 170 us # triton_red_fused__to_copy__unsafe_view_clone_native_layer_norm_native_layer_norm_backward_permute_tanh_tanh_backward_29
-                ]
-            )
+    # We continue here under the following conditions:
+    # - max_autotune_enabled is True
+    # - max_autotune_enabled is False and reduction_hint is NOT one of the above cases
+    result_configs = configs + [
+        contiguous_config,
+        outer_config,
+        tiny_config,
+        make_config(64, 64),
+        make_config(8, 512),
+        # halve the XBLOCK/Rn_BLOCK compared to outer_config
+        # TODO: this may only be beneficial when each iteration of the reduction
+        # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
+        make_config(64, 4, num_warps=8),
+    ]
+
+    if torch.version.hip:
+        result_configs.extend(
+            [
+                make_config(1024, 8, num_warps=4, num_stages=1, waves_per_eu=2),
+                make_config(512, 8, num_warps=4, num_stages=1, waves_per_eu=1),
+                make_config(
+                    128, 4, num_warps=2, num_stages=1, waves_per_eu=1
+                ),  # wrt2: 3X # triton_red_fused_index_add_index_select_mul_native_layer_norm_native_layer_norm_backward_new_zeros_sigmoid_8
+                make_config(
+                    1, 512, num_warps=8, num_stages=1, waves_per_eu=1
+                ),  # wrt2: 2X # triton_red_fused_index_add_index_select_mul_native_layer_norm_native_layer_norm_backward_new_zeros_sigmoid_8-v2 & v3 & v4;
+                # hrt (large): triton_red_fused_sum_22 (large); 8.3X triton_red_fused_sum_5 (xlarge)
+                make_config(
+                    1, 4096, num_warps=8, num_stages=1, waves_per_eu=1
+                ),  # wrt3: 380 us # triton_red_fused__to_copy__unsafe_view_clone_native_layer_norm_native_layer_norm_backward_slice_tanh_tanh_backward_153
+                make_config(
+                    64, 128, num_warps=4, num_stages=1, waves_per_eu=1
+                ),  # wrt3: 170 us # triton_red_fused__to_copy__unsafe_view_add_addmm_cat_clone_native_layer_norm_permute_tanh_view_16
+                make_config(
+                    2, 2048, num_warps=8, num_stages=1, waves_per_eu=1
+                ),  # wrt3: 170 us # triton_red_fused__to_copy__unsafe_view_clone_native_layer_norm_native_layer_norm_backward_permute_tanh_tanh_backward_29
+                # hrt, performance numbers are over baseline as reported by paas
+                make_config(
+                    1, 64, num_warps=1, num_stages=1
+                ),  # 9.0X, triton_red_fused_sum_16 (large)
+                make_config(
+                    1, 256, num_warps=1, num_stages=1
+                ),  # 8.3X, triton_red_fused_sum_5 (medium), 8.1X, triton_red_fused_sum_14 (large);
+                #  7.9X, trion_red_fused_sum_9 (xlarge); 7.7X, triton_red_fused_sum_9 (medium)
+                make_config(
+                    1, 1024, num_warps=8, num_stages=1
+                ),  # 8.5X, triton_red_fused_sum_5 (large)
+                make_config(
+                    1, 4096, num_warps=8, num_stages=1
+                ),  # 6.8X, triton_red_fused_sum_19 (medium)
+                make_config(
+                    2, 2048, num_warps=1, num_stages=1
+                ),  # 4.7X, triton_red_fused_sum_9 (large)
+                make_config(
+                    16, 256, num_warps=4, num_stages=1
+                ),  # 2.2X, triton_red_fused_sum_4 (large)
+                make_config(
+                    32, 64, num_warps=1, num_stages=1
+                ),  # 2.3X, triton_red_fused_sum_4 (xlarge)
+                make_config(
+                    32, 512, num_warps=8, num_stages=1
+                ),  # 2.1X, triton_red_fused_sum_4 (medium)
+                make_config(
+                    64, 64, num_warps=8, num_stages=1
+                ),  # 1.8X, triton_red_fused_sum_18 (medium)
+                make_config(
+                    64, 128, num_warps=8, num_stages=1
+                ),  # 2.0X, triton_red_fused_sum_8 (medium)
+                make_config(
+                    64, 256, num_warps=8, num_stages=3
+                ),  # 1.8X, triton_red_fused_sum_21 (large); 1.9X, triton_red_fused_sum_21 (xlarge);
+                # 1.4X, triton_red_fused_sum_17 (xlarge); 1.6X, triton_red_fused_sum_28 (xlarge);
+                # 1.6X, triton_red_fused_sum_13 (xlarge); 1.3X, triton_ref_fused_sum_8 (xlarge)
+                # 1.3X, triton_red_fused_sum_15 (large)
+                make_config(
+                    128, 256, num_warps=8, num_stages=1
+                ),  # 2.0X, triton_red_fused_sum_8 (large)
+            ]
+        )
 
     return result_configs
 
