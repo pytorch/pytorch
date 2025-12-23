@@ -494,7 +494,7 @@ def fold_weight(
         return map_arg(a, lambda node: env[node.name])
 
     for node in quantized_model.graph.nodes:
-        prepack_node = folded_nodes.get(node.name, None)
+        prepack_node = folded_nodes.get(node.name)
         if prepack_node is node:
             packed_weight = packed_weights[node.name]
             # add a prepacked attribute to root
