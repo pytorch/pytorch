@@ -822,22 +822,13 @@ def _parse_log_settings(settings):
             log_state.enable_artifact(name)
         elif _is_valid_module(name):
             # Get the module and all its submodules if it's a package
-            found_modules = _get_module_and_submodules(name)
-            if found_modules:
-                # Register and enable logging for all modules
-                for module_name in found_modules:
-                    if not _has_registered_parent(module_name):
-                        log_registry.register_log(module_name, module_name)
-                    else:
-                        log_registry.register_child_log(module_name)
-                    log_state.enable_log(module_name, level)
-            else:
-                # Fallback to the original behavior
-                if not _has_registered_parent(name):
-                    log_registry.register_log(name, name)
+            found_modules = _get_module_and_submodules(name) or (name,)
+            for module_name in found_modules:
+                if not _has_registered_parent(module_name):
+                    log_registry.register_log(module_name, module_name)
                 else:
-                    log_registry.register_child_log(name)
-                log_state.enable_log(name, level)
+                    log_registry.register_child_log(module_name)
+                log_state.enable_log(module_name, level)
         else:
             raise ValueError(_invalid_settings_err_msg(settings))
 
