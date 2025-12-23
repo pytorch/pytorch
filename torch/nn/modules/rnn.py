@@ -1637,7 +1637,6 @@ class RNNCell(RNNCellBase):
                 self.bias_hh,
             )
         else:
-            ret = input  # TODO: remove when jit supports exception flow
             raise RuntimeError(f"Unknown nonlinearity: {self.nonlinearity}")
 
         if not is_batched:
