@@ -4,7 +4,7 @@
 import torch
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import OpSchema, OutputSharding
-from torch.distributed.tensor._ops.registration import register_prop_rule
+from torch.distributed.tensor._ops.utils import register_prop_rule
 
 
 aten = torch.ops.aten
