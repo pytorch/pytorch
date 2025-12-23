@@ -300,7 +300,7 @@ def _is_fsdp_all_gather_copy_in(func) -> bool:
         hasattr(func, "namespace")
         and func.namespace == "fsdp"
         and hasattr(func, "__name__")
-        and func.__name__ == "all_gather_copy_in"
+        and func.__name__ == "all_gather_copy_in.default"
     )
 
 
