@@ -149,6 +149,40 @@ class TestConfigModule(TestCase):
         self.assertTrue(config.e_bool)
         self.assertFalse(config.e_ignored)
 
+    def test_save_config_with_patch(self):
+        self.assertTrue(config.e_bool)
+        with config.patch(e_bool=False):
+            p = config.save_config()
+            self.assertDictEqual(
+                pickle.loads(p),
+                {
+                    "_cache_config_ignore_prefix": ["magic_cache_config"],
+                    "e_bool": False,
+                    "e_dict": {1: 2},
+                    "e_float": 1.0,
+                    "e_int": 1,
+                    "e_list": [1],
+                    "e_none": None,
+                    "e_set": {1},
+                    "e_string": "string",
+                    "e_tuple": (1,),
+                    "nested.e_bool": True,
+                    "_e_ignored": True,
+                    "e_compile_ignored": True,
+                    "magic_cache_config_ignored": True,
+                    "_save_config_ignore": ["e_ignored"],
+                    "e_config": True,
+                    "e_jk": True,
+                    "e_jk_false": False,
+                    "e_env_default": True,
+                    "e_env_default_FALSE": False,
+                    "e_env_default_str": "1234",
+                    "e_env_default_str_empty": "",
+                    "e_env_force": True,
+                    "e_optional": True,
+                },
+            )
+
     def test_save_config_portable(self):
         p = config.save_config_portable()
         self.assertDictEqual(
@@ -359,6 +393,18 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             with config.patch("does_not_exist"):
                 pass
 
+    def test_global_patch(self):
+        self.assertTrue(config.e_bool)
+        with config.global_patch("e_bool", False):
+            self.assertFalse(config.e_bool)
+        self.assertTrue(config.e_bool)
+        with config.global_patch(e_bool=False):
+            self.assertFalse(config.e_bool)
+        self.assertTrue(config.e_bool)
+        with self.assertRaises(AssertionError):
+            with config.global_patch("does_not_exist"):
+                pass
+
     def test_make_closur_patcher(self):
         revert = config._make_closure_patcher(e_bool=False)()
         self.assertFalse(config.e_bool)
@@ -406,6 +452,33 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             _ConfigEntry(
                 Config(default=2, env_name_force="FAKE_DISABLE", value_type=float)
             )
+
+    def test_patch_then_global(self):
+        self.assertTrue(config.e_bool)
+        with config.patch(e_bool=False):
+            self.assertFalse(config.e_bool)
+
+        config.e_bool = False
+        self.assertFalse(config.e_bool)
+
+    def test_is_default_patch(self):
+        self.assertTrue(config.e_bool)
+        with config.patch(e_bool=False):
+            self.assertFalse(config._is_default("e_bool"))
+
+    def test_dict_patch(self):
+        self.assertTrue(config.e_bool)
+        with config.patch(e_bool=False):
+            d = config._get_dict()
+            self.assertFalse(d["e_bool"])
+
+    def test_global_in_patch(self):
+        self.assertEqual(config.e_int, 1)
+        with config.patch(e_int=2):
+            self.assertEqual(config.e_int, 2)
+            config.e_int = 3
+            self.assertEqual(config.e_int, 3)
+        self.assertEqual(config.e_int, 3)
 
 
 if __name__ == "__main__":
