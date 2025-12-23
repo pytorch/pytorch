@@ -22,6 +22,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/MapAllocator.h>
+#include <ATen/UsmAllocator.h>
 #include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -362,27 +363,40 @@ static PyObject* THPStorage_fromFile(
   const char* filename = nullptr;
   Py_ssize_t nbytes = 0;
   int shared = 0;
+  bool usm = false;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  constexpr const char* kwlist[] = {"filename", "shared", "nbytes", nullptr};
+  constexpr const char* kwlist[] = {"filename", "shared", "nbytes", "usm", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           keywds,
-          "s|in",
+          "s|inp",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &filename,
           &shared,
-          &nbytes)) {
+          &nbytes,
+          &usm)) {
     return nullptr;
   }
   if (shared)
     shared = at::ALLOCATOR_MAPPED_SHARED;
 
   size_t actual_nbytes = -1;
+
+  // share storage for unified shared memory
+  at::DataPtr data_ptr;
+
+  if (usm) {
+    data_ptr = at::UsmAllocator::makeDataPtr(filename, nbytes, &actual_nbytes);
+  } else {
+    data_ptr = at::MapAllocator::makeDataPtr(filename, shared, nbytes, &actual_nbytes);
+  }
+
+
   auto storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       nbytes,
-      at::MapAllocator::makeDataPtr(filename, shared, nbytes, &actual_nbytes),
+      std::move(data_ptr),
       /*allocator=*/nullptr,
       /*resizable=*/false);
 
