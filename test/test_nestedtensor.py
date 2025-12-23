@@ -53,10 +53,13 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     markDynamoStrictTest,
+    MI200_ARCH,
+    MI300_ARCH,
     NestedTensorTestCase,
     parametrize,
     run_tests,
     serialTest,
+    skipIfRocmArch,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
@@ -7719,7 +7722,7 @@ torch.cuda.synchronize()
     # expected size 1==4, stride 27==96 at dim=0
     # expected size 3==3, stride 9==32 at dim=1
     # expected size 9==32, stride 1==1 at dim=2
-    @skipIfRocmArch(MI200_ARCH, MI300_ARCH) 
+    @skipIfRocmArch(MI200_ARCH, MI300_ARCH)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
