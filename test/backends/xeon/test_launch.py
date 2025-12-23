@@ -101,5 +101,6 @@ class TestTorchrun(TestCase):
                     num += 1
         assert num == 3, "Failed to launch multiple instances for inference"
 
+
 if __name__ == "__main__":
     run_tests()

@@ -387,7 +387,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             logger.warning(
                 """Neither TCMalloc nor JeMalloc is found in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib
                             or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib64 or
-                           %s/.local/lib/ so the LD_PRELOAD environment variable will not be set.
+                           %s/.local/lib/ or /usr/lib/x86_64-linux-gnu/ so the LD_PRELOAD environment variable will not be set.
                            This may drop the performance""",
                 expanduser("~"),
             )
@@ -523,10 +523,9 @@ please make sure ninstances <= total_cores)"
                     )
                 if args.bind_numa_node:
                     logger.warning(
-                        f"with --bind-numa-node set, "
-                        f"the first {args.ninstances} sub-numa node(s) will be used "
-                        f"to launch {args.ninstances} instance(s), "
-                        f"each node for 1 instance."
+                        "with --bind-numa-node set, the first %d sub-numa node(s) will be used \
+to launch the instance(s), each node for 1 instance.",
+                        args.ninstances,
                     )
                     if args.ninstances > self.cpuinfo.node_nums:
                         raise AssertionError(
@@ -541,9 +540,8 @@ when --bind-numa-node or --skip-cross-node-cores is set"
                         args.ncores_per_instance.append(len(per_node_cores))
                 else:
                     logger.warning(
-                        "all the CPU cores on the machine will be distributed "
-                        "as evenly as possible to each instance. It is possible "
-                        "that some cores in an instance may cross the numa node."
+                        "all the CPU cores on the machine will be distributed \
+as evenly as possible to each instance. It is possible that some cores in an instance may cross the numa node."
                     )
                     args.ncores_per_instance = [
                         len(cores) // args.ninstances
@@ -614,8 +612,10 @@ this node and --bind-numa-node is specified.",
                             cores.extend(node_core_list[i - core_num_per_instance : i])
                         if i < node_core_num:
                             logger.warning(
-                                f"With --bind-numa-node set, not all the cores on node {node_id} is used "
-                                f"because the core number on this node is not dividable by {core_num_per_instance}."
+                                "With --bind-numa-node set, not all the cores on node %d is used \
+because the core number on this node is not dividable by %d.",
+                                node_id,
+                                core_num_per_instance,
                             )
                     args.ncores_per_instance = [core_num_per_instance] * args.ninstances
                 else:
