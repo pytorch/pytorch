@@ -667,6 +667,7 @@ class ViewAndMutationMeta:
     def tensors_saved_for_backwards_slice(self):
         assert self.num_symints_saved_for_bw is not None
         assert self.num_opaque_objects_saved_for_bw is not None
+        # Based on the order in partitioners.py/_extract_fwd_bwd_modules, symints and opaque objects are saved after tensors
         num_non_tensors = (
             self.num_symints_saved_for_bw + self.num_opaque_objects_saved_for_bw
         )
@@ -679,6 +680,7 @@ class ViewAndMutationMeta:
     def symints_saved_for_backwards_slice(self):
         assert self.num_symints_saved_for_bw is not None
         assert self.num_opaque_objects_saved_for_bw is not None
+        # Based on the order in partitioners.py/_extract_fwd_bwd_modules, opaque objects are saved after symints
         if self.num_symints_saved_for_bw > 0:
             num_opaque = self.num_opaque_objects_saved_for_bw
             if num_opaque > 0:
