@@ -3,7 +3,7 @@ import itertools
 import operator
 import typing
 from collections.abc import Callable, Sequence
-from typing import Any
+from typing import Any, Optional
 
 import torch
 import torch._inductor.runtime.runtime_utils

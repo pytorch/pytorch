@@ -5,6 +5,7 @@ import itertools
 import logging
 import types
 from collections.abc import Sequence
+from typing import Optional
 
 import torch
 import torch.nn as nn

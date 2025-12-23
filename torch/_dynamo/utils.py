@@ -1117,6 +1117,7 @@ def get_inputs_devices(
         i for i in devices if (isinstance(i, torch.device) and i.type != "meta")
     ] + [None]
 
+
 if sys.version_info >= (3, 14):
     _builtin_final_typing_classes += (typing.Union,)
 
