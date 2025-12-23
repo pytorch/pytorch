@@ -1299,7 +1299,7 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
       store->clone(), groupRank, ranks.size(), ncclOpts);
 #ifdef NCCL_COMM_DESCRIPTION
   // We need to set the desc here so that when eager init the nccl, we can
-  // propogate desc to the nccl comm.
+  // propagate desc to the nccl comm.
   pg->setGroupDesc(ncclOpts->group_desc);
 #endif // NCCL_COMM_DESCRIPTION
   pg->eagerConnectSingleDevice(device);
