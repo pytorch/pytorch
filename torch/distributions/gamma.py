@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -57,9 +56,9 @@ class Gamma(ExponentialFamily):
 
     def __init__(
         self,
-        concentration: Union[Tensor, float],
-        rate: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        concentration: Tensor | float,
+        rate: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         self.concentration, self.rate = broadcast_all(concentration, rate)
         if isinstance(concentration, _Number) and isinstance(rate, _Number):

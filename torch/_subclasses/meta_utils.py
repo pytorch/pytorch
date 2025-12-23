@@ -475,6 +475,7 @@ class MetaTensorDescriber:
             ),
             fake_mode=torch._subclasses.fake_tensor.maybe_get_fake_mode(t),
             view_func=view_func,
+            # pyrefly: ignore [bad-argument-type]
             attrs=attrs,
             ctx=ctx,
             type=type_v,
