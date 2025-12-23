@@ -1407,14 +1407,15 @@ bernoulli(input: Tensor, *, generator: Optional[Generator], out: Optional[Tensor
 
 Draws binary random numbers (0 or 1) from a Bernoulli distribution.
 
-The :attr:`input` tensor should be a tensor containing probabilities
-to be used for drawing the binary random number.
-Hence, all values in :attr:`input` have to be in the range:
-:math:`0 \leq \text{input}_i \leq 1`.
+Each element in the :attr:`input` tensor is treated as a probability for the corresponding
+position in the output to be 1. For example, if ``input[i][j] = 0.8``, then the output at
+position ``[i][j]`` will be 1 with 80% probability and 0 with 20% probability.
 
-The :math:`\text{i}^{th}` element of the output tensor will draw a
-value :math:`1` according to the :math:`\text{i}^{th}` probability value given
-in :attr:`input`.
+All values in :attr:`input` must be in the range :math:`0 \leq \text{input}_i \leq 1`.
+
+The :math:`\text{i}^{th}` element of the output tensor will be :math:`1` with probability
+equal to the :math:`\text{i}^{th}` value in :attr:`input`, and :math:`0` with probability
+:math:`1 - \text{input}_i`.
 
 .. math::
     \text{out}_{i} \sim \mathrm{Bernoulli}(p = \text{input}_{i})
