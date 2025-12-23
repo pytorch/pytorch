@@ -618,15 +618,17 @@ class TestCutlassBackend(TestCase):
         "FP8 is only supported on H100+",
     )
     @unittest.skipIf(not SM90OrLater, "need sm_90")
-    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    @mock.patch.dict(
+        os.environ,
+        # note: It seems necessary to set these here, instead of `config.patch`.
+        {
+            "PATH": _get_path_without_sccache(),
+            "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM": "1",
+            "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS": "CUTLASS",
+        },
+    )
     def test_cutlass_backend_fp8_scaled_mm_mixed_dtypes(self):
-        """
-        Test that CUTLASS backend fails with mixed FP8 dtypes (e4m3fn x e5m2).
-
-        This documents the current limitation where mixed FP8 dtype combinations
-        are not supported by the CUTLASS backend due to dtype filtering in
-        cutlass_utils.get_accumulator_dtype().
-        """
+        """Test that CUTLASS backend works with mixed FP8 dtypes (e4m3fn x e5m2)."""
         m, k, n = 256, 256, 256
 
         # Create mixed FP8 dtypes: e4m3fn x e5m2
@@ -645,15 +647,8 @@ class TestCutlassBackend(TestCase):
                 a, b, scale_a=sa, scale_b=sb, out_dtype=torch.float16
             )
 
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "CUTLASS",
-                "cuda.cutlass_max_profiling_configs": 1,
-            }
-        ):
-            compiled_fn = torch.compile(scaled_mm_fn, fullgraph=True)
-            actual = compiled_fn(a8, b8)
+        compiled_fn = torch.compile(scaled_mm_fn, fullgraph=True)
+        actual = compiled_fn(a8, b8)
         expected = scaled_mm_fn(a8, b8)
         torch.testing.assert_close(actual, expected, rtol=1e-2, atol=0.05)
 
