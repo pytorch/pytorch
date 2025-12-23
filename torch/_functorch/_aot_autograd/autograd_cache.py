@@ -1002,6 +1002,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         guards_expr: Optional[str],
         backward_state_indices: Optional[list[int]],
         num_symints_saved_for_bw: Optional[int],
+        num_opaque_objects_saved_for_bw: Optional[int],
         serialized_bw_module: Optional[SerializedGraphModule],
     ) -> GenericAOTAutogradResult:
         if should_bundle_autograd_cache():

@@ -39,6 +39,7 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
 )
 from torch._guards import CompileContext, TracingContext
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -496,6 +497,7 @@ def _cache_inference_info(
             guards_expr=guards_expr,
             backward_state_indices=None,
             num_symints_saved_for_bw=None,
+            num_opaque_objects_saved_for_bw=None,
             serialized_bw_module=None,
         )
         AOTAutogradCache.save(
@@ -558,6 +560,7 @@ def collect_fw_donated_buffer_idxs(
         t = saved_tensors[i]
         if (
             t is not None
+            and isinstance(t, FakeTensor)  # Ensure it's actually a tensor
             and not is_sparse_any(t)
             and StorageWeakRef(t.untyped_storage()) not in storage_refs
         ):
@@ -1195,6 +1198,10 @@ def maybe_inline_graph_saved_tensors_hooks(
         inner_meta.num_symints_saved_for_bw = len(
             [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
         )
+        inner_meta.num_opaque_objects_saved_for_bw = len(
+            [n for n in fw_outs_saved_for_bw 
+             if isinstance(n, torch.fx.Node) and isinstance(n.meta.get("val"), FakeScriptObject)]
+        )
         bw_donated_idxs = collect_bw_donated_buffer_idxs(
             fw_module,
             bw_module,
@@ -1711,26 +1718,34 @@ def _aot_stage2a_partition(
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
             num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
             symint_outs_saved_for_bw = []
+            opaque_outs_saved_for_bw = []
             for idx, node in enumerate(fw_outs_saved_for_bw):
                 if is_sym_node(node):
                     symint_outs_saved_for_bw.append(node)
                 elif (
                     isinstance(node, torch.fx.Node)
                     and "val" in getattr(node, "meta", {})
-                    and isinstance(node.meta["val"], FakeTensor)
                 ):
-                    # record dynamic tensor activations
-                    dynamic_dims: set[int] = {
-                        dim
-                        for dim, size in enumerate(node.meta["val"].shape)
-                        if not isinstance(size, int)
-                    }
-                    if dynamic_dims:
-                        fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
+                    val = node.meta["val"]
+                    if isinstance(val, FakeTensor):
+                        # record dynamic tensor activations
+                        dynamic_dims: set[int] = {
+                            dim
+                            for dim, size in enumerate(val.shape)
+                            if not isinstance(size, int)
+                        }
+                        if dynamic_dims:
+                            fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
+                    elif isinstance(val, FakeScriptObject):
+                        # Track opaque objects saved for backward
+                        opaque_outs_saved_for_bw.append(node)
 
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+            num_opaque_objects_saved_for_bw = len(opaque_outs_saved_for_bw)
             fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
+            fw_metadata.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
             inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
+            inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
             if torch._functorch.config.donated_buffer:
                 fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
                     fw_module,
@@ -2230,6 +2245,9 @@ def _cache_autograd_info(
                 aot_joint_graph_str: Optional[str] = joint_graph_str
                 guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
 
+                # Get num_opaque_objects_saved_for_bw from metadata
+                num_opaque_objects_saved_for_bw = fw_metadata.num_opaque_objects_saved_for_bw
+
                 entry = AOTAutogradCache.make_entry(
                     compiled_fw_func,  # type: ignore[arg-type]
                     compiled_bw_func,  # type: ignore[arg-type]
@@ -2247,6 +2265,7 @@ def _cache_autograd_info(
                     guards_expr=guards_expr,
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
+                    num_opaque_objects_saved_for_bw=num_opaque_objects_saved_for_bw,
                     serialized_bw_module=serialize_graph_module(bw_module),
                 )
                 AOTAutogradCache.save(

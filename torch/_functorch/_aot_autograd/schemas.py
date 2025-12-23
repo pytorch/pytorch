@@ -435,6 +435,7 @@ class ViewAndMutationMeta:
     traced_tangent_metas: Optional[list[Any]] = None
 
     num_symints_saved_for_bw: Optional[int] = None
+    num_opaque_objects_saved_for_bw: Optional[int] = None
 
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
@@ -665,16 +666,31 @@ class ViewAndMutationMeta:
     @property
     def tensors_saved_for_backwards_slice(self):
         assert self.num_symints_saved_for_bw is not None
-        if self.num_symints_saved_for_bw > 0:
-            return slice(self.num_forward, -self.num_symints_saved_for_bw)
+        assert self.num_opaque_objects_saved_for_bw is not None
+        num_non_tensors = self.num_symints_saved_for_bw + self.num_opaque_objects_saved_for_bw
+        if num_non_tensors > 0:
+            return slice(self.num_forward, -num_non_tensors)
         else:
             return slice(self.num_forward, None)
 
     @property
     def symints_saved_for_backwards_slice(self):
         assert self.num_symints_saved_for_bw is not None
+        assert self.num_opaque_objects_saved_for_bw is not None
         if self.num_symints_saved_for_bw > 0:
-            return slice(-self.num_symints_saved_for_bw, None)
+            num_opaque = self.num_opaque_objects_saved_for_bw
+            if num_opaque > 0:
+                return slice(-self.num_symints_saved_for_bw - num_opaque, -num_opaque)
+            else:
+                return slice(-self.num_symints_saved_for_bw, None)
+        else:
+            return slice(0, 0)  # empty slice
+
+    @property
+    def opaque_objects_saved_for_backwards_slice(self):
+        assert self.num_opaque_objects_saved_for_bw is not None
+        if self.num_opaque_objects_saved_for_bw > 0:
+            return slice(-self.num_opaque_objects_saved_for_bw, None)
         else:
             return slice(0, 0)  # empty slice
 
