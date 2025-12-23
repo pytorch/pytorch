@@ -19,7 +19,6 @@ def get_enum(reduction: str) -> int:
     elif reduction == "sum":
         ret = 2
     else:
-        ret = -1  # TODO: remove once JIT exceptions support control flow
         raise ValueError(f"{reduction} is not a valid value for reduction")
     return ret
 
