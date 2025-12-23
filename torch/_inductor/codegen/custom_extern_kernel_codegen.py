@@ -75,10 +75,12 @@ def generate_print_python(
 
     # First arg is the format string
     if not codegen_args:
-        raise ValueError("generate_print_python requires a format string as the first positional argument")
+        raise ValueError(
+            "generate_print_python requires a format string as the first positional argument"
+        )
     format_str: str = codegen_args[0]
 
-# Remaining args are positional arguments for .format()
+    # Remaining args are positional arguments for .format()
     positional_args = codegen_args[1:]
 
     args_str = ", ".join(positional_args + codegen_kwargs)
@@ -87,6 +89,7 @@ def generate_print_python(
         if args_str
         else f"print({format_str})"
     )
+
 
 # Registry mapping operator names to their custom codegen implementations
 # Usage: CUSTOM_EXTERN_KERNEL_CODEGEN[op_name].python(node, writeline)

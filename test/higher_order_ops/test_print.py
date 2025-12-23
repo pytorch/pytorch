@@ -134,7 +134,6 @@ def forward(self, arg0_1):
                 torch._higher_order_ops.print("values {} {}", 3, res)
                 return (res,)
 
-
         inputs = (torch.randn(3),)
 
         # With functionalization, it should appear wrapped with with_effects()
@@ -269,7 +268,6 @@ x = add_1, y = add_2);  getitem = None
             f"moo kwargs {x * 2}\nmoo args {x * 2 * x * 2}",
         )
         self.assertEqual(orig_out, opt_out)
-
 
         # Test recompilation with different input shape
         x_new = torch.randn(2, 2)
