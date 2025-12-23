@@ -58,11 +58,8 @@ def generate_print_python(
 
     # Remaining args are positional arguments for .format()
     positional_args = codegen_args[1:] if len(codegen_args) > 1 else []
-
-    args_str = ", ".join(
-        ([", ".join(positional_args)] if positional_args else [])
-        + ([", ".join(codegen_kwargs)] if codegen_kwargs else [])
-    )
+    
+    args_str = ", ".join(position_args + codegen_kwargs)
     writeline(
         f"print({format_str}.format({args_str}))"
         if args_str
