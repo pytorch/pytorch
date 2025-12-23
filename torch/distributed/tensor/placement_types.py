@@ -355,14 +355,13 @@ class Shard(torch._C._distributed.Shard):
 
     @staticmethod
     def _compute_padding_info(
-        current_logical_shape: list[int],
+        logical_size_on_dim: int,
         num_chunks: int,
         shard_dim: int,
-    ) -> tuple[bool, int, int]:
-        dim_logical_size = current_logical_shape[shard_dim]
-        dim_padding = dim_logical_size % num_chunks != 0
-        dim_full_chunk_size = (dim_logical_size + num_chunks - 1) // num_chunks
-        return dim_padding, dim_logical_size, dim_full_chunk_size
+    ) -> tuple[bool, int]:
+        dim_padding = logical_size_on_dim % num_chunks != 0
+        dim_full_chunk_size = (logical_size_on_dim + num_chunks - 1) // num_chunks
+        return dim_padding, dim_full_chunk_size
 
     @staticmethod
     @maybe_run_for_local_tensor
@@ -373,20 +372,16 @@ class Shard(torch._C._distributed.Shard):
         old_shard_dim: int,
         new_shard_dim: int,
     ) -> torch.Tensor:
+        old_dim_logical_size = current_logical_shape[old_shard_dim]
         (
             old_dim_padding,
-            _,
             old_dim_full_chunk_size,
-        ) = Shard._compute_padding_info(
-            current_logical_shape, num_chunks, old_shard_dim
-        )
+        ) = Shard._compute_padding_info(old_dim_logical_size, num_chunks, old_shard_dim)
+        new_dim_logical_size = current_logical_shape[new_shard_dim]
         (
             new_dim_padding,
-            _,
             new_dim_full_chunk_size,
-        ) = Shard._compute_padding_info(
-            current_logical_shape, num_chunks, new_shard_dim
-        )
+        ) = Shard._compute_padding_info(new_dim_logical_size, num_chunks, new_shard_dim)
 
         if old_dim_padding:
             old_dim_pad_size = Shard._get_shard_pad_size(
@@ -413,20 +408,16 @@ class Shard(torch._C._distributed.Shard):
         new_shard_dim: int,
         local_rank: int,
     ) -> torch.Tensor:
+        old_dim_logical_size = current_logical_shape[old_shard_dim]
         (
             old_dim_padding,
-            _,
             old_dim_full_chunk_size,
-        ) = Shard._compute_padding_info(
-            current_logical_shape, num_chunks, old_shard_dim
-        )
+        ) = Shard._compute_padding_info(old_dim_logical_size, num_chunks, old_shard_dim)
+        new_dim_logical_size = current_logical_shape[new_shard_dim]
         (
             new_dim_padding,
-            new_dim_logical_size,
             new_dim_full_chunk_size,
-        ) = Shard._compute_padding_info(
-            current_logical_shape, num_chunks, new_shard_dim
-        )
+        ) = Shard._compute_padding_info(new_dim_logical_size, num_chunks, new_shard_dim)
 
         if old_dim_padding:
             old_dim_unpad_size = (
@@ -555,12 +546,12 @@ class Shard(torch._C._distributed.Shard):
             local_tensor = torch.cat(strided_sharded_chunks, dim=new_shard_dim)
 
             # pad for old_shard_dim from Shard
+            old_dim_logical_size = current_logical_shape[old_shard_dim]
             (
                 old_dim_padding,
-                _,
                 old_dim_full_chunk_size,
             ) = Shard._compute_padding_info(
-                current_logical_shape, num_chunks, old_shard_dim
+                old_dim_logical_size, num_chunks, old_shard_dim
             )
             if old_dim_padding:
                 old_dim_pad_size = Shard._get_shard_pad_size(
@@ -580,12 +571,12 @@ class Shard(torch._C._distributed.Shard):
             current_logical_shape,
         ):
             # unpad for old_shard_dim from Shard
+            old_dim_logical_size = current_logical_shape[old_shard_dim]
             (
                 old_dim_padding,
-                _,
                 old_dim_full_chunk_size,
             ) = Shard._compute_padding_info(
-                current_logical_shape, num_chunks, old_shard_dim
+                old_dim_logical_size, num_chunks, old_shard_dim
             )
             if old_dim_padding:
                 old_dim_unpad_size = (
@@ -1015,7 +1006,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         num_chunks: int,
         shard_dim: int,
         split_factor: int = 1,
-    ) -> tuple[bool, int, int]:
+    ) -> tuple[bool, int]:
         """
         Compute padding information for _StridedShard collective operations.
 
@@ -1041,9 +1032,8 @@ class _StridedShard(torch._C._distributed.StridedShard):
                 Defaults to 1 (no strided sharding effect).
 
         Returns:
-            A tuple of (needs_padding_on_dim, logical_size_on_dim, max_chunk_size):
+            A tuple of (needs_padding_on_dim, max_chunk_size):
                 - needs_padding_on_dim: Whether padding is required on the shard dimension.
-                - logical_size_on_dim: The logical size of the tensor on the shard dimension.
                 - max_chunk_size: The maximum chunk size per rank after both levels of splitting.
         """
 
@@ -1080,7 +1070,6 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
         return (
             needs_padding_on_dim,
-            logical_size_on_dim,
             max_chunk_size,
         )
 
@@ -1103,7 +1092,6 @@ class _StridedShard(torch._C._distributed.StridedShard):
         """
         (
             old_dim_padding,
-            _,
             old_dim_max_chunk_size,
         ) = _StridedShard._compute_padding_info(
             current_logical_shape[old_shard_dim],
@@ -1113,7 +1101,6 @@ class _StridedShard(torch._C._distributed.StridedShard):
         )
         (
             new_dim_padding,
-            _,
             new_dim_max_chunk_size,
         ) = _StridedShard._compute_padding_info(
             current_logical_shape[new_shard_dim],
@@ -1156,19 +1143,10 @@ class _StridedShard(torch._C._distributed.StridedShard):
         extract correct elements (removing padding) and reorder them. The key insight
         is that padding can only be at the end, so the first shard has the max size.
         """
-        (
-            _,
-            old_dim_logical_size,
-            _,
-        ) = _StridedShard._compute_padding_info(
-            current_logical_shape[old_shard_dim],
-            num_chunks,
-            old_shard_dim,
-            split_factor,
-        )
+        old_dim_logical_size = current_logical_shape[old_shard_dim]
+        new_dim_logical_size = current_logical_shape[new_shard_dim]
         (
             new_dim_padding,
-            new_dim_logical_size,
             new_dim_max_chunk_size,
         ) = _StridedShard._compute_padding_info(
             current_logical_shape[new_shard_dim],
