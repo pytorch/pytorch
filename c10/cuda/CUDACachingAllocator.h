@@ -52,9 +52,12 @@ namespace c10::cuda::CUDACachingAllocator {
 // NOLINTNEXTLINE(misc-unused-using-decls)
 using c10::CachingAllocator::kLargeBuffer;
 using c10::CachingDeviceAllocator::AllocatorTraceTracker;
+using c10::CachingDeviceAllocator::BlockInfo;
 using c10::CachingDeviceAllocator::CreateContextFn;
 using c10::CachingDeviceAllocator::DeviceStats;
 using c10::CachingDeviceAllocator::RecordContext;
+using c10::CachingDeviceAllocator::SegmentInfo;
+using c10::CachingDeviceAllocator::TraceEntry;
 
 struct AllocatorState {
   virtual ~AllocatorState() = default;
