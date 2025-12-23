@@ -66,19 +66,15 @@ def _fixed_indexer_cute(
     CuTe then applies the tensor's actual memory strides to get the correct offset.
     """
 
-    def indexer(index: Sequence[Expr]) -> Expr:
+    def indexer(index: Sequence[Expr]) -> Expr | Sequence[Expr]:
         assert offset == Integer(0), "Offset not supported for colexicographic indexing"
         if not index:
             return Integer(0)
 
-        result = index[0]
-        runner = size[0]
-
-        for idx, sz in zip(index[1:], size[1:], strict=True):
-            result = result + runner * Identity(idx)
-            runner = runner * sz
-
-        return result
+        # CuTe accepts hierarchical coordinate, so we don't need to re-compute
+        # index in column-major, which probably introduces unnecessary calculations
+        # and increases register pressure.
+        return index[0] if len(index) == 1 else index
 
     return indexer
 

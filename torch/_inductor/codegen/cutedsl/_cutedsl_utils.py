@@ -1,16 +1,23 @@
 # mypy: disable-error-code=import-not-found
 # pyrefly: ignore [import-error, missing-import]
+import cutlass
 import cutlass.cute as cute
+from typing import Sequence
 
 
 @cute.jit  # type: ignore[misc]
-def ssa_to_indexable(ssa_value: cute.TensorSSA, dtype: str) -> cute.Numeric:
+def ssa_to_indexable(
+    ssa_value: cute.TensorSSA | Sequence[cute.TensorSSA], dtype: str
+) -> cute.Numeric | Sequence[cute.Numeric]:
     """
     Convert SSA form to indexable non-SSA form.
 
     Workaround for lack of gather support: SSA values cannot be used directly
     as indices in tensor loads. This converts SSA → fragment → scalar for indexing.
     """
+    if cutlass.const_expr(isinstance(ssa_value, Sequence)):
+        return tuple(ssa_to_indexable(x, dtype) for x in ssa_value)
+
     frag = cute.make_rmem_tensor(1, dtype)
     frag.store(ssa_value)
     return frag[0]
