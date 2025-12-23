@@ -599,7 +599,7 @@ class TestFakeQuantizeOps(TestCase):
             # Output of fake quant is not identical to input
             Y = fq_module(X)
             self.assertNotEqual(Y, X)
-            if type(fq_module) is _LearnableFakeQuantize:
+            if type(fq_module) == _LearnableFakeQuantize:
                 fq_module.toggle_fake_quant(False)
             else:
                 torch.ao.quantization.disable_fake_quant(fq_module)
@@ -613,7 +613,7 @@ class TestFakeQuantizeOps(TestCase):
             scale = fq_module.scale.detach().clone()
             zero_point = fq_module.zero_point.detach().clone()
 
-            if type(fq_module) is _LearnableFakeQuantize:
+            if type(fq_module) == _LearnableFakeQuantize:
                 fq_module.toggle_observer_update(False)
                 fq_module.toggle_fake_quant(True)
             else:
@@ -625,7 +625,7 @@ class TestFakeQuantizeOps(TestCase):
             # Observer is disabled, scale and zero-point do not change
             self.assertEqual(fq_module.scale, scale)
             self.assertEqual(fq_module.zero_point, zero_point)
-            if type(fq_module) is _LearnableFakeQuantize:
+            if type(fq_module) == _LearnableFakeQuantize:
                 fq_module.toggle_observer_update(True)
             else:
                 torch.ao.quantization.enable_observer(fq_module)

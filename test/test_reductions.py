@@ -3327,7 +3327,7 @@ class TestReductions(TestCase):
     """
     def _test_histogramdd_numpy(self, t, bins, bin_range, weights, density):
         def to_np(t):
-            if type(t) is list:
+            if type(t) == list:
                 return list(map(to_np, t))
             if not torch.is_tensor(t):
                 return t

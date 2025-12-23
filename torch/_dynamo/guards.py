@@ -4182,7 +4182,7 @@ def make_torch_function_mode_stack_guard(
             return False
 
         for ty, mode in zip(types, cur_stack):
-            if ty is not type(mode):
+            if ty != type(mode):
                 return False
 
         return True

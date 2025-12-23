@@ -158,7 +158,7 @@ class TestBaseStructuredSparsifier(TestCase):
             assert parametrize.is_parametrized(module)
             assert hasattr(module, "parametrizations")
             # Assume that this is the 1st/only parametrization
-            assert type(module.parametrizations.weight[0]) is FakeStructuredSparsity
+            assert type(module.parametrizations.weight[0]) == FakeStructuredSparsity
 
     def _check_pruner_valid_before_step(self, model, pruner, device):
         for config in pruner.groups:

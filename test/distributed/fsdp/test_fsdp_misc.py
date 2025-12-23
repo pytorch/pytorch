@@ -1021,7 +1021,7 @@ class TestFSDPMiscWorldSize1(FSDPTestMultiThread):
             )
             for warning in w:
                 self.assertTrue(
-                    warning.category is not UserWarning
+                    warning.category != UserWarning
                     or not str(warning.message).startswith(warning_prefix)
                 )
 
