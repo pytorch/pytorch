@@ -74,10 +74,11 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     _disable_current_modes,
+    any_torch_dispatch_mode_on_stack,
     is_in_any_mode_without_ignore_compile_internals,
-    is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
@@ -1914,6 +1915,15 @@ def _compile(
                     else _get_error_on_graph_break()
                 )
 
+            # Cleanup guards unless if in export, which will return guards
+            # Make sure to to do this after collecting metrics
+            if (
+                tracer_output is not None
+                and tracer_output.output_graph is not None
+                and not tracer_output.output_graph.export
+            ):
+                tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.inner = OrderedSet()
+
 
 class ConvertFrame:
     def __init__(
@@ -2118,10 +2128,6 @@ class ConvertFrameProtocol(typing.Protocol):
     ) -> ConvertFrameReturn: ...
 
 
-def should_skip_due_to_torch_dispatch_mode() -> bool:
-    return is_in_any_mode_without_ignore_compile_internals()
-
-
 class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
@@ -2142,13 +2148,25 @@ class CatchErrorsWrapper:
             has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
         else:
             has_started_execution = frame.f_lasti >= first_real_inst_idx(frame.f_code)
+
+        # Check if we should skip due to torch dispatch mode.
+        # When inline_torch_dispatch_torch_compile is True (new behavior), we walk
+        # the stack to check for active modes. When False (old behavior), we use
+        # the global flag that tracks if we're inside any mode.
+        if config.inline_torch_dispatch_torch_compile:
+            should_skip_for_dispatch_mode = any_torch_dispatch_mode_on_stack()
+        else:
+            should_skip_for_dispatch_mode = (
+                is_in_any_mode_without_ignore_compile_internals()
+            )
+
         if (
             # TODO: the first condition is not covered by any test
             has_started_execution
             or is_skipfile
             or config.disable
             or (
-                should_skip_due_to_torch_dispatch_mode()
+                should_skip_for_dispatch_mode
                 and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):
@@ -2157,7 +2175,7 @@ class CatchErrorsWrapper:
                     skip_reason = "traced frame already"
                 elif trace_rules.check(frame.f_code):
                     skip_reason = "in skipfiles"
-                elif is_in_torch_dispatch_mode(include_infra_modes=False):
+                elif should_skip_for_dispatch_mode:
                     skip_reason = "non-infra torch dispatch mode present, this is not supported today in torch.compile"
                 else:
                     skip_reason = "dynamo tracing is disabled"

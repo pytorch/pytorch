@@ -5,7 +5,7 @@ import functools
 import importlib
 from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Literal, Optional
+from typing import Any, cast, Literal, Optional
 
 import sympy
 from sympy import Expr, Integer
@@ -14,7 +14,7 @@ import torch
 from torch.fx import GraphModule
 from torch.utils._sympy.functions import Identity
 
-from ...ir import FixedLayout, Subgraph, TensorBox
+from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
 from .common import infer_dense_strides, load_flex_template, SubgraphResults
 
@@ -110,18 +110,18 @@ def wrap_choice_render_with_cutedsl_indexer(choice: Any) -> None:
     Wrap a template choice's kernel render to apply CuteDSL indexer patching.
 
     See Note [CuteDSL indexer patch]:
-    This wrapper allows the template to construct its closures normally, then
-    scopes the indexer patch to the actual render call that emits the kernel.
-    This ensures CuteDSL templates see colexicographic indexing while preserving
-    the template's setup logic.
+    CuteDSL handles tensor strides internally, so template rendering must use
+    colexicographic indexing.
     """
     original_make_kernel_render = choice.make_kernel_render
 
     def make_kernel_render_with_patch(*args, **kwargs):
         render_kernel, render = original_make_kernel_render(*args, **kwargs)
-        # Let the template construct its closures, then scope the indexer patch
-        # to the actual render call that emits the kernel
-        render_with_patch = patch_fixed_layout_indexer_for_cutedsl()(render)
+
+        def render_with_patch():
+            with patch_fixed_layout_indexer_for_cutedsl():
+                return render()
+
         return render_kernel, render_with_patch
 
     choice.make_kernel_render = make_kernel_render_with_patch
@@ -170,8 +170,8 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
 
 @functools.lru_cache(maxsize=1)
 def _supports_nontrivial_mask_graphs() -> bool:
-    """Currently only supported on Hopper (SM90) GPUs."""
-    return torch.cuda.get_device_capability()[0] in [9, 10]
+    """Currently only supported on Blackwell (SM100) GPUs."""
+    return torch.cuda.get_device_capability()[0] == 10
 
 
 def _can_use_flex_flash_attention(
@@ -198,7 +198,7 @@ def _can_use_flex_flash_attention(
     if not _supports_nontrivial_mask_graphs():
         return (
             False,
-            "NYI: Non-trivial mask graphs only supported on Hopper (SM90) for flash attention",
+            "NYI: Non-trivial mask graphs only supported on Blackwell (SM100) for flash attention",
         )
 
     return True, ""
@@ -315,15 +315,16 @@ def create_flex_flash_attention_kernel(
             "Flash attention with block mask but without full blocks is not supported yet"
         )
 
-    error = flash_attention_cutedsl_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=output_layout,
-        mutated_inputs=[lse],
-        subgraphs=[subgraph_buffer, mask_graph_buffer],
-        SM_SCALE=scale,
-        NEEDS_BLOCK_MASK=needs_block_mask,
-    )
+    with patch_fixed_layout_indexer_for_cutedsl():
+        error = flash_attention_cutedsl_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=output_layout,
+            mutated_inputs=[lse],
+            subgraphs=[subgraph_buffer, mask_graph_buffer],
+            SM_SCALE=scale,
+            NEEDS_BLOCK_MASK=needs_block_mask,
+        )
 
     for choice in choices:
         wrap_choice_render_with_cutedsl_indexer(choice)
@@ -348,8 +349,13 @@ def _can_use_flex_flash_attention_backward(
     if not ensure_flash_available():
         return False, "CUTE flash attention is not available"
 
-    if not is_trivial_mask_graph(mask_graph.graph_module):
-        return False, "NYI: Flex Flash Attention doesn't support block_sparsity yet."
+    mask_trivial = is_trivial_mask_graph(mask_graph.graph_module)
+    if not mask_trivial:
+        if not _supports_nontrivial_mask_graphs():
+            return (
+                False,
+                "NYI: Block sparsity in backward only supported on SM100",
+            )
 
     if input_buffers_require_grads(
         fw_subgraph.graph_module, num_score_mod_placeholders
@@ -424,14 +430,12 @@ def create_flex_flash_attention_backward_kernel(
     fw_subgraph_buffer: Optional[SubgraphResults] = None,
     joint_subgraph_buffer: Optional[Any] = None,
     score_mod_other_buffers: Optional[list[TensorBox]] = None,
-    # TODO: will be needed for block sparsity
-    # mask_graph: SubgraphResults,
-    # mask_mod_other_buffers: list[TensorBox],
-    # kv_num_blocks: TensorBox | None,
-    # kv_indices: TensorBox | None,
-    # full_kv_num_blocks: TensorBox | None,
-    # full_kv_indices: TensorBox | None,
-) -> tuple[TensorBox, TensorBox, TensorBox, tuple]:
+    mask_graph_buffer: Optional[SubgraphResults] = None,
+    q_num_blocks: Optional[TensorBox] = None,
+    q_indices: Optional[TensorBox] = None,
+    full_q_num_blocks: Optional[TensorBox] = None,
+    full_q_indices: Optional[TensorBox] = None,
+) -> tuple[TensorBox | ShapeAsConstantBuffer, TensorBox, TensorBox, tuple]:
     """Create a CuteDSL flash attention backward kernel for the default mod path."""
     if not ensure_flash_available():
         raise RuntimeError("CUTE flash attention not available")
@@ -481,7 +485,7 @@ def create_flex_flash_attention_backward_kernel(
 
     choices: list[Any] = []
 
-    input_nodes = [
+    input_nodes: list[TensorBox] = [
         query,
         key,
         value,
@@ -492,18 +496,39 @@ def create_flex_flash_attention_backward_kernel(
         grad_value,
     ]
 
-    has_score_mod = fw_subgraph_buffer is not None and joint_subgraph_buffer is not None
-    subgraphs = [fw_subgraph_buffer, joint_subgraph_buffer] if has_score_mod else []
+    has_block_mask = mask_graph_buffer is not None
+    if has_block_mask:
+        assert q_indices is not None
+        assert full_q_num_blocks is not None
+        assert full_q_indices is not None
+        input_nodes.extend(
+            [
+                cast(TensorBox, q_num_blocks),
+                q_indices,
+                full_q_num_blocks,
+                full_q_indices,
+            ]
+        )
 
-    error = flash_attention_backward_cutedsl_template.maybe_append_choice(
-        choices,
-        input_nodes=input_nodes,
-        layout=output_layout,
-        mutated_inputs=[grad_key, grad_value],
-        subgraphs=subgraphs if subgraphs else None,
-        SM_SCALE=scale,
-        HAS_SCORE_MOD=has_score_mod,
-    )
+    has_score_mod = fw_subgraph_buffer is not None and joint_subgraph_buffer is not None
+    subgraphs = []
+    if has_score_mod:
+        subgraphs.append(fw_subgraph_buffer)
+        subgraphs.append(joint_subgraph_buffer)
+    if has_block_mask:
+        subgraphs.append(mask_graph_buffer)
+
+    with patch_fixed_layout_indexer_for_cutedsl():
+        error = flash_attention_backward_cutedsl_template.maybe_append_choice(
+            choices,
+            input_nodes=input_nodes,
+            layout=output_layout,
+            mutated_inputs=[grad_key, grad_value],
+            subgraphs=subgraphs if subgraphs else None,
+            SM_SCALE=scale,
+            HAS_SCORE_MOD=has_score_mod,
+            HAS_BLOCK_MASK=has_block_mask,
+        )
 
     for choice in choices:
         wrap_choice_render_with_cutedsl_indexer(choice)
