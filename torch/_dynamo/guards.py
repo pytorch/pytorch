@@ -999,7 +999,6 @@ class GuardBuilder(GuardBuilderBase):
         runtime_global_scope: Optional[dict[str, object]] = None,
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
-        source_get_cache: Optional[dict[str, Any]] = None,
     ) -> None:
         self.f_code = f_code
         self.id_ref = id_ref
@@ -1010,7 +1009,6 @@ class GuardBuilder(GuardBuilderBase):
             weakref.WeakKeyDictionary()
         )
         self.runtime_global_scope = runtime_global_scope or global_scope
-        self.source_get_cache = source_get_cache or {}
         self.scope["__builtins__"] = builtins.__dict__.copy()
         for (
             name,
@@ -1051,8 +1049,6 @@ class GuardBuilder(GuardBuilderBase):
         assert self.check_fn_manager.output_graph is not None
         for source in self.check_fn_manager.output_graph.guard_on_key_order:
             dict_obj = self.get(source)
-            if self.save_guards:
-                self.source_get_cache[source.name] = dict_obj
             self.key_order_guarded_dict_ids.add(id(dict_obj))
 
         # Keep track of weak references of objects with ID_MATCH guard. This
@@ -1816,19 +1812,13 @@ class GuardBuilder(GuardBuilderBase):
         guard_or_source: Guard | Source,
         closure_vars: Optional[dict[str, Any]] = None,
     ) -> Any:
-        name = guard_or_source.name
         if isinstance(guard_or_source, Source):
             src = guard_or_source
         else:
             src = guard_or_source.originating_source
-        if self.source_get_cache:
-            if name in self.source_get_cache:
-                return self.source_get_cache[name]
         if closure_vars is None:
             closure_vars = _get_closure_vars()
         ret = src.get_value(self.scope, closure_vars, self.src_get_value_cache)
-        if self.save_guards and ".__closure__" in name:
-            self.source_get_cache[name] = ret
         return ret
 
     # Registers the usage of the source name referenced by the
@@ -3268,7 +3258,6 @@ class ShapeCodeParts:
 class GuardsState:
     output_graph: OutputGraphGuardsState
     shape_code_parts: Optional[ShapeCodeParts]
-    source_get_cache: Optional[dict[str, Any]] = None
 
 
 class _Missing:
@@ -3291,7 +3280,6 @@ class _Missing:
 def _get_unsupported_types() -> tuple[type, ...]:
     # We only do ID_MATCH on C objects which is already banned from guards serialization.
     ret: tuple[type, ...] = (
-        types.CodeType,
         torch._C.Stream,
         weakref.ReferenceType,
     )
@@ -3441,6 +3429,19 @@ class GuardsStatePickler(pickle.Pickler):
         # pyrefly: ignore [bad-return]
         return collections.namedtuple(name, fields)
 
+    @classmethod
+    def _unpickle_code(cls, serialized_code):
+        from torch._dynamo.package import SerializedCode
+
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_nested_function(
+        cls, code, module: str, qualname: str, argdefs, closure
+    ) -> Any:
+        f_globals = importlib.import_module(module).__dict__
+        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
+
     # pyrefly: ignore [bad-override]
     def reducer_override(
         self, obj: Any
@@ -3449,6 +3450,11 @@ class GuardsStatePickler(pickle.Pickler):
 
         if id(obj) in self.empty_values:
             return type(obj).__new__, (type(obj),)
+
+        if inspect.iscode(obj):
+            from torch._dynamo.package import SerializedCode
+
+            return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
 
         if id(obj) in self.missing_values:
             return _Missing, ("missing values",)
@@ -3572,7 +3578,13 @@ class GuardsStatePickler(pickle.Pickler):
 
         elif inspect.isfunction(obj):
             if obj.__code__.co_flags & inspect.CO_NESTED:
-                return _Missing, ("nested function",)
+                return type(self)._unpickle_nested_function, (
+                    obj.__code__,
+                    obj.__module__,
+                    obj.__qualname__,
+                    obj.__defaults__,
+                    obj.__closure__,
+                )
             if obj.__module__ in sys.modules:
                 f = sys.modules[obj.__module__]
                 for name in obj.__qualname__.split("."):
@@ -3653,8 +3665,6 @@ def pickle_guards_state(
         # Prune more values in AOT precompile when complex pickling structure is not needed.
         state.output_graph.global_scope.clear()
         # state.output_graph.local_scope.clear()
-        if state.source_get_cache:
-            state.source_get_cache.clear()
         state.output_graph.guard_on_key_order.clear()
 
     try:
@@ -3682,7 +3692,6 @@ class CheckFunctionManager:
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
         strict_error: bool = False,
-        source_get_cache: Optional[dict[str, Any]] = None,
     ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
@@ -3752,7 +3761,6 @@ class CheckFunctionManager:
                 f_code,
                 output_graph,
                 False,
-                source_get_cache=source_get_cache,
             )
 
             def make_guard_filter_entry(guard: Guard) -> GuardFilterEntry:
@@ -3802,7 +3810,6 @@ class CheckFunctionManager:
             output_graph,
             save_guards,
             guard_filter_fn=guard_filter_fn,
-            source_get_cache=source_get_cache,
         )
 
         self.guard_manager = guard_manager
@@ -4030,7 +4037,6 @@ class CheckFunctionManager:
         guards_state = GuardsState(
             output_graph=output_graph_guards_state,
             shape_code_parts=self.shape_code_parts,
-            source_get_cache=builder.source_get_cache,
         )
 
         return pickle_guards_state(
@@ -4046,7 +4052,6 @@ class CheckFunctionManager:
         save_guards: bool,
         guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
         | None = None,
-        source_get_cache: Optional[dict[str, Any]] = None,
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
         guard_manager = GuardManagerWrapper()
         guard_manager.diff_guard_sources = existing_diff_guard_sources
@@ -4075,7 +4080,6 @@ class CheckFunctionManager:
             save_guards,
             runtime_global_scope=self.runtime_global_scope,
             guard_filter_fn=guard_filter_fn,
-            source_get_cache=source_get_cache,
         )
 
         # Break retain cycle. See test_release_scope_memory
