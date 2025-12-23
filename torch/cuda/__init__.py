@@ -1344,12 +1344,22 @@ def _get_amdsmi_device_memory_used(device: Device = None) -> int:
 
 def _get_amdsmi_memory_usage(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
+    try:
+        return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
+    except amdsmi.AmdSmiLibraryException:
+        # Some GPU architectures (e.g., MI300X) may return
+        # AMDSMI_STATUS_UNEXPECTED_DATA for activity queries
+        return 0
 
 
 def _get_amdsmi_utilization(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
+    try:
+        return amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
+    except amdsmi.AmdSmiLibraryException:
+        # Some GPU architectures (e.g., MI300X) may return
+        # AMDSMI_STATUS_UNEXPECTED_DATA for activity queries
+        return 0
 
 
 def _get_amdsmi_temperature(device: Device = None) -> int:
