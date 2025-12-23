@@ -1823,10 +1823,6 @@ except RuntimeError as e:
             self.assertEqual(stash[0], torch.full_like(a, 6))
             self.assertEqual(stash[1], torch.full_like(a, 6))
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "In ROCm, kernel asserts are disabled due to performance overhead",
-    )
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(
             RuntimeError, "Boolean value of Tensor with no values is ambiguous"
@@ -1924,7 +1920,6 @@ torch.cuda.synchronize()
     # Test is flaky on Windows (https://github.com/pytorch/pytorch/issues/57401)
     @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows (see issue 57401)")
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
-    @skipIfRocm
     def test_cudnn_multiple_threads_same_device(self):
         # This function is intended to test the lazy creation and reuse of per-thread
         # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
@@ -4141,7 +4136,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @skipIfRocm
+    @skipIfRocm(msg="ROCTracer does not capture Python stack frames in profiler output")
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
             with_stack=True, profile_memory=True, record_shapes=True
@@ -4911,7 +4906,6 @@ print(value, end="")
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "flaky for AMD gpu")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_device_memory_used(self):
         """
@@ -5090,7 +5084,10 @@ def reconstruct_from_tensor_metadata(metadata):
     return t
 
 
-@unittest.skipIf(not TEST_CUDA or TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
+@unittest.skipIf(
+    not TEST_CUDA or TEST_CUDAMALLOCASYNC,
+    "CUDA required, not supported with CUDAMallocAsync",
+)
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
     @property
