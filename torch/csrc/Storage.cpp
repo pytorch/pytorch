@@ -159,8 +159,6 @@ static PyObject* THPStorage_pynew(
 #endif
 #ifdef USE_MPS
       case at::kMPS:
-        allocator = at::mps::GetMPSAllocator();
-        break;
 #endif
       case at::DeviceType::XPU:
       case at::DeviceType::HPU:

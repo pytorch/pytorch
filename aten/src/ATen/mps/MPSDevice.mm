@@ -2,6 +2,7 @@
 
 #include <ATen/mps/IndexKernels.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSCachingAllocator.h>
 #include <ATen/mps/MPSDevice.h>
 #include <ATen/mps/MPSStream.h>
 #include <ATen/native/mps/MPSGraphSequoiaOps.h>
@@ -110,8 +111,9 @@ unsigned MPSDevice::getCoreCount() const {
   return core_count;
 }
 
-at::Allocator* GetMPSAllocator() {
-  return getIMPSAllocator();
+at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
+  // Return the c10-registered allocator
+    return at::mps::MPSCachingAllocator::get();
 }
 bool is_available() {
   return MPSDevice::getInstance()->device() != nil;
