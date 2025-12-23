@@ -297,9 +297,6 @@ def pre_grad_passes(
     Consider adding a new pass to post_grad.py or joint_graph.py which
     are after functionalization and normalization.
     """
-    # gm.print_readable()
-    print(gm.graph)
-    # breakpoint()
     if config.pattern_matcher:
         lazy_init()
         if hasattr(

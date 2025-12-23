@@ -11,13 +11,14 @@ from ..pattern_matcher import (
     register_graph_pattern,
 )
 import operator
+from torch._dynamo.utils import counters
 
 @register_graph_pattern(
     CallFunction(
         torch.argmax,
         CallFunction(
             operator.truediv,
-            # we don't reply on PatternMatcher to match softmax
+            # we don't rely on PatternMatcher to match softmax
             # and exponential_ due to the mutation op
             KeywordArg("softmax"),
             KeywordArg("rand_exp"),
@@ -27,10 +28,12 @@ import operator
     ),
     pass_dict=apply_gumbel_max_trick_pass,
 )
-def apply_gumbel_max_trick_old(match: Match, softmax, rand_exp):
-    # return
+def apply_gumbel_max_trick(match: Match, softmax, rand_exp):
+    if not torch._inductor.config.apply_gumbel_max_trick:
+        return
+
     logits = softmax.args[0]
-    if rand_exp.target != "exponential_" or len(rand_exp.users) != 1:
+    if rand_exp.op != "call_method" or rand_exp.target != "exponential_" or len(rand_exp.users) != 1:
         return
 
     empty_node, rate = rand_exp.args
@@ -54,3 +57,5 @@ def apply_gumbel_max_trick_old(match: Match, softmax, rand_exp):
     # erase nodes
     for n in nodes_to_erase:
         match.graph.erase_node(n)
+
+    counters["inductor"]["apply_gumbel_max_trick"] += 1
