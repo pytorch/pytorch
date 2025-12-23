@@ -316,6 +316,10 @@ def torch_dtype_to_cutlass_type(
         return cutlass_library.library.DataType.f16
     elif torch_dtype == torch.bfloat16:
         return cutlass_library.library.DataType.bf16
+    elif torch_dtype == torch.float8_e4m3fn:
+        return cutlass_library.library.DataType.e4m3
+    elif torch_dtype == torch.float8_e5m2:
+        return cutlass_library.library.DataType.e5m2
     else:
         raise NotImplementedError(f"Unsupported data type: {torch_dtype=}")
 
@@ -375,17 +379,21 @@ def get_accumulator_dtype(
     if input_torch_dtypes[0] == input_torch_dtypes[1]:
         torch_dtype = input_torch_dtypes[0]
     else:
-        size0 = torch.tensor([], dtype=input_torch_dtypes[0]).element_size()
-        size1 = torch.tensor([], dtype=input_torch_dtypes[1]).element_size()
-        if size0 > size1:
-            dtype0, dtype1 = input_torch_dtypes
+        fp8_types = {torch.float8_e4m3fn, torch.float8_e5m2}
+        if set(input_torch_dtypes).issubset(fp8_types):
+            torch_dtype = torch.float8_e4m3fn  # Mixed FP8 types use float32 accumulator
         else:
-            dtype1, dtype0 = input_torch_dtypes
-        if dtype0 in [torch.half, torch.bfloat16] and dtype1 in [
-            torch.int8,
-            torch.uint8,
-        ]:
-            torch_dtype = dtype0
+            size0 = torch.tensor([], dtype=input_torch_dtypes[0]).element_size()
+            size1 = torch.tensor([], dtype=input_torch_dtypes[1]).element_size()
+            if size0 > size1:
+                dtype0, dtype1 = input_torch_dtypes
+            else:
+                dtype1, dtype0 = input_torch_dtypes
+            if dtype0 in [torch.half, torch.bfloat16] and dtype1 in [
+                torch.int8,
+                torch.uint8,
+            ]:
+                torch_dtype = dtype0
 
     if torch_dtype in (
         torch.float16,
