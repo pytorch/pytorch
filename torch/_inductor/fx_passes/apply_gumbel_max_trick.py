@@ -27,18 +27,10 @@ def apply_gumbel_max_trick(match: Match, softmax, rand_exp):
     if not torch._inductor.config.apply_gumbel_max_trick:
         return
 
-    logits = softmax.args[0]
     if (
         rand_exp.op != "call_method"
         or rand_exp.target != "exponential_"
         or len(rand_exp.users) != 1
-    ):
-        return
-
-    if (
-        softmax.op != "call_function"
-        or softmax.target != torch.softmax
-        or len(softmax.users) != 1
     ):
         return
 
@@ -48,6 +40,14 @@ def apply_gumbel_max_trick(match: Match, softmax, rand_exp):
 
     if len(empty_node.users) != 1:
         return
+
+    if (
+        softmax.op != "call_function"
+        or softmax.target != torch.nn.functional.softmax
+        or len(softmax.users) != 1
+    ):
+        return
+    logits = softmax.args[0]
 
     truediv, argmax = match.nodes
     nodes_to_erase = [truediv, softmax]

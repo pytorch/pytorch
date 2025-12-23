@@ -759,7 +759,6 @@ class _TargetArgsExpr(_TargetExpr):
                 )
         m.nodes.append(node)
         m.targets[self] = node.target
-
         return m
 
     def find_anchor_nodes(
