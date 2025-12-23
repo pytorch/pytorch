@@ -82,6 +82,19 @@ struct HIPGuardImplMasqueradingAsCUDA final : public c10::impl::DeviceGuardImplI
   void uncheckedSetDevice(Device d) const noexcept override {
     C10_HIP_CHECK_WARN(hipSetDevice(d.index()));
   }
+  DeviceCapability getDeviceCapability(Device d) const override {
+    DeviceCapability cap;
+    cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
+        (1ULL << kIndex_Char) | (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
+        (1ULL << kIndex_Long) | (1ULL << kIndex_Float) |
+        (1ULL << kIndex_Double) | (1ULL << kIndex_ComplexFloat) |
+        (1ULL << kIndex_ComplexDouble) | (1ULL << kIndex_Bool);
+    // ROCm supports half, complex half, and bfloat16 types natively.
+    cap.capability_data.capability_bits |= (1ULL << kIndex_Half);
+    cap.capability_data.capability_bits |= (1ULL << kIndex_ComplexHalf);
+    cap.capability_data.capability_bits |= (1ULL << kIndex_BFloat16);
+    return cap;
+  }
   Stream getStream(Device d) const override {
     return getCurrentHIPStreamMasqueradingAsCUDA(d.index()).unwrap();
   }
