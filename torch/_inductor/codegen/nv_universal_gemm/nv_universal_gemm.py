@@ -7,7 +7,6 @@ high-performance GEMM kernels for NVIDIA GPUs.
 """
 
 import itertools
-import random
 from typing import Any, Optional, Union
 
 import torch
@@ -19,6 +18,9 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
+from torch._inductor.template_heuristics.nv_universal_gemm import (
+    get_nvgemm_heuristics,
+)
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._logging import getArtifactLogger
 
@@ -282,12 +284,27 @@ def add_nv_universal_gemm_choices(
     if not kernels:
         return
 
-    # Limit kernels to profile if configured
-    if config.cuda.nvgemm_max_profiling_configs:
-        kernels = random.sample(
-            kernels,
-            min(len(kernels), config.cuda.nvgemm_max_profiling_configs),
+    max_configs = config.cuda.nvgemm_max_profiling_configs or len(kernels)
+
+    heuristics = get_nvgemm_heuristics()
+
+    if heuristics.should_run():
+        a_layout = a_node.get_layout()
+        b_layout = b_node.get_layout()
+        dtype_a = a_layout.dtype
+
+        layout_a = "row" if a_layout.stride[-1] == 1 else "col"
+        layout_b = "row" if b_layout.stride[-1] == 1 else "col"
+
+        m = int(layout.size[0])
+        n = int(layout.size[1])
+        k = int(a_layout.size[-1])
+
+        kernels = heuristics.filter_kernels(
+            kernels, m, n, k, dtype_a, layout_a, layout_b, max_configs
         )
+    else:
+        kernels = kernels[:max_configs]
 
     num_added = 0
     for kernel in kernels:
