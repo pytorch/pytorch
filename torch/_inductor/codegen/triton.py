@@ -192,6 +192,16 @@ def gen_common_triton_imports() -> str:
         import triton.language as tl
         """
     )
+    try:
+        import triton.language.extra.tlx  # noqa: F401
+
+        imports.splice(
+            """
+           import triton.language.extra.tlx as tlx  # noqa: F401
+           """
+        )
+    except ImportError:
+        pass
     if attr_desc := gen_attr_descriptor_import():
         imports.writeline(attr_desc)
 
@@ -2491,10 +2501,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         optimize_mask=True,
         fixed_config: Optional[FixedTritonConfig] = None,
         hint_override: Optional[int] = None,
+        is_combo_kernel: bool = False,
         **kwargs,
     ) -> None:
         self.optimize_mask: bool = optimize_mask
         self.fixed_config = fixed_config
+        self.is_combo_kernel: bool = is_combo_kernel
         super().__init__(tiling, **kwargs)
         self.cse = TritonCSE(self.newvar_prefix, self.suffix)
         # Cache of values that can be reused for the prologue.
@@ -3043,8 +3055,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 expand_shape = tuple([1] * len(self.dense_size_list()))
 
             index_str = f"tl.full({expand_str}, {index_str}, tl.int32)"
-            if self.fixed_config and not self._has_constant_xmask():
-                mask_vars = OrderedSet(["xmask"])
+            if self.fixed_config or self.is_combo_kernel:
+                mask_vars = OrderedSet(
+                    f"{tree.prefix}mask"
+                    for tree in self.range_trees
+                    if not tree.is_reduction and not self._has_constant_mask(tree)
+                )
             else:
                 mask_vars = OrderedSet()
             if self._load_mask:
@@ -4856,7 +4872,12 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     loop_end = (
                         "rsplit_end" if self.cooperative_reduction else f"{prefix}numel"
                     )
-                    num_stages = ", num_stages = 2" if torch.version.hip else ""
+                    # Conditionalize pipelining on HIP for Triton due to
+                    # reports of numerical inaccuracies on older Triton
+                    if torch.version.hip and get_triton_version() > (3, 2):
+                        num_stages = ", num_stages = 2"
+                    else:
+                        num_stages = ""
                     self.body.writeline(
                         f"for {prefix}offset in tl.range({loop_start}, {loop_end}, {prefix.upper()}BLOCK{num_stages}):"
                     )
@@ -5070,7 +5091,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
             result.writeline("args = get_args()")
             result.writeline(
-                f"ms = benchmarker.benchmark(lambda: call(args), device={V.graph.get_current_device_or_throw().type}, rep=40)"  # noqa: B950 line too long
+                f"ms = benchmarker.benchmark(lambda: call(args), device='{V.graph.get_current_device_or_throw().type}', rep=40)"  # noqa: B950 line too long
             )
             result.writeline(f"num_gb = {num_gb}")
             result.writeline("gb_per_s = num_gb / (ms / 1e3)")
@@ -5676,7 +5697,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if self.fixed_config and f"{tree.prefix.upper()}BLOCK" in self.fixed_config:
             if self.fixed_config[f"{tree.prefix.upper()}BLOCK"] == 1:
                 return True
-        else:
+        elif not self.is_combo_kernel:
             if V.graph.sizevars.statically_known_equals(tree.numel, 1):
                 return True
 
