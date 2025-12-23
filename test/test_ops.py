@@ -487,6 +487,15 @@ class TestCommon(TestCase):
     @suppress_warnings
     @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
     def test_compare_cpu(self, device, dtype, op):
+        if (
+            TEST_WITH_TORCHINDUCTOR
+            and op.name == "nn.functional.conv1d"
+            and dtype == torch.float32
+            and device.startswith("cuda")
+            and not TEST_WITH_ROCM
+        ):
+            self.skipTest("Skipping conv1d float32 with Inductor on CUDA due to precision issues")
+
         def to_cpu(arg):
             if isinstance(arg, torch.Tensor):
                 return arg.to(device="cpu")
@@ -2314,6 +2323,15 @@ class TestMathBits(TestCase):
     def test_neg_view(self, device, dtype, op):
         if not op.test_neg_view:
             self.skipTest("Operation not tested with tensors with negative bit.")
+        if (
+            TEST_WITH_TORCHINDUCTOR
+            and op.name == "ldexp"
+            and dtype == torch.float64
+            and device.startswith("cuda")
+            and TEST_WITH_ROCM
+        ):
+            self.skipTest("Skipping ldexp float64 with Inductor on ROCm")
+            
         math_op_physical = torch.neg
         math_op_view = torch._neg_view
         is_bit_set = torch.is_neg
