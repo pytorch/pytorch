@@ -68,9 +68,6 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
   C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuGreenCtxCreate_(
       &green_ctx_, desc, device, CU_GREEN_CTX_DEFAULT_STREAM));
 
-  C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuGreenCtxStreamCreate_(
-    &green_ctx_stream_, green_ctx_, CU_STREAM_NON_BLOCKING, 0));
-
   // Convert to regular context
   C10_CUDA_DRIVER_CHECK(
       c10::cuda::DriverAPI::get()->cuCtxFromGreenCtx_(&context_, green_ctx_));
@@ -100,7 +97,6 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
     green_ctx_ = std::exchange(other.green_ctx_, nullptr);
     context_ = std::exchange(other.context_, nullptr);
     parent_stream_ = std::exchange(other.parent_stream_, nullptr);
-    green_ctx_stream_ = std::exchange(other.green_ctx_stream_, nullptr);
 #else
     TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
 #endif
@@ -128,7 +124,6 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
       green_ctx_ = std::exchange(other.green_ctx_, nullptr);
       context_ = std::exchange(other.context_, nullptr);
       parent_stream_ = std::exchange(other.parent_stream_, nullptr);
-      green_ctx_stream_ = std::exchange(other.green_ctx_stream_, nullptr);
     }
     return *this;
 #else
@@ -164,7 +159,9 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
       C10_CUDA_DRIVER_CHECK(
           c10::cuda::DriverAPI::get()->cuCtxPushCurrent_(context_));
     }
-    auto green_ctx_stream = c10::cuda::getStreamFromExternal(green_ctx_stream_, device_id_);
+    // setContext API uses default stream
+    // see GreenContext::Stream() for side-stream creation
+    auto green_ctx_stream = c10::cuda::getDefaultCUDAStream();
     ev.block(green_ctx_stream);
     c10::cuda::setCurrentCUDAStream(c10::cuda::CUDAStream(green_ctx_stream));
 #else
@@ -192,7 +189,11 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
 
   CUDAStream GreenContext::Stream() {
 #if HAS_CUDA_GREEN_CONTEXT()
-    return c10::cuda::getStreamFromExternal(green_ctx_stream_, device_id_);
+    CUstream green_ctx_side_stream;
+    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuGreenCtxStreamCreate_(
+      &green_ctx_side_stream, green_ctx_, CU_STREAM_NON_BLOCKING, 0));
+    // implies we leak side-streams, but this has precedent in e.g., c10/cuda/CUDAStream.cpp
+    return c10::cuda::getStreamFromExternal(green_ctx_side_stream, device_id_);
 #else
     TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
 #endif
