@@ -749,20 +749,17 @@ def _gen_transform_infos_non_cached(
     dst_shard_order = dst_spec.shard_order
     # DTensorSpec should automatically generate shard_order, and it can be () if
     # no shard.
+    assert src_shard_order is not None and dst_shard_order is not None
+    # Determine which transform strategy to use:
+    # 1. Non-standard device order → always use graph-based
+    # 2. Global flag or explicit parameter True → use graph-based
+    # 3. Otherwise → use greedy
     has_non_default_order = not all(
         DTensorSpec.is_default_device_order(order)
         for order in (src_shard_order, dst_shard_order)
     )
-    has_strided_shard = any(
-        isinstance(p, _StridedShard)
-        for p in (*src_spec.placements, *dst_spec.placements)
-    )
 
-    # Determine which transform strategy to use:
-    # 1. Non-standard device order or contains _StridedShard → always use graph-based
-    # 2. Global flag or explicit parameter True → use graph-based
-    # 3. Otherwise → use greedy
-    if has_non_default_order or has_strided_shard:
+    if has_non_default_order is True:
         use_graph_based_transform = True
     elif _FORCE_MIN_COST_REDISTRIBUTION_PLAN is not None:
         use_graph_based_transform = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
@@ -903,8 +900,6 @@ def redistribute_local_tensor(
                             transform_info.logical_shape,
                             target_placement.dim,
                         )
-            # elif isinstance(target, _StridedShard):
-
             elif target.is_partial():
                 if current.is_replicate():
                     partial_spec = cast(Partial, target)
