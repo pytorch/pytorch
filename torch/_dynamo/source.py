@@ -829,6 +829,8 @@ class DictSubclassGetItemSource(ChainedSource):
             assert str(self.index).startswith("<class"), self.index
             idx = str(self.index).removeprefix("<class '").removesuffix("'>")
             return f"{self.base.name()}[{idx}]"
+        else:
+            raise AssertionError(f"unhandled index type: {type(self.index)}")
 
 
 @dataclasses.dataclass(frozen=True)

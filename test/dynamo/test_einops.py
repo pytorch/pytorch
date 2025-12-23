@@ -248,6 +248,7 @@ Failed to trace einops function
 
       Developer debug context: builtin add [<class 'torch._dynamo.variables.constant.ConstantVariable'>, <class 'torch._dynamo.variables.misc.StringFormatVariable'>] False
 
+     For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0059.html
   Hint: Tracing through einops functions is experimental and may not be fully supported.
     To disable einops tracing, set `torch._dynamo.config.enable_einops_tracing = False`.
     Alternatively, explicitly allow this function in the graph with `torch._dynamo.allow_in_graph(reduce)`
@@ -255,6 +256,7 @@ Failed to trace einops function
 
   Developer debug context: einops function 'reduce'
 
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0363.html
 
 from user code:
    File "test_einops.py", line N, in fn

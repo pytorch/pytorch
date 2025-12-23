@@ -868,6 +868,7 @@ def _force_trace_einops(einops):
             id(einops.unpack)
         )  # available since einops 0.6.0
 
+
 # Note: this carefully avoids eagerly import einops.
 trace_rules.add_module_init_func("einops", _allow_in_graph_einops)
 
