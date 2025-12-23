@@ -254,41 +254,6 @@ class Shard(torch._C._distributed.Shard):
             )
         return output
 
-    @maybe_run_for_local_tensor
-    def _maybe_pad_tensor(
-        self,
-        local_tensor: torch.Tensor,
-        logical_dim_size: int,
-        num_chunks: int,
-    ) -> torch.Tensor:
-        is_padded = logical_dim_size % num_chunks != 0
-
-        if is_padded:
-            full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
-            pad_size = full_chunk_size - local_tensor.size(self.dim)
-            local_tensor = pad_tensor(local_tensor, self.dim, pad_size)
-
-        if not local_tensor.is_contiguous():
-            local_tensor = local_tensor.contiguous()
-
-        return local_tensor
-
-    @maybe_run_for_local_tensor
-    def _maybe_unpad_tensor(
-        self,
-        local_tensor: torch.Tensor,
-        logical_dim_size: int,
-        num_chunks: int,
-    ) -> torch.Tensor:
-        is_padded = logical_dim_size % num_chunks != 0
-
-        if is_padded:
-            full_chunk_size = (logical_dim_size + num_chunks - 1) // num_chunks
-            unpad_size = full_chunk_size * num_chunks - logical_dim_size  # type: ignore[possibly-undefined]
-            local_tensor = unpad_tensor(local_tensor, self.dim, unpad_size)
-
-        return local_tensor
-
     def _to_replicate_tensor(
         self,
         local_tensor: torch.Tensor,
@@ -300,11 +265,15 @@ class Shard(torch._C._distributed.Shard):
         This function all_gather all shards and return a tensor that
         is replicated on the previously sharded mesh dimension
         """
-        num_chunks = mesh.size(mesh_dim=mesh_dim)
-        logical_dim_size = current_logical_shape[self.dim]
+        my_coordinate = mesh.get_coordinate()
+        if my_coordinate is None:
+            return local_tensor
 
-        local_tensor = self._maybe_pad_tensor(
-            local_tensor, logical_dim_size, num_chunks
+        dim_logical_size = current_logical_shape[self.dim]
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
+
+        local_tensor = Shard._pad_for_old_shard_dim(
+            local_tensor, self.dim, dim_logical_size, num_chunks
         )
 
         result = funcol.all_gather_tensor(
@@ -312,8 +281,9 @@ class Shard(torch._C._distributed.Shard):
             gather_dim=self.dim,
             group=(mesh, mesh_dim),
         )
-
-        result = self._maybe_unpad_tensor(result, logical_dim_size, num_chunks)
+        result = Shard._unpad_for_old_shard_dim(
+            result, self.dim, dim_logical_size, num_chunks
+        )
 
         return result
 
@@ -365,74 +335,167 @@ class Shard(torch._C._distributed.Shard):
 
     @staticmethod
     @maybe_run_for_local_tensor
-    def _pad_for_new_shard_dim(
-        current_logical_shape: list[int],
+    def _pad_for_old_shard_dim(
         local_tensor: torch.Tensor,
+        shard_dim: int,
+        dim_logical_size: int,
         num_chunks: int,
-        old_shard_dim: int,
-        new_shard_dim: int,
     ) -> torch.Tensor:
-        old_dim_logical_size = current_logical_shape[old_shard_dim]
-        (
-            old_dim_padding,
-            old_dim_full_chunk_size,
-        ) = Shard._compute_padding_info(old_dim_logical_size, num_chunks, old_shard_dim)
-        new_dim_logical_size = current_logical_shape[new_shard_dim]
-        (
-            new_dim_padding,
-            new_dim_full_chunk_size,
-        ) = Shard._compute_padding_info(new_dim_logical_size, num_chunks, new_shard_dim)
+        """
+        Pad the local tensor on the existing (old) shard dimension before a collective operation.
 
-        if old_dim_padding:
-            old_dim_pad_size = Shard._get_shard_pad_size(
-                old_dim_full_chunk_size, local_tensor, old_shard_dim
-            )
-            local_tensor = pad_tensor(local_tensor, old_shard_dim, old_dim_pad_size)
-        if new_dim_padding:
-            new_dim_pad_size = Shard._get_shard_pad_size(
-                new_dim_full_chunk_size * num_chunks, local_tensor, new_shard_dim
-            )
-            local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
+        This ensures all ranks have equal-sized chunks for collective operations like
+        all_gather. The padding is applied to the end of the tensor dimension when the
+        logical size is not evenly divisible by the number of ranks.
 
+        "Old" refers to the source shard dimension - the dimension that is currently
+        sharded before the collective operation.
+
+        Args:
+            local_tensor: The local shard tensor to pad.
+            shard_dim: The tensor dimension that is sharded.
+            dim_logical_size: The global/logical size of the tensor on shard_dim.
+            num_chunks: Number of chunks (typically mesh dimension size).
+
+        Returns:
+            The padded tensor (contiguous). If no padding is needed, returns
+            the original tensor made contiguous.
+        """
+        (
+            dim_padding,
+            dim_max_chunk_size,
+        ) = Shard._compute_padding_info(
+            dim_logical_size,
+            num_chunks,
+            shard_dim,
+        )
+        if dim_padding:
+            dim_pad_size = dim_max_chunk_size - local_tensor.size(shard_dim)
+            if dim_pad_size > 0:
+                local_tensor = pad_tensor(local_tensor, shard_dim, dim_pad_size)
         if not local_tensor.is_contiguous():
             local_tensor = local_tensor.contiguous()
         return local_tensor
 
     @staticmethod
     @maybe_run_for_local_tensor
-    def _unpad_for_new_shard_dim(
-        current_logical_shape: list[int],
+    def _pad_for_new_shard_dim(
         local_tensor: torch.Tensor,
+        shard_dim: int,
+        dim_logical_size: int,
         num_chunks: int,
-        old_shard_dim: int,
-        new_shard_dim: int,
-        local_rank: int,
     ) -> torch.Tensor:
-        old_dim_logical_size = current_logical_shape[old_shard_dim]
-        (
-            old_dim_padding,
-            old_dim_full_chunk_size,
-        ) = Shard._compute_padding_info(old_dim_logical_size, num_chunks, old_shard_dim)
-        new_dim_logical_size = current_logical_shape[new_shard_dim]
-        (
-            new_dim_padding,
-            new_dim_full_chunk_size,
-        ) = Shard._compute_padding_info(new_dim_logical_size, num_chunks, new_shard_dim)
+        """
+        Pad the local tensor on the target (new) shard dimension before an alltoall operation.
 
-        if old_dim_padding:
-            old_dim_unpad_size = (
-                old_dim_full_chunk_size * num_chunks
-                - current_logical_shape[old_shard_dim]  # type: ignore[possibly-undefined]
+        This is used before alltoall when redistributing to a new shard dimension. The
+        padding ensures the dimension size equals num_chunks * max_chunk_size so that
+        after alltoall, each rank receives equal-sized chunks.
+
+        "New" refers to the target shard dimension - the dimension that will be sharded
+        after the collective operation.
+
+        Args:
+            local_tensor: The local tensor to pad.
+            shard_dim: The target tensor dimension for sharding.
+            dim_logical_size: The global/logical size of the tensor on shard_dim.
+            num_chunks: Number of chunks (typically mesh dimension size).
+
+        Returns:
+            The padded tensor (contiguous). If no padding is needed, returns
+            the original tensor made contiguous.
+        """
+        (
+            dim_padding,
+            dim_max_chunk_size,
+        ) = Shard._compute_padding_info(
+            dim_logical_size,
+            num_chunks,
+            shard_dim,
+        )
+        if dim_padding:
+            dim_pad_size = num_chunks * dim_max_chunk_size - local_tensor.size(
+                shard_dim
             )
-            local_tensor = unpad_tensor(local_tensor, old_shard_dim, old_dim_unpad_size)  # type: ignore[possibly-undefined]
+            if dim_pad_size > 0:
+                local_tensor = pad_tensor(local_tensor, shard_dim, dim_pad_size)
+        if not local_tensor.is_contiguous():
+            local_tensor = local_tensor.contiguous()
+        return local_tensor
 
-        if new_dim_padding:
-            local_shard_size_on_new_dim = Shard.local_shard_size_and_offset(
-                new_dim_logical_size, num_chunks, local_rank
-            )[0]
-            new_dim_unpad_size = new_dim_full_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
-            local_tensor = unpad_tensor(local_tensor, new_shard_dim, new_dim_unpad_size)  # type: ignore[possibly-undefined]
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _unpad_for_old_shard_dim(
+        local_tensor: torch.Tensor,
+        shard_dim: int,
+        dim_logical_size: int,
+        num_chunks: int,
+    ) -> torch.Tensor:
+        """
+        Remove padding from the old shard dimension after a collective operation.
 
+        After an all_gather, the gathered tensor may have extra padding at the end
+        that was added to ensure uniform chunk sizes. This method removes that padding
+        to restore the logical size.
+
+        "Old" refers to the source shard dimension - the dimension that was sharded
+        before the collective operation.
+
+        Args:
+            local_tensor: The tensor with potential padding to remove.
+            shard_dim: The tensor dimension that was sharded.
+            dim_logical_size: The expected global/logical size on shard_dim.
+            num_chunks: Number of chunks used in the collective.
+
+        Returns:
+            The tensor with padding removed, having size dim_logical_size on shard_dim.
+        """
+        (dim_padding, max_chunk_size) = Shard._compute_padding_info(
+            dim_logical_size, num_chunks, shard_dim
+        )
+        if dim_padding:
+            dim_unpad_size = max_chunk_size * num_chunks - dim_logical_size
+            local_tensor = unpad_tensor(local_tensor, shard_dim, dim_unpad_size)
+        return local_tensor
+
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _unpad_for_new_shard_dim(
+        local_tensor: torch.Tensor,
+        shard_dim: int,
+        dim_logical_size: int,
+        num_chunks: int,
+        current_rank: int,
+    ) -> torch.Tensor:
+        """
+        Remove padding from the new shard dimension after an alltoall operation.
+
+        After alltoall, each rank receives a chunk that may have padding at the end.
+        This method removes that padding based on the rank's expected local shard size,
+        which varies for uneven sharding (last ranks may have smaller or empty shards).
+
+        "New" refers to the target shard dimension - the dimension that is now sharded
+        after the collective operation.
+
+        Args:
+            local_tensor: The local tensor with potential padding to remove.
+            shard_dim: The tensor dimension that is now sharded.
+            dim_logical_size: The global/logical size of the tensor on shard_dim.
+            num_chunks: Number of chunks used in the collective.
+            current_rank: The rank index on the mesh dimension.
+
+        Returns:
+            The tensor with padding removed, having the correct local shard size.
+        """
+        (dim_padding, _) = Shard._compute_padding_info(
+            dim_logical_size, num_chunks, shard_dim
+        )
+        if dim_padding:
+            expected_local_shard_size, _ = Shard.local_shard_size_and_offset(
+                dim_logical_size, num_chunks, current_rank
+            )
+            pad_size = local_tensor.size(shard_dim) - expected_local_shard_size
+            local_tensor = unpad_tensor(local_tensor, shard_dim, pad_size)
         return local_tensor
 
     def _to_new_shard_dim(
@@ -454,24 +517,23 @@ class Shard(torch._C._distributed.Shard):
             return local_tensor
 
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-
-        local_tensor = Shard._pad_for_new_shard_dim(
-            current_logical_shape, local_tensor, num_chunks, self.dim, new_shard_dim
+        local_tensor = Shard._pad_for_old_shard_dim(
+            local_tensor, self.dim, current_logical_shape[self.dim], num_chunks
         )
 
         new_tensor = shard_dim_alltoall(
             local_tensor, self.dim, new_shard_dim, mesh, mesh_dim
         )
 
-        new_tensor = Shard._unpad_for_new_shard_dim(
-            current_logical_shape,
-            new_tensor,
-            num_chunks,
-            self.dim,
-            new_shard_dim,
-            my_coordinate[mesh_dim],
-        )
-
+        current_rank = my_coordinate[mesh_dim]
+        for operate_tensor_dim in (self.dim, new_shard_dim):
+            new_tensor = Shard._unpad_for_new_shard_dim(
+                new_tensor,
+                operate_tensor_dim,
+                current_logical_shape[operate_tensor_dim],
+                num_chunks,
+                current_rank,
+            )
         return new_tensor
 
     def _to_new_strided_shard_dim(
@@ -517,105 +579,26 @@ class Shard(torch._C._distributed.Shard):
             The alltoall exchanges data so each rank receives interleaved pieces
             along dim 1, matching the strided sharding pattern.
         """
-
-        @maybe_run_for_local_tensor
-        def _pad_for_stridedshard_dim(
-            local_tensor,
-            old_shard_dim,
-            new_shard_dim,
-            split_factor,
-            num_chunks,
-            current_logical_shape,
-            current_rank,
-        ):
-            # pad for new_shard_dim from StridedShard
-            strided_shard = _StridedShard(dim=new_shard_dim, split_factor=split_factor)
-            strided_sharded_chunks, strided_sharded_paddings = (
-                strided_shard._split_tensor(
-                    local_tensor,
-                    num_chunks,
-                    with_padding=True,
-                    contiguous=True,
-                )
-            )
-            for idx, num_paddings in enumerate(strided_sharded_paddings):
-                if num_paddings > 0:
-                    strided_sharded_chunks[idx] = pad_tensor(
-                        strided_sharded_chunks[idx], new_shard_dim, num_paddings
-                    )
-            local_tensor = torch.cat(strided_sharded_chunks, dim=new_shard_dim)
-
-            # pad for old_shard_dim from Shard
-            old_dim_logical_size = current_logical_shape[old_shard_dim]
-            (
-                old_dim_padding,
-                old_dim_full_chunk_size,
-            ) = Shard._compute_padding_info(
-                old_dim_logical_size, num_chunks, old_shard_dim
-            )
-            if old_dim_padding:
-                old_dim_pad_size = Shard._get_shard_pad_size(
-                    old_dim_full_chunk_size, local_tensor, old_shard_dim
-                )
-                local_tensor = pad_tensor(local_tensor, old_shard_dim, old_dim_pad_size)
-
-            return local_tensor
-
-        @maybe_run_for_local_tensor
-        def _unpad_for_old_shard_dim_and_new_stridedshard_dim(
-            current_rank,
-            local_tensor,
-            old_shard_dim,
-            new_shard_dim,
-            split_factor,
-            current_logical_shape,
-        ):
-            # unpad for old_shard_dim from Shard
-            old_dim_logical_size = current_logical_shape[old_shard_dim]
-            (
-                old_dim_padding,
-                old_dim_full_chunk_size,
-            ) = Shard._compute_padding_info(
-                old_dim_logical_size, num_chunks, old_shard_dim
-            )
-            if old_dim_padding:
-                old_dim_unpad_size = (
-                    old_dim_full_chunk_size * num_chunks
-                    - current_logical_shape[old_shard_dim]  # type: ignore[possibly-undefined]
-                )
-                local_tensor = unpad_tensor(
-                    local_tensor, old_shard_dim, old_dim_unpad_size
-                )  # type: ignore[possibly-undefined]
-            new_dim_logical_shape = current_logical_shape[new_shard_dim]
-            # unpad for new_shard_dim from StridedShard
-            shape = [1] * new_shard_dim + [new_dim_logical_shape]
-            indices_tensor = torch.arange(
-                new_dim_logical_shape, device=local_tensor.device
-            ).view(shape)
-
-            sharded_indices, num_paddings = _StridedShard(
-                new_shard_dim, split_factor=split_factor
-            )._split_tensor(
-                indices_tensor, num_chunks, with_padding=True, contiguous=False
-            )
-
-            this_padding_size = num_paddings[current_rank]
-            local_tensor = unpad_tensor(local_tensor, new_shard_dim, this_padding_size)
-            return local_tensor
-
         my_coordinate = mesh.get_coordinate()
         if my_coordinate is None:
             return local_tensor
         current_rank = my_coordinate[mesh_dim]
 
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-        local_tensor = _pad_for_stridedshard_dim(
+
+        local_tensor = Shard._pad_for_old_shard_dim(
             local_tensor,
             self.dim,
+            current_logical_shape[self.dim],
+            num_chunks,
+        )
+
+        local_tensor = _StridedShard._pad_for_new_strided_shard_dim(
+            local_tensor,
             new_shard_dim,
             split_factor,
+            current_logical_shape[new_shard_dim],
             num_chunks,
-            current_logical_shape,
             current_rank,
         )
 
@@ -623,19 +606,26 @@ class Shard(torch._C._distributed.Shard):
         # alltoall. We need to reorder data first and padding so that after
         # alltoall, each rank gets the correct strided pieces.
 
-        new_tensor = shard_dim_alltoall(
+        new_local_tensor = shard_dim_alltoall(
             local_tensor, self.dim, new_shard_dim, mesh, mesh_dim
         )
-        new_tensor = _unpad_for_old_shard_dim_and_new_stridedshard_dim(
-            current_rank,
-            new_tensor,
+
+        new_local_tensor = Shard._unpad_for_old_shard_dim(
+            new_local_tensor,
             self.dim,
+            current_logical_shape[self.dim],
+            num_chunks,
+        )
+        new_local_tensor = _StridedShard._unpad_for_new_strided_shard_dim(
+            new_local_tensor,
             new_shard_dim,
             split_factor,
-            current_logical_shape,
+            current_logical_shape[new_shard_dim],
+            num_chunks,
+            current_rank,
         )
 
-        return new_tensor
+        return new_local_tensor
 
     def __hash__(self) -> int:
         return hash(self.dim)
@@ -938,12 +928,19 @@ class _StridedShard(torch._C._distributed.StridedShard):
         return_first_offset: bool = True,
     ) -> tuple[int, int | list[int]]:
         return self.local_shard_size_and_offset(
-            curr_local_size, num_chunks, rank, return_first_offset
+            self.dim,
+            self.split_factor,
+            curr_local_size,
+            num_chunks,
+            rank,
+            return_first_offset,
         )
 
+    @staticmethod
     @maybe_run_for_local_tensor
     def local_shard_size_and_offset(
-        self,
+        tensor_dim: int,
+        split_factor: int,
         curr_local_size: int,
         num_chunks: int,
         rank: int,
@@ -963,6 +960,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
             rank (int): The rank index to compute the shard for.
             return_first_offset (bool): If True, return only the first offset as an int. If False,
                 return all offsets as a list. Defaults to True.
+            curr_local_size (int): The current size of the tensor dimension to be sharded.
 
         Returns:
             tuple: A tuple containing:
@@ -973,12 +971,14 @@ class _StridedShard(torch._C._distributed.StridedShard):
         """
         # indices_tensor is 1D torch.arange(logical_dim_size) unsqueezed
         # so that we can reuse self._split_tensor which splits on self.dim
-        shape = [1] * self.dim + [curr_local_size]
+        shape = [1] * tensor_dim + [curr_local_size]
         indices_tensor = torch.arange(
             curr_local_size,
         ).view(shape)
 
-        sharded_indices, _ = self._split_tensor(
+        sharded_indices, _ = _StridedShard(
+            tensor_dim, split_factor=split_factor
+        )._split_tensor(
             indices_tensor,
             num_chunks,
             with_padding=False,
@@ -1028,8 +1028,8 @@ class _StridedShard(torch._C._distributed.StridedShard):
             logical_size_on_dim: The logical shape size of the tensor ``shard_dim``.
             num_chunks: Number of chunks to split into (typically the mesh dim size).
             shard_dim: The dimension along which the tensor is sharded.
-            split_factor: The number of pre-existing splits from right-to-left sharding.
                 Defaults to 1 (no strided sharding effect).
+            split_factor: The split_factor in the _StridedShard.
 
         Returns:
             A tuple of (needs_padding_on_dim, max_chunk_size):
@@ -1051,10 +1051,6 @@ class _StridedShard(torch._C._distributed.StridedShard):
             # - remainder > 0 means one chunk has partial size
             # - (split_factor - num_full_first_chunks - (1 if remainder else 0)) > 0 means empty chunks
             has_partial_chunk = remainder > 0
-            num_empty_chunks = (
-                split_factor - num_full_first_chunks - (1 if has_partial_chunk else 0)
-            )
-            needs_padding_on_dim = has_partial_chunk or num_empty_chunks > 0
 
             # Second level: each first-level chunk is split into num_chunks pieces
             # Calculate the per-rank chunk size after both levels of splitting
@@ -1063,6 +1059,11 @@ class _StridedShard(torch._C._distributed.StridedShard):
             )
             if has_partial_chunk:
                 max_chunk_size += _ceil_div(remainder, num_chunks)
+
+            needs_padding_on_dim = (logical_size_on_dim % split_factor) != 0 or (
+                (logical_size_on_dim // split_factor) % num_chunks
+            ) != 0
+
         else:
             # Compute padding info for normal shard, no split_factor impact.
             needs_padding_on_dim = logical_size_on_dim % num_chunks != 0
@@ -1073,93 +1074,186 @@ class _StridedShard(torch._C._distributed.StridedShard):
             max_chunk_size,
         )
 
+    @staticmethod
     @maybe_run_for_local_tensor
-    def _pad_for_new_shard_dim(
-        self,
-        current_logical_shape: list[int],
+    def _pad_for_old_strided_shard_dim(
         local_tensor: torch.Tensor,
-        num_chunks: int,
-        old_shard_dim: int,
-        new_shard_dim: int,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        shard_dim: int,
         split_factor: int,
+        current_logical_shape: list[int],
     ) -> torch.Tensor:
         """
-        Pad the local tensor before alltoall for _StridedShard's _to_new_shard_dim operation.
+        Pad the local tensor on the existing (old) _StridedShard dimension before a collective.
 
-        For _StridedShard, the padding must account for the split_factor since each rank
-        holds split_factor interleaved pieces. The full chunk size per rank is
-        split_factor * single_chunk_size.
+        This is used before alltoall when redistributing from _StridedShard to another
+        placement. Unlike regular Shard padding, this accounts for the split_factor
+        which affects chunk sizes due to the interleaved strided sharding pattern.
+
+        "Old" refers to the source _StridedShard dimension - the dimension that is
+        currently sharded with _StridedShard before the collective operation.
+
+        Args:
+            local_tensor: The local shard tensor to pad.
+            mesh: The device mesh over which the tensor is distributed.
+            mesh_dim: The mesh dimension along which the collective operates.
+            shard_dim: The tensor dimension with _StridedShard placement.
+            split_factor: The split factor for the _StridedShard placement.
+            current_logical_shape: The global/logical shape of the full tensor.
+
+        Returns:
+            The padded tensor (contiguous). If no padding is needed, returns
+            the original tensor made contiguous.
         """
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
         (
-            old_dim_padding,
-            old_dim_max_chunk_size,
+            dim_padding,
+            dim_max_chunk_size,
         ) = _StridedShard._compute_padding_info(
-            current_logical_shape[old_shard_dim],
+            current_logical_shape[shard_dim],
             num_chunks,
-            old_shard_dim,
+            shard_dim,
             split_factor,
         )
-        (
-            new_dim_padding,
-            new_dim_max_chunk_size,
-        ) = _StridedShard._compute_padding_info(
-            current_logical_shape[new_shard_dim],
-            num_chunks,
-            new_shard_dim,
-        )
-
-        if old_dim_padding:
-            target_size = old_dim_max_chunk_size
-            old_dim_pad_size = target_size - local_tensor.size(old_shard_dim)
-            if old_dim_pad_size > 0:
-                local_tensor = pad_tensor(local_tensor, old_shard_dim, old_dim_pad_size)
-
-        if new_dim_padding:
-            target_total_size = new_dim_max_chunk_size * num_chunks
-            new_dim_pad_size = target_total_size - local_tensor.size(new_shard_dim)
-            if new_dim_pad_size > 0:
-                local_tensor = pad_tensor(local_tensor, new_shard_dim, new_dim_pad_size)
-
+        if dim_padding:
+            dim_pad_size = dim_max_chunk_size - local_tensor.size(shard_dim)
+            if dim_pad_size > 0:
+                local_tensor = pad_tensor(local_tensor, shard_dim, dim_pad_size)
         if not local_tensor.is_contiguous():
             local_tensor = local_tensor.contiguous()
         return local_tensor
 
+    @staticmethod
     @maybe_run_for_local_tensor
-    def _unpad_for_new_shard_dim(
-        self,
-        current_logical_shape: list[int],
+    def _pad_for_new_strided_shard_dim(
         local_tensor: torch.Tensor,
-        num_chunks: int,
-        old_shard_dim: int,
-        new_shard_dim: int,
+        shard_dim: int,
         split_factor: int,
-        local_rank: int,
+        dim_logical_size: int,
+        num_chunks: int,
+        current_rank: int,
     ) -> torch.Tensor:
         """
-        Unpad the local tensor after alltoall for _StridedShard's
-        _to_new_shard_dim operation.
+        Pad the local tensor on the target (new) _StridedShard dimension before alltoall.
 
-        This uses the same index_select approach as _to_replicate_tensor to both
-        extract correct elements (removing padding) and reorder them. The key insight
-        is that padding can only be at the end, so the first shard has the max size.
+        This is used before alltoall when redistributing to a _StridedShard placement.
+        The method first splits the tensor using _StridedShard's interleaved pattern,
+        pads each chunk to uniform size, then concatenates them back.
+
+        "New" refers to the target _StridedShard dimension - the dimension that will
+        be sharded with _StridedShard after the collective operation.
+
+        Args:
+            local_tensor: The local tensor to pad.
+            shard_dim: The target tensor dimension for _StridedShard.
+            split_factor: The split factor for the target _StridedShard placement.
+            dim_logical_size: The global/logical size of the tensor on shard_dim.
+            num_chunks: Number of chunks (typically mesh dimension size).
+            current_rank: The rank index on the mesh dimension.
+
+        Returns:
+            The padded tensor with all chunks having uniform size.
         """
-        old_dim_logical_size = current_logical_shape[old_shard_dim]
-        new_dim_logical_size = current_logical_shape[new_shard_dim]
-        (
-            new_dim_padding,
-            new_dim_max_chunk_size,
-        ) = _StridedShard._compute_padding_info(
-            current_logical_shape[new_shard_dim],
+        strided_shard = _StridedShard(dim=shard_dim, split_factor=split_factor)
+        strided_sharded_chunks, strided_sharded_paddings = strided_shard._split_tensor(
+            local_tensor,
             num_chunks,
-            new_shard_dim,
+            with_padding=True,
+            contiguous=True,
         )
+        for idx, num_paddings in enumerate(strided_sharded_paddings):
+            if num_paddings > 0:
+                strided_sharded_chunks[idx] = pad_tensor(
+                    strided_sharded_chunks[idx], shard_dim, num_paddings
+                )
+        local_tensor = torch.cat(strided_sharded_chunks, dim=shard_dim)
+        return local_tensor
 
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _unpad_for_new_strided_shard_dim(
+        local_tensor: torch.Tensor,
+        shard_dim: int,
+        split_factor: int,
+        dim_logical_size: int,
+        num_chunks: int,
+        current_rank: int,
+    ) -> torch.Tensor:
+        """
+        Remove padding from the new _StridedShard dimension after alltoall.
+
+        After alltoall when the target is a _StridedShard placement, the local tensor
+        may have padding that was added to ensure uniform chunk sizes. This method
+        removes that padding based on the rank's expected local shard size, which
+        accounts for the strided interleaving pattern.
+
+        "New" refers to the target _StridedShard dimension - the dimension that is
+        now sharded with _StridedShard after the collective operation.
+
+        Args:
+            local_tensor: The local tensor with potential padding to remove.
+            shard_dim: The tensor dimension with _StridedShard placement.
+            split_factor: The split factor for the _StridedShard placement.
+            dim_logical_size: The global/logical size of the tensor on shard_dim.
+            num_chunks: Number of chunks used in the collective.
+            current_rank: The rank index on the mesh dimension.
+
+        Returns:
+            The tensor with padding removed, having the correct local shard size.
+        """
+        (dim_padding, dim_max_chunk_size) = _StridedShard._compute_padding_info(
+            dim_logical_size, num_chunks, shard_dim, split_factor
+        )
+        if dim_padding:
+            local_size, _ = _StridedShard.local_shard_size_and_offset(
+                shard_dim, split_factor, dim_logical_size, num_chunks, current_rank
+            )
+            padding_size = dim_max_chunk_size - local_size
+            local_tensor = unpad_tensor(local_tensor, shard_dim, padding_size)
+        return local_tensor
+
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _unpad_for_old_strided_shard_dim(
+        local_tensor: torch.Tensor,
+        old_strided_shard_dim: int,
+        split_factor: int,
+        num_chunks: int,
+        dim_logical_size: int,
+    ) -> torch.Tensor:
+        """
+        Remove padding and reorder elements after transforming from _StridedShard.
+
+        After an alltoall operation that transforms from _StridedShard to another
+        placement, the resulting tensor has elements in a strided order with potential
+        padding. This method uses index_select to both:
+        1. Extract only the non-padding elements
+        2. Reorder them back to the correct logical order
+
+        The approach builds an index mapping by replaying the _StridedShard split
+        operation to understand which positions in the padded tensor correspond to
+        which logical indices.
+
+        Args:
+            local_tensor: The local tensor after alltoall with strided ordering and padding.
+            mesh: The device mesh over which the tensor is distributed.
+            mesh_dim: The mesh dimension along which the collective operated.
+            old_strided_shard_dim: The tensor dimension that was sharded with _StridedShard.
+            split_factor: The split factor of the source _StridedShard placement.
+            current_logical_shape: The global/logical shape of the full tensor.
+
+        Returns:
+            The tensor with elements reordered to logical order and padding removed.
+        """
         # Build sharded indices to understand the strided pattern
-        shape = [1] * old_shard_dim + [old_dim_logical_size]
+        shape = [1] * old_strided_shard_dim + [dim_logical_size]
         indices_tensor = torch.arange(
-            old_dim_logical_size, device=local_tensor.device
+            dim_logical_size, device=local_tensor.device
         ).view(shape)
-        sharded_indices, _ = self._split_tensor(
+        sharded_indices, _ = _StridedShard(
+            old_strided_shard_dim, split_factor=split_factor
+        )._split_tensor(
             indices_tensor, num_chunks, with_padding=False, contiguous=False
         )
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
@@ -1181,15 +1275,9 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
         inv_permutation = torch.argsort(permutation)
         select_indices = select_positions.index_select(0, inv_permutation)
-        local_tensor = torch.index_select(local_tensor, old_shard_dim, select_indices)
-
-        if new_dim_padding:
-            # copy from Shard._unpad_for_new_shard_dim
-            local_shard_size_on_new_dim = Shard.local_shard_size_and_offset(
-                new_dim_logical_size, num_chunks, local_rank
-            )[0]
-            new_dim_unpad_size = new_dim_max_chunk_size - local_shard_size_on_new_dim  # type: ignore[possibly-undefined]
-            local_tensor = unpad_tensor(local_tensor, new_shard_dim, new_dim_unpad_size)  # type: ignore[possibly-undefined]
+        local_tensor = torch.index_select(
+            local_tensor, old_strided_shard_dim, select_indices
+        )
         return local_tensor
 
     def _to_new_shard_dim(
@@ -1201,8 +1289,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         new_shard_dim: int,
     ) -> torch.Tensor:
         """
-        Transform from existing _StridedShard tensor to a new _StridedShard tensor that
-        shards on a new dimension, which performs an alltoall.
+        Transform from existing tensor's _StridedShard on a mesh dim into Shard, which performs an alltoall.
 
         This is analogous to Shard._to_new_shard_dim but accounts for the split_factor
         in padding calculations since _StridedShard represents interleaved sharding.
@@ -1212,32 +1299,43 @@ class _StridedShard(torch._C._distributed.StridedShard):
             # if rank is not part of mesh, we simply return local_tensor,
             # which should be an empty tensor
             return local_tensor
+        current_rank = my_coordinate[mesh_dim]
 
-        num_chunks = mesh.size(mesh_dim=mesh_dim)
-
-        local_tensor = self._pad_for_new_shard_dim(
-            current_logical_shape,
+        num_chunks = mesh.size(mesh_dim)
+        local_tensor = _StridedShard._pad_for_old_strided_shard_dim(
             local_tensor,
-            num_chunks,
+            mesh,
+            mesh_dim,
             self.dim,
-            new_shard_dim,
             self.split_factor,
+            current_logical_shape,
+        )
+        local_tensor = Shard._pad_for_new_shard_dim(
+            local_tensor,
+            new_shard_dim,
+            current_logical_shape[new_shard_dim],
+            num_chunks,
         )
 
-        new_tensor = shard_dim_alltoall(
+        new_local_tensor = shard_dim_alltoall(
             local_tensor, self.dim, new_shard_dim, mesh, mesh_dim
         )
-        new_tensor = self._unpad_for_new_shard_dim(
-            current_logical_shape,
-            new_tensor,
-            num_chunks,
-            self.dim,
-            new_shard_dim,
-            self.split_factor,
-            my_coordinate[mesh_dim],
-        )
 
-        return new_tensor
+        new_local_tensor = _StridedShard._unpad_for_old_strided_shard_dim(
+            new_local_tensor,
+            self.dim,
+            self.split_factor,
+            num_chunks,
+            current_logical_shape[self.dim],
+        )
+        new_local_tensor = Shard._unpad_for_new_shard_dim(
+            new_local_tensor,
+            new_shard_dim,
+            current_logical_shape[new_shard_dim],
+            num_chunks,
+            current_rank,
+        )
+        return new_local_tensor
 
 
 class Replicate(torch._C._distributed.Replicate):
