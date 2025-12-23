@@ -12562,22 +12562,6 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # https://github.com/pytorch/pytorch/issues/55907
                DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               # RuntimeError: MPS device does not support addbmm or baddbmm for non-float inputs
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   dtypes=(torch.int64,), device_type='mps'
-               ),
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref', dtypes=(torch.int64,), device_type='mps'),
-               # RuntimeError: value cannot be converted to type double without overflow
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   dtypes=(torch.complex64,), device_type='mps'
-               ),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error',
-                   dtypes=(torch.complex64,), device_type='mps'
-               ),
                # AssertionError: RuntimeError not raised : Expected RuntimeError
                # when doing an unsafe cast from a result of dtype torch.float32
                # into an out= with dtype torch.long
@@ -12616,25 +12600,6 @@ op_db: list[OpInfo] = [
                    'TestSchemaCheckModeOpInfo',
                    'test_schema_correctness',
                    dtypes=(torch.complex64, torch.complex128)),
-               # FIXME: RuntimeError: value cannot be converted to type double without overflow
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestCommon',
-                   'test_noncontiguous_samples',
-                   device_type='mps',
-                   dtypes=(torch.complex64,)),
-               DecorateInfo(
-                   unittest.expectedFailure,
-                   'TestCommon',
-                   'test_variant_consistency_eager',
-                   device_type='mps',
-                   dtypes=(torch.complex64,)),
-               # RuntimeError: MPS device does not support addbmm or baddbmm for non-float inputs
-               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
-               DecorateInfo(
-                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
-                   device_type='mps', dtypes=(torch.int64,)
-               ),
            )),
     OpInfo('dot',
            dtypes=all_types_and_complex_and(torch.float16, torch.bfloat16),
