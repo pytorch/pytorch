@@ -70,6 +70,7 @@ from .common import (
     WorkspaceZeroMode,
 )
 from .cpp_utils import cexpr
+from .custom_extern_kernel_codegen import get_custom_codegen
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 
@@ -325,14 +326,14 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif hasattr(triton, "constexpr_function") and isinstance(
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     symbol,
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     triton.runtime.jit.ConstexprFunction,
                 ):
                     compile_wrapper.newline()
@@ -1548,64 +1549,13 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
-        # Special handling for print HOP - use builtin print directly
-        if (
-            isinstance(node.op_overload, torch._ops.HigherOrderOperator)
-            and node.python_kernel_name == "torch.ops.higher_order.print"
-        ):
-            self._generate_print_fallback(node)
+        # Check if this op has a custom codegen implementation
+
+        custom_codegen = get_custom_codegen(node.python_kernel_name, "python")
+        if custom_codegen is not None:
+            custom_codegen(node, self.writeline)
             return
         self.writeline(ExternKernelAllocLine(self, node))
-
-    def _generate_print_fallback(self, node: ir.FallbackKernel) -> None:
-        """Generate a builtin print call for the print HOP fallback."""
-        # Get args and kwargs from the node
-        args, kwargs = node.unflatten_args(node.inputs, node.constant_args)
-
-        # First arg is the format string
-        format_str = args[0] if args else ""
-        # Remaining args are positional arguments for format
-        positional_args = args[1:] if len(args) > 1 else ()
-
-        # For HOPs, kwargs are stored in node.kwargs directly
-        # Use node.kwargs if available, otherwise fall back to unflatten_args kwargs
-        actual_kwargs = node.kwargs if node.kwargs else kwargs
-
-        # Build format args - for positional arguments
-        format_args: list[str] = []
-        for value in positional_args:
-            if isinstance(value, ir.IRNode):
-                # For tensor nodes, reference the buffer
-                format_args.append(value.codegen_reference())
-            else:
-                format_args.append(repr(value))
-
-        # Build format kwargs - for keyword arguments
-        format_kwargs: dict[str, str] = {}
-        for key, value in actual_kwargs.items():
-            if isinstance(value, ir.IRNode):
-                # For tensor nodes, reference the buffer
-                format_kwargs[key] = value.codegen_reference()
-            else:
-                format_kwargs[key] = repr(value)
-
-        # Generate the print call with formatted string using print
-        # to avoid any potential shadowing of the print name
-        if format_args or format_kwargs:
-            args_str = ", ".join(format_args)
-            kwargs_str = ", ".join(f"{k}={v}" for k, v in format_kwargs.items())
-
-            if args_str and kwargs_str:
-                self.writeline(
-                    f"print({repr(format_str)}.format({args_str}, {kwargs_str}))"
-                )
-            elif args_str:
-                self.writeline(f"print({repr(format_str)}.format({args_str}))")
-            else:
-                self.writeline(f"print({repr(format_str)}.format({kwargs_str}))")
-        else:
-            # No format args or kwargs, just print the format string directly
-            self.writeline(f"print({repr(format_str)})")
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
         node.codegen_comment(self)

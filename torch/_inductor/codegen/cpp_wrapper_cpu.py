@@ -2349,19 +2349,13 @@ class CppWrapperCpu(PythonWrapperCodegen):
             raise AssertionError(f"Unexpected output: {type(out)}")
 
         if isinstance(op_overload, torch._ops.HigherOrderOperator):
-            if isinstance(op_overload, torch._higher_order_ops.torchbind.CallTorchBind):
-                assert len(raw_args) > 1
-                obj = raw_args[0]
-                method = raw_args[1]
-                return_schema = op_overload.schema(obj, method).returns
-            elif op_overload == torch.ops.higher_order.print:
-                # We dont need to add schema to cpp print - no return value
-                return_schema = []
-            else:
-                raise NotImplementedError(
-                    f"HigherOrderOperator {op_overload} does not have schema handling implemented. "
-                    "Please implement schema handling for this operator."
-                )
+            assert isinstance(
+                op_overload, torch._higher_order_ops.torchbind.CallTorchBind
+            ), type(op_overload)
+            assert len(raw_args) > 1
+            obj = raw_args[0]
+            method = raw_args[1]
+            return_schema = op_overload.schema(obj, method).returns
         else:
             return_schema = op_overload._schema.returns
 

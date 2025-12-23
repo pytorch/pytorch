@@ -6982,7 +6982,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
             configs = kernel.configs
             kernel = kernel.fn
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return kernel, configs, restore_value_args, reset_to_zero_args
 
     @override
@@ -7138,7 +7138,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.mutable_args = [
             kernel_args[key]
             for key in identify_mutated_tensors(
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 kernel,
                 {**kernel_args, **autotuned_kwargs},
                 tma_descriptor_metadata,
@@ -7937,10 +7937,6 @@ class FallbackKernel(ExternKernelAlloc):
 
         if not V.graph.aot_mode:
             # No need to serialize in the cpp wrapper JIT mode
-            # For HOPs (HigherOrderOperator), include kwargs as a separate dict
-            # since they may not have ordered_kwargs_for_cpp_kernel
-            # if isinstance(target, torch._ops.HigherOrderOperator):
-            #     return (args, kwargs)
             return [*args, *ordered_kwargs]
 
         serializer = GraphModuleSerializer(None, [])  # type: ignore[arg-type]
@@ -8163,12 +8159,9 @@ class FallbackKernel(ExternKernelAlloc):
         device = cls.find_device(tensor_args, example_output)
 
         # Default to CPU for torchbind methods or HOPs that don't produce tensors
-        if not device and isinstance(
-            kernel,
-            (
-                torch._higher_order_ops.torchbind.CallTorchBind,
-                torch._ops.HigherOrderOperator,
-            ),
+        if not device and (
+            isinstance(kernel, torch._higher_order_ops.torchbind.CallTorchBind)
+            or kernel is torch.ops.higher_order.print
         ):
             device = torch.device("cpu")
 
@@ -8259,7 +8252,7 @@ class ComplexView(FallbackKernel):
         nontensor_args: Sequence[Any],
         unflatten_args: Callable[..., Any],
         *,
-        kwargs: Optional[dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
