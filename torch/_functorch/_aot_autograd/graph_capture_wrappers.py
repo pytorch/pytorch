@@ -1207,12 +1207,16 @@ def aot_dispatch_subclass(
         # Step 1: OpaqueObjects don't need wrapping - they're passed through
         # as-is so remove them here and add them back later before we call the
         # function.
-        if use_trace_joint:
-            primals, tangents = args
-            tensor_primals, opaque_args = primals[:-num_opaque], primals[-num_opaque:]
-            args = (tensor_primals, tangents)
-        else:
-            args, opaque_args = args[:-num_opaque], args[-num_opaque:]
+        if num_opaque > 0:
+            if use_trace_joint:
+                primals, tangents = args
+                tensor_primals, opaque_args = (
+                    primals[:-num_opaque],
+                    primals[-num_opaque:],
+                )
+                args = (tensor_primals, tangents)
+            else:
+                args, opaque_args = args[:-num_opaque], args[-num_opaque:]
 
         # Step 2: wrap tensor inputs into subclasses if necessary
         all_args = wrap_tensor_subclasses_maybe_joint(
