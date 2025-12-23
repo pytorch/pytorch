@@ -303,6 +303,9 @@ def _sort_dims(self: Tensor, dim: list[int], exclude_last: bool = False):
     return sorted_dims
 
 
+cufft_max_ndim = 3
+
+
 # See _fft_c2c_cufft in aten/src/ATen/native/cuda/SpectralOps.cpp
 # and _fft_c2c_mkl in aten/src/ATen/native/mkl/SpectralOps.cpp
 @register_meta([aten._fft_c2c.default, aten._fft_c2c.out])
@@ -313,11 +316,23 @@ def meta_fft_c2c(self, dim, normalization, forward):
         return self.clone()
 
     sorted_dims = _sort_dims(self, dim)
-    out = self.new_empty(self.size())
-    return _exec_fft(out, self, self.size(), sorted_dims, forward=forward)
+    output = self.new_empty(self.size())
+    if device_hint(self) == "cuda":
+        working_tensor = output
+        while sorted_dims:
+            output, working_tensor = working_tensor, output
+            strides = working_tensor.stride()
+            sorted_dims.sort(
+                key=lambda i: strides[i], reverse=True
+            )  # NB reverse!  Not sure if this is og bug
+            max_dims = min(cufft_max_ndim, len(sorted_dims))
+            last_dims = sorted_dims[len(sorted_dims) - max_dims :]
+            _exec_fft(output, working_tensor, self.size(), last_dims, forward=forward)
+            sorted_dims = sorted_dims[: len(sorted_dims) - max_dims]
 
-
-cufft_max_ndim = 3
+        return output
+    else:
+        return _exec_fft(output, self, self.size(), sorted_dims, forward=forward)
 
 
 def use_optimized_cufft_path(dim: list[int]):
