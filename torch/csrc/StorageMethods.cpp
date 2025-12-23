@@ -109,6 +109,36 @@ static PyObject* THPStorage_copy_(
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStorage_usm_share_(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+
+  at::Storage self_ = torch::createStorage(self);
+
+  static torch::PythonArgParser parser({
+      "usm_share_(Device device)",
+  });
+  torch::ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  c10::Device device = r.device(0);
+
+  // Check if source storage is valid
+  auto invalid = self_.data() == nullptr &&
+      self_.device_type() != c10::DeviceType::Meta && self_.sym_nbytes() != 0;
+  TORCH_CHECK(
+      !invalid, "Attempted to call usm_share_() on an invalid python storage.")
+  
+  at::Storage result = at::usm_share(self_, device);
+
+  return THPStorage_Wrap(std::move(result));
+
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPStorage_elementSize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(_self);
@@ -621,6 +651,10 @@ static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
 static PyMethodDef THPStorage_methods[] = {
     {"copy_",
      castPyCFunctionWithKeywords(THPStorage_copy_),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"usm_share_",
+     castPyCFunctionWithKeywords(THPStorage_usm_share_),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"element_size", THPStorage_elementSize, METH_NOARGS, nullptr},

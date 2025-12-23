@@ -65,6 +65,9 @@ class _StorageBase:
     def copy_(self, source: T, non_blocking: _bool | None = None) -> T:
         raise NotImplementedError
 
+    def usm_share_(self, device: DeviceLikeType) -> T:
+        raise NotImplementedError
+
     def new(self) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 

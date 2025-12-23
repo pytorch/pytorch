@@ -46,4 +46,18 @@ C10_EXPORT void storage_copy(
  */
 C10_EXPORT void share_memory_(TensorBase& t);
 
+/**
+ * Create a new storage on target device by sharing from src storage.
+ *
+ * This function creates a new storage on the specified device,
+ * sharing the data from the source storage. The source storage must be on CPU.
+ *
+ * @param src  source storage on CPU
+ * @param device  target device to share to
+ * @return a new storage on the target device
+ */
+C10_EXPORT c10::Storage usm_share(
+    const c10::Storage& src,
+    const c10::Device& device);
+
 } // namespace at
