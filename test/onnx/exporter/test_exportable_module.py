@@ -218,9 +218,8 @@ class TestExportableModule(common_utils.TestCase):
             def forward(self, x):
                 return x * 2
 
-        model = IncompleteExportableModel()
-        with self.assertRaises(NotImplementedError):
-            model.example_arguments()
+        with self.assertRaises(TypeError):
+            IncompleteExportableModel()
 
     def test_forward_with_complex_inputs(self):
         """Test ExportableModule with more complex input types."""

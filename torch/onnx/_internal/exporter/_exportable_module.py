@@ -178,7 +178,8 @@ class ExportableModule(torch.nn.Module, abc.ABC):
         Args:
             **kwargs: Additional keyword arguments to pass to ``torch.onnx.export``.
                 Common options include:
-                    - ``opset_version`` (int): The ONNX opset version to target
+
+                - ``opset_version`` (int): The ONNX opset version to target
 
         Returns:
             An ONNXProgram object containing the exported model and metadata.
