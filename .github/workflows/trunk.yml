@@ -86,7 +86,7 @@ jobs:
     secrets: inherit
 
   linux-jammy-cuda12_8-py3_10-gcc11-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.8-py3.10-gcc11 ') }}
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' linux-jammy-cuda12.8-py3.10-gcc11 ') || contains(needs.job-filter.outputs.jobs, ' cross-compile-linux-test ') }}
     name: linux-jammy-cuda12.8-py3.10-gcc11
     uses: ./.github/workflows/_linux-build.yml
     needs:
@@ -282,7 +282,7 @@ jobs:
     secrets: inherit
 
   win-vs2022-cuda12_8-py3-build:
-    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' win-vs2022-cuda12.8-py3 ') }}
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' win-vs2022-cuda12.8-py3 ') || contains(needs.job-filter.outputs.jobs, ' cross-compile-linux-test ') }}
     name: win-vs2022-cuda12.8-py3
     uses: ./.github/workflows/_win-build.yml
     needs:
@@ -457,7 +457,7 @@ jobs:
       - job-filter
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: linux.2xlarge.memory
+      runner: linux.r7i.2xlarge
       build-environment: linux-jammy-py3.10-gcc11-full-debug-build-only
       docker-image-name: ci-image:pytorch-linux-jammy-py3.10-gcc11
     secrets: inherit
