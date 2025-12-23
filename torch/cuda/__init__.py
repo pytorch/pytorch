@@ -189,7 +189,7 @@ def is_bf16_supported(including_emulation: bool = True):
     # If CUDA is not available, than it does not support bf16 either
     if not is_available():
         return False
-    
+
     # Check for ROCm, if true return true, no ROCM_VERSION check required,
     # since it is supported on AMD GPU archs.
     if torch.version.hip:

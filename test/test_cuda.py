@@ -404,12 +404,9 @@ print(t.is_pinned())
         if torch.version.hip:
             self.assertIn(torch.float16, supported_dtypes)
             self.assertIn(torch.bfloat16, supported_dtypes)
-        elif (
-            current_device_capability.major >= 5
-            and current_device_capability.minor >= 3
-        ):
+        elif current_device_capability[0] >= 5 and current_device_capability[1] >= 3:
             self.assertIn(torch.float16, supported_dtypes)
-        elif current_device_capability.major >= 8:
+        elif current_device_capability.major[0] >= 8:
             self.assertIn(torch.bfloat16, supported_dtypes)
 
     def test_cuda_get_device_properties(self):
