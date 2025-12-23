@@ -692,7 +692,10 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
         """
         if self.is_realized():
             assert self._cache.vt is not None
-            return (True, False, self._cache.vt.as_python_constant())
+            can_peek, _is_unrealized, value = self._cache.vt.try_peek_constant()
+            if not can_peek:
+                return (False, False, None)
+            return (True, False, value)
         return (True, True, self._cache.value)
 
     def reconstruct(self, codegen: Any) -> None:

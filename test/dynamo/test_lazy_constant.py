@@ -2,6 +2,8 @@
 
 import keyword
 
+import sympy
+
 import torch
 import torch._dynamo
 from torch._dynamo.test_case import run_tests, TestCase
@@ -908,6 +910,28 @@ class LazyConstantVariableTests(TestCase):
         self.assertTrue(same(result1, expected1))
         self.assertTrue(same(result2, expected2))
         self.assertTrue(same(result3, expected3))
+
+    def test_computed_lazy_constant_peek_symbolic_realized(self):
+        from torch._dynamo.variables.lazy import (
+            ComputedLazyCache,
+            ComputedLazyConstantVariable,
+        )
+        from torch._dynamo.variables.tensor import SymNodeVariable
+
+        cache = ComputedLazyCache(
+            value=1,
+            lazy_vars=[],
+            args=[],
+            op=lambda: 1,
+            reconstruct_fn=lambda codegen, args: None,
+        )
+        var = ComputedLazyConstantVariable(cache)
+        cache.vt = SymNodeVariable(proxy=None, sym_num=sympy.Symbol("n"))
+
+        can_peek, is_unrealized, value = var.try_peek_constant()
+        self.assertFalse(can_peek)
+        self.assertFalse(is_unrealized)
+        self.assertIsNone(value)
 
     def test_computed_lazy_constant_nested_fstring(self):
         """Test f-strings with expressions involving lazy constants.
