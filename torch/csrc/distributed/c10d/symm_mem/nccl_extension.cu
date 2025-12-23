@@ -3,14 +3,19 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
 #include <cuda/atomic>
+#endif
 
 namespace c10d::nccl_extension {
 
 #define THREADS_PER_BLOCK 512
 #define WARP_SIZE 32
 
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_SUPPORT) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
+#define NCCL_EXTENSIONS_ARE_SUPPORTED
+#endif
+
 __device__ __forceinline__ char* get_remote_ptr(
     void** buffer,  // buffers_dev_
     int peer,  // peer index
@@ -27,6 +32,7 @@ __device__ inline void copy_bytes_vec16(
     size_t tid,
     size_t stride)
 {
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
     if (nbytes == 0) return;
 
     uintptr_t src_addr = reinterpret_cast<uintptr_t>(src_base);
@@ -80,6 +86,9 @@ __device__ inline void copy_bytes_vec16(
     for (size_t i = tid; i < tail; i += stride) {
         dst_base[copied + i] = src_base[copied + i];
     }
+#else
+  CUDA_KERNEL_ASSERT(false);
+#endif
 }
 
 __global__ void lsa_put_kernel(
@@ -89,6 +98,7 @@ __global__ void lsa_put_kernel(
     const void* src,
     size_t nbytes
 ) {
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
     // Calculate index
     const size_t tid    = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t stride = blockDim.x * gridDim.x;
@@ -97,6 +107,9 @@ __global__ void lsa_put_kernel(
     auto dst = get_remote_ptr(buffer, dst_peer, dst_byte_offset);
     const char* src_bytes = reinterpret_cast<const char*>(src);
     copy_bytes_vec16(src_bytes, dst, nbytes, tid, stride);
+#else
+  CUDA_KERNEL_ASSERT(false);
+#endif
 }
 
 __global__ void lsa_put_signal_kernel(
@@ -109,6 +122,7 @@ __global__ void lsa_put_signal_kernel(
     unsigned int* blocks_done,  // global counter of blocks done
     uint64_t  signal_value     // value to write
 ) {
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
     const size_t tid    = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t stride = blockDim.x * gridDim.x;
 
@@ -137,6 +151,9 @@ __global__ void lsa_put_signal_kernel(
             signal_ref.store(signal_value, cuda::memory_order_relaxed);
         }
     }
+#else
+  CUDA_KERNEL_ASSERT(false);
+#endif
 }
 
 __global__ void nccl_wait_for_signal_kernel(
@@ -144,6 +161,7 @@ __global__ void nccl_wait_for_signal_kernel(
     int  cur_rank,
     uint64_t  target_signal_value
 ) {
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
     if (blockIdx.x == 0 && threadIdx.x == 0) {
         uint64_t* sig_ptr =
             reinterpret_cast<uint64_t*>(signal_pad[cur_rank]);
@@ -157,11 +175,13 @@ __global__ void nccl_wait_for_signal_kernel(
 #endif
         }
     }
-}
+#else
+  CUDA_KERNEL_ASSERT(false);
 #endif
+}
 
 void nccl_put(at::Tensor& tensor, const int64_t peer) {
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
@@ -185,7 +205,7 @@ void nccl_put(at::Tensor& tensor, const int64_t peer) {
 }
 
 void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
@@ -201,7 +221,7 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
 }
 
 void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
@@ -233,7 +253,6 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
 #endif
 }
 
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
 __global__ void lsa_get_kernel(
     void**  buffer,  // buffers_dev_
     int  peer,
@@ -241,6 +260,7 @@ __global__ void lsa_get_kernel(
     void*  dst,
     size_t  nbytes
 ) {
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
     const size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t stride = blockDim.x * gridDim.x;
 
@@ -248,11 +268,13 @@ __global__ void lsa_get_kernel(
     auto src = get_remote_ptr(buffer, peer, src_byte_offset);
     char* dst_bytes = reinterpret_cast<char*>(dst);
     copy_bytes_vec16(src, dst_bytes, nbytes, tid, stride);
-}
+#else
+  CUDA_KERNEL_ASSERT(false);
 #endif
+}
 
 void nccl_get(at::Tensor& tensor, const int64_t peer) {
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "get op currently supports contiguous tensors only");
