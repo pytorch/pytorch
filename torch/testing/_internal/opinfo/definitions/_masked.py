@@ -55,7 +55,7 @@ def sample_inputs_softmax_variant(
     kwargs = (
         dict(
             dtype=(
-                torch.float32 if torch.device(device).type == "mps" else torch.float64
+                torch.bfloat16 if torch.device(device).type == "mps" else torch.float64
             )
         )
         if with_dtype
