@@ -10,6 +10,7 @@
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/xpu/Module.h>
+#include <torch/csrc/xpu/XPUPluggableAllocator.h>
 
 using namespace torch;
 
@@ -224,9 +225,14 @@ static PyObject* THXPModule_memoryStats(PyObject* self, PyObject* arg) {
       c10::xpu::XPUCachingAllocator::getDeviceStats(device_index);
 
   py::dict result;
+  result["allocation"] = statArrayToDict(stats.allocation);
+  result["segment"] = statArrayToDict(stats.segment);
+  result["active"] = statArrayToDict(stats.active);
+  result["inactive_split"] = statArrayToDict(stats.inactive_split);
   result["allocated_bytes"] = statArrayToDict(stats.allocated_bytes);
   result["reserved_bytes"] = statArrayToDict(stats.reserved_bytes);
   result["active_bytes"] = statArrayToDict(stats.active_bytes);
+  result["inactive_split_bytes"] = statArrayToDict(stats.inactive_split_bytes);
   result["requested_bytes"] = statArrayToDict(stats.requested_bytes);
 
   return result.release().ptr();
@@ -372,6 +378,35 @@ static void registerXpuDeviceProperties(PyObject* module) {
           });
 }
 
+static void registerXpuPluggableAllocator(PyObject* module) {
+  auto m = py::handle(module).cast<py::module>();
+
+  py::class_<
+      c10::xpu::XPUCachingAllocator::XPUAllocator,
+      std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>>(
+      m, "_xpu_XPUAllocator");
+
+  m.def("_xpu_getAllocator", []() {
+    return py::cast(torch::xpu::XPUPluggableAllocator::getCurrentAllocator());
+  });
+  m.def(
+      "_xpu_changeCurrentAllocator",
+      [](std::shared_ptr<c10::xpu::XPUCachingAllocator::XPUAllocator>
+             allocator) {
+        torch::xpu::XPUPluggableAllocator::changeCurrentAllocator(allocator);
+      });
+  m.def("_xpu_customAllocator", [](uint64_t malloc_ptr, uint64_t free_ptr) {
+    using MallocFuncType = void*(size_t, int, sycl::queue*);
+    using FreeFuncType = void(void*, size_t, int, sycl::queue*);
+    std::function<MallocFuncType> malloc_fn =
+        reinterpret_cast<MallocFuncType*>(malloc_ptr);
+    std::function<FreeFuncType> free_fn =
+        reinterpret_cast<FreeFuncType*>(free_ptr);
+    return torch::xpu::XPUPluggableAllocator::createCustomAllocator(
+        malloc_fn, free_fn);
+  });
+}
+
 static void bindGetDeviceProperties(PyObject* module) {
   // Add method to torch.xpu
   auto m = py::handle(module).cast<py::module>();
@@ -495,6 +530,7 @@ namespace torch::xpu {
 
 void initModule(PyObject* module) {
   registerXpuDeviceProperties(module);
+  registerXpuPluggableAllocator(module);
   initXpuMethodBindings(module);
 }
 

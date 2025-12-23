@@ -6,7 +6,6 @@ on:
       - main
       - release/*
     tags:
-      - ciflow/rocm/*
       - ciflow/rocm-mi300/*
   workflow_dispatch:
   schedule:
@@ -67,7 +66,7 @@ jobs:
       - linux-noble-rocm-py3_12-build
       - target-determination
     with:
-      build-environment: linux-noble-rocm-py3.12-mi300
+      build-environment: ${{ needs.linux-noble-rocm-py3_12-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-noble-rocm-py3_12-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-noble-rocm-py3_12-build.outputs.test-matrix }}
     secrets: inherit

@@ -258,7 +258,8 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
         super().setUp()
         self.rank = self.MAIN_PROCESS_RANK
         self.world_size = 1
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
 
     def tearDown(self):
         pass
@@ -348,10 +349,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # These tests are expected to throw SIGABRT(6);
         # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
+        #
+        # CUDA: Uses native __trap() instruction → CUDA runtime catches it →
+        #       clean exit(6) → exit code 6
+        # ROCm: No native trap instruction, uses assert(0) (NanCheck.cu:24-27) →
+        #       calls abort() → OS sends SIGABRT signal → process killed by signal →
+        #       exit code -6
         TEST_NAN_ASSERT_RETURN = (
             0
             if (IS_SANDCASTLE and not (TEST_MULTIGPU and CUDA_12_AND_ABOVE))
-            else signal.SIGABRT
+            else (-signal.SIGABRT if torch.version.hip else signal.SIGABRT)
         )
         self.special_return_code_checks = {
             self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
@@ -473,7 +480,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             dist.all_reduce(t)
 
     @requires_nccl()
-    @skip_if_rocm_multiprocess
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_restart_pg(self):
         # Note: restart test passes steadily only for blocking mode for now.
@@ -561,7 +567,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             torch.float8_e5m2,
         ],
     )
-    @skip_if_rocm_multiprocess
     def test_nan_assert(self, type):
         # Expecting a device-side error when NaN is detected
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
@@ -1999,6 +2004,228 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
+    def test_ddp_complex_params_and_grads(self):
+        # test ddp with complex parameters and gradients
+        process_group = self._get_process_group()
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device = torch.device(f"cuda:{device_id}")
+
+        torch.manual_seed(42 + self.rank)
+        model = nn.Sequential(
+            nn.Linear(4, 8, dtype=torch.cfloat),
+            nn.Linear(8, 2, dtype=torch.cfloat),
+        ).to(device)
+
+        torch.manual_seed(42 + self.rank)
+        ref_model = nn.Sequential(
+            nn.Linear(4, 8, dtype=torch.cfloat),
+            nn.Linear(8, 2, dtype=torch.cfloat),
+        ).to(device)
+
+        # 0.001 forces tiny buckets, creating multiple buckets, stress-testing bucketing
+        ddp_model = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+            bucket_cap_mb=0.001,
+        )
+
+        torch.manual_seed(100)
+        batch_size = 16
+        input_dim = 4
+        output_dim = 2
+
+        x = torch.randn(batch_size, input_dim, dtype=torch.cfloat, device=device)
+        y = torch.randn(batch_size, output_dim, dtype=torch.cfloat, device=device)
+
+        optimizer_ddp = torch.optim.SGD(ddp_model.parameters(), lr=0.01)
+        optimizer_ref = torch.optim.SGD(ref_model.parameters(), lr=0.01)
+
+        for iteration in range(5):
+            optimizer_ddp.zero_grad()
+            output_ddp = ddp_model(x)
+            loss_ddp = torch.mean(torch.abs(output_ddp - y) ** 2)
+            loss_ddp.backward()
+
+            optimizer_ref.zero_grad()
+            with torch.no_grad():
+                for p_ddp, p_ref in zip(ddp_model.parameters(), ref_model.parameters()):
+                    p_ref.copy_(p_ddp)
+
+            output_ref = ref_model(x)
+            loss_ref = torch.mean(torch.abs(output_ref - y) ** 2)
+            loss_ref.backward()
+
+            for param in ref_model.parameters():
+                if param.grad is not None:
+                    dist.all_reduce(
+                        param.grad.data, op=dist.ReduceOp.SUM, group=process_group
+                    )
+                    param.grad.data /= self.world_size
+
+            for name, (p_ddp, p_ref) in enumerate(
+                zip(ddp_model.parameters(), ref_model.parameters())
+            ):
+                self.assertIsNotNone(
+                    p_ddp.grad,
+                    f"DDP gradient is None at iteration {iteration}, param {name}",
+                )
+
+                self.assertIsNotNone(
+                    p_ref.grad,
+                    f"Reference gradient is None at iteration {iteration}, param {name}",
+                )
+
+                self.assertTrue(
+                    p_ddp.grad.is_complex(),
+                    f"DDP gradient lost complex dtype at iteration {iteration}, param {name}",
+                )
+
+                self.assertTrue(
+                    p_ref.grad.is_complex(),
+                    f"Reference gradient lost complex dtype at iteration {iteration}, param {name}",
+                )
+
+                self.assertFalse(
+                    torch.allclose(p_ddp.grad.imag, torch.zeros_like(p_ddp.grad.imag)),
+                    f"DDP imaginary gradient is all zeros at iteration {iteration}, param {name}! "
+                    f"This indicates the complex gradient bug.",
+                )
+
+                self.assertTrue(
+                    torch.allclose(
+                        p_ddp.grad.real, p_ref.grad.real, rtol=1e-5, atol=1e-5
+                    ),
+                    f"Real gradient mismatch at iteration {iteration}, param {name}\n"
+                    f"DDP real: {p_ddp.grad.real.mean():.6f}, "
+                    f"Ref real: {p_ref.grad.real.mean():.6f}",
+                )
+
+                self.assertTrue(
+                    torch.allclose(
+                        p_ddp.grad.imag, p_ref.grad.imag, rtol=1e-5, atol=1e-5
+                    ),
+                    f"Imaginary gradient mismatch at iteration {iteration}, param {name}\n"
+                    f"DDP imag: {p_ddp.grad.imag.mean():.6f}, "
+                    f"Ref imag: {p_ref.grad.imag.mean():.6f}",
+                )
+
+            optimizer_ddp.step()
+            optimizer_ref.step()
+
+        for p_ddp, p_ref in zip(ddp_model.parameters(), ref_model.parameters()):
+            self.assertTrue(
+                torch.allclose(p_ddp, p_ref, rtol=1e-4, atol=1e-4),
+                "Final model parameters don't match after training",
+            )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_mixed_real_and_complex_params(self):
+        # test ddp with mixed real and complex parameters and gradients
+        process_group = self._get_process_group()
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device = torch.device(f"cuda:{device_id}")
+
+        class MixedModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.complex_fc = nn.Linear(4, 4, dtype=torch.cfloat)
+                self.real_fc = nn.Linear(4, 4, dtype=torch.float32)
+                self.final_fc = nn.Linear(4, 2, dtype=torch.cfloat)
+
+            def forward(self, x_complex, x_real):
+                complex_branch = self.complex_fc(x_complex)
+                real_branch = self.real_fc(x_real)
+                real_as_complex = torch.complex(
+                    real_branch, torch.zeros_like(real_branch)
+                )
+                return self.final_fc(complex_branch + real_as_complex)
+
+        torch.manual_seed(42 + self.rank)
+        model = MixedModule().to(device)
+        ref_model = MixedModule().to(device)
+
+        # 100 forces large bucket, forcing the BucketKey mechanism to segregate buckets, testing bucket segregation by dtype
+        ddp_model = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+            bucket_cap_mb=100,
+        )
+
+        optimizer_ddp = torch.optim.SGD(ddp_model.parameters(), lr=0.01)
+        optimizer_ref = torch.optim.SGD(ref_model.parameters(), lr=0.01)
+
+        torch.manual_seed(100)
+        x_complex = torch.randn(8, 4, dtype=torch.cfloat, device=device)
+        x_real = torch.randn(8, 4, dtype=torch.float32, device=device)
+        target = torch.randn(8, 2, dtype=torch.cfloat, device=device)
+
+        for iteration in range(5):
+            optimizer_ddp.zero_grad()
+            loss_ddp = torch.mean(torch.abs(ddp_model(x_complex, x_real) - target) ** 2)
+            loss_ddp.backward()
+
+            optimizer_ref.zero_grad()
+            with torch.no_grad():
+                for p_ddp, p_ref in zip(ddp_model.parameters(), ref_model.parameters()):
+                    p_ref.copy_(p_ddp)
+            loss_ref = torch.mean(torch.abs(ref_model(x_complex, x_real) - target) ** 2)
+            loss_ref.backward()
+            for param in ref_model.parameters(5):
+                if param.grad is not None and param.grad.is_floating_point():
+                    dist.all_reduce(
+                        param.grad.data,
+                        op=dist.ReduceOp.SUM,
+                        group=process_group,
+                    )
+                    param.grad.data /= self.world_size
+
+            for name, (p_ddp, p_ref) in enumerate(
+                zip(ddp_model.parameters(), ref_model.parameters())
+            ):
+                self.assertIsNotNone(
+                    p_ddp.grad,
+                    f"DDP gradient is None at iteration {iteration}, param {name}",
+                )
+                self.assertIsNotNone(
+                    p_ref.grad,
+                    f"Reference gradient is None at iteration {iteration}, param {name}",
+                )
+
+                self.assertTrue(
+                    p_ddp.grad.is_complex() == p_ref.grad.is_complex(),
+                    f"Gradient dtype mismatch at iteration {iteration}, param {name}",
+                )
+
+                if p_ddp.grad.is_complex():
+                    self.assertFalse(
+                        torch.allclose(
+                            p_ddp.grad.imag, torch.zeros_like(p_ddp.grad.imag)
+                        ),
+                        f"DDP imaginary gradient is all zeros at iteration {iteration}, param {name}",
+                    )
+                    self.assertTrue(
+                        torch.allclose(
+                            p_ddp.grad.real, p_ref.grad.real, rtol=1e-5, atol=1e-5
+                        ),
+                        f"Real gradient mismatch at iteration {iteration}, param {name}",
+                    )
+                    self.assertTrue(
+                        torch.allclose(
+                            p_ddp.grad.imag, p_ref.grad.imag, rtol=1e-5, atol=1e-5
+                        ),
+                        f"Imaginary gradient mismatch at iteration {iteration}, param {name}",
+                    )
+                else:
+                    self.assertTrue(
+                        torch.allclose(p_ddp.grad, p_ref.grad, rtol=1e-5, atol=1e-5),
+                        f"Real gradient mismatch at iteration {iteration}, param {name}",
+                    )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
     def test_nccl_propagate_error_reason(self):
         # Need to use TORCH_NCCL_BLOCKING_WAIT and not ASYNC_ERROR_HANDLING,
         # otherwise process will be taken down and we can't check for errors.
@@ -2825,7 +3052,6 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    @skip_if_rocm_multiprocess
     def test_grad_layout_2devicemodule(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         dev0 = torch.device("cuda:" + str(int_devices[0]))
@@ -3569,7 +3795,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm_multiprocess
     def test_send_recv_non_dense_tensor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device("cuda", self.rank % torch.cuda.device_count())
@@ -3625,7 +3850,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm_multiprocess
     def test_nccl_errors_blocking(self):
         self._reduce_timeout()
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
@@ -3740,7 +3964,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
-    @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(3)
     def test_restart_pg_after_error(self):
         self._reduce_timeout()
@@ -3779,8 +4002,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             self.assertEqual(nccl_backend.get_error(), ErrorType.TIMEOUT)
             # we need a brand new fileStore for the new PG
             # the new file name is shared through the old fileStore
-            new_file_name = tempfile.NamedTemporaryFile(delete=False).name
-            store.set("file", new_file_name)
+            with tempfile.NamedTemporaryFile(delete=False) as f:
+                new_file_name = f.name
+                store.set("file", new_file_name)
         else:
             # other ranks not exiting before rank 0 timeout, this is to avoid
             # nccl error happening before rank 0 timeouts
@@ -3837,21 +4061,21 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        nccl_debug_file = tempfile.NamedTemporaryFile()
-        nccl_env = {
-            # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
-            # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
-            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
-            "NCCL_ALGO": "NVLS",
-            "NCCL_DEBUG": "INFO",
-            "NCCL_DEBUG_SUBSYS": "NVLS",
-            "NCCL_DEBUG_FILE": nccl_debug_file.name,
-        }
-        if torch.cuda.nccl.version() >= (2, 24, 3):
-            nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
-        self.env_patcher = mock.patch.dict(os.environ, nccl_env)
-        self.env_patcher.start()
-        self._spawn_processes()
+        with tempfile.NamedTemporaryFile(delete=False) as nccl_debug_file:
+            nccl_env = {
+                # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+                # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+                "NCCL_ALGO": "NVLS",
+                "NCCL_DEBUG": "INFO",
+                "NCCL_DEBUG_SUBSYS": "NVLS",
+                "NCCL_DEBUG_FILE": nccl_debug_file.name,
+            }
+            if torch.cuda.nccl.version() >= (2, 24, 3):
+                nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
+            self.env_patcher = mock.patch.dict(os.environ, nccl_env)
+            self.env_patcher.start()
+            self._spawn_processes()
 
     def tearDown(self):
         self.env_patcher.stop()
@@ -4223,15 +4447,15 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg_opts.config.cga_cluster_size = 2
         pg_opts.config.net_name = "Socket"
         pg_opts.config.split_share = 1
-        nccl_debug_file = tempfile.NamedTemporaryFile()
         os.environ["NCCL_DEBUG"] = "INFO"
-        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+        with tempfile.NamedTemporaryFile() as nccl_debug_file:
+            os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
 
-        # Tests functionality when passing nccl config
-        self._test_pass_nccl_options(pg_opts)
+            # Tests functionality when passing nccl config
+            self._test_pass_nccl_options(pg_opts)
 
-        # Tests if comms were configured
-        nccl_debug_file_content = nccl_debug_file.read()
+            # Tests if comms were configured
+            nccl_debug_file_content = nccl_debug_file.read()
         max_ctas = re.search(rb"Max CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
         min_ctas = re.search(rb"Min CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
         split_share = re.search(
@@ -5014,6 +5238,80 @@ class SparseCollective(MultiProcessTestCase):
             else:
                 # Rethrow the exception if it's a different error
                 raise
+
+
+class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 1
+
+    def setUp(self):
+        super().setUp()
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # self.num_gpus = torch.cuda.device_count()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter(self):
+        """
+        This is testing against a known bug in NCCL.
+
+        TODO: remove once this is fixed upstream
+
+        https://github.com/pytorch/pytorch/issues/168092
+        https://github.com/NVIDIA/nccl/issues/1950
+        """
+        device = torch.device(f"cuda:{self.rank:d}")
+
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            device_id=device,
+        )
+
+        size = 8192 + 1  # known bad size
+        input_tensor = torch.randn(size, dtype=torch.bfloat16, device=device)
+
+        with self.subTest("reduce_scatter"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            dist.reduce_scatter(
+                output=output_tensor,
+                input_list=[input_tensor],
+                op=dist.ReduceOp.AVG,
+            )
+            torch.testing.assert_close(output_tensor, input_tensor)
+
+        with self.subTest("reduce_scatter_tensor"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            dist.reduce_scatter_tensor(
+                output=output_tensor,
+                input=input_tensor,
+                op=dist.ReduceOp.AVG,
+            )
+            torch.testing.assert_close(output_tensor, input_tensor)
+
+        with self.subTest("reduce_scatter_tensor_coalesced"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            with dist._coalescing_manager():
+                dist.reduce_scatter_tensor(
+                    output=output_tensor,
+                    input=input_tensor,
+                    op=dist.ReduceOp.AVG,
+                )
+            torch.testing.assert_close(output_tensor, input_tensor)
 
 
 class NCCLTraceTestBase(MultiProcessTestCase):
@@ -6043,7 +6341,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
         return pg
 
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -6112,7 +6410,7 @@ instantiate_parametrized_tests(NCCLTraceTest)
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -6173,7 +6471,7 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
             return None
 
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort with exception and rank1 to exit with exit 1
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -6182,7 +6480,6 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_multiprocess
     def test_nccl_errors_dump(self):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "1000"

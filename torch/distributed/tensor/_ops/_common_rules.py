@@ -168,7 +168,10 @@ def einop_rule(
                         assert input_spec.tensor_meta is not None
                         global_shape = input_spec.tensor_meta.shape
                         local_shape, _ = compute_local_shape_and_global_offset(
-                            global_shape, input_spec.mesh, input_spec.placements
+                            global_shape,
+                            input_spec.mesh,
+                            input_spec.placements,
+                            skip_offset=True,
                         )
                         cost += prod(local_shape) * input_spec.mesh.size(mesh_dim)
                 # pyrefly: ignore [bad-argument-type]

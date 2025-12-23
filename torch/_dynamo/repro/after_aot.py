@@ -419,7 +419,7 @@ if "__compile_source__" in globals():
                 # pyrefly: ignore [missing-attribute]
                 kernel._fn_name
                 if isinstance(kernel, JITFunction)
-                # pyrefly: ignore  # missing-attribute
+                # pyrefly: ignore [missing-attribute]
                 else kernel.fn._fn_name
             )
             fn_name = fn_name.split(".")[-1]
@@ -664,32 +664,35 @@ def isolate_fails(
     #     print(fd.read())
     new_env = os.environ.copy()
     new_env = {**new_env, **env}
-    stdout, stderr = TemporaryFile(), TemporaryFile()
-
     if use_buck:
         cmd = BuckTargetWriter(file_name).write(print_msg=False)
     else:
         cmd = [sys.executable, file_name]
+    with (
+        TemporaryFile() as stdout,
+        TemporaryFile() as stderr,
+        subprocess.Popen(
+            cmd,
+            cwd=subdir,
+            stdout=stdout,
+            stderr=stderr,
+            env=new_env,
+        ) as p,
+    ):
+        p.wait()
 
-    p = subprocess.Popen(
-        cmd,
-        cwd=subdir,
-        stdout=stdout,
-        stderr=stderr,
-        env=new_env,
-    )
-    p.wait()
-
-    stdout.seek(0)
-    stderr.seek(0)
-    print(
-        textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "), file=sys.stdout
-    )
-    print(
-        textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "), file=sys.stderr
-    )
-    # print(f"Isolated test failed - {file_name}")
-    return p.returncode != 0
+        stdout.seek(0)
+        stderr.seek(0)
+        print(
+            textwrap.indent(stdout.read().decode("utf-8"), prefix=">>  "),
+            file=sys.stdout,
+        )
+        print(
+            textwrap.indent(stderr.read().decode("utf-8"), prefix=">>  "),
+            file=sys.stderr,
+        )
+        # print(f"Isolated test failed - {file_name}")
+        return p.returncode != 0
 
 
 # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ #
@@ -800,6 +803,7 @@ def repro_common(
 
     # Turn mod into a GraphModule the slow way
     # TODO: speed this up
+    # pyrefly: ignore [bad-argument-type]
     mod = make_fx(mod, tracing_mode=options.tracing_mode)(*args)
 
     # pyrefly: ignore [bad-assignment]

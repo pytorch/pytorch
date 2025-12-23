@@ -26,6 +26,7 @@ from __future__ import annotations
 import collections
 import contextlib
 import cProfile
+import dataclasses
 import dis
 import functools
 import gc
@@ -73,10 +74,11 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.fx.graph_module import _forward_from_src as original_forward_from_src
 from torch.monitor import _WaitCounter
 from torch.nn.parallel.distributed import DistributedDataParallel
+from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import (
     _disable_current_modes,
+    any_torch_dispatch_mode_on_stack,
     is_in_any_mode_without_ignore_compile_internals,
-    is_in_torch_dispatch_mode,
 )
 from torch.utils._traceback import CapturedTraceback, format_traceback_short
 
@@ -475,12 +477,13 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         )
         prof = cProfile.Profile()
         try:
-            prof.enable()
             start_ts = time.time()
+            # runcall calls prof.enable() and prof.disable(), so do NOT call
+            # enable outside. This leads to issues like
+            # ValueError: Another profiling tool is already active
             # pyrefly: ignore [bad-argument-type]
             retval = prof.runcall(func, *args, **kwargs)
             profile_latency = time.time() - start_ts
-            prof.disable()
         except ValueError:
             log.exception("failed to enable cProfile")
             profile_latency = 0
@@ -499,7 +502,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         log.warning("Raw profile at %s", profile_path)
         svg_path = profile_path.with_suffix(".svg")
         try:
-            gprof2dot_process = subprocess.Popen(
+            with subprocess.Popen(
                 [
                     "gprof2dot",
                     "-f",
@@ -510,12 +513,12 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
                     str(profile_path),
                 ],
                 stdout=subprocess.PIPE,
-            )
-            subprocess.check_call(
-                ["dot", "-Tsvg", "-o", str(svg_path)],
-                stdin=gprof2dot_process.stdout,
-            )
-            log.warning("Generated SVG from profile at %s", svg_path)
+            ) as gprof2dot_process:
+                subprocess.check_call(
+                    ["dot", "-Tsvg", "-o", str(svg_path)],
+                    stdin=gprof2dot_process.stdout,
+                )
+                log.warning("Generated SVG from profile at %s", svg_path)
         except FileNotFoundError:
             log.warning(
                 "Failed to generate SVG from profile -- dumping stats instead."
@@ -665,6 +668,7 @@ class ConvertFrameAssert:
         # skip tracing non-recursive disabled functions
         # detect if the previous frame (non-convert_frame) is a non-recursive disable wrapper
         prev_frame = sys._getframe()
+        # pyrefly: ignore [bad-assignment]
         while (
             prev_frame
             and "torch/_dynamo/convert_frame.py" in prev_frame.f_code.co_filename
@@ -846,7 +850,6 @@ def trace_frame(
     except Exception as e:
         e._torch_dynamo_tracer_output = DynamoTracerOutput(tracer, error=True)  # type: ignore[attr-defined]
         raise
-
     return tracer_output
 
 
@@ -932,6 +935,7 @@ class GraphRuntimeEnv:
     used_globals: dict[str, Any]
     closure: Optional[tuple[Any, ...]]
     argdefs: Optional[tuple[Any, ...]]
+    external_refs: set[str] = dataclasses.field(default_factory=set)
 
     def forward_callable(
         self,
@@ -950,12 +954,28 @@ class GraphRuntimeEnv:
             **(extra_globals or {}),
             backend_id: compiled_fn,
         }
+
+        # check that all external references are available
+        self._check_external_refs(f_globals)
+
         return types.FunctionType(
             self.bytecode,
             f_globals,
             closure=self.closure,
             argdefs=self.argdefs,
         )
+
+    def _check_external_refs(self, f_globals: dict[str, Any]) -> None:
+        missing_refs = []
+        for ref in self.external_refs:
+            if ref not in f_globals:
+                missing_refs.append(ref)
+
+        if missing_refs:
+            raise RuntimeError(
+                f"Missing required external references: {missing_refs}. "
+                "Please load AOT compiled function with `f_globals=<enclosing global scope>`"
+            )
 
 
 @dataclass
@@ -1003,13 +1023,36 @@ class GraphCaptureOutput:
             if global_name in self.f_globals:
                 used_globals[global_name] = self.f_globals[global_name]
 
+        # Scan bytecode for all external references
+        external_refs = self._get_external_refs(self.bytecode)
+
         return GraphRuntimeEnv(
             bytecode=self.bytecode,
             import_sources=self.import_sources,
             used_globals=used_globals,
             closure=self.closure,
             argdefs=self.argdefs,
+            external_refs=external_refs,
         )
+
+    @staticmethod
+    def _get_external_refs(bytecode: types.CodeType) -> set[str]:
+        import dis
+
+        external_refs: set[str] = set()
+
+        # Get all instructions from the bytecode
+        for instruction in dis.get_instructions(bytecode):
+            # LOAD_GLOBAL loads a global variable or a builtin
+            if instruction.opname == "LOAD_GLOBAL":
+                if instruction.argval:
+                    external_refs.add(instruction.argval)
+            # LOAD_NAME loads a name (used in module-level code, less common in functions)
+            elif instruction.opname == "LOAD_NAME":
+                if instruction.argval:
+                    external_refs.add(instruction.argval)
+
+        return external_refs
 
 
 @dataclass
@@ -1037,10 +1080,12 @@ class CaptureOutput:
         runtime_env = self.graph_capture_output.get_runtime_env()
         assert self.backend_input is not None
         backend_id = self.backend_input.backend_id
-        # pyrefly: ignore [not-callable]
+        # pyrefly: ignore [bad-assignment, not-callable]
         compiled_fn = compiled_fn or self.backend_input.graph_module
         return runtime_env.forward_callable(
-            backend_id, compiled_fn, extra_globals=extra_globals
+            backend_id,
+            compiled_fn,  # pyrefly: ignore [bad-argument-type]
+            extra_globals=extra_globals,
         )
 
 
@@ -1212,6 +1257,7 @@ def _fullgraph_capture_frame(
             frame.locals,
             frame.builtins,
             frame.closure,
+            # pyrefly: ignore [bad-argument-type]
             compiler_fn=fullgraph_compiler,
             export=_is_export_deprecated_do_not_use,
             export_constraints=constraints,  # type: ignore[arg-type]
@@ -1311,6 +1357,10 @@ def compile_frame(  # type: ignore[return]
                 "Restarting analysis due to %s",
                 LazyString(format_traceback_short, e.__traceback__),
             )
+            # Clean up the failed tracer output's graph to break reference cycles
+            failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            if failed_tracer_output:
+                failed_tracer_output._cleanup_output_graph()
             # If restart reason is None just log the type of the exception
             restart_reasons.add(e.restart_reason or str(type(e)))
             # We now have a new "last attempt", reset the clock
@@ -1327,6 +1377,10 @@ def compile_frame(  # type: ignore[return]
         except exc.SkipFrame as e:
             if not isinstance(e, exc.TensorifyScalarRestartAnalysis):
                 TensorifyState.clear()
+            # Clean up the failed tracer output's graph to break reference cycles
+            failed_tracer_output = getattr(e, "_torch_dynamo_tracer_output", None)
+            if failed_tracer_output:
+                failed_tracer_output._cleanup_output_graph()
             log.debug(  # noqa: G200
                 "Skipping frame %s %s \
                 %s %s",
@@ -1861,6 +1915,15 @@ def _compile(
                     else _get_error_on_graph_break()
                 )
 
+            # Cleanup guards unless if in export, which will return guards
+            # Make sure to to do this after collecting metrics
+            if (
+                tracer_output is not None
+                and tracer_output.output_graph is not None
+                and not tracer_output.output_graph.export
+            ):
+                tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.inner = OrderedSet()
+
 
 class ConvertFrame:
     def __init__(
@@ -1878,6 +1941,7 @@ class ConvertFrame:
     @property
     def _clone_with_backend(self) -> Callable[[WrapBackendDebug], ConvertFrame]:
         return lambda backend: convert_frame(
+            # pyrefly: ignore [bad-argument-type]
             backend,
             self._hooks,
         )
@@ -2064,10 +2128,6 @@ class ConvertFrameProtocol(typing.Protocol):
     ) -> ConvertFrameReturn: ...
 
 
-def should_skip_due_to_torch_dispatch_mode() -> bool:
-    return is_in_any_mode_without_ignore_compile_internals()
-
-
 class CatchErrorsWrapper:
     def __init__(self, callback: ConvertFrameProtocol, hooks: Hooks) -> None:
         functools.wraps(callback)(self)
@@ -2088,13 +2148,25 @@ class CatchErrorsWrapper:
             has_started_execution = frame.f_lasti > first_real_inst_idx(frame.f_code)
         else:
             has_started_execution = frame.f_lasti >= first_real_inst_idx(frame.f_code)
+
+        # Check if we should skip due to torch dispatch mode.
+        # When inline_torch_dispatch_torch_compile is True (new behavior), we walk
+        # the stack to check for active modes. When False (old behavior), we use
+        # the global flag that tracks if we're inside any mode.
+        if config.inline_torch_dispatch_torch_compile:
+            should_skip_for_dispatch_mode = any_torch_dispatch_mode_on_stack()
+        else:
+            should_skip_for_dispatch_mode = (
+                is_in_any_mode_without_ignore_compile_internals()
+            )
+
         if (
             # TODO: the first condition is not covered by any test
             has_started_execution
             or is_skipfile
             or config.disable
             or (
-                should_skip_due_to_torch_dispatch_mode()
+                should_skip_for_dispatch_mode
                 and not getattr(self._torchdynamo_orig_backend, "_export", False)
             )
         ):
@@ -2103,7 +2175,7 @@ class CatchErrorsWrapper:
                     skip_reason = "traced frame already"
                 elif trace_rules.check(frame.f_code):
                     skip_reason = "in skipfiles"
-                elif is_in_torch_dispatch_mode(include_infra_modes=False):
+                elif should_skip_for_dispatch_mode:
                     skip_reason = "non-infra torch dispatch mode present, this is not supported today in torch.compile"
                 else:
                     skip_reason = "dynamo tracing is disabled"
