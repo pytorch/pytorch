@@ -101,6 +101,7 @@ jobs:
             dist/torch-*.whl \
             dist/vision/torchvision-*.whl \
             dist/audio/torchaudio-*.whl \
+            dist/ao/torchao-*.whl \
             dist/vllm/vllm-*.whl \
             --extra-index-url https://download.pytorch.org/whl/cu129 \
             --index-strategy unsafe-best-match
