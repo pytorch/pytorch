@@ -16,11 +16,13 @@
 
 #pragma once
 
+#include <memory>
 #include <mutex>
 #include <unordered_map>
 #include <utility>
 
 #include <c10/core/Device.h>
+#include <c10/util/Exception.h>
 
 namespace at::cuda {
 namespace detail {
@@ -105,12 +107,17 @@ template <typename Handle_t, void Create(Handle_t*), void Destroy(Handle_t)>
 struct ThreadLocalHandleStorage {
 private:
   using Handle = HandleRaii<Handle_t, Create, Destroy>;
+  using GlobalStorage = GlobalHandleStorage<Handle_t, Create, Destroy>;
+
+  // In the case where a thread is detached we cannot rely on static storage
+  // outliving thread_local storage. This weak_ptr ensures that the global
+  // handle pool is not accessed if static storage has been destroyed.
+  std::weak_ptr<GlobalStorage> global_;
   std::unordered_map<c10::DeviceIndex, Handle> handles_;
-  GlobalHandleStorage<Handle_t, Create, Destroy>& global_;
 
 public:
-  explicit ThreadLocalHandleStorage(GlobalHandleStorage<Handle_t, Create, Destroy>& global)
-    : global_(global) {}
+  explicit ThreadLocalHandleStorage(std::weak_ptr<GlobalStorage> global)
+    : global_(std::move(global)) {}
 
   Handle_t reserve(c10::DeviceIndex device) {
     { // This thread already has a handle for device
@@ -120,21 +127,27 @@ public:
       }
     }
 
+    std::shared_ptr<GlobalStorage> global = global_.lock();
+    TORCH_CHECK(global != nullptr, "Cannot create handle during program termination");
+
     { // Use a handle from the global pool if available
-      auto it = handles_.insert(global_.extract(device)).position;
+      auto it = handles_.insert(global->extract(device)).position;
       if (it != handles_.end()) {
         return it->second.handle;
       }
     }
 
-    // Allocate a new handle. operator[] will default construct
+    // Allocate a new handle. operator[] will call HandleRaii::HandleRaii
     return handles_[device].handle;
   }
 
   ~ThreadLocalHandleStorage() {
-    // Release handles back to the global pool
-    if (!handles_.empty())
-      global_.merge(std::move(handles_));
+    // Release handles back to the global pool if it's still alive
+    if (!handles_.empty()) {
+      if (std::shared_ptr<GlobalStorage> global = global_.lock()) {
+        global->merge(std::move(handles_));
+      }
+    }
   }
 };
 } // namespace detail
@@ -142,9 +155,17 @@ public:
 template <typename Handle_t, void Create(Handle_t*), void Destroy(Handle_t)>
 struct DeviceThreadHandlePool {
   static Handle_t reserve(c10::DeviceIndex device) {
-    static detail::GlobalHandleStorage<Handle_t, Create, Destroy> available;
-    thread_local detail::ThreadLocalHandleStorage<Handle_t, Create, Destroy> local(available);
-    return local.reserve(device);
+    using GlobalStorage = detail::GlobalHandleStorage<Handle_t, Create, Destroy>;
+    static auto global = std::make_shared<GlobalStorage>();
+    // We need to this funky initialization because thread_local does not behave
+    // as expected with MSVC. See https://github.com/pytorch/pytorch/pull/22405
+    using ThreadLocalStorage = detail::ThreadLocalHandleStorage<Handle_t, Create, Destroy>;
+    thread_local std::unique_ptr<ThreadLocalStorage> local;
+    if (local == nullptr) {
+      local.reset(new ThreadLocalStorage(global));
+    }
+
+    return local->reserve(device);
   }
 };
 
