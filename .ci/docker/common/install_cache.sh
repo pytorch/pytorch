@@ -100,7 +100,7 @@ fi
 if [ -n "$ROCM_VERSION" ]; then
   # Skip sccache wrapping for theRock nightly - sccache has issues parsing
   # theRock's complex include paths and causes hipconfig to fail
-  if [ "$ROCM_VERSION" = "nightly" ]; then
+  if [[ "$ROCM_VERSION" == "nightly" ]]; then
     echo "Skipping sccache wrapping for theRock nightly ROCm"
   else
     source /etc/rocm_env.sh
