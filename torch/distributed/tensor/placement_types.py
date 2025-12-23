@@ -19,7 +19,7 @@ from torch.distributed.tensor._collective_utils import (
     unpad_tensor,
 )
 from torch.distributed.tensor._ops._mask_buffer import MaskBuffer
-from torch.distributed.tensor.placement_utils import CollectivePaddingContext
+from torch.distributed.tensor._placement_utils import CollectivePaddingContext
 
 
 __all__ = ["Placement", "Shard", "Replicate", "Partial"]
