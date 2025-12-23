@@ -8255,7 +8255,6 @@ class ComplexView(FallbackKernel):
         nontensor_args: Sequence[Any],
         unflatten_args: Callable[..., Any],
         *,
-        kwargs: Optional[dict[str, Any]] = None,
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
@@ -8264,7 +8263,6 @@ class ComplexView(FallbackKernel):
             tensor_args,
             nontensor_args,
             unflatten_args,
-            kwargs=kwargs,
             unbacked_bindings=unbacked_bindings,
         )
 
