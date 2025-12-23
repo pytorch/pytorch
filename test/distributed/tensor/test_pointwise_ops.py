@@ -483,6 +483,33 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(res, expected)
 
     @with_comms
+    def test_mul_div_scalar_norm_partial(self):
+        mesh = self.build_device_mesh()
+        aten = torch.ops.aten
+        local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
+        dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
+
+        norm = dt.norm()
+        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
+
+        res = aten.mul.Scalar(norm, 2)
+        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 20)
+
+        res = aten.div.Scalar(norm, 2)
+        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
+        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertEqual(res, 5)
+
+        res = aten.mul.Scalar(norm, -2)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+
+        res = aten.div.Scalar(norm, -2)
+        self.assertEqual(res, -5)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+
+    @with_comms
     def test_add_scalar_partial(self):
         mesh = self.build_device_mesh()
 
