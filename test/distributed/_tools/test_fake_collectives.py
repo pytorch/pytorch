@@ -113,6 +113,35 @@ class TestFakeCollectives(TestCase):
             if dist.group.WORLD is not None:
                 dist.destroy_process_group()
 
+    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_dtensor_distribute_tensor_with_scatter(self):
+        """Test that distribute_tensor works with FakeTensorMode (uses c10d.scatter_ internally)"""
+        try:
+            self._setup_distributed()
+            from torch.distributed.device_mesh import init_device_mesh
+            from torch.distributed.tensor import distribute_tensor, Shard
+
+            device_mesh = init_device_mesh(
+                "cuda",
+                (4,),
+                mesh_dim_names=("dp",),
+            )
+
+            with FakeTensorMode(allow_non_fake_inputs=True):
+                input_tensor = torch.randn(8, 16, device="cuda")
+
+                # This should not raise NotImplementedError about c10d.scatter_
+                distributed_tensor = distribute_tensor(
+                    input_tensor, device_mesh=device_mesh, placements=[Shard(0)]
+                )
+
+                # Verify the tensor was created successfully
+                self.assertEqual(distributed_tensor.shape, torch.Size([8, 16]))
+        finally:
+            if dist.group.WORLD is not None:
+                dist.destroy_process_group()
+
 
 class CollectiveTest(TorchDispatchMode):
     collective_size_exclude = {

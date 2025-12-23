@@ -61,6 +61,14 @@ from torch.utils._traceback import CapturedTraceback
 from ._fake_tensor_utils import _CacheKeyState, _PySymInputStub, _SymIntOutputStub
 
 
+# Import fake_collectives to register meta implementations for c10d ops
+# This ensures operations like scatter_, broadcast_, etc. work in fake tensor mode
+try:
+    import torch.distributed._tools.fake_collectives  # noqa: F401
+except ImportError:
+    # In case distributed is not available
+    pass
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
     from types import TracebackType
