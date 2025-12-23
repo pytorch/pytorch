@@ -18,13 +18,7 @@ from torch._inductor.autotune_process import (
     TensorMeta,
 )
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
-from torch._inductor.ir import (
-    Buffer,
-    ChoiceCaller,
-    Layout,
-    ShapeAsConstantBuffer,
-    TensorBox,
-)
+from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._logging import getArtifactLogger
 
@@ -141,7 +135,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
     def benchmark(self, *args, out) -> float:
         return self.bmreq.benchmark(*args, out=out)
 
-    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def output_node(self) -> TensorBox:
         from torch._inductor.ir import NVUniversalGemmBuffer
 
         return TensorBox.create(
