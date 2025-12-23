@@ -132,7 +132,7 @@ class ModelReportVisualizer:
                 # if we need plottable, ensure type of val is tensor
                 if (
                     not plottable_features_only
-                    or type(feature_dict[feature_name]) is torch.Tensor
+                    or type(feature_dict[feature_name]) == torch.Tensor
                 ):
                     unique_feature_names.add(feature_name)
 

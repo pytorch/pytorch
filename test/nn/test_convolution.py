@@ -3839,9 +3839,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
                         # This is because we have N111 weight that cannot handle
                         # the ambiguous memory_format
                         if w_f == torch.channels_last:
-                            if layer is nn.Conv2d and filter_size * c != 1:
+                            if layer == nn.Conv2d and filter_size * c != 1:
                                 output_format = torch.channels_last
-                            if layer is nn.ConvTranspose2d and filter_size * k != 1:
+                            if layer == nn.ConvTranspose2d and filter_size * k != 1:
                                 output_format = torch.channels_last
                     self._run_conv(
                         layer,

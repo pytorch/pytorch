@@ -211,9 +211,9 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     is_ok &= var.grad is None
     is_ok &= not var._backward_hooks
     if is_parameter:
-        is_ok &= type(var) is Parameter
+        is_ok &= type(var) == Parameter
     else:
-        is_ok &= type(var) is torch.Tensor
+        is_ok &= type(var) == torch.Tensor
     var._grad = torch.ones(5, 5, device=device)
 
     queue.put(is_ok)

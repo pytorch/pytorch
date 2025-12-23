@@ -82,7 +82,7 @@ class TestSerialize(TestCase):
                 return 0
 
             def __eq__(self, other):
-                return type(other) is type(self)
+                return type(other) == type(self)
 
             def __call__(self, *args, **kwargs):
                 return torch.ops.aten.add.Tensor(*args, **kwargs)

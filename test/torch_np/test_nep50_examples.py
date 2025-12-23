@@ -94,7 +94,7 @@ class TestNEP50Table(TestCase):
     def test_nep50_exceptions(self, example):
         old, new = examples[example]
 
-        if new is Exception:
+        if new == Exception:
             with assert_raises(OverflowError):
                 eval(example)
 

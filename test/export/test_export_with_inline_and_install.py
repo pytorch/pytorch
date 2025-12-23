@@ -1,6 +1,8 @@
 # Owner(s): ["oncall: export"]
 
 
+import unittest
+
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._export import config as export_config
@@ -64,6 +66,13 @@ for test in tests:
     make_dynamic_cls(test)
 del test
 
+
+# NOTE: For this test, we have a failure that occurs because the buffers (for BatchNorm2D) are installed, and not
+# graph input.  Therefore, they are not in the `program.graph_signature.inputs_to_buffers`
+# and so not found by the unit test when counting the buffers
+unittest.expectedFailure(
+    InlineAndInstallStrictExportTestExport.test_buffer_util_inline_and_install_strict  # noqa: F821
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

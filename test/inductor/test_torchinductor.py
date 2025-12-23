@@ -514,11 +514,11 @@ def check_model(
     #         print("Graph", graph)
     if check_has_compiled:
         assert called, "Ran graph without calling compile_fx"
-    assert type(actual) is type(correct)
+    assert type(actual) == type(correct)
     if isinstance(actual, (tuple, list)):
         assert len(actual) == len(correct)
         assert all(
-            type(actual_item) is type(correct_item)
+            type(actual_item) == type(correct_item)
             for actual_item, correct_item in zip(actual, correct)
         )
 

@@ -106,9 +106,9 @@ class TestMixin:
         return keys
 
     def key(self: Self, key_type: type[icache.Key]) -> icache.Key:
-        if key_type is str:
+        if key_type == str:
             return f"s{randint(0, 2**32)}"
-        elif key_type is int:
+        elif key_type == int:
             return randint(0, 2**32)
         elif key_type == tuple[Any, ...]:
             return (self.key(str), self.key(int))
@@ -125,13 +125,13 @@ class TestMixin:
         return values
 
     def value(self: Self, value_type: type[icache.Value]) -> icache.Value:
-        if value_type is str:
+        if value_type == str:
             return f"s{randint(0, 2**32)}"
-        elif value_type is int:
+        elif value_type == int:
             return randint(0, 2**32)
         elif value_type == tuple[Any, ...]:
             return (self.value(str), self.value(int))
-        elif value_type is bytes:
+        elif value_type == bytes:
             return self.value(str).encode()
         elif value_type == dict[Any, Any]:
             return {
