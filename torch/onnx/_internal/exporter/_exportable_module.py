@@ -180,6 +180,7 @@ class ExportableModule(torch.nn.Module, abc.ABC):
                 Common options include:
 
                 - ``opset_version`` (int): The ONNX opset version to target
+                - ``optimize`` (bool): Whether to apply optimizations to the exported model
 
         Returns:
             An ONNXProgram object containing the exported model and metadata.
