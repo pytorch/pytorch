@@ -391,13 +391,50 @@ void upsample_nearest3d_backward_kernel_impl(
     std::optional<double> scales_h,
     std::optional<double> scales_w) {
   if (grad_output.is_contiguous(at::MemoryFormat::ChannelsLast3d)) {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "_upsample_nearest3d_backward_cl", [&] {
-      cpu_upsample_nearest_backward_channels_last<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
-    });
+    // BF16 channels_last_3d path is currently broken on CPU
+    // Fall back to contigueous implementation for correctness
+    if (grad_output.scalar_type() == at::kBFloat16) {
+      auto grad_output_contig =
+          grad_output.contiguous(at::MemoryFormat::Contiguous);
+      auto grad_input_contig =
+          grad_input.contiguous(at::MemoryFormat::Contiguous);
+      grad_input_contig.zero_();
+      AT_DISPATCH_FLOATING_TYPES_AND2(
+          kBFloat16,
+          kHalf,
+          grad_output_contig.scalar_type(),
+          "upsample_nearest3d_backward_fallback_contig",
+          [&] {
+            cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(
+                grad_input_contig,
+                grad_output_contig,
+                {scales_d, scales_h, scales_w});
+          });
+      grad_input.copy_(grad_input_contig);
+      return;
+    }
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16,
+        kHalf,
+        grad_output.scalar_type(),
+        "_upsample_nearest3d_backward_cl",
+        [&] {
+          cpu_upsample_nearest_backward_channels_last<
+              scalar_t,
+              scale_t,
+              nearest_idx>(
+              grad_input, grad_output, {scales_d, scales_h, scales_w});
+        });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND2(kBFloat16, kHalf, grad_output.scalar_type(), "upsample_nearest3d_backward", [&] {
-      cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(grad_input, grad_output, {scales_d, scales_h, scales_w});
-    });
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        kBFloat16,
+        kHalf,
+        grad_output.scalar_type(),
+        "upsample_nearest3d_backward",
+        [&] {
+          cpu_upsample_nearest_backward<scalar_t, scale_t, nearest_idx>(
+              grad_input, grad_output, {scales_d, scales_h, scales_w});
+        });
   }
 }
 
