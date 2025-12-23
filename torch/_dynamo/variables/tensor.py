@@ -1511,6 +1511,9 @@ class TensorVariable(VariableTracker):
         else:
             return self
 
+    def method_share_memory_(self) -> VariableTracker:
+        return self
+
     def method_new(
         self, *args: VariableTracker, **kwargs: VariableTracker
     ) -> VariableTracker | None:
