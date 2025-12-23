@@ -23,7 +23,7 @@ CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
 
 
 # Duplicated, because mypy needs these types statically
-T = TypeVar("T", bound=int | float | bool | None | str | list | set | tuple | dict)
+T = TypeVar("T", bound=int | float | bool | str | list | set | tuple | dict | None)
 
 
 _UNSET_SENTINEL = object()

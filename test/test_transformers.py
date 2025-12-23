@@ -2687,7 +2687,7 @@ class TestSDPACudaOnly(NNTestCase):
 
         # head_dim=256 support on SM 9.0 requires cuDNN >= 9.10.0 (91000) per sdp_utils.cpp:495
         cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
-        if torch.cuda.get_device_capability() in [(9, 0)] and cudnn_version >= 91000:
+        if torch.cuda.get_device_capability() == (9, 0) and cudnn_version >= 91000:
             test()
         else:
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):

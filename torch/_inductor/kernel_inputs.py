@@ -241,7 +241,7 @@ class MMKernelInputs(KernelInputs):
             m2_idx += len(input_nodes)
 
         assert 0 <= m1_idx < len(input_nodes), f"Invalid mat1_idx: {mat1_idx}"
-        assert 0 <= m1_idx < len(input_nodes), f"Invalid mat2_idx: {mat2_idx}"
+        assert 0 <= m2_idx < len(input_nodes), f"Invalid mat2_idx: {mat2_idx}"
 
         self._mat1_idx = mat1_idx
         self._mat2_idx = mat2_idx
