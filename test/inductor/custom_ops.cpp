@@ -406,6 +406,17 @@ extern "C" {
       *ret = torch::aot_inductor::new_tensor_handle(std::move(tmp_result));
     });
   }
+
+  AOTI_TORCH_EXPORT AOTITorchError
+  aoti_torch_xpu_fn_square(
+      AtenTensorHandle input,
+      AtenTensorHandle* ret) {
+    AOTI_TORCH_CONVERT_EXCEPTION_TO_ERROR_CODE({
+      auto tmp_result = at::fn_square_impl(
+          torch::aot_inductor::resolve_tensor_dispatch_flags(input));
+      *ret = torch::aot_inductor::new_tensor_handle(std::move(tmp_result));
+    });
+  }
 }
 
 TORCH_LIBRARY(aoti_custom_ops, m) {
