@@ -23,6 +23,7 @@ class AutoChunkerTest(TestCase):
         super().setUp()
         metrics.reset()
 
+    @largeTensorTest("8GB", device=GPU_TYPE, inductor=True)
     def common_matmul_test(self, has_softmax, use_bias=False, dynamic_shape=None):
         M, K, N = 1024, 16, 1024
 
