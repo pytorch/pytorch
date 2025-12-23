@@ -27,6 +27,7 @@ from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import timed
 from torch._prims_common import is_float_dtype
+from torch.autograd.functional import vjp
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -2239,11 +2240,15 @@ class CPUReproTests(TestCase):
     @patch("torch.cuda.is_available", lambda: False)
     def test_auto_simd(self):
         vec_amx = cpu_vec_isa.supported_vec_isa_list[0]
-        vec_avx512 = cpu_vec_isa.supported_vec_isa_list[1]
-        vec_avx2 = cpu_vec_isa.supported_vec_isa_list[2]
+        vec_avx512_vnni = cpu_vec_isa.supported_vec_isa_list[1]
+        vec_avx512 = cpu_vec_isa.supported_vec_isa_list[2]
+        vec_avx2 = cpu_vec_isa.supported_vec_isa_list[3]
         self.assertTrue(vec_amx.bit_width() == 512)
         self.assertTrue(vec_amx.nelements() == 16)
         self.assertTrue(vec_amx.nelements(torch.bfloat16) == 32)
+        self.assertTrue(vec_avx512_vnni.bit_width() == 512)
+        self.assertTrue(vec_avx512_vnni.nelements(torch.int8) == 64)
+        self.assertTrue(vec_avx512_vnni.nelements(torch.uint8) == 64)
         self.assertTrue(vec_avx512.bit_width() == 512)
         self.assertTrue(vec_avx2.bit_width() == 256)
         self.assertTrue(vec_avx512.nelements() == 16)
@@ -2273,6 +2278,8 @@ class CPUReproTests(TestCase):
             isa = cpu_vec_isa.pick_vec_isa()
             if vec_amx in isa_list:
                 self.assertTrue(isa == vec_amx)
+            elif vec_avx512_vnni in isa_list:
+                self.assertTrue(isa == vec_avx512_vnni)
             elif vec_avx512 in isa_list:
                 self.assertTrue(isa == vec_avx512)
 
@@ -2291,6 +2298,8 @@ class CPUReproTests(TestCase):
                 isa = cpu_vec_isa.pick_vec_isa()
                 if vec_amx in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_amx)
+                elif vec_avx512_vnni in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512_vnni)
                 elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx512)
                 else:
@@ -2300,6 +2309,8 @@ class CPUReproTests(TestCase):
                 os.environ["ATEN_CPU_CAPABILITY"] = "avx2"
                 isa = cpu_vec_isa.pick_vec_isa()
                 if vec_amx in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx2)
+                if vec_avx512_vnni in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx2)
                 elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx2)
@@ -2311,6 +2322,8 @@ class CPUReproTests(TestCase):
                 isa = cpu_vec_isa.pick_vec_isa()
                 if vec_amx in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_amx)
+                elif vec_avx512_vnni in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512_vnni)
                 elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx512)
                 else:
@@ -2326,6 +2339,8 @@ class CPUReproTests(TestCase):
                 isa = cpu_vec_isa.pick_vec_isa()
                 if vec_amx in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_amx)
+                elif vec_avx512_vnni in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512_vnni)
                 elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx512)
                 else:
@@ -2336,6 +2351,8 @@ class CPUReproTests(TestCase):
                 isa = cpu_vec_isa.pick_vec_isa()
                 if vec_amx in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_amx)
+                elif vec_avx512_vnni in cpu_vec_isa.valid_vec_isa_list():
+                    self.assertTrue(isa == vec_avx512_vnni)
                 elif vec_avx512 in cpu_vec_isa.valid_vec_isa_list():
                     self.assertTrue(isa == vec_avx512)
                 else:
@@ -4493,6 +4510,41 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(x_cmp.grad, x_ref.grad)
         torch.testing.assert_close(weight_cmp.grad, weight_ref.grad)
         torch.testing.assert_close(bias_cmp.grad, bias_ref.grad)
+
+    @config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_cpp_backend_no_error(self):
+        """
+        See https://github.com/pytorch/pytorch/issues/167205
+        emulate_precision_casts threw TypeError on CPP backend.
+
+        Before fix: TypeError: CppVecOverrides.to_dtype() got an unexpected
+        keyword argument 'use_compute_types'
+
+        After fix: Should compile and run without error.
+        """
+
+        def robust_power(base, exponent, threshold):
+            threshold1 = threshold
+            broadcasted_base = torch.abs(base)
+            threshold_bc = threshold.expand_as(base)
+            cond = broadcasted_base < threshold_bc
+            return torch.where(cond, base / threshold1, base**exponent)
+
+        device = torch.device("cpu")
+        base = torch.randn(10, dtype=torch.float16, device=device)
+        exponent = torch.tensor(2.0, dtype=torch.float16, device=device)
+        threshold = torch.tensor(0.01, dtype=torch.float16, device=device)
+        v = torch.ones_like(base)
+
+        # Main test, this should not raise TypeError (before fix it would)
+        compiled_fn = torch.compile(robust_power)
+        y, (grad_b, grad_e, grad_t) = vjp(
+            lambda b, e, t: compiled_fn(b, e, t), (base, exponent, threshold), v=v
+        )
+
+        # Sanity check that gradients were computed
+        self.assertIsNotNone(grad_b)
+        self.assertEqual(grad_b.dtype, torch.float16)
 
     def test_int_div_vec(self):
         def fn(x, y, mode):

@@ -67,7 +67,7 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
     To simplify things for sympy, we'll try just x * y == 1, check x(1) and x(0).
     """
 
-    if len(expr.free_symbols) == 0:
+    if len(expr.free_symbols) != 1:
         return None
 
     free_symbol = next(iter(expr.free_symbols))
@@ -98,7 +98,6 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
         if isinstance(arg, sympy.Mul):
             seen = False
             # TODO - only need one of these to be solvable to zero
-            #
             for mul_arg in arg.args:
                 out = solve_for_zero(mul_arg)
                 if out is None:
@@ -133,6 +132,7 @@ def solve_for_tiling(expr: sympy.Expr) -> Optional[sympy.Expr]:
     )
 
     out = _solve_simple_expr(eq_1_expr_simplified)
+
     # since we approximated FloorDiv/ModularIndexing, double check here
     if not out or sympy_subs(eq_1_expr, {free_symbol: out}) != 1:
         return None
@@ -218,6 +218,13 @@ def find_coalesced_var(
     return None
 
 
+def has_indirect_access(memory_expr: sympy.Expr) -> bool:
+    """
+    Check if this memory expression has any indirect indexing.
+    """
+    return any(symbol_is_type(s, SymT.INDIRECT) for s in memory_expr.free_symbols)
+
+
 @dataclasses.dataclass(frozen=True)
 class FusedNormalizedReadsWrites:
     """
@@ -256,12 +263,15 @@ def get_pw_red_splits(
     none_if_not_divisible: bool = False,
 ) -> Optional[tuple[VarsAndRanges, VarsAndRanges]]:
     if n.is_reduction() or sympy_product(n._body.sizes[0]) == pointwise_numel:
+        # pyrefly: ignore [bad-return]
         return (
             (n._body.iter_vars, n._body.sizes[0]),
             (n._body.reduce_vars, n._body.sizes[1]),
         )  # type: ignore[return-value]
 
-    assert sympy_product(n._body.sizes[0]) == pointwise_numel * red_numel  # type: ignore[operator]
+    assert get_hint(sympy_product(n._body.sizes[0])) == get_hint(
+        pointwise_numel * red_numel
+    )  # type: ignore[operator]
     i = len(n._body.sizes[0]) - 1
     prod = 1
     while i >= 0:
@@ -281,6 +291,7 @@ def get_pw_red_splits(
     if none_if_not_divisible:
         return None
     else:
+        # pyrefly: ignore [bad-return]
         return (
             (n._body.iter_vars, n._body.sizes[0]),
             (n._body.reduce_vars, n._body.sizes[1]),
@@ -301,6 +312,7 @@ class NodeSplitGetter:
         self.red_numel: sympy.Expr = node.group[1][1]
 
         self.pw_split_options: dict[int, OrderedSet[Split]] = defaultdict(OrderedSet)
+        self.red_split_options: dict[int, OrderedSet[Split]] = defaultdict(OrderedSet)
 
         self.reduction_split: Split = ()
         self.all_node_sizes: OrderedSet[tuple[Split, Split]] = OrderedSet()
@@ -330,13 +342,7 @@ class NodeSplitGetter:
             )
 
             self.pw_split_options[len(n_pw_splits)].add(tuple(n_pw_splits))
-
-            # initially, we are just going to do a single reduction split since
-            # reduction tiling is off by default. even if we miss a reduction split,
-            # we can recover it in the split var analysis.
-            # TODO: an earlier version for this code tried to iteratively try the maximum number
-            # of split vars, by iterating over both pointwise and reduction. but not worth
-            # the complexity yet.
+            self.red_split_options[len(n_red_splits)].add(tuple(n_red_splits))
 
             if n_red_splits != ():
                 self.reduction_split = (sympy_product(n_red_splits),)
@@ -354,21 +360,36 @@ class NodeSplitGetter:
         if len(self.all_node_sizes) == 1:
             return next(iter(self.all_node_sizes))
 
-        max_pw_split = max(self.pw_split_options.keys())
-        for pw_split_len in range(max_pw_split, 0, -1):
-            for pw_split in self.pw_split_options[pw_split_len]:
-                if out := self.try_split(pw_split, self.reduction_split):
-                    return out
+        if len(self.pw_split_options) == 0:
+            return ((self.pointwise_numel,), (self.red_numel,))
 
-            # combine dims for next round
-            for pw_split in self.pw_split_options[pw_split_len]:
-                for i in range(len(pw_split) - 1):
+        max_pw_split = max(self.pw_split_options.keys())
+        max_red_split = max(self.red_split_options.keys())
+
+        def add_combined_split_options(
+            split_options: dict[int, OrderedSet[Split]], curr_length: int
+        ) -> None:
+            for split in split_options[curr_length]:
+                for i in range(len(split) - 1):
                     new_split = tuple(
-                        pw_split[0:i]
-                        + (sympy_product(pw_split[i : i + 2]),)
-                        + pw_split[i + 2 :]
+                        split[0:i] + (sympy_product(split[i : i + 2]),) + split[i + 2 :]
                     )
-                    self.pw_split_options[len(new_split)].add(new_split)
+                    split_options[len(new_split)].add(new_split)
+
+        max_total_splits = max_pw_split + max_red_split
+        for curr_iter, total_splits in enumerate(range(max_total_splits, 0, -1)):
+            for pw_split_len in range(total_splits, 0, -1):
+                for pw_split in self.pw_split_options[pw_split_len]:
+                    for red_split in self.red_split_options[
+                        total_splits - pw_split_len
+                    ]:
+                        if out := self.try_split(pw_split, red_split):
+                            return out
+
+            add_combined_split_options(self.pw_split_options, max_pw_split - curr_iter)
+            add_combined_split_options(
+                self.red_split_options, max_red_split - curr_iter
+            )
 
         # if for whatever reason we couldn't split above, return default split
         return ((self.pointwise_numel,), (self.red_numel,))
@@ -500,13 +521,6 @@ def extract_normalized_read_writes(
     pointwise_numel: sympy.Expr = node.group[1][0]
     red_numel: sympy.Expr = node.group[1][1]
 
-    # TODO - a few dynamic shapes issues to resolve
-    if any(
-        (isinstance(var, sympy.Expr) and not var.is_constant())
-        for var in (pointwise_numel, red_numel)
-    ):
-        return None
-
     pw_splits, red_splits = NodeSplitGetter(node).get_node_splits()
 
     # lets use different prefix (`n`) to distinguish
@@ -519,11 +533,6 @@ def extract_normalized_read_writes(
             continue
 
         body = n._body
-
-        # TODO - not handled well. indirect loads will not be coalesced,
-        # need to account for that in analysis.
-        if body.indirect_vars:
-            return None
 
         n_reads: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
         n_writes: dict[sympy.Expr, OrderedSet[str]] = defaultdict(OrderedSet)
@@ -552,11 +561,18 @@ def extract_normalized_read_writes(
                 groups, lengths, red_numel
             )
         )
-        new_ranges, return_getters_groups = (
-            torch._inductor.codegen.simd.SIMDKernel._split_iteration_ranges(
-                groups, lengths
+        try:
+            new_ranges, return_getters_groups = (
+                torch._inductor.codegen.simd.SIMDKernel._split_iteration_ranges(
+                    groups, lengths
+                )
             )
-        )
+        except torch._inductor.codegen.simd.CantSplit:
+            # occasionally with dynamic shapes, we will be unable to prove
+            # divisibility
+            assert pointwise_numel.free_symbols or red_numel.free_symbols
+            return None
+
         var_map = apply_var_mapping(
             iter_vars,
             red_vars,
@@ -696,25 +712,22 @@ def analyze_memory_coalescing(
         ((True, item) for item in reads.items()),
         ((False, item) for item in writes.items()),
     ):
-        # skip memory deps with indirect vars - todo: better handling
-        indirect_expr = bool(
-            memory_expr.free_symbols - norm_read_writes.var_ranges.keys()
-        )
-
-        if indirect_expr:
-            continue
-
         size = get_score(memory_expr, var_ranges, buf_names)
-
         if size == 0:
             continue
 
-        maybe_coalesced_var = find_coalesced_var(memory_expr, var_ranges)
-        # while broadcasting vars are not technically coalesced,
-        # accesses at least stay in cache, so they provide most of the benefit.
-        # treat the same for now.
-        if maybe_coalesced_var is None:
-            maybe_coalesced_var = find_broadcast_var(memory_expr, var_ranges)
+        # accesses with indirect expressions are never coalesced
+        indirect_expr = has_indirect_access(memory_expr)
+
+        if indirect_expr:
+            maybe_coalesced_var = None
+        else:
+            maybe_coalesced_var = find_coalesced_var(memory_expr, var_ranges)
+            # while broadcasting vars are not technically coalesced,
+            # accesses at least stay in cache, so they provide most of the benefit.
+            # treat the same for now.
+            if maybe_coalesced_var is None:
+                maybe_coalesced_var = find_broadcast_var(memory_expr, var_ranges)
 
         total_score = 0
         for buf_name in buf_names:
@@ -744,18 +757,27 @@ def analyze_memory_coalescing(
     tiling_scores: dict[sympy.Expr, dict[int, int]] = defaultdict(Counter)
 
     for uncoalesced_expr, addr_score in uncoalesced_addrs.items():
-        expr_subs = dict.fromkeys(uncoalesced_expr.free_symbols, 0)
-        for v in uncoalesced_expr.free_symbols:
+        if has_indirect_access(uncoalesced_expr):
+            continue
+
+        expr_subs = dict.fromkeys(var_ranges.keys(), 0)
+        for v in uncoalesced_expr.free_symbols & var_ranges.keys():
             # skip non iter/reduce var variables
             if v not in var_ranges:
                 continue
             # skip small addrs
             if addr_score == 0:
                 continue
+
             del expr_subs[v]
             single_var_expr = sympy_subs(uncoalesced_expr, expr_subs)
             expr_subs[v] = 0
+
+            if len(single_var_expr.free_symbols) != 1:
+                continue
+
             tiling_factor = solve_for_tiling(single_var_expr)
+
             if (
                 tiling_factor is None
                 or not tiling_factor.is_constant()

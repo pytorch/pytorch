@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from typing import Any, final, TYPE_CHECKING
 
 import torch
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.export.graph_signature import (
@@ -59,6 +60,8 @@ def _check_val(node: torch.fx.Node) -> None:
             return True
         elif isinstance(val, Iterable):
             return all(_check_correct_val(x) for x in val)
+        elif is_opaque_type(type(val)):
+            return True
         return False
 
     def _no_returns(op):
@@ -358,9 +361,16 @@ def _verify_exported_program_signature(exported_program) -> None:
     ]
 
     if len(input_node_names) != len(gs.input_specs):
+        input_spec_names = [
+            spec.arg.name for spec in gs.input_specs if hasattr(spec.arg, "name")
+        ]
+        missing_in_specs = set(input_node_names) - set(input_spec_names)
+        missing_in_graph = set(input_spec_names) - set(input_node_names)
         raise SpecViolationError(
             f"Number of graph inputs ({len(input_node_names)}) "
-            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})"
+            f"does not match number of inputs in the graph signature ({len(gs.input_specs)})\n"
+            f"Placeholders missing input_specs: {missing_in_specs}\n"
+            f"Input_specs missing placeholders: {missing_in_graph}"
         )
 
     for input_spec, node in zip(gs.input_specs, input_node_names):
@@ -468,11 +478,17 @@ def _verify_exported_program_signature(exported_program) -> None:
     ]
 
     if len(output_nodes) != len(gs.output_specs):
+        output_spec_names = [
+            spec.arg.name if hasattr(spec.arg, "name") else str(spec.arg)
+            for spec in gs.output_specs
+        ]
+        missing_out_specs = set(output_nodes) - set(output_spec_names)
+        missing_out_graph = set(output_spec_names) - set(output_nodes)
         raise SpecViolationError(
             f"Number of output nodes {len(output_nodes)} is different "
-            "Than the number of outputs specified by the graph signature: \n"
-            f"Number of mutated buffers: {len(gs.buffers_to_mutate)}. \n"
-            f"Number of user outputs: {len(gs.user_outputs)}. \n"
+            f"Than the number of outputs specified by the graph signature: {len(gs.output_specs)}\n"
+            f"Nodes missing output_specs: {missing_out_specs}\n"
+            f"Output_specs missing nodes: {missing_out_graph}"
         )
 
     num_tokens = len(gs.output_tokens)

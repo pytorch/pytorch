@@ -362,7 +362,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @reduced_f32_on_and_off()
     def test_conv2d_unary(self, device):
         self.device = device
@@ -370,7 +369,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @reduced_f32_on_and_off()
     def test_conv3d_unary(self, device):
         self.device = device
@@ -451,7 +449,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @skipIfXpu(
         msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
     )
@@ -462,7 +459,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @skipIfXpu(
         msg="The operator 'mkldnn::_convolution_transpose_pointwise' is not currently implemented for the XPU device."
     )
@@ -560,7 +556,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @reduced_f32_on_and_off(0.02)
     def test_conv2d_binary(self, device):
         self.device = device
@@ -568,7 +563,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @reduced_f32_on_and_off(0.02)
     def test_conv3d_binary(self, device):
         self.device = device
@@ -668,7 +662,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @reduced_f32_on_and_off()
     def test_conv2d_binary_broadcast_shapes(self, device):
         self.device = device
@@ -676,7 +669,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @reduced_f32_on_and_off(bf32_precision=5e-2)
     def test_conv3d_binary_broadcast_shapes(self, device):
         self.device = device
@@ -684,7 +676,6 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
 
     @skipIfNoDynamoSupport
     @skipIfNoONEDNN
-    @skipIfRocm
     @unittest.skipIf(IS_FBCODE, "Failing in fbcode")
     @reduced_f32_on_and_off()
     def test_conv2d_linear_add_broadcast_shapes(self, device):
@@ -715,6 +706,59 @@ class TestPatternMatcherGeneric(TestPatternMatcherBase):
             )
 
         self._test_common(mod, (x1, x2), matcher_check_fn)
+
+    @skipIfNoDynamoSupport
+    def test_woq_int8(self, device):
+        class M(torch.nn.Module):
+            def __init__(self, is_permute):
+                super().__init__()
+                self.is_permute = is_permute
+
+            def forward(self, x, weight, scales):
+                if self.is_permute:
+                    weight = weight.t()
+                    m = torch.mm(
+                        x.reshape(-1, x.shape[-1]),
+                        weight.to(x.dtype),
+                    )
+                    y = m * scales.to(m.dtype)
+                    y = y.reshape(*x.shape[:-1], y.shape[-1])
+                    return y
+                else:
+                    return (
+                        torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
+                    )
+
+        x_shape = (1, 1, 256)
+        s_shape = 12
+        x_strides = [
+            (256, 256, 1),  # linear dispatching to mm
+            (256, 32, 1),  # linear dispatching to bmm
+        ]
+        is_permutes = [False, True]
+        for x_stride, is_permute in itertools.product(x_strides, is_permutes):
+            mod = M(is_permute=is_permute).eval()
+            x = (
+                torch.randn(x_shape, dtype=torch.bfloat16)
+                .as_strided(x_shape, x_stride)
+                .to(device)
+            )
+
+            w_shape = (12, 256)
+            w = torch.randint(-128, 127, w_shape, dtype=torch.int8).to(device)
+            s = torch.randn(s_shape, dtype=torch.bfloat16).to(device)
+
+            def matcher_check_fn():
+                self.assertEqual(counters["inductor"]["woq_matcher_count"], 1)
+
+            self._test_common(
+                mod,
+                (x, w, s),
+                matcher_check_fn,
+                check_quantization=False,
+                atol=0.001,
+                rtol=0.07,
+            )
 
 
 class TestPatternMatcher(TestPatternMatcherBase):
@@ -4249,56 +4293,6 @@ class TestPatternMatcher(TestPatternMatcherBase):
                     else:
                         include_ops = [linear_op]
                     self._test_code_common(mod, (x,), include_ops, exclude_ops)
-
-    @skipIfNoDynamoSupport
-    def test_woq_int8(self):
-        class M(torch.nn.Module):
-            def __init__(self, is_permute):
-                super().__init__()
-                self.is_permute = is_permute
-
-            def forward(self, x, weight, scales):
-                if self.is_permute:
-                    weight = weight.t()
-                    m = torch.mm(
-                        x.reshape(-1, x.shape[-1]),
-                        weight.to(x.dtype),
-                    )
-                    y = m * scales.to(m.dtype)
-                    y = y.reshape(*x.shape[:-1], y.shape[-1])
-                    return y
-                else:
-                    return (
-                        torch.nn.functional.linear(x, weight.to(dtype=x.dtype)) * scales
-                    )
-
-        x_shape = (1, 1, 256)
-        s_shape = 12
-        x_strides = [
-            (256, 256, 1),  # linear dispatching to mm
-            (256, 32, 1),  # linear dispatching to bmm
-        ]
-        is_permutes = [False, True]
-        for x_stride, is_permute in itertools.product(x_strides, is_permutes):
-            mod = M(is_permute=is_permute).eval()
-            x = torch.randn(x_shape, dtype=torch.bfloat16).as_strided(x_shape, x_stride)
-            w_shape = (12, 256)
-            w = torch.randint(-128, 127, w_shape, dtype=torch.int8)
-            s = torch.randn(s_shape, dtype=torch.bfloat16)
-
-            def matcher_check_fn():
-                self.assertEqual(
-                    counters["inductor"]["woq_matcher_count"], 0 if TEST_ACL else 1
-                )
-
-            self._test_common(
-                mod,
-                (x, w, s),
-                matcher_check_fn,
-                check_quantization=False,
-                atol=0.001,
-                rtol=0.07,
-            )
 
     @skipIfNoDynamoSupport
     def test_woq_int4_cpu(self):
