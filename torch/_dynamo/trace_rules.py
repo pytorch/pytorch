@@ -32,7 +32,6 @@ import os
 import random
 import re
 import sys
-import traceback
 import types
 import unittest
 from collections import defaultdict
@@ -2595,8 +2594,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch.cuda._set_rng_state_offset",
         "torch.cuda._set_stream_by_id",
         "torch.cuda._sleep",
-        "torch.cuda._busy_wait_for_flag",
-        "torch.cuda._clear_flag",
         "torch.cuda._transform_uuid_to_ordinals",
         "torch.cuda._utils._get_device_index",
         "torch.cuda.amp.autocast_mode._cast",
@@ -3309,7 +3306,6 @@ BUILTIN_SKIPLIST = (
     abc,
     copy,
     random,
-    traceback,
     linecache,
 )
 

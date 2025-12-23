@@ -6181,7 +6181,7 @@ class TestTorchDeviceType(TestCase):
                 if dtype in (torch.half, torch.complex32):
                     rtol = 1e-3
                     atol = 1e-3
-                if dtype in (torch.bfloat16,):
+                if dtype == torch.bfloat16:
                     rtol = 1e-2
                     atol = 1e-2
                 self.assertEqual(src, dst.copy_(t), rtol=rtol, atol=atol)
