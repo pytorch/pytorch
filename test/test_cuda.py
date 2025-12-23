@@ -1112,8 +1112,20 @@ print(t.is_pinned())
         s2 = torch.cuda.Stream()
         torch.accelerator.set_stream(s1)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s1.stream_id)
+        self.assertEqual(
+            torch.accelerator.current_stream().stream_handle, s1.cuda_stream
+        )
+        self.assertEqual(
+            torch.accelerator.current_stream().stream_handle, s1.stream_handle
+        )
         torch.accelerator.set_stream(s2)
         self.assertEqual(torch.accelerator.current_stream().stream_id, s2.stream_id)
+        self.assertEqual(
+            torch.accelerator.current_stream().stream_handle, s2.cuda_stream
+        )
+        self.assertEqual(
+            torch.accelerator.current_stream().stream_handle, s2.stream_handle
+        )
         with self.assertRaisesRegex(
             RuntimeError, "Device index value .* is out of index range"
         ):

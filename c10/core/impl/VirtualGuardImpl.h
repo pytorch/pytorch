@@ -53,6 +53,9 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   Stream exchangeStream(Stream s) const override {
     return impl_->exchangeStream(s);
   }
+  void* getStreamHandle(const Stream s) const override {
+    return impl_->getStreamHandle(s);
+  }
   DeviceIndex deviceCount() const noexcept override {
     return impl_->deviceCount();
   }

@@ -3,6 +3,11 @@
 
 namespace c10 {
 
+void* Stream::stream_handle() const {
+  impl::VirtualGuardImpl impl{device_.type()};
+  return impl.getStreamHandle(*this);
+}
+
 // Return whether all asynchronous work previously enqueued on this stream
 // has completed running on the device.
 bool Stream::query() const {
