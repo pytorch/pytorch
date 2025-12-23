@@ -9792,6 +9792,18 @@ class TestNNDeviceType(NNTestCase):
             v(lambda: F.soft_margin_loss(input, input.sign().detach(), reduction=reduction))
 
     @onlyNativeDeviceTypes
+    def test_multilabel_soft_margin_loss_invalid_reduction_error_message(self, device):
+        """Test that multilabel_soft_margin_loss raises ValueError with proper error message for invalid reduction."""
+        input = torch.randn(3, 5, device=device)
+        target = torch.zeros_like(input).to(torch.int64)
+        
+        with self.assertRaisesRegex(
+            ValueError,
+            r"'invalid' is not a valid reduction mode\. Expected 'none', 'mean', or 'sum'\."
+        ):
+            F.multilabel_soft_margin_loss(input, target, reduction='invalid')
+
+    @onlyNativeDeviceTypes
     def test_smooth_l1_loss_vs_huber_loss(self, device):
         def _make_test_tensor(shape, contiguous=True):
             if contiguous:
