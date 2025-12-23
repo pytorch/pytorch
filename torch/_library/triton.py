@@ -208,7 +208,7 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
 
             # not in globals/nonlocals/builtins, check if it's a local assignment
             if name not in collector.assignments:
-                logger.warning(f"{name} not in collector.assignments")
+                logger.warning("%s not in collector.assignments", name)
                 return []
 
             # trace through assignments - collect all names referenced in RHS
