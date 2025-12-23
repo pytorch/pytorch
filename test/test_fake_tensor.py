@@ -247,7 +247,7 @@ class FakeTensorTest(TestCase):
             torch.nextafter(fake_x, fake_y)
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_one_dim_single_elem_cpu_with_cuda_tensor(self):
+    def test_diagonal_scatter_one_dim_single_elem_cpu_with_cuda_tensor(self):
         with FakeTensorMode():
             base = torch.zeros((1, 2), device="cuda")
             src = torch.tensor([1.0])
@@ -257,14 +257,15 @@ class FakeTensorTest(TestCase):
             self.assertTrue(isinstance(out, FakeTensor))
 
     @unittest.skipIf(not RUN_CUDA, "requires cuda")
-    def test_three_dim_single_elem_cpu_with_cuda_tensor(self):
+    def test_add_one_dim_single_elem_cpu_with_cuda_tensor(self):
         with FakeTensorMode():
-            x = torch.randn((1, 1, 1))
+            x = torch.randn([1])
             y = torch.randn(10, device="cuda")
-            out = x + y
-            self.assertEqual(out.shape, (1, 1, 10))
-            self.assertEqual(out.device, y.device)
-            self.assertTrue(isinstance(out, FakeTensor))
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Unhandled FakeTensor Device Propagation for.*"
+            ) as exc:
+                x + y
 
     def test_nan_to_num(self):
         with FakeTensorMode():
