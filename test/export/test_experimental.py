@@ -9,7 +9,10 @@ from typing import Any, Dict, List, Tuple
 
 import torch
 import torch._dynamo
-from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+from torch._dynamo.functional_export import (
+    _dynamo_graph_capture_for_export,
+    dynamo_graph_capture_for_export,
+)
 from torch._dynamo.test_case import run_tests, TestCase
 from torch._functorch.aot_autograd import aot_export_module
 from torch.export import export
@@ -21,6 +24,21 @@ from torch.utils import _pytree as pytree
 
 
 GLOBAL_LIST = []
+
+
+def _register_blockmask_pytree():
+    """Register BlockMask as a pytree node if not already registered."""
+    from torch.nn.attention.flex_attention import BlockMask
+    from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+
+    if BlockMask not in SUPPORTED_NODES:
+        register_pytree_node(
+            BlockMask,
+            BlockMask._flatten,
+            BlockMask._unflatten,
+            flatten_with_keys_fn=BlockMask._flatten_with_keys,
+            serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
+        )
 
 
 class GlobalContext:
@@ -161,91 +179,114 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
     return (div, permute_3, view_3)""",
         )
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask(self):
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
-        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
-        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
+    def _test_export_blockmask_with_mask_fn(self, make_mask_fn):
+        from torch.nn.attention.flex_attention import create_block_mask
 
-        if BlockMask not in SUPPORTED_NODES:
-            register_pytree_node(
-                BlockMask,
-                BlockMask._flatten,
-                BlockMask._unflatten,
-                flatten_with_keys_fn=BlockMask._flatten_with_keys,
-                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
-            )
-
-        def make_mask_closure():
-            def fn(b, h, q, k):
-                return q >= k
-
-            return fn
+        _register_blockmask_pytree()
 
         class Model(torch.nn.Module):
-            def __init__(
-                self,
-            ):
+            def __init__(self, mask_fn_factory):
                 super().__init__()
+                self.mask_fn_factory = mask_fn_factory
 
             def forward(self, x):
-                mask_fn = make_mask_closure()
+                mask_fn = self.mask_fn_factory()
                 block_mask = create_block_mask(
                     mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
                 )
                 return x, block_mask
 
         x = torch.randn(2, 128, device="cuda")
-        module = Model()
+        module = Model(make_mask_fn)
 
         out_eager, mask_eager = module(x)
 
         compiled = _dynamo_graph_capture_for_export(module)(x)
         out_compiled, mask_compiled = compiled(x)
 
-        B = 1
-        H = 1
-        Q_LEN = 64
-        KV_LEN = 64
-
         self.assertEqual(out_eager, out_compiled)
-        # they are not same function because dynamo reconstructs them
         self.assertEqual(
-            mask_eager.mask_mod(B, H, Q_LEN, KV_LEN),
-            mask_compiled.mask_mod(B, H, Q_LEN, KV_LEN),
+            mask_eager.mask_mod(1, 1, 64, 64),
+            mask_compiled.mask_mod(1, 1, 64, 64),
         )
 
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
-    def test_export_blockmask_error(self):
-        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
-        from torch.nn.attention.flex_attention import BlockMask, create_block_mask
-        from torch.utils._pytree import register_pytree_node, SUPPORTED_NODES
-
-        if BlockMask not in SUPPORTED_NODES:
-            register_pytree_node(
-                BlockMask,
-                BlockMask._flatten,
-                BlockMask._unflatten,
-                flatten_with_keys_fn=BlockMask._flatten_with_keys,
-                serialized_type_name="torch.nn.attention.flex_attention.BlockMask",
-            )
-
-        def make_mask_closure():
-            closure = 4
+    def test_export_blockmask(self):
+        def make_mask_fn():
+            res = 4
 
             def fn(b, h, q, k):
-                return q >= k + closure
+                return q >= k + res
+
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_mutated_closure(self):
+        def make_mask_fn():
+            res = 1
+
+            def fn(b, h, q, k):
+                return q >= k + res
+
+            res = 4  # mutation after function definition
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_with_containers(self):
+        def make_mask_fn():
+            offsets = [1, 2, 3]
+            config = {"base": 4, "nested": {"scale": 2}}
+
+            def fn(b, h, q, k):
+                return q >= k + config["base"] + sum(offsets)
+
+            return fn
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_triple_nested(self):
+        def make_mask_fn():
+            a = 1
+
+            def level1():
+                b = 2
+
+                def level2():
+                    c = 3
+
+                    def fn(bx, h, q, k):
+                        return q >= k + a + b + c
+
+                    return fn
+
+                return level2()
+
+            return level1()
+
+        self._test_export_blockmask_with_mask_fn(make_mask_fn)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_self_recursive(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            # Self-referential: fn captures itself through the closure
+            def fn(b, h, q, k):
+                _ = fn  # self-reference
+                return q >= k + 4
 
             return fn
 
         class Model(torch.nn.Module):
-            def __init__(
-                self,
-            ):
-                super().__init__()
-
             def forward(self, x):
-                mask_fn = make_mask_closure()
+                mask_fn = make_mask_fn()
                 block_mask = create_block_mask(
                     mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
                 )
@@ -255,9 +296,113 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
         module = Model()
 
         with self.assertRaisesRegex(
-            torch._dynamo.exc.Unsupported, "nested function with closure in output"
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
         ):
-            compiled = _dynamo_graph_capture_for_export(module)(x)
+            _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_tensor(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            tensor = torch.ones(2, 2)
+
+            def fn(b, h, q, k):
+                _ = fn
+                return q >= k + 4 + tensor.sum()
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_unsupported_class_instance(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        class MaskConfig:
+            def __init__(self, offset):
+                self.offset = offset
+
+        def make_mask_fn():
+            cfg = MaskConfig(offset=5)
+
+            def fn(b, h, q, k):
+                return q >= k + cfg.offset
+
+            return fn
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    def test_export_blockmask_closure_mutually_recursive(self):
+        from torch.nn.attention.flex_attention import create_block_mask
+
+        _register_blockmask_pytree()
+
+        def make_mask_fn():
+            # Create mutually recursive closures: fn_a references fn_b, fn_b references fn_a
+            # This is non-constructible because we cannot serialize mutually recursive closures
+            def fn_a(b, h, q, k):
+                _ = fn_b  # reference to fn_b
+                return q >= k
+
+            def fn_b(b, h, q, k):
+                _ = fn_a  # reference to fn_a
+                return q >= k + 1
+
+            return fn_a
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                mask_fn = make_mask_fn()
+                block_mask = create_block_mask(
+                    mask_fn, B=1, H=1, Q_LEN=64, KV_LEN=64, device=x.device
+                )
+                return x, block_mask
+
+        x = torch.randn(2, 128, device="cuda")
+        module = Model()
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "nested function with non-constructible closure in output",
+        ):
+            _dynamo_graph_capture_for_export(module)(x)
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
