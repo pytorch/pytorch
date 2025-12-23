@@ -1361,7 +1361,7 @@ class TensorVariable(VariableTracker):
         if (len(args) == 1 and isinstance(args[0], SizeVariable)) or (
             len(args) >= 1
             and all(
-                isinstance(a, ConstantVariable) and a.python_type() is int for a in args
+                isinstance(a, ConstantVariable) and a.python_type() == int for a in args
             )
         ):
             from ..symbolic_convert import InstructionTranslator

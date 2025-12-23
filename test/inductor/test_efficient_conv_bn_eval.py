@@ -127,11 +127,11 @@ class EfficientConvBNEvalTemplate(TestCase):
             spatial_d = (
                 4 if issubclass(module[0], nn.modules.conv._ConvTransposeNd) else 96
             )
-            if module[0] is nn.Conv1d or module[0] is nn.ConvTranspose1d:
+            if module[0] == nn.Conv1d or module[0] == nn.ConvTranspose1d:
                 inps += [spatial_d] * 1
-            if module[0] is nn.Conv2d or module[0] is nn.ConvTranspose2d:
+            if module[0] == nn.Conv2d or module[0] == nn.ConvTranspose2d:
                 inps += [spatial_d] * 2
-            if module[0] is nn.Conv3d or module[0] is nn.ConvTranspose3d:
+            if module[0] == nn.Conv3d or module[0] == nn.ConvTranspose3d:
                 inps += [spatial_d] * 3
             inp = torch.rand(inps).to(self.device)
 

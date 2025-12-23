@@ -59,7 +59,7 @@ class SourceTests(torch._dynamo.test_case.TestCase):
             def forward(self):
                 if (
                     torch.utils._pytree.SUPPORTED_NODES[CausalLMOutputWithPast].type
-                    is int
+                    == int
                 ):
                     x = torch.sin(self.x)
                 else:

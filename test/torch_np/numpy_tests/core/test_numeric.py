@@ -2384,7 +2384,7 @@ class TestLikeFuncs(TestCase):
         b = a[:, ::2]  # Ensure b is not contiguous.
         kwargs = {"fill_value": ""} if likefunc == np.full_like else {}
         result = likefunc(b, dtype=dtype, **kwargs)
-        if dtype is str:
+        if dtype == str:
             assert result.strides == (16, 4)
         else:
             # dtype is bytes

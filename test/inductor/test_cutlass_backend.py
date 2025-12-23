@@ -88,7 +88,7 @@ def _check_if_instances_equal(op1, op2) -> bool:
     if isinstance(op1, (list | tuple)):
         return tuple(op1) == tuple(op2)
 
-    if type(op1) is not type(op2):
+    if type(op1) != type(op2):
         return False
 
     # some classes have __eq__ defined but they may be insufficient

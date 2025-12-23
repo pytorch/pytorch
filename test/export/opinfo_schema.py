@@ -38,7 +38,7 @@ class PreDispatchSchemaCheckMode(SchemaCheckMode):
 
     def _may_alias_or_mutate(self, func, types, args, kwargs):
         def unwrap(e):
-            if isinstance(e, torch.Tensor) and type(e) is not torch.Tensor:
+            if isinstance(e, torch.Tensor) and not type(e) == torch.Tensor:
                 try:
                     return e.elem
                 except AttributeError:
