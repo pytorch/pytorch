@@ -927,9 +927,9 @@ class OutputGraph(OutputGraphCommon):
     def subtracer(
         self,
         source_target: Optional[Target],
-        prior_tracer: "SubgraphTracer",
+        prior_tracer: Optional["SubgraphTracer"],
         description: Optional[str] = None,
-    ) -> Generator[fx.Tracer, None, None]:
+    ) -> Generator["SubgraphTracer", None, None]:
         new_scope_ctx = enter_new_scope()
         try:
             if prior_tracer:
@@ -1199,7 +1199,7 @@ class OutputGraph(OutputGraphCommon):
 
             def wrap_name(module_key: str) -> VariableTracker:
                 return SymNodeVariable.create(
-                    self,
+                    self.root_tx,
                     self.create_proxy("get_attr", module_key, (), {}),
                     sym_num=target,
                     **options,
@@ -1854,12 +1854,14 @@ class OutputGraph(OutputGraphCommon):
                         ):
                             for k, v in var.items.items():
                                 specs = {}
+                                # pyrefly: ignore[missing-attribute]
                                 for k_spec, val in v.items.items():
                                     specs[k_spec.vt.as_python_constant()] = (
                                         val.as_python_constant()
                                     )
                                 assert ["in_spec", "out_spec"] == list(specs.keys())
                                 self.export_metadata.module_call_spec[
+                                    # pyrefly: ignore[missing-attribute]
                                     k.vt.as_python_constant()
                                 ] = specs
                         # export uses tracepoint pass to dump submodule inp/out spec
@@ -1945,8 +1947,7 @@ class OutputGraph(OutputGraphCommon):
         self.codegen_cells(tx, cg)
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
-        if config.replay_side_effects:
-            self.side_effects.codegen_update_mutated(cg)
+        self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self) -> None:
         """
@@ -2287,6 +2288,7 @@ class OutputGraph(OutputGraphCommon):
                         unused_root_guard_manager,
                         specialization.check_fn,
                         [check_fn_source],
+                        None,  # user_stack
                     )
 
                     log.debug(
@@ -2805,6 +2807,9 @@ class DynamoTracerOutput:
     error_on_graph_break: bool
     is_tracing_resume_prologue: bool
     output_graph: Optional[OutputGraph]
+    # output_graph_for_cleanup is set even when there's an error, to allow
+    # cleanup of graph nodes to break reference cycles
+    output_graph_for_cleanup: Optional[OutputGraph]
     closure: Optional[tuple[Any, ...]]
     f_globals: dict[str, Any]
 
@@ -2815,10 +2820,23 @@ class DynamoTracerOutput:
         self.is_tracing_resume_prologue = tracer.is_tracing_resume_prologue
         self.closure = tracer.closure
         self.f_globals = tracer.f_globals
+        self.output_graph_for_cleanup = tracer.output
         if error:
             self.output_graph = None
         else:
             self.output_graph = tracer.output
+
+    def _cleanup_output_graph(self) -> None:
+        output_graph = self.output_graph_for_cleanup
+        if output_graph:
+            for tracer in output_graph.tracers:
+                tracer.graph._clear_nodes()
+            # Also clear tracked_fakes to break FakeTensorMode → ShapeEnv → TrackedFake → FakeTensor cycle
+            if (
+                output_graph.tracing_context.fake_mode
+                and output_graph.tracing_context.fake_mode.shape_env
+            ):
+                output_graph.tracing_context.fake_mode.shape_env.tracked_fakes = None
 
 
 err_epilogue = (
