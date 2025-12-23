@@ -200,6 +200,8 @@ fx_wrapper: bool = os.environ.get("TORCHINDUCTOR_FX_WRAPPER", "0") == "1"
 cpp_cache_precompile_headers: bool = not is_fbcode()
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
+if torch.xpu.is_available():
+    online_softmax = False
 
 # dead code elimination
 dce = False

@@ -922,7 +922,7 @@ class CommonTemplate:
         result, (code,) = self._run_and_compare(
             foo,
             view,
-            expected_num_block_pointers=5,
+            expected_num_block_pointers=5 if config.online_softmax else 6,
             expected_num_triton_kernels=2,
             config_patches={
                 "triton.multi_kernel": True,
