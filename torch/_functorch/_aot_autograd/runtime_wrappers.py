@@ -1703,7 +1703,7 @@ def _backward_prologue_functional(
     all_args = [
         *ctx_symints,
         *ctx_saved_tensors,
-        *ctx_saved_opaque,
+        *(ctx_saved_opaque if ctx_saved_opaque else ()),
         *flat_bw_args_with_grads,
         *bw_tokens,
         *rng_args,
