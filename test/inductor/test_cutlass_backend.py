@@ -613,6 +613,50 @@ class TestCutlassBackend(TestCase):
 
             torch.testing.assert_close(actual, expected, rtol=1e-2, atol=0.05)
 
+    @unittest.skipIf(
+        torch.cuda.is_available() and not PLATFORM_SUPPORTS_FP8,
+        "FP8 is only supported on H100+",
+    )
+    @unittest.skipIf(not SM90OrLater, "need sm_90")
+    @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
+    def test_cutlass_backend_fp8_scaled_mm_mixed_dtypes(self):
+        """
+        Test that CUTLASS backend fails with mixed FP8 dtypes (e4m3fn x e5m2).
+
+        This documents the current limitation where mixed FP8 dtype combinations
+        are not supported by the CUTLASS backend due to dtype filtering in
+        cutlass_utils.get_accumulator_dtype().
+        """
+        m, k, n = 256, 256, 256
+
+        # Create mixed FP8 dtypes: e4m3fn x e5m2
+        a8 = torch.randn(m, k, device="cuda", dtype=torch.float16).to(
+            torch.float8_e4m3fn
+        )
+        b8 = torch.randn(k, n, device="cuda", dtype=torch.float16).to(torch.float8_e5m2)
+        # _scaled_mm requires mat2 to be column-major
+        b8 = b8.t().contiguous().t()
+
+        sa = torch.tensor(1.0, device=a8.device)
+        sb = torch.tensor(2.0, device=b8.device)
+
+        def scaled_mm_fn(a, b):
+            return torch._scaled_mm(
+                a, b, scale_a=sa, scale_b=sb, out_dtype=torch.float16
+            )
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "CUTLASS",
+                "cuda.cutlass_max_profiling_configs": 1,
+            }
+        ):
+            compiled_fn = torch.compile(scaled_mm_fn, fullgraph=True)
+            actual = compiled_fn(a8, b8)
+        expected = scaled_mm_fn(a8, b8)
+        torch.testing.assert_close(actual, expected, rtol=1e-2, atol=0.05)
+
     @unittest.skipIf(not SM90OrLater, "need sm_90")
     @parametrize("dynamic", (False, True))
     @parametrize("use_aoti", (False, True))
