@@ -1,0 +1,167 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader, TensorDataset
+import random
+import logging
+from abc import ABC, abstractmethod
+from typing import List, Dict, Any
+
+# Настройка логирования
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+
+" === БАЗОВЫЕ КЛАССЫ ===
+
+class Module(ABC):
+    """Базовый интерфейс модуля"""
+    @abstractmethod
+    def execute(self, x):
+        pass
+
+    @property
+    @abstractmethod
+    def dna(self) -> Dict[str, Any]:
+        pass
+
+
+
+class NeuralModule(Module):
+    """Нейронный модуль с архитектурой"""
+    def __init__(self, layers: List[nn.Module]):
+        super().__init__()
+        self.network = nn.Sequential(*layers)
+        self._dna = {"layers": [type(layer).__name__ for layer in layers]}
+    
+    
+    def execute(self, x):
+        return self.network(x)
+    
+    @property
+    def dna(self) -> Dict[str, Any]:
+        return self._dna
+
+
+
+# === МЕХАНИЗМЫ ЭВОЛЮЦИИ ===
+
+class MutationEngine:
+    """Мутации архитектуры"""
+    def mutate(self, module: NeuralModule) -> NeuralModule:
+        layers = list(module.network)
+        for i, layer in enumerate(layers):
+            if isinstance(layer, nn.Linear):
+                # Меняем количество выходов
+                new_out = random.randint(5, 50)
+                layers[i] = nn.Linear(layer.in_features, new_out)
+        return NeuralModule(layers)
+
+
+
+class CrossoverEngine:
+    """Кроссовер двух модулей"""
+    def crossover(self, parent1: NeuralModule, parent2: NeuralModule) -> NeuralModule:
+        p1_layers = list(parent1.network)
+        p2_layers = list(parent2.network)
+        # Берём половину от каждого родителя
+        child_layers = p1_layers[:len(p1_layers)//2] + p2_layers[len(p2_layers)//2:]
+        return NeuralModule(child_layers)
+
+
+
+# === ОБУЧЕНИЕ И ОЦЕНКА ===
+
+
+class Trainer:
+    """Обучение модуля на данных"""
+    def train(self, module: NeuralModule, train_loader: DataLoader, epochs: int = 10):
+        optimizer = optim.Adam(module.parameters(), lr=0.001)
+        loss_fn = nn.MSELoss()
+        
+        module.train()
+        for epoch in range(epochs):
+            for x_batch, y_batch in train_loader:
+                optimizer.zero_grad()
+                output = module.execute(x_batch)
+                loss = loss_fn(output, y_batch)
+                loss.backward()
+                optimizer.step()
+        return module
+
+class FitnessEvaluator:
+    """Оценка качества модуля"""
+    def evaluate(self, module: NeuralModule, test_loader: DataLoader) -> Dict[str, float]:
+        module.eval()
+        total_loss = 0
+        correct = 0
+        total = 0
+        
+        with torch.no_grad():
+            for x_batch, y_batch in test_loader:
+                output = module.execute(x_batch)
+                total_loss += nn.MSELoss()(output, y_batch).item()
+                if output.shape[1] > 1:  # Классификация
+                    pred = output.argmax(dim=1, keepdim=True)
+                    correct += pred.eq(y_batch.view_as(pred)).sum().item()
+                    total += y_batch.size(0)
+        
+        accuracy = correct / total if total > 0 else 0
+        params_count = sum(p.numel() for p in module.parameters())
+        
+        return {
+            "accuracy": accuracy,
+            "loss": total_loss / len(test_loader),
+            "params_count": params_count
+        }
+
+
+# === СЕЛЕКЦИЯ И ЭВОЛЮЦИЯ ===
+
+class SelectionEngine:
+    """Отбор лучших модулей"""
+    def select(self, population: List[NeuralModule], evaluator: FitnessEvaluator, 
+              test_loader: DataLoader, k: int) -> List[NeuralModule]:
+        scores = [(module, evaluator.evaluate(module, test_loader)) for module in population]
+        sorted_modules = sorted(scores, key=lambda x: (
+            x[1]["accuracy"], -x[1]["params_count"]
+        ), reverse=True)
+        return [item[0] for item in sorted_modules[:k]]
+
+class EvolutionEngine:
+    """Главный движок эволюции"""
+    def __init__(self):
+        self.mutation_engine = MutationEngine()
+        self.crossover_engine = CrossoverEngine()
+        self.trainer = Trainer()
+        self.evaluator = FitnessEvaluator()
+        self.selection_engine = SelectionEngine()
+
+    def evolve(self, initial_population: List[NeuralModule], train_loader: DataLoader,
+              test_loader: DataLoader, generations: int = 5) -> NeuralModule:
+        population = initial_population
+        
+        for gen in range(generations):
+            logger.info(f"Поколение {gen + 1}")
+            
+            # Обучение
+            population = [self.trainer.train(m, train_loader) for m in population]
+            
+            # Оценка и отбор
+            selected = self.selection_engine.select(
+                population, self.evaluator, test_loader, k=3
+            )
+            
+            # Создание нового поколения
+            offspring = []
+            for _ in range(len(population) - len(selected)):
+                parent1, parent2 = random.sample(selected, 2)
+                child = self.crossover_engine.crossover(parent1, parent2)
+                child = self.mutation_engine.mutate(child)
+                offspring.append(child)
+            
+            population = selected + offspring
+        
+        # Возвращаем лучший модуль последнего поколения
+        best = self.selection_engine.select(population, self.evaluator, test_loader, k=1)[0]
+        return best
