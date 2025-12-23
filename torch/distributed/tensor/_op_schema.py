@@ -644,7 +644,13 @@ class OpInfo:
     compute_mesh: DeviceMesh
 
     # compete runtime operator infos
-    schema: OpSchema
+    # NOTE: schema can be None due to C++ fast path optimization. When the C++
+    # dispatch layer (dispatchDTensorOp in python_variable.cpp) finds a cached
+    # sharding decision, it skips creating the full OpSchema to reduce CPU overhead.
+    # In this case, OpInfo is created with create_schema=False, setting schema to None.
+    # The operator information is still available through output_sharding.redistribute_schema
+    # when redistribution is needed.
+    schema: OpSchema | None
     flat_args_schema: list[object]
     local_args: Sequence[object]
     local_kwargs: dict[str, object]

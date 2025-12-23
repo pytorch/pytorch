@@ -42,12 +42,12 @@ from torch.export.pt2_archive._package import load_pt2
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
     CDNA2OrLater,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    requires_triton_ptxas_compat,
     SM80OrLater,
     tf32_on_and_off,
 )
@@ -245,10 +245,7 @@ class AOTInductorTestsTemplate:
     # Skip embed_kernel_binary == True for now as it shows random
     # failure on CI
     @common_utils.parametrize("embed_kernel_binary", [False])
-    @unittest.skipIf(
-        torch.version.hip is None and _get_torch_cuda_version() < (12, 8),
-        "Test is only supported on CUDA 12.8+",
-    )
+    @requires_triton_ptxas_compat
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
@@ -6864,9 +6861,6 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfMPS
-    @skipIfXpu(
-        msg="aten::convert_weight_to_int4pack is not currently implemented for XPU"
-    )
     @parametrize("m", [32])
     @parametrize("n", [64])
     @parametrize("q_group", [32, 64])
