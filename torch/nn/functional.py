@@ -2545,10 +2545,10 @@ def embedding(
     if padding_idx is not None:
         if padding_idx > 0:
             if padding_idx >= weight.size(0):
-                raise AssertionError("Padding_idx must be within num_embeddings")
+                raise ValueError("Padding_idx must be within num_embeddings")
         elif padding_idx < 0:
             if padding_idx < -weight.size(0):
-                raise AssertionError("Padding_idx must be within num_embeddings")
+                raise ValueError("Padding_idx must be within num_embeddings")
             padding_idx = weight.size(0) + padding_idx
     else:
         padding_idx = -1
