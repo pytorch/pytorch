@@ -33,6 +33,7 @@ from collections.abc import (
     MutableSet,
 )
 from datetime import datetime
+from functools import lru_cache
 from io import StringIO
 from typing import (
     Any,
@@ -2683,14 +2684,14 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
-            # pyrefly: ignore  # missing-argument
+            # pyrefly: ignore [missing-argument]
             return get_max_tensorcore_tflops(dtype)
 
         if torch.backends.cuda.matmul.allow_tf32:
-            # pyrefly: ignore  # missing-argument
+            # pyrefly: ignore [missing-argument]
             return get_max_tensorcore_tflops(torch.float32)
         else:
-            # pyrefly: ignore  # missing-argument
+            # pyrefly: ignore [missing-argument]
             return get_max_simd_tflops(torch.float32)
 
 
@@ -2704,7 +2705,7 @@ def get_gpu_dram_gbps() -> int:
 def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
 
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
@@ -4222,3 +4223,18 @@ COLLECTIVE_OPS = OrderedSet(
 def is_collective_op(op_name: str) -> bool:
     """Check if an operation is a collective operation."""
     return op_name in COLLECTIVE_OPS
+
+
+@lru_cache
+def tlx_only_cuda_options() -> list[str]:
+    if config.is_fbcode():
+        try:
+            from torch._inductor.fb.tlx_templates.registry import tlx_only_cuda_options
+
+            return tlx_only_cuda_options
+
+        except ImportError:
+            return []
+
+    else:
+        return []
