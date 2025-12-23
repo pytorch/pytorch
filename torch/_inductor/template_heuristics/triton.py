@@ -1477,7 +1477,10 @@ class XPUConfigHeuristic(BaseConfigHeuristic):
             FlexConfig(128, 32, 2, 16),
             FlexConfig(128, 32, 2, 8),
         ]
-        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = []
+        self.flex_attn_bwd_autotune_configs: list[FlexBwDConfig] = [
+            FlexBwDConfig(32, 32, 32, 32, 2, 4),
+            FlexBwDConfig(64, 64, 64, 64, 2, 4),
+        ]
         self.flex_decode_autotune_configs: list[FlexDecodeConfig] = []
 
         if not bool(os.getenv("CI")):
