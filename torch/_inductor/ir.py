@@ -8159,12 +8159,9 @@ class FallbackKernel(ExternKernelAlloc):
         device = cls.find_device(tensor_args, example_output)
 
         # Default to CPU for torchbind methods or HOPs that don't produce tensors
-        if not device and isinstance(
-            kernel,
-            (
-                torch._higher_order_ops.torchbind.CallTorchBind,
-                torch.ops.higher_order.print,
-            ),
+        if not device and (
+            isinstance(kernel, torch._higher_order_ops.torchbind.CallTorchBind)
+            or kernel is torch.ops.higher_order.print
         ):
             device = torch.device("cpu")
 
@@ -8255,6 +8252,7 @@ class ComplexView(FallbackKernel):
         nontensor_args: Sequence[Any],
         unflatten_args: Callable[..., Any],
         *,
+        kwargs: Optional[dict[str, Any]] = None,
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
@@ -8263,6 +8261,7 @@ class ComplexView(FallbackKernel):
             tensor_args,
             nontensor_args,
             unflatten_args,
+            kwargs=kwargs,
             unbacked_bindings=unbacked_bindings,
         )
 

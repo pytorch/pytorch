@@ -77,31 +77,26 @@ CUSTOM_EXTERN_KERNEL_CODEGEN: dict[
 
 
 def get_custom_codegen(
-    op_name: str,
+    op_name: str | None,
     wrapper_type: str = "python",
 ) -> Callable[[ir.FallbackKernel, Callable[[str], None]], None] | None:
     """
     Get the custom codegen function for an operator.
 
     Args:
-        op_name: The operator name (e.g., "torch.ops.higher_order.print")
+        op_name: The operator name (e.g., "torch.ops.higher_order.print"), or None
         wrapper_type: Either "python" or "cpp"
 
     Returns:
         The codegen function if found, None otherwise.
         For cpp wrapper, falls back to python implementation if cpp not provided.
     """
-    if op_name not in CUSTOM_EXTERN_KERNEL_CODEGEN:
+    if op_name is None or op_name not in CUSTOM_EXTERN_KERNEL_CODEGEN:
         return None
 
     codegen_map = CUSTOM_EXTERN_KERNEL_CODEGEN[op_name]
     # Try to get the specific wrapper type without fallback between cpp and python
-    if wrapper_type in codegen_map:
-        return codegen_map[wrapper_type]
-    else:
-        return None
-
-    return None
+    return codegen_map.get(wrapper_type)
 
 
 def has_custom_codegen(op_name: str) -> bool:
