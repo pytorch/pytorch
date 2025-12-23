@@ -366,6 +366,11 @@ def get_accumulator_dtype(
     if len(input_torch_dtypes) != 2:
         return None
 
+    if OrderedSet(input_torch_dtypes) == OrderedSet(
+        [torch.float8_e5m2, torch.float8_e4m3fn]
+    ):
+        return torch.float
+
     torch_dtype = None
     if input_torch_dtypes[0] == input_torch_dtypes[1]:
         torch_dtype = input_torch_dtypes[0]
@@ -388,8 +393,6 @@ def get_accumulator_dtype(
         torch.float,
         torch.float8_e4m3fn,
         torch.float8_e5m2,
-    ) or OrderedSet([dtype0, dtype1]) == OrderedSet(
-        [torch.float8_e5m2, torch.float8_e4m3fn]
     ):
         accumulator_dtype = torch.float
     elif torch_dtype == torch.int8:
