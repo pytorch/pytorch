@@ -2782,7 +2782,11 @@ from torch.func import vmap as vmap
 
 
 if not TYPE_CHECKING:
+    # register python metas for distributed ops
+    import torch.distributed._meta_registrations as coll_meta_registrations
     from torch import _meta_registrations
+
+    del coll_meta_registrations
 
 # Enable CUDA Sanitizer
 if "TORCH_CUDA_SANITIZER" in os.environ:
