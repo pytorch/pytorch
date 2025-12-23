@@ -31,6 +31,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.types import _Number
 from torch.utils._typing_utils import not_none
 
 
@@ -482,6 +483,7 @@ def pointwise_strategy(
         f"no strategy to follow for {op_schema}!"
     )
     return common_pointwise_strategy(
+        op_schema.op,
         op_schema.args_schema,
         followed_strategy,
         followed_strategy_index,
@@ -596,6 +598,7 @@ def single_mesh_dim_common_pointwise_strategy(
 
 
 def common_pointwise_strategy(
+    op,
     args_schema: Sequence[object],
     followed_strategy: OpStrategy,
     followed_strategy_index: int,
@@ -647,14 +650,21 @@ def common_pointwise_strategy(
                 else:
                     out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
+                is_scalar_arg = any(isinstance(arg, _Number) for arg in args_schema)
+                propagate_partial = not (
+                    op in redistribute_partial_ops and is_scalar_arg
+                )
+
                 # Check if this partial type should be preserved
                 if preserve_partial is not None and placement.is_partial(
                     preserve_partial
                 ):
                     out_placements.append(placement)
                 # note that only partial-sum and partial-avg are supported for linearity
-                elif linearity >= 0 and (
-                    placement.is_partial("sum") or placement.is_partial("avg")
+                elif (
+                    linearity >= 0
+                    and (placement.is_partial("sum") or placement.is_partial("avg"))
+                    and propagate_partial
                 ):
                     # propagate the partial placement
                     out_placements.append(placement)
@@ -753,6 +763,8 @@ def common_pointwise_strategy(
         )
     return pointwise_strategy
 
+
+redistribute_partial_ops = {aten.add.Tensor, aten.add_.Tensor}
 
 for op in linear_pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
@@ -891,6 +903,7 @@ def list_pointwise_strategy(
             for arg_strategy in args_strategies
         ]
         pointwise_strategy: OpStrategy = common_pointwise_strategy(
+            op_schema.op,
             args_schema,
             child_strtgy,
             linearity,
