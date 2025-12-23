@@ -32,12 +32,12 @@ import os
 import random
 import re
 import sys
-import traceback
 import types
 import unittest
 from collections import defaultdict
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, cast, Optional, Union
+from typing import Any, cast, Optional, Union
 
 import torch
 import torch._inductor.test_operators
@@ -63,6 +63,8 @@ from .variables import (
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    PyTreeGetNodeTypeFunctionVariable,
+    PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
@@ -177,8 +179,11 @@ manual_torch_name_rule_map: dict[
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
+    "torch._dynamo.eval_frame._is_in_optimized_module": TorchInGraphFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
+    "torch._C._group_tensors_by_device_and_dtype": TorchInGraphFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
+    "torch._check": TorchInGraphFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
     # are not aten operations and therefore they are completely ignored
@@ -376,6 +381,8 @@ manual_torch_name_rule_map: dict[
     f"torch/testing/_internal/distributed/_tensor/common_dtensor.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
+    "torch.utils._pytree._get_node_type": PyTreeGetNodeTypeFunctionVariable,
+    "torch.utils._pytree.tree_is_leaf": PyTreeTreeIsLeafFunctionVariable,
 }
 
 
@@ -449,6 +456,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._accelerator_getAccelerator",
         "torch._C._accelerator_getDeviceIndex",
         "torch._C._accelerator_getStream",
+        "torch._C._accelerator_setAllocatorSettings",
         "torch._C._accelerator_setStream",
         "torch._C._accelerator_synchronizeDevice",
         "torch._C._activate_gpu_trace",
@@ -505,7 +513,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._cuda_clearCublasWorkspaces",
         "torch._C._cuda_cudaCachingAllocator_raw_alloc",
         "torch._C._cuda_cudaCachingAllocator_raw_delete",
-        "torch._C._cuda_cudaCachingAllocator_set_allocator_settings",
         "torch._C._cuda_cudaHostAllocator",
         "torch._C._cuda_customAllocator",
         "torch._C._cuda_emptyCache",
@@ -683,6 +690,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_mem_efficient_sdp_enabled",
         "torch._C._get_mkldnn_enabled",
         "torch._C._get_cudnn_sdp_enabled",
+        "torch._C._get_overrideable_sdp_enabled",
         "torch._C._set_sdp_use_cudnn",
         "torch._C._get_mobile_model_contained_types_from_buffer",
         "torch._C._get_mobile_model_contained_types",
@@ -711,7 +719,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_version_calculator_flag",
         "torch._C._get_warnAlways",
         "torch._C._graph_pool_handle",
-        "torch._C._group_tensors_by_device_and_dtype",
         "torch._C._hack_do_not_use_clone_module_with_class",
         "torch._C._has_distributed",
         "torch._C._has_Standard_Deleter",
@@ -1057,7 +1064,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._nn._conv_depthwise2d",
         "torch._C._nn._pad_circular",
         "torch._C._nn._pad_enum",
-        "torch._C._nn._parse_to",
         "torch._C._nn._test_ambiguous_defaults",
         "torch._C._nn._test_optional_filled_intlist",
         "torch._C._nn._test_optional_floatlist",
@@ -1219,6 +1225,7 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._set_sdp_use_math",
         "torch._C._set_math_sdp_allow_fp16_bf16_reduction",
         "torch._C._set_sdp_use_mem_efficient",
+        "torch._C._set_sdp_use_overrideable",
         "torch._C._set_should_use_format_with_string_table",
         "torch._C._set_sm_carveout_experimental",
         "torch._C._set_storage_access_error_msg",
@@ -1579,7 +1586,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._fw_primal_copy",
         "torch._grid_sampler_2d_cpu_fallback",
         "torch._grouped_mm",
-        "torch._has_compatible_shallow_copy_type",
         "torch._histogramdd_bin_edges",
         "torch._histogramdd_from_bin_cts",
         "torch._histogramdd_from_bin_tensors",
@@ -2316,6 +2322,8 @@ if sys.version_info >= (3, 11):
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
 
+if sys.version_info >= (3, 13):
+    torch_c_binding_in_graph_functions["math.fma"] = TorchInGraphFunctionVariable
 
 # In graph functions (including constant folding) that are not C bindings
 # NOTE: [Cacheability of in-graph torch functions]
@@ -2340,7 +2348,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._check_type",
         "torch._check_value",
         "torch._check_with",
-        "torch._check",
         "torch._compile._disable_dynamo",
         "torch._functorch.apis.chunk_vmap",
         "torch._functorch.batch_norm_replacement.batch_norm_without_running_stats",
@@ -3299,7 +3306,6 @@ BUILTIN_SKIPLIST = (
     abc,
     copy,
     random,
-    traceback,
     linecache,
 )
 
@@ -3365,6 +3371,7 @@ LEGACY_MOD_INLINELIST = {
     "torch._functorch.apis",
     "torch._functorch.deprecated",
     "torch.nn.attention.flex_attention",
+    "torch.ao.quantization.stubs",
     "torch.ao.quantization.pt2e.export_utils",
     "torch.ao.quantization.pt2e.qat_utils",
     "torch.ao.quantization.pt2e.representation.rewrite",
@@ -3404,6 +3411,7 @@ MOD_INLINELIST = [
     "torch._dynamo.comptime",
     "torch._dynamo.polyfills",
     "torch._dynamo.test_case",
+    "torch._export.non_strict_utils",
     "torch._functorch._aot_autograd.subclass_parametrization",
     "torch._functorch.autograd_function",
     "torch._functorch.eager_transforms",
@@ -3424,11 +3432,13 @@ MOD_INLINELIST = [
     "torch.cuda.amp.autocast_mode",
     "torch.distributions",
     "torch.export._tree_utils",
+    "torch.export._unlift",
     "torch.export._wrapper_utils",
     "torch.fx._pytree",
     "torch.fx._symbolic_trace",
     "torch.fx.experimental.proxy_tensor",
     "torch.fx.passes.shape_prop",
+    "torch.fx.traceback",
     "torch.nn",
     "torch.overrides",
     "torch.random",
@@ -3440,6 +3450,7 @@ MOD_INLINELIST = [
     "torch.utils._cxx_pytree",
     "torch.utils._device",
     "torch.utils._foreach_utils",
+    "torch.utils._ordered_set",
     "torch.utils._python_dispatch",
     "torch.utils._pytree",
     "torch.utils.hooks",

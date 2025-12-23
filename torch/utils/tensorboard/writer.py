@@ -3,7 +3,7 @@
 
 import os
 import time
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING, Union
 
 import torch
 
@@ -50,7 +50,7 @@ class FileWriter:
     training.
     """
 
-    def __init__(self, log_dir, max_queue=10, flush_secs=120, filename_suffix=""):
+    def __init__(self, log_dir, max_queue=10, flush_secs=120, filename_suffix="") -> None:
         """Create a `FileWriter` and an event file.
 
         On construction the writer creates a new event file in `log_dir`.
@@ -81,7 +81,7 @@ class FileWriter:
         """Return the directory where event file will be written."""
         return self.event_writer.get_logdir()
 
-    def add_event(self, event, step=None, walltime=None):
+    def add_event(self, event, step=None, walltime=None) -> None:
         """Add an event to the event file.
 
         Args:
@@ -98,7 +98,7 @@ class FileWriter:
             event.step = int(step)
         self.event_writer.add_event(event)
 
-    def add_summary(self, summary, global_step=None, walltime=None):
+    def add_summary(self, summary, global_step=None, walltime=None) -> None:
         """Add a `Summary` protocol buffer to the event file.
 
         This method wraps the provided summary in an `Event` protocol buffer
@@ -114,7 +114,7 @@ class FileWriter:
         event = event_pb2.Event(summary=summary)
         self.add_event(event, global_step, walltime)
 
-    def add_graph(self, graph_profile, walltime=None):
+    def add_graph(self, graph_profile, walltime=None) -> None:
         """Add a `Graph` and step stats protocol buffer to the event file.
 
         Args:
@@ -133,7 +133,7 @@ class FileWriter:
         event = event_pb2.Event(tagged_run_metadata=trm)
         self.add_event(event, None, walltime)
 
-    def add_onnx_graph(self, graph, walltime=None):
+    def add_onnx_graph(self, graph, walltime=None) -> None:
         """Add a `Graph` protocol buffer to the event file.
 
         Args:
@@ -144,7 +144,7 @@ class FileWriter:
         event = event_pb2.Event(graph_def=graph.SerializeToString())
         self.add_event(event, None, walltime)
 
-    def flush(self):
+    def flush(self) -> None:
         """Flushes the event file to disk.
 
         Call this method to make sure that all pending events have been written to
@@ -152,20 +152,21 @@ class FileWriter:
         """
         self.event_writer.flush()
 
-    def close(self):
+    def close(self) -> None:
         """Flushes the event file to disk and close the file.
 
         Call this method when you do not need the summary writer anymore.
         """
         self.event_writer.close()
 
-    def reopen(self):
+    def reopen(self) -> None:
         """Reopens the EventFileWriter.
 
         Can be called after `close()` to add more events in the same directory.
         The events will go into a new events file.
         Does nothing if the EventFileWriter was not closed.
         """
+        # pyrefly: ignore [missing-attribute]
         self.event_writer.reopen()
 
 
@@ -187,7 +188,7 @@ class SummaryWriter:
         max_queue=10,
         flush_secs=120,
         filename_suffix="",
-    ):
+    ) -> None:
         """Create a `SummaryWriter` that will write out events and summaries to the event file.
 
         Args:
@@ -254,7 +255,9 @@ class SummaryWriter:
         buckets = []
         neg_buckets = []
         while v < 1e20:
+            # pyrefly: ignore [bad-argument-type]
             buckets.append(v)
+            # pyrefly: ignore [bad-argument-type]
             neg_buckets.append(-v)
             v *= 1.1
         self.default_bins = neg_buckets[::-1] + [0] + buckets
@@ -262,18 +265,23 @@ class SummaryWriter:
     def _get_file_writer(self):
         """Return the default FileWriter instance. Recreates it if closed."""
         if self.all_writers is None or self.file_writer is None:
+            # pyrefly: ignore [bad-assignment]
             self.file_writer = FileWriter(
                 self.log_dir, self.max_queue, self.flush_secs, self.filename_suffix
             )
+            # pyrefly: ignore [bad-assignment, missing-attribute]
             self.all_writers = {self.file_writer.get_logdir(): self.file_writer}
             if self.purge_step is not None:
                 most_recent_step = self.purge_step
+                # pyrefly: ignore [missing-attribute]
                 self.file_writer.add_event(
                     Event(step=most_recent_step, file_version="brain.Event:2")
                 )
+                # pyrefly: ignore [missing-attribute]
                 self.file_writer.add_event(
                     Event(
                         step=most_recent_step,
+                        # pyrefly: ignore [missing-attribute]
                         session_log=SessionLog(status=SessionLog.START),
                     )
                 )
@@ -291,7 +299,7 @@ class SummaryWriter:
         hparam_domain_discrete=None,
         run_name=None,
         global_step=None,
-    ):
+    ) -> None:
         """Add a set of hyperparameters to be compared in TensorBoard.
 
         Args:
@@ -347,7 +355,7 @@ class SummaryWriter:
         walltime=None,
         new_style=False,
         double_precision=False,
-    ):
+    ) -> None:
         """Add scalar data to summary.
 
         Args:
@@ -380,7 +388,7 @@ class SummaryWriter:
         )
         self._get_file_writer().add_summary(summary, global_step, walltime)
 
-    def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None):
+    def add_scalars(self, main_tag, tag_scalar_dict, global_step=None, walltime=None) -> None:
         """Add many scalar data to summary.
 
         Args:
@@ -414,8 +422,9 @@ class SummaryWriter:
         fw_logdir = self._get_file_writer().get_logdir()
         for tag, scalar_value in tag_scalar_dict.items():
             fw_tag = fw_logdir + "/" + main_tag.replace("/", "_") + "_" + tag
-            assert self.all_writers is not None
-            if fw_tag in self.all_writers.keys():
+            if self.all_writers is None:
+                raise AssertionError("self.all_writers is None")
+            if fw_tag in self.all_writers:
                 fw = self.all_writers[fw_tag]
             else:
                 fw = FileWriter(
@@ -430,7 +439,7 @@ class SummaryWriter:
         tensor,
         global_step=None,
         walltime=None,
-    ):
+    ) -> None:
         """Add tensor data to summary.
 
         Args:
@@ -464,7 +473,7 @@ class SummaryWriter:
         bins="tensorflow",
         walltime=None,
         max_bins=None,
-    ):
+    ) -> None:
         """Add histogram to summary.
 
         Args:
@@ -511,7 +520,7 @@ class SummaryWriter:
         bucket_counts,
         global_step=None,
         walltime=None,
-    ):
+    ) -> None:
         """Add histogram with raw data.
 
         Args:
@@ -576,7 +585,7 @@ class SummaryWriter:
 
     def add_image(
         self, tag, img_tensor, global_step=None, walltime=None, dataformats="CHW"
-    ):
+    ) -> None:
         """Add image data to summary.
 
         Note that this requires the ``pillow`` package.
@@ -627,7 +636,7 @@ class SummaryWriter:
 
     def add_images(
         self, tag, img_tensor, global_step=None, walltime=None, dataformats="NCHW"
-    ):
+    ) -> None:
         """Add batched image data to summary.
 
         Note that this requires the ``pillow`` package.
@@ -679,7 +688,7 @@ class SummaryWriter:
         rescale=1,
         dataformats="CHW",
         labels=None,
-    ):
+    ) -> None:
         """Add image and draw bounding boxes on the image.
 
         Args:
@@ -724,9 +733,9 @@ class SummaryWriter:
         self,
         tag: str,
         figure: Union["Figure", list["Figure"]],
-        global_step: Optional[int] = None,
+        global_step: int | None = None,
         close: bool = True,
-        walltime: Optional[float] = None,
+        walltime: float | None = None,
     ) -> None:
         """Render matplotlib figure into an image and add it to summary.
 
@@ -758,7 +767,7 @@ class SummaryWriter:
                 dataformats="CHW",
             )
 
-    def add_video(self, tag, vid_tensor, global_step=None, fps=4, walltime=None):
+    def add_video(self, tag, vid_tensor, global_step=None, fps=4, walltime=None) -> None:
         """Add video data to summary.
 
         Note that this requires the ``moviepy`` package.
@@ -780,7 +789,7 @@ class SummaryWriter:
 
     def add_audio(
         self, tag, snd_tensor, global_step=None, sample_rate=44100, walltime=None
-    ):
+    ) -> None:
         """Add audio data to summary.
 
         Args:
@@ -798,7 +807,7 @@ class SummaryWriter:
             audio(tag, snd_tensor, sample_rate=sample_rate), global_step, walltime
         )
 
-    def add_text(self, tag, text_string, global_step=None, walltime=None):
+    def add_text(self, tag, text_string, global_step=None, walltime=None) -> None:
         """Add text data to summary.
 
         Args:
@@ -817,13 +826,13 @@ class SummaryWriter:
             text(tag, text_string), global_step, walltime
         )
 
-    def add_onnx_graph(self, prototxt):
+    def add_onnx_graph(self, prototxt) -> None:
         torch._C._log_api_usage_once("tensorboard.logging.add_onnx_graph")
         self._get_file_writer().add_onnx_graph(load_onnx_graph(prototxt))
 
     def add_graph(
         self, model, input_to_model=None, verbose=False, use_strict_trace=True
-    ):
+    ) -> None:
         """Add graph data to summary.
 
         Args:
@@ -858,7 +867,7 @@ class SummaryWriter:
         global_step=None,
         tag="default",
         metadata_header=None,
-    ):
+    ) -> None:
         """Add embedding projector data to summary.
 
         Args:
@@ -924,20 +933,19 @@ class SummaryWriter:
             fs.makedirs(save_path)
 
         if metadata is not None:
-            assert mat.shape[0] == len(
+            if mat.shape[0] != len(
                 metadata
-            ), "#labels should equal with #data points"
+            ):
+                raise AssertionError("#labels should equal with #data points")
             make_tsv(metadata, save_path, metadata_header=metadata_header)
 
         if label_img is not None:
-            assert (
-                mat.shape[0] == label_img.shape[0]
-            ), "#images should equal with #data points"
+            if mat.shape[0] != label_img.shape[0]:
+                raise AssertionError("#images should equal with #data points")
             make_sprite(label_img, save_path)
 
-        assert (
-            mat.ndim == 2
-        ), "mat should be 2D, where mat.size(0) is the number of data points"
+        if mat.ndim != 2:
+            raise AssertionError("mat should be 2D, where mat.size(0) is the number of data points")
         make_mat(mat, save_path)
 
         # Filesystem doesn't necessarily have append semantics, so we store an
@@ -949,6 +957,7 @@ class SummaryWriter:
             metadata, label_img, subdir, global_step, tag
         )
         self._projector_config.embeddings.extend([embedding_info])
+
 
         from google.protobuf import text_format
 
@@ -964,7 +973,7 @@ class SummaryWriter:
         num_thresholds=127,
         weights=None,
         walltime=None,
-    ):
+    ) -> None:
         """Add precision recall curve.
 
         Plotting a precision-recall curve lets you understand your model's
@@ -1017,7 +1026,7 @@ class SummaryWriter:
         num_thresholds=127,
         weights=None,
         walltime=None,
-    ):
+    ) -> None:
         """Add precision recall curve with raw data.
 
         Args:
@@ -1053,7 +1062,7 @@ class SummaryWriter:
 
     def add_custom_scalars_multilinechart(
         self, tags, category="default", title="untitled"
-    ):
+    ) -> None:
         """Shorthand for creating multilinechart. Similar to ``add_custom_scalars()``, but the only necessary argument is *tags*.
 
         Args:
@@ -1071,7 +1080,7 @@ class SummaryWriter:
 
     def add_custom_scalars_marginchart(
         self, tags, category="default", title="untitled"
-    ):
+    ) -> None:
         """Shorthand for creating marginchart.
 
         Similar to ``add_custom_scalars()``, but the only necessary argument is *tags*,
@@ -1087,11 +1096,12 @@ class SummaryWriter:
         torch._C._log_api_usage_once(
             "tensorboard.logging.add_custom_scalars_marginchart"
         )
-        assert len(tags) == 3
+        if len(tags) != 3:
+            raise AssertionError(f"Expected 3 tags, got {len(tags)}.")
         layout = {category: {title: ["Margin", tags]}}
         self._get_file_writer().add_summary(custom_scalars(layout))
 
-    def add_custom_scalars(self, layout):
+    def add_custom_scalars(self, layout) -> None:
         """Create special chart by collecting charts tags in 'scalars'.
 
         NOTE: This function can only be called once for each SummaryWriter() object.
@@ -1124,7 +1134,7 @@ class SummaryWriter:
         config_dict=None,
         global_step=None,
         walltime=None,
-    ):
+    ) -> None:
         """Add meshes or 3D point clouds to TensorBoard.
 
         The visualization is based on Three.js,
@@ -1182,7 +1192,7 @@ class SummaryWriter:
             mesh(tag, vertices, colors, faces, config_dict), global_step, walltime
         )
 
-    def flush(self):
+    def flush(self) -> None:
         """Flushes the event file to disk.
 
         Call this method to make sure that all pending events have been written to
@@ -1193,12 +1203,13 @@ class SummaryWriter:
         for writer in self.all_writers.values():
             writer.flush()
 
-    def close(self):
+    def close(self) -> None:
         if self.all_writers is None:
             return  # ignore double close
         for writer in self.all_writers.values():
             writer.flush()
             writer.close()
+        # pyrefly: ignore [bad-assignment]
         self.file_writer = self.all_writers = None
 
     def __enter__(self):

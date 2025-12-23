@@ -33,7 +33,8 @@ bool _compute_contiguous(ArrayRef<T> sizes, ArrayRef<T> strides, T numel) {
 }
 
 // Return a SymBool with underlying symbolic expression that represents
-// contiguity. Guaranteed not to add guards.
+// contiguity. Guaranteed not to throw DDE, may returns a symbolic expressions
+// or symbolic True.
 inline static c10::SymBool _compute_contiguous_sym(
     ArrayRef<c10::SymInt> sizes,
     ArrayRef<c10::SymInt> strides,
@@ -76,6 +77,8 @@ inline static c10::SymBool _compute_contiguous_sym(
     return true;
   };
 
+  // We try to minimize creating large symbolic expressions when not needed to
+  // avoid symbolic evaluation perf issues.
   if (is_contiguous_or_false()) {
     return c10::SymBool(true);
   }
@@ -94,6 +97,9 @@ inline static c10::SymBool _compute_contiguous_sym(
   return is_contiguous_cond.sym_or(is_empty);
 }
 
+// When T is SymInt this function may throw a data dependent error.
+// _compute_channels_last_contiguous_2d_sym does not. Only use this function
+// when inputs are hinted.
 template <typename T>
 bool _compute_channels_last_contiguous_2d(
     ArrayRef<T> sizes,
@@ -105,8 +111,8 @@ bool _compute_channels_last_contiguous_2d(
       T expected = 1;
       for (auto& d : {1, 3, 2, 0}) {
         const auto& size_d = sizes[d];
-        if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(size_d, 1))) {
-          if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected))) {
+        if (size_d != 1) {
+          if (strides[d] != expected) {
             return false;
           }
           expected *= size_d;
@@ -123,6 +129,65 @@ bool _compute_channels_last_contiguous_2d(
   }
 }
 
+// Return a SymBool with underlying symbolic expression that represents
+// contiguity. Guaranteed not to throw DDE, may returns a symbolic expressions
+// or symbolic True.
+inline static c10::SymBool _compute_channels_last_contiguous_2d_sym(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides) {
+  switch (sizes.size()) {
+    case 4: {
+      // When this function return True, result always true. When it return
+      // False, result could be False or data dependent.
+      auto guard_or_false = [&]() {
+        c10::SymInt expected = 1;
+        for (auto& d : {1, 3, 2, 0}) {
+          const auto& size_d = sizes[d];
+          // Not taking this branch could make this return False instead of True
+          // but not vice-versa. so its ok.
+          if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
+            continue;
+          }
+          // Taking this branch could make this return False instead of True
+          // but not vice-versa. so its ok.
+          if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected))) {
+            return false;
+          }
+          expected *= size_d;
+        }
+        return true;
+      };
+
+      // We try to minimize creating large symbolic expressions when not needed
+      // to avoid symbolic evaluation perf issues.
+      if (guard_or_false()) {
+        return c10::SymBool(true);
+      }
+
+      // Result is either false, or data dependent.
+      c10::SymInt expected_stride = 1;
+      c10::SymBool cond = true;
+
+      for (auto& d : {1, 3, 2, 0}) {
+        const auto& size_d = sizes[d];
+        cond = cond.sym_and(
+            size_d.sym_eq(1).sym_or(sym_eq(strides[d], expected_stride)));
+        expected_stride *= size_d;
+      }
+      return cond;
+    }
+      // NOLINTNEXTLINE(bugprone-branch-clone)
+    case 3:
+      // TODO dim == 3 case will be enabled once it is fully tested
+      return c10::SymBool(false);
+    default:
+      return c10::SymBool(false);
+  }
+}
+
+// When T is SymInt this function may throw a data dependent error.
+// _compute_channels_last_contiguous_3d_sym does not. Only use this function
+// when inputs are hinted.
 template <typename T>
 bool _compute_channels_last_contiguous_3d(
     ArrayRef<T> sizes,
@@ -134,8 +199,8 @@ bool _compute_channels_last_contiguous_3d(
       T expected = 1;
       for (auto& d : {1, 4, 3, 2, 0}) {
         const auto& size_d = sizes[d];
-        if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(size_d, 1))) {
-          if (TORCH_GUARD_SIZE_OBLIVIOUS(sym_ne(strides[d], expected))) {
+        if (size_d != 1) {
+          if (strides[d] != expected) {
             return false;
           }
           expected *= size_d;
@@ -149,6 +214,59 @@ bool _compute_channels_last_contiguous_3d(
       return false;
     default:
       return false;
+  }
+}
+
+inline static c10::SymBool _compute_channels_last_contiguous_3d_sym(
+    ArrayRef<c10::SymInt> sizes,
+    ArrayRef<c10::SymInt> strides) {
+  switch (sizes.size()) {
+    case 5: {
+      // When this function return True, result always true. When it return
+      // False, result could be False or data dependent.
+      auto guard_or_false = [&]() {
+        c10::SymInt expected = 1;
+        for (auto& d : {1, 4, 3, 2, 0}) {
+          const auto& size_d = sizes[d];
+          // Not taking this branch could make this return False instead of True
+          // but not vice-versa. so its ok.
+          if (TORCH_GUARD_OR_FALSE(sym_eq(sizes[d], 1))) {
+            continue;
+          }
+          // Taking this branch could make this return False instead of True
+          // but not vice-versa. so its ok.
+          if (TORCH_GUARD_OR_TRUE(sym_ne(strides[d], expected))) {
+            return false;
+          }
+          expected *= size_d;
+        }
+        return true;
+      };
+
+      // We try to minimize creating large symbolic expressions when not needed
+      // to avoid symbolic evaluation perf issues.
+      if (guard_or_false()) {
+        return c10::SymBool(true);
+      }
+
+      // Result is either false, or data dependent.
+      c10::SymInt expected_stride = 1;
+      c10::SymBool cond = true;
+
+      for (auto& d : {1, 4, 3, 2, 0}) {
+        const auto& size_d = sizes[d];
+        cond = cond.sym_and(
+            size_d.sym_eq(1).sym_or(sym_eq(strides[d], expected_stride)));
+        expected_stride *= size_d;
+      }
+      return cond;
+    }
+      // NOLINTNEXTLINE(bugprone-branch-clone)
+    case 4:
+      // TODO dim == 4 case will be enabled once it is fully tested
+      return c10::SymBool(false);
+    default:
+      return c10::SymBool(false);
   }
 }
 

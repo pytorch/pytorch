@@ -3,6 +3,7 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <utility>
 
 namespace c10d {
 namespace symmetric_memory {
@@ -45,8 +46,8 @@ class IpcChannel {
 // SymmetricMemory implementation files.
 class StoreExchange {
  public:
-  StoreExchange(const std::string& store_prefix)
-      : store_prefix_(store_prefix) {}
+  StoreExchange(std::string store_prefix)
+      : store_prefix_(std::move(store_prefix)) {}
 
   // Put template function in header file so that compiler can easily access it.
   template <typename T>
@@ -61,7 +62,7 @@ class StoreExchange {
     peer_keys.reserve(world_size);
     for (int r = 0; r < world_size; ++r) {
       std::ostringstream oss;
-      oss << store_prefix_ << "/" << seq_id_ << "/" << r;
+      oss << store_prefix_ << '/' << seq_id_ << '/' << r;
       peer_keys.push_back(oss.str());
     }
     ++seq_id_;
@@ -103,7 +104,7 @@ class StoreExchange {
   size_t seq_id_ = 0;
 };
 
-// Teturns a pointer of virtual address that is mapped to the physical memory
+// Returns a pointer of virtual address that is mapped to the physical memory
 // held by the handle.
 void map_block(
     void** ptr,

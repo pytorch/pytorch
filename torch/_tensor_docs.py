@@ -3753,7 +3753,17 @@ add_docstr_all(
     r"""
 permute(*dims) -> Tensor
 
-See :func:`torch.permute`
+Returns a view of the tensor with its dimensions permuted.
+
+Args:
+    dims (torch.Size, int..., tuple of int or list of int): the desired ordering of dimensions.
+
+Example:
+    >>> x = torch.randn(2, 3, 5)
+    >>> x.size()
+    torch.Size([2, 3, 5])
+    >>> x.permute(2, 0, 1).size()
+    torch.Size([5, 2, 3])
 """,
 )
 
@@ -6621,6 +6631,36 @@ This attribute is ``None`` by default and becomes a Tensor the first time a call
 :func:`backward` computes gradients for ``self``.
 The attribute will then contain the gradients computed and future calls to
 :func:`backward` will accumulate (add) gradients into it.
+""",
+)
+
+add_docstr_all(
+    "grad_dtype",
+    r"""
+The allowed dtype of :attr:``grad`` for this tensor.
+
+:attr:``grad_dtype`` can be set to a specific dtype or ``None``. By default,
+``t.grad_dtype == t.dtype``. When not None, the autograd engine casts
+incoming gradients to this dtype. This attribute is only accessible and
+settable for leaf tensors.
+
+.. warning::
+    Use with caution. Diverging the dtypes of a tensor and its gradient may
+    break downstream systems that assume they match.
+
+Example::
+
+    >>> x = torch.tensor([1.0, 2.0], requires_grad=True)
+    >>> x.grad_dtype
+    torch.float32
+
+    >>> x.grad_dtype = torch.float16
+    >>> x.grad_dtype
+    torch.float16
+
+    >>> # Allow any gradient dtype
+    >>> x.grad_dtype = None
+    >>> x.grad_dtype
 """,
 )
 

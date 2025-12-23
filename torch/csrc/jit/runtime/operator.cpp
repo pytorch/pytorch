@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <ATen/ATen.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>

@@ -15,7 +15,17 @@ from torch.backends.cuda import (
 )
 
 
-__all__: list[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
+__all__: list[str] = [
+    "SDPBackend",
+    "sdpa_kernel",
+    "WARN_FOR_UNFUSED_KERNELS",
+    "register_flash_attention_impl",
+    "activate_flash_attention_impl",
+    "list_flash_attention_impls",
+    "current_flash_attention_impl",
+    "restore_flash_attention_impl",
+]
+
 
 # Note: [SDPA warnings]
 # TODO: Consider using this for sdpa regardless of subclasses
@@ -27,9 +37,6 @@ __all__: list[str] = ["SDPBackend", "sdpa_kernel", "WARN_FOR_UNFUSED_KERNELS"]
 WARN_FOR_UNFUSED_KERNELS = False
 
 
-# Hacks for Sphinx documentation:
-# https://stackoverflow.com/questions/38765577/overriding-sphinx-autodoc-alias-of-for-import-of-private-class
-SDPBackend = SDPBackend
 r"""An enum-like class that contains the different backends for scaled dot product attention.
     This backend class is designed to be used with the sdpa_kernel context manager.
 
@@ -56,10 +63,10 @@ def _raise_kernel_warnings(params: SDPAParams) -> None:
     """
     if WARN_FOR_UNFUSED_KERNELS:
         if not can_use_efficient_attention(params):
-            warn("Efficient attention can't be used because:")
+            warn("Efficient attention can't be used because:", stacklevel=2)
             can_use_efficient_attention(params, True)
         if not can_use_flash_attention(params):
-            warn("Flash attention can't be used because:")
+            warn("Flash attention can't be used because:", stacklevel=2)
             can_use_flash_attention(params, True)
 
 
@@ -89,7 +96,7 @@ def _cur_sdpa_kernel_backends(with_priority: bool = False):
     return backends
 
 
-def _sdpa_kernel(backends: Iterable, set_priority: bool = False):
+def _sdpa_kernel(backends: Iterable, set_priority: bool = False) -> None:
     for name, val in _backend_names.items():
         enabled = getattr(SDPBackend, val) in backends
         getattr(torch._C, f"_set_sdp_use_{name}")(enabled)
@@ -104,9 +111,7 @@ def _sdpa_kernel(backends: Iterable, set_priority: bool = False):
 
 
 @contextlib.contextmanager
-def sdpa_kernel(
-    backends: Union[list[SDPBackend], SDPBackend], set_priority: bool = False
-):
+def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = False):
     r"""
     Context manager to select which backend to use for scaled dot product attention.
 
@@ -134,9 +139,10 @@ def sdpa_kernel(
     This context manager can be used to select which backend to use for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored, enabling all backends.
     """
-    assert isinstance(backends, (list, SDPBackend)), (
-        "Backend must be an instance of SDPBackend or a list of SDPBackend instances"
-    )
+    if not isinstance(backends, (list, SDPBackend)):
+        raise AssertionError(
+            f"Backend must be an instance of SDPBackend or a list of SDPBackend instances, got {type(backends).__name__}"
+        )
 
     if isinstance(backends, SDPBackend):
         backends = [backends]
@@ -161,3 +167,25 @@ def _sdpa_kernel_variadic(*backends: SDPBackend):
 def _get_flash_version() -> str:
     """This returns the closest matching tag for the flash attention backend"""
     return "2.5.7"
+
+
+from . import _registry
+
+
+# Re-export registry types and functions for public API
+_FlashAttentionImpl = _registry._FlashAttentionImpl
+_RegisterFn = _registry._RegisterFn
+register_flash_attention_impl = _registry.register_flash_attention_impl
+activate_flash_attention_impl = _registry.activate_flash_attention_impl
+list_flash_attention_impls = _registry.list_flash_attention_impls
+current_flash_attention_impl = _registry.current_flash_attention_impl
+restore_flash_attention_impl = _registry.restore_flash_attention_impl
+
+register_flash_attention_impl.__module__ = __name__
+activate_flash_attention_impl.__module__ = __name__
+list_flash_attention_impls.__module__ = __name__
+current_flash_attention_impl.__module__ = __name__
+restore_flash_attention_impl.__module__ = __name__
+
+# Import built-in implementations to trigger self-registration
+from . import _fa4  # noqa: F401

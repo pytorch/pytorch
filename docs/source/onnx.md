@@ -102,6 +102,7 @@ also be interested in reading our [development wiki](https://github.com/pytorch/
     onnx_export
     onnx_ops
     onnx_verification
+    onnx_testing
 ```
 
 ### Deprecated APIs

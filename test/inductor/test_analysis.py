@@ -20,8 +20,15 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     skipIf,
+    skipXPUIf,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    parametrize,
+    run_tests,
+    skipIfXpu,
+    TEST_WITH_SLOW,
+    TestCase,
+)
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
 
@@ -267,8 +274,13 @@ class TestUtils(TestCase):
         self.assertEqual(set(res2), {("a", 1, 3), ("b", 2, None), ("c", None, 4)})
 
 
+def has_supported_gpu():
+    """Check if any GPU platform with Triton support is available."""
+    return torch.xpu.is_available() or SM80OrLater or torch.version.hip
+
+
 class TestAnalysis(TestCase):
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     def test_noop(self):
         with (
             patch("sys.stdout", new_callable=StringIO) as mock_stdout,
@@ -277,7 +289,7 @@ class TestAnalysis(TestCase):
             main()
             self.assertEqual(mock_stdout.getvalue(), "")
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.double, torch.float16)
     def test_diff(self, device, dtype):
         """
@@ -328,7 +340,8 @@ class TestAnalysis(TestCase):
         expected_flops = [4096000, 4096000, 223552896, 223552896, 0, 0, 0]
         verify_flops(self, expected_flops, out_profile)
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
+    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.double, torch.float16)
     @parametrize(
         "maxat",
@@ -382,7 +395,11 @@ class TestAnalysis(TestCase):
 
         verify_triton(comp_omni)
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
+    @skipIfXpu(
+        msg="Intel triton issue: https://github.com/intel/intel-xpu-backend-for-triton/issues/5491"
+    )
+    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -467,6 +484,7 @@ class TestAnalysis(TestCase):
                         "aten::cudnn_convolution",
                         "aten::convolution",
                         "aten::_convolution",
+                        "aten::convolution_overrideable",
                     )
                 )
                 or "conv" in name
@@ -493,7 +511,8 @@ class TestAnalysis(TestCase):
         self.assertTrue(seen_baddbmm)
         self.assertTrue(seen_conv)
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
+    @skipXPUIf(TEST_WITH_SLOW, "Skip because test too slow on XPU")
     @dtypes(torch.float, torch.float16)
     @parametrize(
         "maxat",
@@ -543,7 +562,7 @@ class TestAnalysis(TestCase):
             if event["name"] == "triton_poi_fused_add_randn_sin_0":
                 event["args"]["kernel_num_gb"] = 0.002097168
 
-    @skipIf(not SM80OrLater, "Requires SM80")
+    @skipIf(not has_supported_gpu(), "Requires XPU, CUDA SM80+, or ROCm")
     @dtypes(torch.float, torch.float16)
     def test_combine_profiles(self, device, dtype):
         """
@@ -619,7 +638,10 @@ class TestAnalysis(TestCase):
 
         # Verify device properties are present
         self.assertIn("deviceProperties", combined_profile)
-        self.assertGreater(len(combined_profile["deviceProperties"]), 0)
+        # XPU currently does not have the deviceProperties like CUDA.
+        # See https://github.com/intel/torch-xpu-ops/issues/2247
+        if torch.cuda.is_available():
+            self.assertGreater(len(combined_profile["deviceProperties"]), 0)
 
         # Verify some trace events from each original profile are present
         combined_event_names = {
@@ -637,7 +659,7 @@ class TestAnalysis(TestCase):
         self.assertTrue(profile3_event_names.intersection(combined_event_names))
 
 
-instantiate_device_type_tests(TestAnalysis, globals())
+instantiate_device_type_tests(TestAnalysis, globals(), allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

@@ -9,25 +9,28 @@ if(NOT __AOTRITON_INCLUDED)
   # Replaces .ci/docker/aotriton_version.txt
   # Note packages information may have versions skipped (due to no ABI breaks)
   # But they must be listed from lower version to higher version
-  set(__AOTRITON_VER "0.11b")
+  set(__AOTRITON_VER "0.11.1b")
   set(__AOTRITON_MANYLINUX_LIST
       "manylinux_2_28"  # rocm6.2
       "manylinux_2_28"  # rocm6.3
       "manylinux_2_28"  # rocm6.4
       "manylinux_2_28"  # rocm7.0
+      "manylinux_2_28"  # rocm7.1
       )
   set(__AOTRITON_ROCM_LIST
       "rocm6.2"
       "rocm6.3"
       "rocm6.4"
       "rocm7.0"
+      "rocm7.1"
       )
-  set(__AOTRITON_CI_COMMIT "972223c501ffc22068bb035ac5d64cf54318d895")
+  set(__AOTRITON_CI_COMMIT "d34f3b6c824df77d5c5788a2e7555b2398be4b79")
   set(__AOTRITON_SHA256_LIST
-      "6cae3d5de75ee205d22e088f7dfaab1227056d02ea67f29ccdbc09f2be4e8c8f"  # rocm6.2
-      "72a153549ea20707331e8a1f1e3d1b8de2913f9d5af2b900c56235d578b57efe"  # rocm6.3
-      "c7f319dd7448cbbbab81889dd8a37d47dbc25ebcbd89760f09e6a0904e556393"  # rocm6.4
-      "a2a974e0ad929a5e5827c0f896c59bda4872459cbaf8dd8e0a00407f404491cf"  # rocm7.0
+      "a3a7e391758b3580c42a1623d11606308ae52115b2a3eba5d1f440586a078391"  # rocm6.2
+      "662fc06239c8091f57e13793a4fac0e783241c9f5e86b1701bbb2ba308ef4279"  # rocm6.3
+      "367062cba487492e58b38bb54720fb239e65b8717d0e11084f8059f2c5748af0"  # rocm6.4
+      "deb8046e9ef976c2739fd0563b50239e12dc002d7d4f97c1c4a1874acb65abc4"  # rocm7.0
+      "c1613ed9e9eecc7359f04a1624bb528e54f5e6369e682dd446eaa936d9452358"  # rocm7.1
       )
   set(__AOTRITON_IMAGE_LIST
       "amd-gfx90a"
@@ -37,21 +40,97 @@ if(NOT __AOTRITON_INCLUDED)
       "amd-gfx120x"
      )
   set(__AOTRITON_IMAGE_SHA256_LIST
-     "c19a41c9480510ab32e6fb05e6ed0a3832d6b07634f050b836b760200befa735" # amd-gfx90a
-     "3a06a99971dddb7703a30378f1c5d6b41468d926ea51821156d1b6857b985bc4" # amd-gfx942
-     "27fc21f6761d57987a700436de8cf29cbdd9eeee91318dfed596eeb147d219ad" # amd-gfx950
-     "ec134032087344176695505db659387374d1916adfee16f0db47dee38d9c8603" # amd-gfx11xx
-     "fec05205747ff51649b1e151545267d5aa2037ba9d0338cad286882915b941b0" # amd-gfx120x
+     "fe9f04b66bf52ac27cd025e1d89cfd04974dd3fb3ae076192f783641a4d80fdf" # amd-gfx90a
+     "0a7bcee19d3bb6d548732248c3234f7b92736c2ab7a7aae65294b87a7fd64c06" # amd-gfx942
+     "c1ba3bfe84217fd67df3dd1f8b67c80a7f7b33d0ad4d74b41d6567036e032ace" # amd-gfx950
+     "6632040c405d833be6ff72029249c776838baf5f03a3c13ba4e8d37a87b7a740" # amd-gfx11xx
+     "0a4ff324bffdac0c2fde87a8a7f70563d3c84a80ad4e8f31345f2b40a1384e95" # amd-gfx120x
      )
   set(__AOTRITON_BASE_URL "https://github.com/ROCm/aotriton/releases/download/")  # @lint-ignore
   set(__AOTRITON_Z "gz")
+  # Set the default __AOTRITON_LIB path
+  if(NOT WIN32)
+    set(__AOTRITON_LIB "lib/libaotriton_v2.so")
+  else()
+    set(__AOTRITON_LIB "lib/aotriton_v2.lib")
+  endif()
+
+  function(aotriton_build_windows_dependencies dlfcn-win32_external xz_external dlfcn-win32_DIR liblzma_DIR)
+    # Windows-specific dependencies - build these first
+    if(NOT noimage)
+      message(FATAL_ERROR "noimage must be ON for Windows builds")
+    endif()
+    # Build dlfcn-win32
+    set(__DLFCN_WIN32_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/dlfcn-win32")
+    set(__DLFCN_WIN32_INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/dlfcn-win32-install")
+
+    ExternalProject_Add(${dlfcn-win32_external}
+      GIT_REPOSITORY https://github.com/dlfcn-win32/dlfcn-win32.git
+      GIT_TAG v1.4.2
+      PREFIX ${__DLFCN_WIN32_PREFIX}
+      INSTALL_DIR ${__DLFCN_WIN32_INSTALL_DIR}
+      CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${__DLFCN_WIN32_INSTALL_DIR}
+        -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_C_COMPILER=cl
+        -DCMAKE_CXX_COMPILER=cl
+        -DBUILD_SHARED_LIBS=ON
+        -DBUILD_TESTS=OFF
+      BUILD_BYPRODUCTS
+        "${__DLFCN_WIN32_INSTALL_DIR}/lib/dl.lib"
+        "${__DLFCN_WIN32_INSTALL_DIR}/bin/dl.dll"
+    )
+    ExternalProject_Add_Step(${dlfcn-win32_external} copy_to_aotriton
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${__DLFCN_WIN32_INSTALL_DIR}/bin/dl.dll"
+        "${__AOTRITON_INSTALL_DIR}/lib/"
+      DEPENDEES install
+    )
+    set(${dlfcn-win32_DIR} "${__DLFCN_WIN32_INSTALL_DIR}/share/dlfcn-win32" CACHE PATH "Path to dlfcn-win32 CMake config" FORCE)
+
+    # Build xz/liblzma
+    set(__XZ_PREFIX "${CMAKE_CURRENT_BINARY_DIR}/xz")
+    set(__XZ_INSTALL_DIR "${CMAKE_CURRENT_BINARY_DIR}/xz-install")
+
+    ExternalProject_Add(${xz_external}
+      GIT_REPOSITORY https://github.com/tukaani-project/xz.git
+      GIT_TAG v5.8.1
+      PREFIX ${__XZ_PREFIX}
+      INSTALL_DIR ${__XZ_INSTALL_DIR}
+      CMAKE_ARGS
+        -DCMAKE_INSTALL_PREFIX=${__XZ_INSTALL_DIR}
+        -DCMAKE_BUILD_TYPE=Release
+        -DBUILD_SHARED_LIBS=ON
+        -DENABLE_NLS=OFF
+        -DXZ_TOOL_LZMAINFO=OFF
+        -DXZ_TOOL_XZ=OFF
+        -DXZ_TOOL_XZDEC=OFF
+        -DXZ_TOOL_LZMADEC=OFF
+      BUILD_BYPRODUCTS
+        "${__XZ_INSTALL_DIR}/lib/lzma.lib"
+        "${__XZ_INSTALL_DIR}/bin/liblzma.dll"
+    )
+    ExternalProject_Add_Step(${xz_external} copy_to_aotriton
+      COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        "${__XZ_INSTALL_DIR}/bin/liblzma.dll"
+        "${__AOTRITON_INSTALL_DIR}/lib/"
+      DEPENDEES install
+    )
+    set(${liblzma_DIR} "${__XZ_INSTALL_DIR}/lib/cmake/liblzma" CACHE PATH "Path to xz/liblzma CMake config" FORCE)
+  endfunction()
+
   function(aotriton_build_from_source noimage project)
     if(noimage)
       SET(RECURSIVE "OFF")
     else()
       SET(RECURSIVE "ON")
     endif()
+    if(WIN32)
+      message(STATUS "Building AOTriton Windows dependencies")
+      aotriton_build_windows_dependencies(dlfcn-win32_external xz_external dlfcn-win32_DIR liblzma_DIR)
+    endif()
     message(STATUS "PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}")
+
     ExternalProject_Add(${project}
       GIT_REPOSITORY https://github.com/ROCm/aotriton.git
       GIT_SUBMODULES_RECURSE ${RECURSIVE}
@@ -65,12 +144,18 @@ if(NOT __AOTRITON_INCLUDED)
       -DAOTRITON_GPU_BUILD_TIMEOUT=0
       -DAOTRITON_NO_PYTHON=ON
       -DAOTRITON_NOIMAGE_MODE=${noimage}
-      BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/lib/libaotriton_v2.so"
+      -DHIP_PLATFORM=amd
+      $<$<BOOL:${WIN32}>:-Ddlfcn-win32_DIR=${dlfcn-win32_DIR}>
+      $<$<BOOL:${WIN32}>:-Dliblzma_DIR=${liblzma_DIR}>
+      BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/${__AOTRITON_LIB}"
       USES_TERMINAL_DOWNLOAD TRUE
       USES_TERMINAL_CONFIGURE TRUE
       USES_TERMINAL_BUILD TRUE
       USES_TERMINAL_INSTALL TRUE
     )
+    if(WIN32)
+      add_dependencies(${project} dlfcn-win32_external xz_external)
+    endif()
   endfunction()
 
   set(__AOTRITON_ARCH ${CMAKE_HOST_SYSTEM_PROCESSOR})
@@ -95,7 +180,7 @@ if(NOT __AOTRITON_INCLUDED)
       INSTALL_COMMAND ${CMAKE_COMMAND} -E copy_directory
       "${CMAKE_CURRENT_BINARY_DIR}/aotriton_runtime"
       "${__AOTRITON_INSTALL_DIR}"
-      BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/lib/libaotriton_v2.so"
+      BUILD_BYPRODUCTS "${__AOTRITON_INSTALL_DIR}/${__AOTRITON_LIB}"
     )
     message(STATUS "Using AOTriton Runtime from pre-compiled binary ${__AOTRITON_URL}.\
     Set env variables AOTRITON_INSTALL_FROM_SOURCE=1 to build from source.")
@@ -111,14 +196,35 @@ if(NOT __AOTRITON_INCLUDED)
     string(CONCAT __AOTRITON_URL
            "${__AOTRITON_BASE_URL}"
            "${__AOTRITON_VER}/${__AOTRITON_FILE}")
+
+    # Set up directories
+    set(__AOTRITON_DOWNLOAD_DIR ${CMAKE_CURRENT_BINARY_DIR}/aotriton_download-${image})
+    set(__AOTRITON_EXTRACT_DIR ${CMAKE_CURRENT_BINARY_DIR}/aotriton_image-${image})
+    set(__AOTRITON_INSTALL_SOURCE_DIR ${__AOTRITON_EXTRACT_DIR})
+    set(__DOWNLOAD_NO_EXTRACT "")
+    set(__BUILD_COMMANDS "")
+
+    # On Windows, we need custom tar extraction with UTF-8 support
+    if(WIN32)
+      set(__DOWNLOAD_NO_EXTRACT "DOWNLOAD_NO_EXTRACT;TRUE")
+      set(__BUILD_COMMANDS
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${__AOTRITON_EXTRACT_DIR}"
+        COMMAND tar --options hdrcharset=UTF-8 -xf "${__AOTRITON_DOWNLOAD_DIR}/${__AOTRITON_FILE}" -C "${__AOTRITON_EXTRACT_DIR}"
+      )
+      set(__AOTRITON_INSTALL_SOURCE_DIR ${__AOTRITON_EXTRACT_DIR}/aotriton)
+    endif()
+
     ExternalProject_Add(${project}
       URL "${__AOTRITON_URL}"
       URL_HASH SHA256=${__AOTRITON_SHA256}
-      SOURCE_DIR ${CMAKE_CURRENT_BINARY_DIR}/aotriton_image-${image}
+      DOWNLOAD_DIR ${__AOTRITON_DOWNLOAD_DIR}
+      ${__DOWNLOAD_NO_EXTRACT}
+      SOURCE_DIR ${__AOTRITON_EXTRACT_DIR}
       CONFIGURE_COMMAND ""
       BUILD_COMMAND ""
+      ${__BUILD_COMMANDS}
       INSTALL_COMMAND ${CMAKE_COMMAND} -E copy_directory
-      "${CMAKE_CURRENT_BINARY_DIR}/aotriton_image-${image}"
+      "${__AOTRITON_INSTALL_SOURCE_DIR}"
       "${__AOTRITON_INSTALL_DIR}"
       BUILD_BYPRODUCTS
       "${__AOTRITON_INSTALL_DIR}/lib/aotriton.images/${image}/__signature__"
@@ -141,7 +247,8 @@ if(NOT __AOTRITON_INCLUDED)
   else()
     set(__AOTRITON_SYSTEM_ROCM "${HIP_VERSION_MAJOR}.${HIP_VERSION_MINOR}")
     list(FIND __AOTRITON_ROCM_LIST "rocm${__AOTRITON_SYSTEM_ROCM}" __AOTRITON_RUNTIME_INDEX)
-    if(${__AOTRITON_RUNTIME_INDEX} LESS 0)
+    # Always build aotriton runtime from source on Windows due to lack of pre-built binaries
+    if(${__AOTRITON_RUNTIME_INDEX} LESS 0 OR WIN32)
       message(STATUS "Cannot find AOTriton runtime for ROCM ${__AOTRITON_SYSTEM_ROCM}. \
       Build runtime from source")
       aotriton_build_from_source(ON aotriton_runtime)
@@ -164,7 +271,7 @@ if(NOT __AOTRITON_INCLUDED)
       endforeach()
     endforeach()
   endif()
-  target_link_libraries(__caffe2_aotriton INTERFACE ${__AOTRITON_INSTALL_DIR}/lib/libaotriton_v2.so)
+  target_link_libraries(__caffe2_aotriton INTERFACE "${__AOTRITON_INSTALL_DIR}/${__AOTRITON_LIB}")
   target_include_directories(__caffe2_aotriton INTERFACE ${__AOTRITON_INSTALL_DIR}/include)
   set(AOTRITON_FOUND TRUE)
 endif() # __AOTRITON_INCLUDED

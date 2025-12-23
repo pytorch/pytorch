@@ -27,7 +27,7 @@
 
 #if !AT_ROCM_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 // See Note [ATen preprocessor philosophy]
 
@@ -134,7 +134,7 @@ at::Tensor miopen_convolution_relu(
   TORCH_CHECK(false, "miopen_convolution_relu: ATen not compiled with MIOpen support");
 }
 
-}}
+}
 
 #else  // AT_ROCM_ENABLED
 
@@ -281,8 +281,9 @@ struct Workspace {
     data = c10::hip::HIPCachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
-  Workspace(Workspace&&) = default;
-  Workspace& operator=(Workspace&&) = default;
+  Workspace(Workspace&&) = delete;
+  Workspace& operator=(const Workspace&) = delete;
+  Workspace& operator=(Workspace&&) = delete;
   ~Workspace() {
     if (data) {
       c10::hip::HIPCachingAllocator::raw_delete(data);
@@ -605,7 +606,7 @@ Workspace chooseAlgorithm(
   search::wsscache().find(args.params, &workspace_size);
   try {
     return Workspace(workspace_size);
-  } catch (const std::exception& e) {
+  } catch (const std::exception&) {
     std::ignore = hipGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent
@@ -626,7 +627,7 @@ Workspace chooseSolution(const ConvolutionArgs& args, uint64_t* solution_id)
   try {
     *solution_id = solution.solution_id;
     return Workspace(solution.workspace_size);
-  } catch (const std::exception& e) {
+  } catch (const std::exception&) {
     std::ignore = hipGetLastError(); // clear OOM error
 
     // switch to default algorithm
@@ -657,14 +658,14 @@ static inline void split_batch_dim_to_32bit_out(
     bool deterministic,
     bool depthwise,
     int64_t max_worksize,
-    func_t func_32bit) {
+    func_t func_indexing) {
   constexpr int64_t int_max = std::numeric_limits<int>::max();
   const int64_t ni = input.numel();
   const int64_t no = output.numel();
   // Assume the shape of the tensor is (N, C, D1, D2, ...)
   // if N * C * D1 * D2 * ... <= int_max, then no need to split at all
   if (ni <= int_max && no <= int_max) {
-    func_32bit(
+    func_indexing(
         output,
         input,
         weight,
@@ -693,7 +694,7 @@ static inline void split_batch_dim_to_32bit_out(
       int64_t split_size_ = std::min<int64_t>(split_size, n - start);
       Tensor input_ = input.narrow(0, start, split_size_);
       Tensor output_ = output.narrow(0, start, split_size_);
-      func_32bit(
+      func_indexing(
           output_,
           input_,
           weight,
@@ -707,21 +708,18 @@ static inline void split_batch_dim_to_32bit_out(
     }
     return;
   }
-  // If control flow reaches here, this means even splitting N is not enough,
-  // then things starts to become complicated: For example, for conv2d, there
-  // following questions needs to be considered.
-  // - Is the memory layout NCHW or NHWC ?
-  // - If the conv is NCHW -> NC'H'W', then should we
-  //   - split only NC?
-  //   - split only N'C'?
-  //   - split both?
-  // - If the conv is NHWC, then we need to split across H, we need to be very
-  // careful about the boundary condition
-  //   to make sure that the boundary is handled correctly.
-  // - If we decide to make these splits, is the memory contiguous? Do we need
-  // to copy the memory? Considering the complexity of this issue, it is better
-  // not to use cuDNN for this case
-  TORCH_INTERNAL_ASSERT(false, "This case should not be dispatched to cuDNN.");
+  // MIOpen supports 64-bit indexing via miopenSetTensorDescriptorV2 API.
+  func_indexing(
+      output,
+      input,
+      weight,
+      padding,
+      stride,
+      dilation,
+      groups,
+      benchmark,
+      deterministic,
+      depthwise);
 }
 
 // ---------------------------------------------------------------------
@@ -1770,10 +1768,12 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> miopen_depthwise_convolution_back
 // fusions
 // ---------------------------------------------------------------------
 
-void raw_miopen_convolution_relu_out(
+void raw_miopen_convolution_add_relu_out(
     const Tensor& output,
     const Tensor& input,
     const Tensor& weight,
+    const Tensor& z,
+    float alpha,
     const Tensor& bias,
     IntArrayRef stride,
     IntArrayRef padding,
@@ -1781,68 +1781,20 @@ void raw_miopen_convolution_relu_out(
     int64_t groups,
     bool benchmark,
     bool deterministic) {
-  auto dataType = getMiopenDataType(input);
-  miopenConvolutionMode_t c_mode = miopenConvolution;
-  ConvolutionArgs args{ input, output, weight };
-  args.handle = getMiopenHandle();
-  at::MemoryFormat memory_format = miopen_conv_suggest_memory_format(input, weight);
-  setConvolutionParams(
-      &args.params,
-      args.handle,
+  raw_miopen_convolution_forward_out(
+      output,
       input,
       weight,
       padding,
       stride,
       dilation,
       groups,
-      deterministic,
-      memory_format);
-  args.idesc.set(input, memory_format);
-  args.wdesc.set(weight, memory_format, 0);
-  args.odesc.set(output, memory_format);
-  args.cdesc.set(
-      dataType,
-      c_mode,
-      input.dim() - 2,
-      args.params.padding,
-      args.params.stride,
-      args.params.dilation,
-      args.params.groups,
       benchmark,
       deterministic);
-
-  TensorDescriptor bdesc;
-  bdesc.set(bias.expand({1, bias.size(0)}), output.dim());
-
-  // Create the fusion plan
-  miopenFusionPlanDescriptor_t fusePlanDesc;
-  miopenFusionOpDescriptor_t convoOp;
-  miopenFusionOpDescriptor_t biasOp;
-  miopenFusionOpDescriptor_t activOp;
-  MIOPEN_CHECK(miopenCreateFusionPlan(&fusePlanDesc, miopenVerticalFusion, args.idesc.desc()));
-  MIOPEN_CHECK(miopenCreateOpConvForward(fusePlanDesc, &convoOp, args.cdesc.desc(), args.wdesc.desc()));
-  MIOPEN_CHECK(miopenCreateOpBiasForward(fusePlanDesc, &biasOp, bdesc.desc()));
-  MIOPEN_CHECK(miopenCreateOpActivationForward(fusePlanDesc, &activOp, miopenActivationRELU));
-
-  // compile fusion plan
-  MIOPEN_CHECK(miopenCompileFusionPlan(args.handle, fusePlanDesc));
-
-  // Set the Args
-  float alpha = static_cast<float>(1);
-  float beta = static_cast<float>(0);
-  float activ_alpha = static_cast<float>(0);
-  float activ_beta = static_cast<float>(0);
-  float activ_gamma = static_cast<float>(0);
-  miopenOperatorArgs_t fusionArgs;
-  MIOPEN_CHECK(miopenCreateOperatorArgs(&fusionArgs));
-  MIOPEN_CHECK(miopenSetOpArgsConvForward(fusionArgs, convoOp, &alpha, &beta, weight.const_data_ptr()));
-  MIOPEN_CHECK(miopenSetOpArgsBiasForward(fusionArgs, biasOp, &alpha, &beta, bias.const_data_ptr()));
-  MIOPEN_CHECK(miopenSetOpArgsActivForward(fusionArgs, activOp, &alpha, &beta, activ_alpha, activ_beta, activ_gamma));
-
-  miopenExecuteFusionPlan(args.handle, fusePlanDesc, args.idesc.desc(), input.const_data_ptr(), args.odesc.desc(), output.data_ptr(), fusionArgs);
-
-  // Cleanup
-  miopenDestroyFusionPlan(fusePlanDesc);
+  at::Tensor alpha_mul_z_add_bias =
+      at::native::reshape_bias(input.dim(), bias).add(z, alpha);
+  output.add_(alpha_mul_z_add_bias);
+  output.relu_();
 }
 
 static at::Tensor self_or_new_memory_format(at::Tensor& self, at::MemoryFormat memory_format) {
@@ -1855,171 +1807,107 @@ static at::Tensor self_or_new_memory_format(at::Tensor& self, at::MemoryFormat m
 Tensor miopen_convolution_add_relu(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const Tensor& z,
+    const Tensor& z_t,
     const std::optional<Scalar>& alpha,
-    const std::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias_t,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
     int64_t groups) {
-
-  // MIOpen does not support fusion of add, the alpha2 * z step of the below cuDNN function:
-  // y = act ( alpha1 * conv(x) + alpha2 * z + bias )
-
   auto memory_format = miopen_conv_suggest_memory_format(input_t, weight_t);
+  const Tensor input = input_t.contiguous(memory_format);
+  const Tensor weight = weight_t.contiguous(memory_format);
+  Tensor z = z_t;
+  if (z.suggest_memory_format() != memory_format) {
+    z = z.to(memory_format);
+  }
+  z = z.contiguous(memory_format);
+
+  // FuseFrozenConvAddRelu performs some tensor shape checking
+  Tensor output_t = at::detail::empty_cuda(
+      conv_output_size(
+          input.sizes(), weight.sizes(), padding, stride, dilation),
+      input.options().memory_format(memory_format));
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
 
   auto& ctx = at::globalContext();
   bool benchmark = ctx.benchmarkCuDNN();
+  auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
+  auto _bias = bias_t.has_value()
+      ? bias_t.value()
+      : at::zeros(
+            {output_t.size(1)},
+            optTypeMetaToScalarType(output_t.options().dtype_opt()),
+            output_t.options().layout_opt(),
+            output_t.options().device_opt(),
+            output_t.options().pinned_memory_opt());
 
-  TensorArg input  { input_t,  "input",  1 },
-            weight { weight_t, "weight", 2 };
-
-  Tensor output_t = at::detail::empty_cuda(
-      conv_output_size(
-        input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
-      input_t.options().memory_format(memory_format));
-  if (output_t.numel() == 0){
-    return output_t;
-  }
-  // Avoid ambiguity of "output" when this is being used as backwards
-  TensorArg output{output_t, "result", 0};
-  miopen_convolution_forward_out(
-      output,
-      "miopen_convolution_add_relu",
+  raw_miopen_convolution_add_relu_out(
+      output_t,
       input,
       weight,
-      padding,
+      z,
+      _alpha,
+      _bias,
       stride,
+      padding,
       dilation,
       groups,
       benchmark,
-      false // deterministic
-  );
+      true); // deterministic
 
-  auto contig_output_t = self_or_new_memory_format(output_t, memory_format);
-
-  if (!output_t.is_same(contig_output_t)) {
-    contig_output_t.copy_(output_t);
-  }
-
-  auto _alpha = alpha.has_value() ? alpha.value().to<float>() : 1.0;
-  auto _bias = bias.has_value()
-          ? bias.value()
-          : at::zeros(
-                {contig_output_t.size(1)},
-                optTypeMetaToScalarType(contig_output_t.options().dtype_opt()),
-                contig_output_t.options().layout_opt(),
-                contig_output_t.options().device_opt(),
-                contig_output_t.options().pinned_memory_opt());
-
-  at::Tensor alpha_mul_z_add_bias = at::native::reshape_bias(input_t.dim(), _bias).add(z, _alpha);
-  contig_output_t.add_(alpha_mul_z_add_bias);
-  contig_output_t.relu_();
-
-  return contig_output_t;
+  return output_t;
 }
 
 Tensor miopen_convolution_relu(
     const Tensor& input_t,
     const Tensor& weight_t,
-    const std::optional<Tensor>& bias,
+    const std::optional<Tensor>& bias_t,
     IntArrayRef stride,
     IntArrayRef padding,
     IntArrayRef dilation,
     int64_t groups) {
+  auto memory_format = miopen_conv_suggest_memory_format(input_t, weight_t);
+  const Tensor input = input_t.contiguous(memory_format);
+  const Tensor weight = weight_t.contiguous(memory_format);
+
+  // FuseFrozenConvAddRelu performs some tensor shape checking
+  Tensor output_t = at::detail::empty_cuda(
+      conv_output_size(
+          input.sizes(), weight.sizes(), padding, stride, dilation),
+      input.options().memory_format(memory_format));
+  if (output_t.numel() == 0) {
+    return output_t;
+  }
 
   auto& ctx = at::globalContext();
   bool benchmark = ctx.benchmarkCuDNN();
+  auto _bias = bias_t.has_value()
+      ? bias_t.value()
+      : at::zeros(
+            {output_t.size(1)},
+            optTypeMetaToScalarType(output_t.options().dtype_opt()),
+            output_t.options().layout_opt(),
+            output_t.options().device_opt(),
+            output_t.options().pinned_memory_opt());
 
-  // MIOpen currently only supports MemoryFormat::Contiguous and fp32 and 2d
-  if (input_t.suggest_memory_format() == at::MemoryFormat::Contiguous
-          && input_t.scalar_type() == at::kFloat
-          && input_t.ndimension() == 4) {
+  raw_miopen_convolution_add_relu_out(
+      output_t,
+      input,
+      weight,
+      output_t, // use output_t as z to satisfy MIOpen API
+      0, // alpha
+      _bias,
+      stride,
+      padding,
+      dilation,
+      groups,
+      benchmark, // benchmark
+      true); // deterministic
 
-    // FuseFrozenConvAddRelu performs some tensor shape checking
-    Tensor output_t = at::detail::empty_cuda(
-        conv_output_size(
-            input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
-        input_t.options().memory_format(input_t.suggest_memory_format()));
-    if (output_t.numel() == 0) {
-      return output_t;
-    }
-
-    auto _bias = bias.has_value()
-            ? bias.value()
-            : at::zeros(
-                  {output_t.size(1)},
-                  optTypeMetaToScalarType(output_t.options().dtype_opt()),
-                  output_t.options().layout_opt(),
-                  output_t.options().device_opt(),
-                  output_t.options().pinned_memory_opt());
-
-    raw_miopen_convolution_relu_out(
-        output_t,
-        input_t,
-        weight_t,
-        _bias,
-        stride,
-        padding,
-        dilation,
-        groups,
-        benchmark, // benchmark
-        false // deterministic
-    );
-
-    return output_t;
-  }
-  else {
-    // fallback
-
-    auto memory_format = miopen_conv_suggest_memory_format(input_t, weight_t);
-
-    TensorArg input  { input_t,  "input",  1 },
-              weight { weight_t, "weight", 2 };
-
-    Tensor output_t = at::detail::empty_cuda(
-        conv_output_size(
-          input_t.sizes(), weight_t.sizes(), padding, stride, dilation),
-        input->options().memory_format(memory_format));
-    if (output_t.numel() == 0){
-      return output_t;
-    }
-    // Avoid ambiguity of "output" when this is being used as backwards
-    TensorArg output{output_t, "result", 0};
-    miopen_convolution_forward_out(
-        output,
-        "miopen_convolution_relu",
-        input,
-        weight,
-        padding,
-        stride,
-        dilation,
-        groups,
-        benchmark,
-        false // deterministic
-    );
-
-    auto contig_output_t = self_or_new_memory_format(output_t, memory_format);
-
-    if (!output_t.is_same(contig_output_t)) {
-      contig_output_t.copy_(output_t);
-    }
-
-    auto _bias = bias.has_value()
-            ? bias.value()
-            : at::zeros(
-                  {contig_output_t.size(1)},
-                  optTypeMetaToScalarType(contig_output_t.options().dtype_opt()),
-                  contig_output_t.options().layout_opt(),
-                  contig_output_t.options().device_opt(),
-                  contig_output_t.options().pinned_memory_opt());
-
-    at::Tensor reshaped_bias = at::native::reshape_bias(input_t.dim(), _bias);
-    contig_output_t.add_(reshaped_bias);
-    contig_output_t.relu_();
-
-    return contig_output_t;
-  }
+  return output_t;
 }
 
 REGISTER_CUDA_DISPATCH(miopen_convolution_backward_stub, &miopen_convolution_backward)

@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["oncall: distributed"]
 import copy
 import unittest
 
@@ -80,7 +80,7 @@ class TestSACILP(TestCase):
             # postprocessing due to the fact that for ModTracker, the post backward hook
             # is not being called for modules whose inputs don't require gradients
             # TODO: fix this in ModTracker and ensure it does not lead to any perf regression
-            if _ModState.POST_BW not in mod_stats.snapshots.keys():
+            if _ModState.POST_BW not in mod_stats.snapshots:
                 mod_stats.snapshots.setdefault(_ModState.POST_BW, []).append(
                     copy.deepcopy(last_snapshot)
                 )

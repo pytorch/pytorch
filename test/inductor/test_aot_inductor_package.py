@@ -9,14 +9,14 @@ import sys
 import tempfile
 import unittest
 import zipfile
+from collections.abc import Callable
 from pathlib import Path
-from typing import Callable
 
 from parameterized import parameterized_class
 
 import torch
 import torch._inductor.config
-from torch._inductor.codecache import get_kernel_bin_format
+from torch._inductor.codecache import get_kernel_bin_format, WritableTempFile
 from torch._inductor.package import load_package, package_aoti
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import fresh_cache
@@ -27,13 +27,12 @@ from torch.export.pt2_archive._package import (
     load_pt2,
     load_weights_to_pt2_contents,
 )
-from torch.testing._internal.common_cuda import _get_torch_cuda_version
-from torch.testing._internal.common_utils import (
-    IS_FBCODE,
-    skipIfRocm,
-    skipIfXpu,
-    TEST_CUDA,
+from torch.testing._internal.common_cuda import (
+    _get_torch_cuda_version,
+    requires_triton_ptxas_compat,
+    TRITON_PTXAS_VERSION,
 )
+from torch.testing._internal.common_utils import IS_FBCODE, skipIfXpu, TEST_CUDA
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -119,7 +118,7 @@ class TestAOTInductorPackage(TestCase):
             inductor_configs["aot_inductor.package_cpp_only"] = self.package_cpp_only
 
             torch.manual_seed(0)
-            with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            with WritableTempFile(suffix=".pt2") as f:
                 compiled_model = compile(
                     model,
                     example_inputs,
@@ -242,7 +241,7 @@ class TestAOTInductorPackage(TestCase):
             expected = ref_model(*ref_inputs)
 
             torch.manual_seed(0)
-            with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+            with WritableTempFile(suffix=".pt2") as f:
                 ep = torch.export.export(model, example_inputs, strict=True)
                 with fresh_cache():
                     # cubin files are removed when exiting this context
@@ -272,9 +271,9 @@ class TestAOTInductorPackage(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
+        TEST_CUDA and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
+        "Test is only supported on CUDA {}.{}+".format(*TRITON_PTXAS_VERSION),
     )
-    @skipIfXpu  # build system may be different
     def test_compile_after_package(self):
         self.check_package_cpp_only()
 
@@ -319,11 +318,8 @@ class TestAOTInductorPackage(TestCase):
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
-    )
+    @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfRocm  # doesn't support multi-arch binary
     @skipIfXpu  # doesn't support multi-arch binary
     def test_compile_after_package_multi_arch(self):
         if self.device != GPU_TYPE:
@@ -366,10 +362,8 @@ class TestAOTInductorPackage(TestCase):
                 actual = optimized(*example_inputs)
                 self.assertTrue(torch.allclose(actual, expected))
 
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
-    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @requires_triton_ptxas_compat
     @skipIfXpu  # build system may be different
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_after_package_static(self):
@@ -393,7 +387,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when no name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
             }
             with (
                 tempfile.TemporaryDirectory() as tmp_dir,
@@ -407,7 +401,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when model name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "linear",
             }
             with (
@@ -422,13 +416,14 @@ class TestAOTInductorPackage(TestCase):
 
             # test invalid model name
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "linear/linear",
             }
             with self.assertRaisesRegex(Exception, "Invalid AOTI model name"):
                 self.cmake_compile(model, example_inputs, options, "")
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
+    @requires_triton_ptxas_compat
     @skipIfXpu  # build system may be different
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_standalone_cos(self):
@@ -448,7 +443,7 @@ class TestAOTInductorPackage(TestCase):
 
             # Test compilation when model name is passed in
             options = {
-                "aot_inductor.compile_standalone": True,
+                "aot_inductor_mode.compile_standalone": True,
                 "aot_inductor.model_name_for_generated_files": "cos",
             }
             with (
@@ -461,11 +456,8 @@ class TestAOTInductorPackage(TestCase):
                 a_path = build_path / "libcos.a"
                 self.assertTrue(a_path.exists())
 
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
-    )
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfRocm  # doesn't support multi-arch binary
+    @requires_triton_ptxas_compat
     @skipIfXpu  # doesn't support multi-arch binary
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter(self):
@@ -519,11 +511,8 @@ class TestAOTInductorPackage(TestCase):
                             " 0  0  0\n 0  0  0\n[ CPUFloatType{3,3} ]\n",
                         )
 
-    @unittest.skipIf(
-        _get_torch_cuda_version() < (12, 6), "Test is only supported on CUDA 12.6+"
-    )
+    @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfRocm  # doesn't support multi-arch binary
     @skipIfXpu  # doesn't support multi-arch binary
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter_weights(self):
@@ -579,14 +568,48 @@ class TestAOTInductorPackage(TestCase):
             torch.randn(10, 10, device=self.device),
         )
         metadata = {"dummy": "moo"}
-        compiled_model = self.check_model(
-            Model(),
-            example_inputs,
-            inductor_configs={"aot_inductor.metadata": metadata},
-        )
+
+        with torch.no_grad():
+            torch.manual_seed(0)
+            model = Model().to(device=self.device)
+            ref_model = copy.deepcopy(model)
+            ref_inputs = copy.deepcopy(example_inputs)
+            expected = ref_model(*ref_inputs)
+
+            inductor_configs = {
+                "aot_inductor.package_cpp_only": self.package_cpp_only,
+                "aot_inductor.metadata": metadata,
+            }
+
+            with WritableTempFile(suffix=".pt2") as f:
+                ep = torch.export.export(model, example_inputs, strict=False)
+                package_path = torch._inductor.aoti_compile_and_package(
+                    ep, package_path=f.name, inductor_configs=inductor_configs
+                )  # type: ignore[arg-type]
+
+                # We can load the metadata w/o loading the actual package
+                loaded_metadata = (
+                    torch._C._aoti.AOTIModelPackageLoader.load_metadata_from_package(
+                        package_path, "model"
+                    )
+                )
+                self.assertEqual(loaded_metadata.get("dummy"), "moo")
+
+                device = loaded_metadata["AOTI_DEVICE_KEY"]
+                current_device_info = torch._inductor.codecache.get_device_information(
+                    device
+                )
+
+                for k, v in current_device_info.items():
+                    self.assertTrue(k in loaded_metadata)
+                    self.assertEqual(v, loaded_metadata[k])
+
+                compiled_model = torch._inductor.aoti_load_package(package_path)
+
+            actual = compiled_model(*example_inputs)
+            self.assertEqual(actual, expected)
 
         loaded_metadata = compiled_model.get_metadata()  # type: ignore[attr-defined]
-
         self.assertEqual(loaded_metadata.get("dummy"), "moo")
 
     def test_bool_input(self):
@@ -644,7 +667,7 @@ class TestAOTInductorPackage(TestCase):
             ep2.module(), example_inputs2, options=options
         )
 
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        with WritableTempFile(suffix=".pt2") as f:
             package_path = package_aoti(
                 f.name, {"model1": aoti_files1, "model2": aoti_files2}
             )
@@ -654,13 +677,13 @@ class TestAOTInductorPackage(TestCase):
         self.assertEqual(loaded1(*example_inputs1), ep1.module()(*example_inputs1))
         self.assertEqual(loaded2(*example_inputs2), ep2.module()(*example_inputs2))
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_duplicate_calls(self):
         options = {
             "aot_inductor.package": True,
         }
 
-        device = "cuda"
+        device = GPU_TYPE
 
         class Model1(torch.nn.Module):
             def __init__(self) -> None:
@@ -696,7 +719,7 @@ class TestAOTInductorPackage(TestCase):
             ep2.module(), example_inputs2, options=options
         )
 
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        with WritableTempFile(suffix=".pt2") as f:
             package_path = package_aoti(
                 f.name, {"model1": aoti_files1, "model2": aoti_files2}
             )
@@ -732,7 +755,7 @@ class TestAOTInductorPackage(TestCase):
                 "aot_inductor.package_cpp_only": self.package_cpp_only,
             },
         )
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        with WritableTempFile(suffix=".pt2") as f:
             package_path = package_aoti(f.name, {"model1": aoti_files})
             loaded = load_package(package_path, "model1")
         self.assertTrue(
@@ -916,7 +939,7 @@ class TestAOTInductorPackage(TestCase):
             "aot_inductor.package_cpp_only": self.package_cpp_only,
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
-            "aot_inductor.package_constants_on_disk": True,
+            "aot_inductor.package_constants_on_disk_format": "pickle_weights",
         }
 
         class Bar(torch.nn.Module):
@@ -952,7 +975,7 @@ class TestAOTInductorPackage(TestCase):
         aoti_files1 = torch._inductor.aot_compile(ep1.module(), (), options=options)
         aoti_files2 = torch._inductor.aot_compile(ep2.module(), (), options=options)
 
-        with tempfile.NamedTemporaryFile(suffix=".pt2") as f:
+        with WritableTempFile(suffix=".pt2") as f:
             package_path = package_aoti(
                 f.name,
                 {"model1": aoti_files1, "model2": aoti_files2},
@@ -1000,7 +1023,7 @@ class TestAOTInductorPackage(TestCase):
             "aot_inductor.package_cpp_only": self.package_cpp_only,
             "always_keep_tensor_constants": True,
             "aot_inductor.package_constants_in_so": False,
-            "aot_inductor.package_constants_on_disk": True,
+            "aot_inductor.package_constants_on_disk_format": "pickle_weights",
         }
 
         # linear.weight's node name is linear_weight.

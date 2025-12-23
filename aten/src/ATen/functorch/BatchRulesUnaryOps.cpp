@@ -5,7 +5,6 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <ATen/functorch/BatchRulesHelper.h>
-#include <ATen/functorch/PlumbingHelper.h>
 
 namespace at::functorch {
 
@@ -171,6 +170,8 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
 
   POINTWISE_BOXED(fill_.Scalar);
   POINTWISE_BOXED(zero_);
+  // This is special because this op doesn't return anything
+  m.impl("_assert_tensor_metadata", native::_assert_tensor_metadata);
 
 #undef UNARY_POINTWISE
 #undef UNARY_POINTWISE_ALL

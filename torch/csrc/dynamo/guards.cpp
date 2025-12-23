@@ -2,6 +2,7 @@
 #include <ATen/autocast_mode.h>
 #include <c10/core/SafePyObject.h>
 #include <c10/core/impl/PyInterpreter.h>
+#include <c10/util/Exception.h>
 #define PY_SSIZE_T_CLEAN
 #include <ATen/EmptyTensor.h>
 #include <ATen/SparseCsrTensorUtils.h>
@@ -18,6 +19,7 @@
 #include <torch/csrc/utils/python_symnode.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/extension.h>
+#include <cstdint>
 
 #include <torch/csrc/dynamo/debug_macros.h>
 
@@ -64,8 +66,7 @@ int open_counter() {
 
 uint64_t count_instructions(const std::function<void()>& fn) {
   int fd = open_counter();
-  if (fd == -1)
-    throw std::runtime_error("perf_event_open failed");
+  TORCH_CHECK(fd != -1, "perf_event_open failed");
 
   ioctl(fd, PERF_EVENT_IOC_RESET, 0);
   ioctl(fd, PERF_EVENT_IOC_ENABLE, 0);
@@ -120,6 +121,16 @@ typedef struct {
 #endif // IS_PYTHON_3_12_PLUS
 
 namespace torch::dynamo {
+
+thread_local bool tls_is_in_mode_without_ignore_compile_internals = false;
+
+void set_is_in_mode_without_ignore_compile_internals(bool value) {
+  tls_is_in_mode_without_ignore_compile_internals = value;
+}
+
+bool get_is_in_mode_without_ignore_compile_internals() {
+  return tls_is_in_mode_without_ignore_compile_internals;
+}
 
 // Macro to skip addition of duplicate guards like EQUALS_MATCH
 #define SKIP_IF_GUARD_ALREADY_PRESENT(name) \
@@ -568,7 +579,7 @@ static PyMethodDef TensorGuards_methods[] = {
     {nullptr} /* Sentinel */
 };
 
-static PyTypeObject TensorGuardsType = { PyVarObject_HEAD_INIT(nullptr, 0)
+static PyTypeObject TensorGuardsType = {PyVarObject_HEAD_INIT(nullptr, 0)
 };
 
 struct AutocastState {
@@ -622,7 +633,7 @@ struct AutocastState {
 struct GlobalStateGuard {
   PyObject_HEAD
 
-  inline void init() {
+  void init() {
     auto& ctx = at::globalContext();
     _grad_mode = at::GradMode::is_enabled();
     _autocast_state = AutocastState();
@@ -634,14 +645,16 @@ struct GlobalStateGuard {
     _torch_function_all_disabled = at::impl::torch_function_all_disabled();
     _deterministic_algorithms = ctx.deterministicAlgorithms();
     _deterministic_algorithms_warn_only = ctx.deterministicAlgorithmsWarnOnly();
-    _allow_tf32 = ctx.float32Precision("cuda", "matmul") == "tf32";
+    _allow_tf32 =
+        ctx.float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+        at::Float32Precision::TF32;
     _allow_fp16_reduce = ctx.allowFP16ReductionCuBLAS();
     _allow_bf16_reduce = ctx.allowBF16ReductionCuBLAS();
     _num_threads = at::get_num_threads();
     _default_dtype = at::get_default_dtype();
   }
 
-  inline bool check() const {
+  bool check() const {
     auto& ctx = at::globalContext();
     return (_grad_mode == at::GradMode::is_enabled() &&
             _autocast_state == AutocastState() &&
@@ -651,14 +664,17 @@ struct GlobalStateGuard {
             _deterministic_algorithms == ctx.deterministicAlgorithms() &&
             _deterministic_algorithms_warn_only ==
                 ctx.deterministicAlgorithmsWarnOnly() &&
-            _allow_tf32 == (ctx.float32Precision("cuda", "matmul") == "tf32") &&
+            _allow_tf32 ==
+                (ctx.float32Precision(
+                     at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+                 at::Float32Precision::TF32) &&
             _allow_fp16_reduce == ctx.allowFP16ReductionCuBLAS() &&
             _allow_bf16_reduce == ctx.allowBF16ReductionCuBLAS() &&
             _num_threads == at::get_num_threads()) &&
         _default_dtype == at::get_default_dtype();
   }
 
-  inline std::string reason() const {
+  std::string reason() const {
     std::ostringstream os;
     auto& ctx = at::globalContext();
     if (_grad_mode != at::GradMode::is_enabled())
@@ -672,7 +688,10 @@ struct GlobalStateGuard {
     if (_deterministic_algorithms_warn_only !=
         ctx.deterministicAlgorithmsWarnOnly())
       os << "deterministic_algorithms_warn_only ";
-    if (_allow_tf32 != (ctx.float32Precision("cuda", "matmul") == "tf32"))
+    if (_allow_tf32 !=
+        (ctx.float32Precision(
+             at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
+         at::Float32Precision::TF32))
       os << "allow_tf32 ";
     if (_allow_fp16_reduce != ctx.allowFP16ReductionCuBLAS())
       os << "allow_fp16_reduce ";
@@ -695,8 +714,10 @@ struct GlobalStateGuard {
     json_j["deterministic_algorithms_warn_only"] =
         json_t._deterministic_algorithms_warn_only;
     json_j["allow_tf32"] = json_t._allow_tf32;
-    json_j["allow_fp16_reduce"] = json_t._allow_fp16_reduce;
-    json_j["allow_bf16_reduce"] = json_t._allow_bf16_reduce;
+    json_j["allow_fp16_reduce"] =
+        static_cast<int64_t>(json_t._allow_fp16_reduce);
+    json_j["allow_bf16_reduce"] =
+        static_cast<int64_t>(json_t._allow_bf16_reduce);
     json_j["num_threads"] = json_t._num_threads;
     json_j["default_dtype"] = json_t._default_dtype.toScalarType();
   }
@@ -712,8 +733,10 @@ struct GlobalStateGuard {
     json_t._deterministic_algorithms_warn_only =
         json_j.at("deterministic_algorithms_warn_only");
     json_t._allow_tf32 = json_j.at("allow_tf32");
-    json_t._allow_fp16_reduce = json_j.at("allow_fp16_reduce");
-    json_t._allow_bf16_reduce = json_j.at("allow_bf16_reduce");
+    json_t._allow_fp16_reduce = static_cast<at::CuBLASReductionOption>(
+        static_cast<int64_t>(json_j.at("allow_fp16_reduce")));
+    json_t._allow_bf16_reduce = static_cast<at::CuBLASReductionOption>(
+        static_cast<int64_t>(json_j.at("allow_bf16_reduce")));
     json_t._num_threads = json_j.at("num_threads");
     json_t._default_dtype =
         caffe2::TypeMeta::fromScalarType(json_j.at("default_dtype"));
@@ -726,8 +749,8 @@ struct GlobalStateGuard {
   bool _deterministic_algorithms;
   bool _deterministic_algorithms_warn_only;
   bool _allow_tf32;
-  bool _allow_fp16_reduce;
-  bool _allow_bf16_reduce;
+  at::CuBLASReductionOption _allow_fp16_reduce;
+  at::CuBLASReductionOption _allow_bf16_reduce;
   int _num_threads;
   caffe2::TypeMeta _default_dtype;
   // TODO(jansel): we should guard on more state as inductor starts using it
@@ -771,9 +794,8 @@ PyObject* GlobalStateGuard_load(
     PyObject* args,
     PyObject* kwargs) {
   char* json;
-  if (!PyArg_ParseTuple(args, "s", &json)) {
-    throw std::runtime_error("Cannot parse as json string.");
-  }
+  TORCH_CHECK(
+      PyArg_ParseTuple(args, "s", &json), "Cannot parse as json string.");
   nlohmann::json::parse(json).get_to(*self);
   Py_RETURN_NONE;
 }
@@ -797,7 +819,7 @@ static PyMethodDef GlobalStateGuard_methods[] = {
      METH_VARARGS,
      "Parse serialized json format"},
     {nullptr}};
-static PyTypeObject GlobalStateGuardType = { PyVarObject_HEAD_INIT(nullptr, 0)
+static PyTypeObject GlobalStateGuardType = {PyVarObject_HEAD_INIT(nullptr, 0)
 };
 
 static PyObject* check_type_id(PyObject* dummy, PyObject* args) {
@@ -854,9 +876,9 @@ static int dict_version_watch_callback(
 static uint64_t get_dict_version_unchecked(PyObject* dict) {
 #if IS_PYTHON_3_12_PLUS
 
-  if (PyDict_Watch(dict_version_watcher_id, dict)) {
-    throw std::runtime_error("failed to add version watcher to dict!");
-  }
+  TORCH_CHECK(
+      !PyDict_Watch(dict_version_watcher_id, dict),
+      "failed to add version watcher to dict!");
   if (!dict_version_map.count(dict)) {
     dict_version_map[dict] = global_dict_version_id++;
   }
@@ -1514,14 +1536,18 @@ class GuardDebugInfo {
   GuardDebugInfo(
       bool result,
       py::list verbose_code_parts,
-      int num_guards_executed)
+      int num_guards_executed,
+      py::object user_stack = py::none())
       : result(result),
         verbose_code_parts(std::move(verbose_code_parts)),
-        num_guards_executed(num_guards_executed) {}
+        num_guards_executed(num_guards_executed),
+        user_stack(std::move(user_stack)) {}
 
   // This constructor is used when guard succeeds.
   GuardDebugInfo(bool result, int num_guards_executed)
-      : result(result), num_guards_executed(num_guards_executed) {}
+      : result(result),
+        num_guards_executed(num_guards_executed),
+        user_stack(py::none()) {}
 
   GuardDebugInfo(
       bool result,
@@ -1536,7 +1562,8 @@ class GuardDebugInfo {
     ss << "GuardDebugInfo(\n"
        << "result=" << result << ",\n"
        << "verbose_code_parts=" << verbose_code_parts << ",\n"
-       << "num_guards_executed=" << num_guards_executed << ")\n";
+       << "num_guards_executed=" << num_guards_executed << ",\n"
+       << "user_stack=" << user_stack << ")\n";
     return ss.str();
   }
 
@@ -1552,6 +1579,9 @@ class GuardDebugInfo {
   // Total number of executed guards so far. This is helpful in debugging if
   // shuffling is working.
   int num_guards_executed;
+
+  // User stack trace information for the guard.
+  py::object user_stack;
 };
 
 class GuardManager;
@@ -1594,9 +1624,13 @@ std::unordered_map<PyObject*, std::list<GuardManager*>> dict_to_guard_managers;
  */
 class LeafGuard {
  public:
-  LeafGuard(RootGuardManager* root_guard_manager, py::object verbose_code_parts)
+  LeafGuard(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts,
+      py::object user_stack)
       : _root_guard_manager(root_guard_manager),
-        _verbose_code_parts(std::move(verbose_code_parts)) {}
+        _verbose_code_parts(std::move(verbose_code_parts)),
+        _user_stack(std::move(user_stack)) {}
 
   // check function could be called from python. This is useful for debugging
   // purpose.
@@ -1612,13 +1646,17 @@ class LeafGuard {
       PyObject* value) { // borrowed ref
     bool result = check_nopybind(value);
     if (!result) {
-      return GuardDebugInfo(result, _verbose_code_parts, 0);
+      return GuardDebugInfo(result, _verbose_code_parts, 0, get_user_stack());
     }
     return GuardDebugInfo(true, 0);
   }
 
   py::list verbose_code_parts() {
     return _verbose_code_parts;
+  }
+
+  py::object get_user_stack() const {
+    return _user_stack;
   }
 
   // This is on the hot path and avoids any refcounting code from pybind. This
@@ -1641,6 +1679,7 @@ class LeafGuard {
   // This is set while constructing the leaf guard. This is used for identifying
   // the cause of recompilation.
   py::list _verbose_code_parts;
+  py::object _user_stack;
 };
 
 /**
@@ -1658,8 +1697,12 @@ class LAMBDA_GUARD : public LeafGuard {
   LAMBDA_GUARD(
       RootGuardManager* root_guard_manager,
       py::object guard_check_fn,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {
     if (py::isinstance<py::function>(guard_check_fn)) {
       _guard_check_fn = py::cast<py::function>(std::move(guard_check_fn));
     } else {
@@ -1707,8 +1750,12 @@ class TYPE_MATCH : public LeafGuard {
   TYPE_MATCH(
       RootGuardManager* root_guard_manager,
       py::object type_id,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _expected(py::cast<intptr_t>(std::move(type_id))) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1727,8 +1774,12 @@ class ID_MATCH : public LeafGuard {
   ID_MATCH(
       RootGuardManager* root_guard_manager,
       py::object obj_id,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _expected(py::cast<intptr_t>(std::move(obj_id))) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1745,8 +1796,12 @@ class NONE_MATCH : public LeafGuard {
  public:
   NONE_MATCH(
       RootGuardManager* root_guard_manager,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return value == Py_None;
@@ -1757,8 +1812,12 @@ class TRUE_MATCH : public LeafGuard {
  public:
   TRUE_MATCH(
       RootGuardManager* root_guard_manager,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return value == Py_True;
@@ -1769,8 +1828,12 @@ class FALSE_MATCH : public LeafGuard {
  public:
   FALSE_MATCH(
       RootGuardManager* root_guard_manager,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return value == Py_False;
@@ -1782,8 +1845,12 @@ class EQUALS_MATCH : public LeafGuard {
   EQUALS_MATCH(
       RootGuardManager* root_guard_manager,
       py::object value,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _value(value),
         _value_type(Py_TYPE(value.ptr())) {}
 
@@ -1825,8 +1892,12 @@ class RANGE_ITERATOR_MATCH : public LeafGuard {
       py::object stop,
       py::object step,
       py::object type_id,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _type_id(py::cast<intptr_t>(std::move(type_id))) {
     PyObject* start_obj = start.ptr();
     PyObject* stop_obj = stop.ptr();
@@ -1870,8 +1941,12 @@ class TUPLE_ITERATOR_LEN : public LeafGuard {
       RootGuardManager* root_guard_manager,
       py::object length,
       py::object type_id,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _length(py::cast<Py_ssize_t>(std::move(length))),
         _type_id(py::cast<intptr_t>(std::move(type_id))) {}
 
@@ -1899,8 +1974,12 @@ class LENGTH_CHECK : public LeafGuard {
   LENGTH_CHECK(
       RootGuardManager* root_guard_manager,
       py::object value,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _length(py::cast<Py_ssize_t>(std::move(value))) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1919,8 +1998,12 @@ class DICT_LENGTH : public LeafGuard {
   DICT_LENGTH(
       RootGuardManager* root_guard_manager,
       py::object value,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _length(py::cast<Py_ssize_t>(std::move(value))) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -1934,8 +2017,14 @@ class DICT_LENGTH : public LeafGuard {
 
 class NOT_NONE : public LeafGuard {
  public:
-  NOT_NONE(RootGuardManager* root_guard_manager, py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+  NOT_NONE(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     return value != Py_None;
@@ -1947,8 +2036,12 @@ class MAPPING_KEYS_MATCH : public LeafGuard {
   MAPPING_KEYS_MATCH(
       RootGuardManager* root_guard_manager,
       py::object value,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {
     // This is ok to stash in the state because we only support
     // MappingProxyType objects with constant keys. So, the mem overhead is
     // negligible.
@@ -1970,8 +2063,12 @@ class DEFAULT_DEVICE : public LeafGuard {
  public:
   DEFAULT_DEVICE(
       RootGuardManager* root_guard_manager,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {
     py::handle device_module = py::module::import("torch.utils._device");
     // Save the dict using py::object
     _utils_device_dict = device_module.attr("__dict__");
@@ -2017,8 +2114,12 @@ class GLOBAL_STATE : public LeafGuard {
  public:
   GLOBAL_STATE(
       RootGuardManager* root_guard_manager,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _guard(PyObject_New(GlobalStateGuard, &GlobalStateGuardType)) {
     _guard->init();
     owner_ = py::reinterpret_steal<py::object>((PyObject*)_guard);
@@ -2027,8 +2128,9 @@ class GLOBAL_STATE : public LeafGuard {
   GLOBAL_STATE(
       RootGuardManager* root,
       py::object initial_state,
-      py::object verbose_code_parts)
-      : LeafGuard(root, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(root, std::move(verbose_code_parts), std::move(user_stack)),
         owner_(std::move(initial_state)),
         _guard((GlobalStateGuard*)owner_.ptr()) {
     if (!PyObject_TypeCheck(owner_.ptr(), &GlobalStateGuardType)) {
@@ -2067,8 +2169,12 @@ class NO_HASATTR : public LeafGuard {
   NO_HASATTR(
       RootGuardManager* root_guard_manager,
       py::object attr_name,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _attr_name(std::move(attr_name)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -2090,8 +2196,12 @@ class DICT_CONTAINS : public LeafGuard {
       RootGuardManager* root_guard_manager,
       bool contains,
       py::object key,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _contains(contains ? 1 : 0),
         _key(std::move(key)) {}
 
@@ -2116,8 +2226,12 @@ class SET_CONTAINS : public LeafGuard {
       RootGuardManager* root_guard_manager,
       bool contains,
       py::object item,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _contains(contains ? 1 : 0),
         _item(std::move(item)) {}
 
@@ -2136,11 +2250,101 @@ class SET_CONTAINS : public LeafGuard {
   py::object _item;
 };
 
+// Check if the float is nan
+class FLOAT_IS_NAN : public LeafGuard {
+ public:
+  FLOAT_IS_NAN(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (!PyFloat_CheckExact(value)) {
+      return false;
+    }
+    return std::isnan(PyFloat_AsDouble(value));
+  }
+};
+
+// Check if the float is nan
+class COMPLEX_IS_NAN : public LeafGuard {
+ public:
+  COMPLEX_IS_NAN(
+      RootGuardManager* root_guard_manager,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {}
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    if (!PyComplex_CheckExact(value)) {
+      return false;
+    }
+    Py_complex c_value = PyComplex_AsCComplex(value);
+    return std::isnan(c_value.real) || std::isnan(c_value.imag);
+  }
+};
+
+// Check if the dual level is the same as the one in fx graph
+class DUAL_LEVEL_MATCH : public LeafGuard {
+ public:
+  DUAL_LEVEL_MATCH(
+      RootGuardManager* root_guard_manager,
+      int64_t level,
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
+        _level(level) {
+    forward_ad_module = py::module_::import("torch.autograd.forward_ad");
+  }
+
+  bool check_nopybind(PyObject* value) override { // borrowed ref
+    // Ignore value arg, this is just to satisfy the interface.
+    return _check();
+  }
+
+  bool check_nopybind(FrameLocalsMapping* value) override {
+    // Ignore value arg, this is just to satisfy the interface.
+    return _check();
+  }
+
+  bool _check() {
+    PyObject* current_level = PyObject_GetAttrString(
+        forward_ad_module.ptr(), "_current_level"); // new ref
+    if (current_level == nullptr) {
+      // Attribute absent, clear the exception and return false.
+      PyErr_Clear();
+      return false;
+    }
+    if (!PyLong_CheckExact(current_level)) {
+      Py_DECREF(current_level);
+      return false;
+    } else {
+      int64_t current_level_int = PyLong_AsLongLong(current_level);
+      Py_DECREF(current_level);
+      return current_level_int == _level;
+    }
+  }
+
+ private:
+  int64_t _level;
+  py::object forward_ad_module;
+};
+
 /**
  * Relational guards compare more than one value. We implement Relational
  * guards by capturing some state in the guard object. For example for tensor
  * aliasing guards - tensor X is not tensor Y - we construct one leaf guard
- * and and install it at as a leaf of two guard managers (one for X and
+ * and install it at as a leaf of two guard managers (one for X and
  * another for Y). Therefore, this guard is run twice. In the first
  * invocation, it saves the first value (state) and returns True. In the
  * second invocation, it compares the saved value with the new value and
@@ -2155,8 +2359,12 @@ class RelationalGuard : public LeafGuard {
  public:
   RelationalGuard(
       RootGuardManager* root_guard_manager,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {}
 
   // reset the relational guard state on guard failure. This is called by the
   // guard manager.
@@ -2170,8 +2378,12 @@ class OBJECT_ALIASING : public RelationalGuard {
  public:
   OBJECT_ALIASING(
       RootGuardManager* root_guard_manager,
-      py::object verbose_code_parts)
-      : RelationalGuard(root_guard_manager, std::move(verbose_code_parts)) {}
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
     if (_is_first_call) {
@@ -2199,8 +2411,12 @@ class NO_TENSOR_ALIASING : public RelationalGuard {
   NO_TENSOR_ALIASING(
       RootGuardManager* root_guard_manager,
       const py::list& tensor_names,
-      py::object verbose_code_parts)
-      : RelationalGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _tensor_names(tensor_names) {
     _unique_tensors.reserve(tensor_names.size());
   }
@@ -2251,8 +2467,12 @@ class STORAGE_OVERLAPPING : public RelationalGuard {
       RootGuardManager* root_guard_manager,
       bool overlapping,
       std::shared_ptr<StorageOverlapChecker> checker,
-      py::object verbose_code_parts)
-      : RelationalGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _overlapping(overlapping),
         _checker(std::move(checker)) {}
 
@@ -2285,8 +2505,12 @@ class SYMBOLIC_SHAPE_GUARD : public RelationalGuard {
       py::int_ nargs_float,
       py::int_ py_addr,
       py::object py_addr_keep_alive,
-      py::object verbose_code_parts)
-      : RelationalGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : RelationalGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _py_addr_keep_alive(std::move(py_addr_keep_alive)) {
     _nargs_int = PyLong_AsSize_t(nargs_int.ptr());
     _nargs_float = PyLong_AsSize_t(nargs_float.ptr());
@@ -2398,8 +2622,12 @@ class DYNAMIC_INDICES : public LeafGuard {
   DYNAMIC_INDICES(
       RootGuardManager* root_guard_manager,
       py::set dynamic_indices,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _dynamic_indices(std::move(dynamic_indices)) {}
 
   bool check_nopybind(PyObject* value) override { // borrowed ref
@@ -2432,8 +2660,12 @@ class DICT_VERSION : public LeafGuard {
   DICT_VERSION(
       RootGuardManager* root_guard_manager,
       py::object value,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {
     if (!PyDict_Check(value.ptr())) {
       throw py::type_error("DICT_VERSION expects a dict");
     }
@@ -2630,7 +2862,7 @@ class GuardManager {
  public:
   GuardManager() = delete;
   GuardManager(RootGuardManager* root, std::string source)
-      : _root(root), _source(std::move(source)), _is_dict(false) {}
+      : _root(root), _source(std::move(source)) {}
 
   GuardManager(
       RootGuardManager* root,
@@ -2717,9 +2949,8 @@ class GuardManager {
       return py::type::of(py::none());
     }
 
-    if (!PyCallable_Check(_weak_type.ptr())) {
-      throw std::runtime_error("_weak_type is not callable");
-    }
+    TORCH_CHECK_TYPE(
+        PyCallable_Check(_weak_type.ptr()), "_weak_type is not callable");
     return _weak_type();
   }
 
@@ -2731,10 +2962,8 @@ class GuardManager {
   }
 
   void mark_tag_safe_root() {
-    if (!_is_tag_safe) {
-      throw std::runtime_error(
-          "Marking a node tag_safe_root when its not tag safe");
-    }
+    TORCH_CHECK(
+        _is_tag_safe, "Marking a node tag_safe_root when its not tag safe");
     _is_tag_safe_root = true;
   }
 
@@ -2777,7 +3006,7 @@ class GuardManager {
         _source(std::move(source)),
         _is_dict(is_dict),
         _is_immutable(is_immutable),
-        _weak_type(weak_type) {}
+        _weak_type(std::move(weak_type)) {}
 
   void clone_common(
       RootGuardManager* cloned_root,
@@ -3000,11 +3229,10 @@ class GuardManager {
     if (is_recording) {
       stop_recording_dict_pointers(_root, value, result);
       if (result) {
-        if (!register_weakref_callback(value)) {
-          // something bad happened, disable the dict tag optimization
-          throw std::runtime_error(
-              "Could not register a callback for recursive dict tag optimization");
-        }
+        // something bad happened, disable the dict tag optimization
+        TORCH_CHECK(
+            register_weakref_callback(value),
+            "Could not register a callback for recursive dict tag optimization");
 #if IS_PYTHON_3_12_PLUS
         // Ideally we don't need to even register a weakref callback for value.
         // But it does not hurt to be more cautious
@@ -3448,7 +3676,7 @@ class RootGuardManager : public GuardManager {
 
   void add_no_tensor_aliasing_guard(
       std::shared_ptr<RelationalGuard> no_tensor_aliasing_guard) {
-    // stash a pointer to the _no_tensor_alising_guard
+    // stash a pointer to the _no_tensor_aliasing_guard
     _no_tensor_aliasing_guard = no_tensor_aliasing_guard;
     this->add_relational_guard_resetter(std::move(no_tensor_aliasing_guard));
   }
@@ -3674,8 +3902,8 @@ class RootGuardManager : public GuardManager {
   }
 
   void record_dict_pointer(PyObject* dict_pointer) {
-    _recorded_dict_pointers.push_back(
-        std::make_pair(dict_pointer, get_dict_version_unchecked(dict_pointer)));
+    _recorded_dict_pointers.emplace_back(
+        dict_pointer, get_dict_version_unchecked(dict_pointer));
   }
 
   void record_tensor_pointer(PyObject* tensor_pointer) {
@@ -3923,7 +4151,10 @@ class DictGuardManager : public GuardManager {
     return GuardDebugInfo(true, num_guards_executed);
   }
 
-  void skip_adding_guard(const py::object& a, const py::object& b) {
+  void skip_adding_guard(
+      const py::object& a,
+      const py::object& b,
+      const py::object& c) {
     // The `add_leaf_guard` method in `DictGuardManager` is overridden to block
     // the addition of leaf guards. However, this is too strict. Python side of
     // guard management frequently adds TYPE_MATCH and DICT_LENGTH on
@@ -3937,14 +4168,14 @@ class DictGuardManager : public GuardManager {
       const py::object& a,
       const std::string& source,
       const py::object& b) {
-    throw std::runtime_error("Can not add an accessor to DictGuardManager");
+    TORCH_CHECK(false, "Can not add an accessor to DictGuardManager");
   }
 
   void add_leaf_guard(std::shared_ptr<LeafGuard> leaf_guard) override {
     // If you are calling this, you probably want to go through a key, value
     // child manager and then add a leaf guard on them. DictGuardManager already
     // has TYPE_MATCH and LENGTH_CHECK built in.
-    throw std::runtime_error("DictGuardManager does not support a leaf_guard");
+    TORCH_CHECK(false, "DictGuardManager does not support a leaf_guard");
   }
 
   // Debug helper - Returning raw pointers because we can't return unique_ptr
@@ -4189,8 +4420,12 @@ class TORCH_FUNCTION_MODE_STACK : public LeafGuard {
   TORCH_FUNCTION_MODE_STACK(
       RootGuardManager* root_guard_manager,
       const py::list& initial_stack,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {
     Py_ssize_t len = PyList_Size(initial_stack.ptr());
     for (Py_ssize_t idx = 0; idx < len; idx++) {
       PyObject* mode = PyList_GetItem(initial_stack.ptr(), idx); // borrowed ref
@@ -4239,8 +4474,12 @@ class DISPATCH_KEY_SET_MATCH : public LeafGuard {
   DISPATCH_KEY_SET_MATCH(
       RootGuardManager* root_guard_manager,
       py::object value,
-      py::object verbose_code_parts)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)) {
+      py::object verbose_code_parts,
+      py::object user_stack)
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)) {
     root_guard_manager->set_init_local_state_flag();
     c10::DispatchKeySet value_ = value.cast<c10::DispatchKeySet>();
     raw_repr = _root_guard_manager->_local_state.apply(value_).raw_repr();
@@ -4266,9 +4505,13 @@ class TENSOR_MATCH : public LeafGuard {
       py::object dynamic_dims_strides_py,
       py::object tensor_name,
       py::object verbose_code_parts,
+      py::object user_stack,
       py::object pytype,
       py::object dispatch_keys)
-      : LeafGuard(root_guard_manager, std::move(verbose_code_parts)),
+      : LeafGuard(
+            root_guard_manager,
+            std::move(verbose_code_parts),
+            std::move(user_stack)),
         _tensor_name(py::cast<std::string>(std::move(tensor_name))) {
     root_guard_manager->set_init_local_state_flag();
     PyObject* item = value.ptr();
@@ -4703,13 +4946,12 @@ class FrameLocalsGuardAccessor : public GuardAccessor {
   // NB: Intentional duplication between check_nopybind and
   // check_verbose_nopybind.
   bool check_nopybind(PyObject* obj, bool matches_dict_tag = false) override {
-    if (!PyDict_Check(obj)) {
-      // This should not cause guard failure.
-      // If this error is encountered, it probably means
-      // we did not convert FrameLocalsMapping to dict (using to_dict()).
-      throw std::runtime_error(
-          "FrameLocalsGuardAccessor check expected dict() input");
-    }
+    // This should not cause guard failure.
+    // If this error is encountered, it probably means
+    // we did not convert FrameLocalsMapping to dict (using to_dict()).
+    TORCH_CHECK_TYPE(
+        PyDict_Check(obj),
+        "FrameLocalsGuardAccessor check expected dict() input");
 
     if (matches_dict_tag && _is_immutable_object) {
       // immutable object and dict tag matches, we can skip the guard subtree.
@@ -5155,7 +5397,7 @@ class TensorPropertyGuardAccessor : public GuardAccessor {
     } else if (_prop == TensorProperty::STORAGE_OFFSET) {
       opt_value = tensor.sym_storage_offset().maybe_as_int();
     } else {
-      throw std::runtime_error("Unknown property");
+      TORCH_CHECK(false, "Unknown property");
     }
 
     if (!opt_value.has_value()) {
@@ -5554,6 +5796,11 @@ class GlobalsGuardAccessor : public GuardAccessor {
 
   std::string repr() const override {
     return "GlobalsGuardAccessor";
+  }
+
+  bool check_nopybind(FrameLocalsMapping* map, bool matches_dict_tag) override {
+    // Ensure that we don't construct the framelocals to dict here.
+    return _guard_manager->check_nopybind(_globals_dict);
   }
 
  public: // cloning functions
@@ -6328,11 +6575,12 @@ class PythonLambdaGuardAccessor : public GuardAccessor {
 void install_object_aliasing_guard(
     GuardManager* x,
     GuardManager* y,
-    py::object verbose_code_parts) {
+    py::object verbose_code_parts,
+    py::object user_stack) {
   // Adds tensor X is tensor Y guard. This is a an example of relational guard.
   // There is one guard object that is shared between two guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<OBJECT_ALIASING>(
-      x->get_root(), std::move(verbose_code_parts));
+      x->get_root(), std::move(verbose_code_parts), std::move(user_stack));
 
   // Register the resetter on the root guard manager, so that it can reset
   // the newly added relational guard when the guard eval fails.
@@ -6350,14 +6598,16 @@ void install_object_aliasing_guard(
 void install_no_tensor_aliasing_guard(
     const py::list& guard_managers,
     const py::list& tensor_names,
-    py::object verbose_code_parts) {
+    py::object verbose_code_parts,
+    py::object user_stack) {
   // Adds a guard that checks none of tensors alias. This is a an example of
   // relational guard. There is one guard object that is shared between multiple
   // guard managers.
   std::shared_ptr<RelationalGuard> guard = std::make_shared<NO_TENSOR_ALIASING>(
       py::cast<GuardManager*>(guard_managers[0])->get_root(),
       tensor_names,
-      std::move(verbose_code_parts));
+      std::move(verbose_code_parts),
+      std::move(user_stack));
 
   // Register the resetter on the root guard manager, so that it can reset
   // the newly added relational guard when the guard eval fails.
@@ -6377,7 +6627,8 @@ void install_symbolic_shape_guard(
     py::int_ nargs_float,
     py::int_ py_addr,
     py::object py_addr_keep_alive,
-    py::object verbose_code_parts) {
+    py::object verbose_code_parts,
+    py::object user_stack) {
   // Adds a guard that checks symbolic shapes. This is a an example of
   // relational guard. There is one guard object that is shared between
   // multiple guard managers.
@@ -6388,7 +6639,8 @@ void install_symbolic_shape_guard(
           std::move(nargs_float),
           std::move(py_addr),
           std::move(py_addr_keep_alive),
-          std::move(verbose_code_parts));
+          std::move(verbose_code_parts),
+          std::move(user_stack));
 
   // Register the resetter on the root guard manager, so that it can reset
   // the newly added relational guard when the guard eval fails.
@@ -6404,6 +6656,7 @@ void install_storage_overlapping_guard_with_checker(
     const std::shared_ptr<StorageOverlapChecker>& checker,
     const py::list& guard_managers,
     const py::object& verbose_code_parts,
+    const py::object& user_stack,
     bool overlapping) {
   if (guard_managers.empty()) {
     // If there are no GuardManagers, there's no need to create a
@@ -6416,7 +6669,8 @@ void install_storage_overlapping_guard_with_checker(
           py::cast<GuardManager*>(guard_managers[0])->get_root(),
           overlapping,
           checker,
-          verbose_code_parts);
+          verbose_code_parts,
+          user_stack);
   py::cast<GuardManager*>(guard_managers[0])
       ->get_root()
       ->add_relational_guard_resetter(guard);
@@ -6428,7 +6682,8 @@ void install_storage_overlapping_guard_with_checker(
 void install_storage_overlapping_guard(
     const py::list& overlapping_guard_managers,
     const py::list& non_overlapping_guard_managers,
-    const py::object& verbose_code_parts) {
+    const py::object& verbose_code_parts,
+    const py::object& user_stack) {
   // Create a single StorageOverlapChecker that will be shared amongst
   // the 2 STORAGE_OVERLAPPING guards below.
   std::shared_ptr<StorageOverlapChecker> checker =
@@ -6440,12 +6695,14 @@ void install_storage_overlapping_guard(
       checker,
       overlapping_guard_managers,
       verbose_code_parts,
+      user_stack,
       /* overlapping= */ true);
   // Create the non-overlapping storage guard.
   install_storage_overlapping_guard_with_checker(
       checker,
       non_overlapping_guard_managers,
       verbose_code_parts,
+      user_stack,
       /* overlapping= */ false);
 }
 
@@ -6493,12 +6750,9 @@ double profile_guard_manager(
 } // namespace
 
 static void* _torchinductor_pyobject_tensor_data_ptr(PyObject* obj) {
-  if (C10_UNLIKELY(
-          obj == nullptr ||
-          (!THPVariable_CheckExact(obj) && !THPVariable_Check(obj)))) {
-    throw std::runtime_error(
-        "_torchinductor_pyobject_tensor_data_ptr: non-tensor input");
-  }
+  TORCH_CHECK(
+      obj != nullptr && (THPVariable_CheckExact(obj) || THPVariable_Check(obj)),
+      "_torchinductor_pyobject_tensor_data_ptr: non-tensor input");
   return THPVariable_Unpack(obj).data_ptr();
 }
 
@@ -6592,68 +6846,74 @@ PyObject* torch_c_dynamo_guards_init() {
   py::class_<GuardDebugInfo, std::unique_ptr<GuardDebugInfo>>(
       py_m, "GuardDebugInfo")
       .def(py::init<bool, py::list, int>())
+      .def(py::init<bool, py::list, int, py::object>())
       .def("__str__", &GuardDebugInfo::to_string)
       .def_readonly("result", &GuardDebugInfo::result)
       .def_readonly("verbose_code_parts", &GuardDebugInfo::verbose_code_parts)
-      .def_readonly(
-          "num_guards_executed", &GuardDebugInfo::num_guards_executed);
+      .def_readonly("num_guards_executed", &GuardDebugInfo::num_guards_executed)
+      .def_readonly("user_stack", &GuardDebugInfo::user_stack);
 
   // Leaf Guards
   py::class_<LeafGuard, std::shared_ptr<LeafGuard>>(py_m, "LeafGuard")
       .def("verbose_code_parts", &LeafGuard::verbose_code_parts);
   py::class_<LAMBDA_GUARD, LeafGuard, std::shared_ptr<LAMBDA_GUARD>>(
       py_m, "LAMBDA_GUARD")
-      .def(py::init<RootGuardManager*, py::function, py::list>())
+      .def(py::init<RootGuardManager*, py::function, py::list, py::object>())
       .def("__call__", &LAMBDA_GUARD::check);
   py::class_<TYPE_MATCH, LeafGuard, std::shared_ptr<TYPE_MATCH>>(
       py_m, "TYPE_MATCH")
-      .def(py::init<RootGuardManager*, py::object, py::list>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &TYPE_MATCH::check);
   py::class_<ID_MATCH, LeafGuard, std::shared_ptr<ID_MATCH>>(py_m, "ID_MATCH")
-      .def(py::init<RootGuardManager*, py::object, py::list>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &ID_MATCH::check);
   py::class_<NONE_MATCH, LeafGuard, std::shared_ptr<NONE_MATCH>>(
       py_m, "NONE_MATCH")
-      .def(py::init<RootGuardManager*, py::list>())
+      .def(py::init<RootGuardManager*, py::list, py::object>())
       .def("__call__", &NONE_MATCH::check);
   py::class_<TRUE_MATCH, LeafGuard, std::shared_ptr<TRUE_MATCH>>(
       py_m, "TRUE_MATCH")
-      .def(py::init<RootGuardManager*, py::list>())
+      .def(py::init<RootGuardManager*, py::list, py::object>())
       .def("__call__", &TRUE_MATCH::check);
   py::class_<FALSE_MATCH, LeafGuard, std::shared_ptr<FALSE_MATCH>>(
       py_m, "FALSE_MATCH")
-      .def(py::init<RootGuardManager*, py::list>())
+      .def(py::init<RootGuardManager*, py::list, py::object>())
       .def("__call__", &FALSE_MATCH::check);
   py::class_<EQUALS_MATCH, LeafGuard, std::shared_ptr<EQUALS_MATCH>>(
       py_m, "EQUALS_MATCH")
-      .def(py::init<RootGuardManager*, py::object, py::list>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &EQUALS_MATCH::check);
   py::class_<LENGTH_CHECK, LeafGuard, std::shared_ptr<LENGTH_CHECK>>(
       py_m, "LENGTH_CHECK")
-      .def(py::init<RootGuardManager*, py::object, py::list>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &LENGTH_CHECK::check);
   py::class_<DICT_LENGTH, LeafGuard, std::shared_ptr<DICT_LENGTH>>(
       py_m, "DICT_LENGTH")
-      .def(py::init<RootGuardManager*, py::object, py::list>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &DICT_LENGTH::check);
   py::class_<DEFAULT_DEVICE, LeafGuard, std::shared_ptr<DEFAULT_DEVICE>>(
       py_m, "DEFAULT_DEVICE")
-      .def(py::init<RootGuardManager*, py::list>())
+      .def(py::init<RootGuardManager*, py::list, py::object>())
       .def("__call__", &DEFAULT_DEVICE::check);
   py::class_<NOT_NONE, LeafGuard, std::shared_ptr<NOT_NONE>>(py_m, "NOT_NONE")
-      .def(py::init<RootGuardManager*, py::list>())
+      .def(py::init<RootGuardManager*, py::list, py::object>())
       .def("__call__", &NOT_NONE::check);
   py::class_<
       MAPPING_KEYS_MATCH,
       LeafGuard,
       std::shared_ptr<MAPPING_KEYS_MATCH>>(py_m, "MAPPING_KEYS_MATCH")
-      .def(py::init<RootGuardManager*, py::object, py::list>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &MAPPING_KEYS_MATCH::check);
   py::class_<
       TUPLE_ITERATOR_LEN,
       LeafGuard,
       std::shared_ptr<TUPLE_ITERATOR_LEN>>(py_m, "TUPLE_ITERATOR_LEN")
-      .def(py::init<RootGuardManager*, py::object, py::object, py::list>())
+      .def(py::init<
+           RootGuardManager*,
+           py::object,
+           py::object,
+           py::list,
+           py::object>())
       .def("__call__", &TUPLE_ITERATOR_LEN::check);
   py::class_<
       RANGE_ITERATOR_MATCH,
@@ -6665,11 +6925,12 @@ PyObject* torch_c_dynamo_guards_init() {
            py::object,
            py::object,
            py::object,
-           py::list>())
+           py::list,
+           py::object>())
       .def("__call__", &RANGE_ITERATOR_MATCH::check);
   py::class_<GLOBAL_STATE, LeafGuard, std::shared_ptr<GLOBAL_STATE>>(
       py_m, "GLOBAL_STATE")
-      .def(py::init<RootGuardManager*, py::list>())
+      .def(py::init<RootGuardManager*, py::list, py::object>())
       .def("check_verbose", &GLOBAL_STATE::check_verbose)
       .def("__call__", &GLOBAL_STATE::check);
   py::class_<
@@ -6677,33 +6938,47 @@ PyObject* torch_c_dynamo_guards_init() {
       LeafGuard,
       std::shared_ptr<TORCH_FUNCTION_MODE_STACK>>(
       py_m, "TORCH_FUNCTION_MODE_STACK")
-      .def(py::init<RootGuardManager*, py::list, py::list>())
+      .def(py::init<RootGuardManager*, py::list, py::list, py::object>())
       .def("__call__", &TORCH_FUNCTION_MODE_STACK::check);
   py::class_<NO_HASATTR, LeafGuard, std::shared_ptr<NO_HASATTR>>(
       py_m, "NO_HASATTR")
-      .def(py::init<RootGuardManager*, py::object, py::list>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &NO_HASATTR::check);
   py::class_<DICT_CONTAINS, LeafGuard, std::shared_ptr<DICT_CONTAINS>>(
       py_m, "DICT_CONTAINS")
-      .def(py::init<RootGuardManager*, bool, py::object, py::list>())
+      .def(
+          py::init<RootGuardManager*, bool, py::object, py::list, py::object>())
       .def("__call__", &DICT_CONTAINS::check);
   py::class_<SET_CONTAINS, LeafGuard, std::shared_ptr<SET_CONTAINS>>(
       py_m, "SET_CONTAINS")
-      .def(py::init<RootGuardManager*, bool, py::object, py::list>())
+      .def(
+          py::init<RootGuardManager*, bool, py::object, py::list, py::object>())
       .def("__call__", &SET_CONTAINS::check);
+  py::class_<DUAL_LEVEL_MATCH, LeafGuard, std::shared_ptr<DUAL_LEVEL_MATCH>>(
+      py_m, "DUAL_LEVEL_MATCH")
+      .def(py::init<RootGuardManager*, int64_t, py::list, py::object>())
+      .def("__call__", &DUAL_LEVEL_MATCH::check);
+  py::class_<FLOAT_IS_NAN, LeafGuard, std::shared_ptr<FLOAT_IS_NAN>>(
+      py_m, "FLOAT_IS_NAN")
+      .def(py::init<RootGuardManager*, py::list, py::object>())
+      .def("__call__", &FLOAT_IS_NAN::check);
+  py::class_<COMPLEX_IS_NAN, LeafGuard, std::shared_ptr<COMPLEX_IS_NAN>>(
+      py_m, "COMPLEX_IS_NAN")
+      .def(py::init<RootGuardManager*, py::list, py::object>())
+      .def("__call__", &COMPLEX_IS_NAN::check);
   py::class_<DYNAMIC_INDICES, LeafGuard, std::shared_ptr<DYNAMIC_INDICES>>(
       py_m, "DYNAMIC_INDICES")
-      .def(py::init<RootGuardManager*, py::set, py::list>())
+      .def(py::init<RootGuardManager*, py::set, py::list, py::object>())
       .def("__call__", &DYNAMIC_INDICES::check);
   py::class_<DICT_VERSION, LeafGuard, std::shared_ptr<DICT_VERSION>>(
       py_m, "DICT_VERSION")
-      .def(py::init<RootGuardManager*, py::object, py::list>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &DICT_VERSION::check);
   py::class_<
       DISPATCH_KEY_SET_MATCH,
       LeafGuard,
       std::shared_ptr<DISPATCH_KEY_SET_MATCH>>(py_m, "DISPATCH_KEY_SET_MATCH")
-      .def(py::init<RootGuardManager*, py::object, py::list>())
+      .def(py::init<RootGuardManager*, py::object, py::list, py::object>())
       .def("__call__", &DISPATCH_KEY_SET_MATCH::check);
   py::class_<TENSOR_MATCH, LeafGuard, std::shared_ptr<TENSOR_MATCH>>(
       py_m, "TENSOR_MATCH")
@@ -6714,6 +6989,7 @@ PyObject* torch_c_dynamo_guards_init() {
            py::object,
            py::str,
            py::list,
+           py::object,
            py::type,
            py::object>())
       .def("__call__", &TENSOR_MATCH::check);
@@ -6901,100 +7177,126 @@ PyObject* torch_c_dynamo_guards_init() {
           "add_lambda_guard",
           [](GuardManager& self,
              py::object lambda,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<LAMBDA_GUARD>(
                 self.get_root(),
                 std::move(lambda),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_type_match_guard",
           [](GuardManager& self,
              py::object value,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("TYPE_MATCH");
             self.add_leaf_guard(std::make_shared<TYPE_MATCH>(
                 self.get_root(),
                 std::move(value),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_id_match_guard",
           [](GuardManager& self,
              py::object value,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("ID_MATCH");
             self.add_leaf_guard(std::make_shared<ID_MATCH>(
                 self.get_root(),
                 std::move(value),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_none_match_guard",
-          [](GuardManager& self, py::object verbose_code_parts) -> void {
+          [](GuardManager& self,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("NONE_MATCH");
             self.add_leaf_guard(std::make_shared<NONE_MATCH>(
-                self.get_root(), std::move(verbose_code_parts)));
+                self.get_root(),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_true_match_guard",
-          [](GuardManager& self, py::object verbose_code_parts) -> void {
+          [](GuardManager& self,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("TRUE_MATCH");
             self.add_leaf_guard(std::make_shared<TRUE_MATCH>(
-                self.get_root(), std::move(verbose_code_parts)));
+                self.get_root(),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_false_match_guard",
-          [](GuardManager& self, py::object verbose_code_parts) -> void {
+          [](GuardManager& self,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("FALSE_MATCH");
             self.add_leaf_guard(std::make_shared<FALSE_MATCH>(
-                self.get_root(), std::move(verbose_code_parts)));
+                self.get_root(),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_equals_match_guard",
           [](GuardManager& self,
              py::object value,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("EQUALS_MATCH");
             self.add_leaf_guard(std::make_shared<EQUALS_MATCH>(
                 self.get_root(),
                 std::move(value),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_length_check_guard",
           [](GuardManager& self,
              py::object value,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("LENGTH_CHECK");
             self.add_leaf_guard(std::make_shared<LENGTH_CHECK>(
                 self.get_root(),
                 std::move(value),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_dict_length_check_guard",
           [](GuardManager& self,
              py::object value,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("DICT_LENGTH");
             self.add_leaf_guard(std::make_shared<DICT_LENGTH>(
                 self.get_root(),
                 std::move(value),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_tuple_iterator_length_guard",
           [](GuardManager& self,
              py::object length,
              py::object type_id,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("TUPLE_ITERATOR_LEN");
             self.add_leaf_guard(std::make_shared<TUPLE_ITERATOR_LEN>(
                 self.get_root(),
                 std::move(length),
                 std::move(type_id),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_range_iterator_match_guard",
@@ -7003,7 +7305,8 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object stop,
              py::object step,
              py::object type_id,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("RANGE_ITERATOR_MATCH");
             self.add_leaf_guard(std::make_shared<RANGE_ITERATOR_MATCH>(
                 self.get_root(),
@@ -7011,115 +7314,176 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(stop),
                 std::move(step),
                 std::move(type_id),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_default_device_guard",
-          [](GuardManager& self, py::object verbose_code_parts) -> void {
+          [](GuardManager& self,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<DEFAULT_DEVICE>(
-                self.get_root(), std::move(verbose_code_parts)));
+                self.get_root(),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_not_none_guard",
-          [](GuardManager& self, py::object verbose_code_parts) -> void {
+          [](GuardManager& self,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("NOT_NONE");
             self.add_leaf_guard(std::make_shared<NOT_NONE>(
-                self.get_root(), std::move(verbose_code_parts)));
+                self.get_root(),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_mapping_keys_guard",
           [](GuardManager& self,
              py::object value,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("MAPPING_KEYS_MATCH");
             self.add_leaf_guard(std::make_shared<MAPPING_KEYS_MATCH>(
                 self.get_root(),
                 std::move(value),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_dispatch_key_set_guard",
           [](GuardManager& self,
              py::object value,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("DISPATCH_KEY_SET_MATCH");
             self.add_leaf_guard(std::make_shared<DISPATCH_KEY_SET_MATCH>(
                 self.get_root(),
                 std::move(value),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_global_state_guard",
           [](GuardManager& self,
              py::object initial_state,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<GLOBAL_STATE>(
                 self.get_root(),
                 std::move(initial_state),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_torch_function_mode_stack_guard",
           [](GuardManager& self,
              const py::list& initial_stack,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<TORCH_FUNCTION_MODE_STACK>(
-                self.get_root(), initial_stack, std::move(verbose_code_parts)));
+                self.get_root(),
+                initial_stack,
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_no_hasattr_guard",
           [](GuardManager& self,
              py::object attr_name,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<NO_HASATTR>(
                 self.get_root(),
                 std::move(attr_name),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_dict_contains_guard",
           [](GuardManager& self,
              bool contains,
              py::object key,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<DICT_CONTAINS>(
                 self.get_root(),
                 contains,
                 std::move(key),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_set_contains_guard",
           [](GuardManager& self,
              bool contains,
              py::object item,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<SET_CONTAINS>(
                 self.get_root(),
                 contains,
                 std::move(item),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_dual_level_match_guard",
+          [](GuardManager& self,
+             int64_t level,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            self.add_leaf_guard(std::make_shared<DUAL_LEVEL_MATCH>(
+                self.get_root(),
+                level,
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_float_is_nan_guard",
+          [](GuardManager& self,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            self.add_leaf_guard(std::make_shared<FLOAT_IS_NAN>(
+                self.get_root(),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
+          })
+      .def(
+          "add_complex_is_nan_guard",
+          [](GuardManager& self,
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
+            self.add_leaf_guard(std::make_shared<COMPLEX_IS_NAN>(
+                self.get_root(),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_dynamic_indices_guard",
           [](GuardManager& self,
              py::set value,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             self.add_leaf_guard(std::make_shared<DYNAMIC_INDICES>(
                 self.get_root(),
                 std::move(value),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_dict_version_guard",
           [](GuardManager& self,
              py::object value,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("DICT_VERSION");
             self.add_leaf_guard(std::make_shared<DICT_VERSION>(
                 self.get_root(),
                 std::move(value),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_tensor_match_guard",
@@ -7129,6 +7493,7 @@ PyObject* torch_c_dynamo_guards_init() {
              py::object strides,
              py::object tensor_name,
              py::object verbose_code_parts,
+             py::object user_stack,
              py::object pytype,
              py::object dispatch_keys) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("TENSOR_MATCH");
@@ -7139,6 +7504,7 @@ PyObject* torch_c_dynamo_guards_init() {
                 std::move(strides),
                 std::move(tensor_name),
                 std::move(verbose_code_parts),
+                std::move(user_stack),
                 std::move(pytype),
                 std::move(dispatch_keys)));
           })
@@ -7547,9 +7913,13 @@ PyObject* torch_c_dynamo_guards_init() {
           "add_epilogue_lambda_guard",
           [](RootGuardManager& self,
              py::object lambda,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             self.add_epilogue_lambda_guard(std::make_unique<LAMBDA_GUARD>(
-                &self, std::move(lambda), std::move(verbose_code_parts)));
+                &self,
+                std::move(lambda),
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           });
 
   // Dict Guard Manager
@@ -7610,33 +7980,39 @@ PyObject* torch_c_dynamo_guards_init() {
           [](DictGuardManager& self,
              bool contains,
              py::object key,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             self.add_permitted_leaf_guard(std::make_shared<DICT_CONTAINS>(
                 self.get_root(),
                 contains,
                 std::move(key),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_dict_version_guard",
           [](DictGuardManager& self,
              py::object value,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             SKIP_IF_GUARD_ALREADY_PRESENT("DICT_VERSION");
             self.add_permitted_leaf_guard(std::make_shared<DICT_VERSION>(
                 self.get_root(),
                 std::move(value),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       .def(
           "add_no_hasattr_guard",
           [](DictGuardManager& self,
              py::object attr_name,
-             py::object verbose_code_parts) -> void {
+             py::object verbose_code_parts,
+             py::object user_stack) -> void {
             self.add_permitted_leaf_guard(std::make_shared<NO_HASATTR>(
                 self.get_root(),
                 std::move(attr_name),
-                std::move(verbose_code_parts)));
+                std::move(verbose_code_parts),
+                std::move(user_stack)));
           })
       // Not permitted accessors
       .def("lambda_manager", &DictGuardManager::fail_on_get_child_manager)
@@ -7660,10 +8036,9 @@ PyObject* torch_c_dynamo_guards_init() {
              std::string source,
              py::handle example_value,
              py::handle guard_manager_enum) -> GuardManager* {
-            if (self.is_exact_dict_type()) {
-              throw std::runtime_error(
-                  "getattr_manager on a DictGuardManager is supported only for dict subclasses");
-            }
+            TORCH_CHECK(
+                !self.is_exact_dict_type(),
+                "getattr_manager on a DictGuardManager is supported only for dict subclasses");
             return self.get_child_manager<GetAttrGuardAccessor>(
                 std::move(attr_name),
                 std::move(source),
@@ -7701,18 +8076,22 @@ PyObject* torch_c_dynamo_guards_init() {
 #if IS_PYTHON_3_12_PLUS
 
   dict_version_watcher_id = PyDict_AddWatcher(dict_version_watch_callback);
-  if (dict_version_watcher_id == -1) {
-    throw std::runtime_error("Failed to install dict_version_watch_callback");
-  }
+  TORCH_CHECK(
+      dict_version_watcher_id != -1,
+      "Failed to install dict_version_watch_callback");
 
   dict_recursive_tag_watcher_id =
       PyDict_AddWatcher(dict_recursive_tag_watch_callback);
-  if (dict_recursive_tag_watcher_id == -1) {
-    throw std::runtime_error(
-        "Failed to install dict_recursive_tag_watch_callback");
-  }
+  TORCH_CHECK(
+      dict_recursive_tag_watcher_id != -1,
+      "Failed to install dict_recursive_tag_watch_callback");
 
 #endif
+
+  py_m.def(
+      "set_is_in_mode_without_ignore_compile_internals",
+      &set_is_in_mode_without_ignore_compile_internals,
+      "Set the thread-local cache for whether we're in a mode with ignore_compile_internals=False");
 
   return m;
 }

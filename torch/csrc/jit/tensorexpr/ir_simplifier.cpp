@@ -885,7 +885,7 @@ ExprPtr PolynomialTransformer::insertIntoTerm(
   bool merged{false};
   for (const auto& component : term->variables()) {
     if (auto roundoff = isRoundOff(component, expr)) {
-      vars.push_back(roundoff);
+      vars.push_back(std::move(roundoff));
       merged = true;
     } else {
       vars.push_back(component);
@@ -897,10 +897,10 @@ ExprPtr PolynomialTransformer::insertIntoTerm(
   }
 
   if (vars.size() == 1 && immediateEquals(term->scalar(), 1)) {
-    return vars[0];
+    return std::move(vars[0]);
   }
 
-  return alloc<Term>(hasher_, term->scalar(), vars);
+  return alloc<Term>(hasher_, term->scalar(), std::move(vars));
 }
 
 ExprPtr PolynomialTransformer::mutate(const MulPtr& v) {
@@ -3079,7 +3079,7 @@ bool exprEquals(const ExprPtr& A, const ExprPtr& B) {
       return false;
     }
     return immediateEquals(diff, 0);
-  } catch (std::exception& e) {
+  } catch (std::exception&) {
     return false;
   }
 }

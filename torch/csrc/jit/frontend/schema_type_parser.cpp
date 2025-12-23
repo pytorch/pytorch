@@ -8,6 +8,7 @@
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/custom_class.h>
 #include <string>
+#include <unordered_set>
 
 using c10::AliasInfo;
 using c10::AwaitType;
@@ -33,6 +34,7 @@ using c10::StorageType;
 using c10::StreamObjType;
 using c10::StringType;
 using c10::Symbol;
+using c10::SymBoolType;
 using c10::SymIntType;
 using c10::TensorType;
 using c10::TupleType;
@@ -40,6 +42,25 @@ using c10::UnionType;
 using c10::VarType;
 
 namespace torch::jit {
+
+static std::unordered_set<std::string>& getOpaqueTypes() {
+  static std::unordered_set<std::string> global_opaque_types;
+  return global_opaque_types;
+}
+
+void registerOpaqueType(const std::string& type_name) {
+  auto& global_opaque_types = getOpaqueTypes();
+  auto [_, inserted] = global_opaque_types.insert(type_name);
+  if (!inserted) {
+    throw std::runtime_error(
+        "Type '" + type_name + "' is already registered as an opaque type");
+  }
+}
+
+bool isRegisteredOpaqueType(const std::string& type_name) {
+  auto& global_opaque_types = getOpaqueTypes();
+  return global_opaque_types.find(type_name) != global_opaque_types.end();
+}
 
 TypePtr SchemaTypeParser::parseBaseType() {
   static std::unordered_map<std::string, TypePtr> type_map = {
@@ -66,6 +87,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"int", c10::TypeFactory::get<IntType>()},
       {"SymInt", c10::TypeFactory::get<SymIntType>()},
       {"bool", c10::TypeFactory::get<BoolType>()},
+      {"SymBool", c10::TypeFactory::get<SymBoolType>()},
       {"None", c10::TypeFactory::get<NoneType>()},
       {"NoneType", c10::TypeFactory::get<NoneType>()},
       {"Capsule", c10::TypeFactory::get<CapsuleType>()},
@@ -78,6 +100,19 @@ TypePtr SchemaTypeParser::parseBaseType() {
     L.expect(TK_IDENT);
   }
   std::string text = tok.text();
+
+  // Check if this might be a dotted identifier (for opaque types)
+  // Keep consuming '.' + IDENT sequences to build fully qualified names
+  while (L.cur().kind == '.' && L.lookahead().kind == TK_IDENT) {
+    L.next(); // consume '.'
+    auto ident_tok = L.expect(TK_IDENT);
+    text += "." + ident_tok.text();
+  }
+
+  // Check if this type is registered as an opaque type first
+  if (isRegisteredOpaqueType(text)) {
+    return c10::PyObjectType::get();
+  }
 
   auto it = type_map.find(text);
   if (it == type_map.end()) {

@@ -1,6 +1,11 @@
 #ifndef C10_MACROS_MACROS_H_
 #define C10_MACROS_MACROS_H_
+
+#ifdef __cplusplus
 #include <cassert>
+#else
+#include <assert.h>
+#endif
 
 /* Main entry for torch/headeronly/macros (used to be c10/macros).
  *
@@ -139,6 +144,8 @@
 
 #define C10_RESTRICT __restrict
 
+#ifdef __cplusplus
+
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {}
@@ -175,6 +182,8 @@ using namespace c10::hip;
 namespace at::xpu {
 using namespace c10::xpu;
 } // namespace at::xpu
+
+#endif // __cplusplus
 
 // C10_LIKELY/C10_UNLIKELY
 //
@@ -236,7 +245,11 @@ using namespace c10::xpu;
 
 #define C10_ERASE C10_ALWAYS_INLINE C10_ATTR_VISIBILITY_HIDDEN
 
+#ifdef __cplusplus
 #include <cstdint>
+#else
+#include <stdint.h>
+#endif
 
 #ifdef __HIPCC__
 // Unlike CUDA, HIP requires a HIP header to be included for __host__ to work.
@@ -359,6 +372,7 @@ static inline int C10_WARP_SIZE_INTERNAL() {
 // Those platforms do not support assert()
 #define CUDA_KERNEL_ASSERT(cond)
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg)
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)
 #define SYCL_KERNEL_ASSERT(cond)
 #elif defined(_MSC_VER)
 #if defined(NDEBUG)
@@ -395,6 +409,26 @@ __host__ __device__
                _CRT_WIDE(__FILE__),              \
                static_cast<unsigned>(__LINE__)), \
            0);                                   \
+  }
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                     \
+  if (C10_UNLIKELY(!(cond))) {                                        \
+    (void)(printf(                                                    \
+        "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(           \
+            __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: " \
+                      "Assertion failed: `" #cond "`: " msg "\n",     \
+        __func__,                                                     \
+        blockIdx.x,                                                   \
+        blockIdx.y,                                                   \
+        blockIdx.z,                                                   \
+        threadIdx.x,                                                  \
+        threadIdx.y,                                                  \
+        threadIdx.z,                                                  \
+        ##__VA_ARGS__));                                              \
+    (void)(_wassert(                                                  \
+               _CRT_WIDE(#cond),                                      \
+               _CRT_WIDE(__FILE__),                                   \
+               static_cast<unsigned>(__LINE__)),                      \
+           0);                                                        \
   }
 #define SYCL_KERNEL_ASSERT(cond)                 \
   if (C10_UNLIKELY(!(cond))) {                   \
@@ -446,7 +480,7 @@ __host__ __device__
 // a non-negligible performance impact even if the assert condition is
 // never triggered. We choose to use abort() instead which will still
 // terminate the application but without a more useful error message.
-#if !defined(C10_USE_ROCM_KERNEL_ASSERT) and defined(USE_ROCM)
+#if !defined(C10_USE_ROCM_KERNEL_ASSERT) && defined(USE_ROCM)
 #define CUDA_KERNEL_ASSERT(cond) \
   if C10_UNLIKELY (!(cond)) {    \
     abort();                     \
@@ -454,6 +488,10 @@ __host__ __device__
 #define CUDA_KERNEL_ASSERT_MSG(cond, msg) \
   if C10_UNLIKELY (!(cond)) {             \
     abort();                              \
+  }
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...) \
+  if C10_UNLIKELY (!(cond)) {                     \
+    abort();                                      \
   }
 #define SYCL_KERNEL_ASSERT(cond) \
   if C10_UNLIKELY (!(cond)) {    \
@@ -470,13 +508,42 @@ __host__ __device__
     __assert_fail(                                                     \
         msg, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
+#define CUDA_KERNEL_ASSERT_PRINTF(cond, msg, ...)                        \
+  if (C10_UNLIKELY(!(cond))) {                                           \
+    printf(                                                            \
+        "[CUDA_KERNEL_ASSERT] " __FILE__ ":" C10_STRINGIZE(            \
+            __LINE__) ": %s: block: [%d,%d,%d], thread: [%d,%d,%d]: "  \
+            "Assertion failed: `" #cond "`: " msg "\n",                \
+        __func__,                                                      \
+        blockIdx.x,                                                    \
+        blockIdx.y,                                                    \
+        blockIdx.z,                                                    \
+        threadIdx.x,                                                   \
+        threadIdx.y,                                                   \
+        threadIdx.z,                                                   \
+        ##__VA_ARGS__); \
+    __assert_fail(                                                       \
+        #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
+  }
 #define SYCL_KERNEL_ASSERT(cond)                                         \
   if (C10_UNLIKELY(!(cond))) {                                           \
     __assert_fail(                                                       \
         #cond, __FILE__, static_cast<unsigned int>(__LINE__), __func__); \
   }
-#endif //  C10_USE_ROCM_KERNEL_ASSERT and USE_ROCM
+#endif //  C10_USE_ROCM_KERNEL_ASSERT && USE_ROCM
 #endif // __APPLE__
+
+// Compile-time switch to control how assertions are logged inside CUDA kernels.
+// If C10_CUDA_VERBOSE_ASSERT is defined,  CUDA_KERNEL_ASSERT_VERBOSE will
+// take addition information passed to the macro and forward them to
+// CUDA_KERNEL_ASSERT_PRINTF If C10_CUDA_VERBOSE_ASSERT is not defined,
+// CUDA_KERNEL_ASSERT_VERBOSE will behave the same as CUDA_KERNEL_ASSERT.
+#ifdef C10_ENABLE_VERBOSE_ASSERT
+#define CUDA_KERNEL_ASSERT_VERBOSE(cond, ...) \
+  CUDA_KERNEL_ASSERT_PRINTF(cond, __VA_ARGS__)
+#else
+#define CUDA_KERNEL_ASSERT_VERBOSE(cond, ...) CUDA_KERNEL_ASSERT(cond)
+#endif
 
 #ifdef __APPLE__
 #include <TargetConditionals.h>
@@ -567,6 +634,61 @@ __host__ __device__
 #define C10_RETURN_MOVE_IF_OLD_COMPILER 1
 #else
 #define C10_RETURN_MOVE_IF_OLD_COMPILER 0
+#endif
+
+// The HIDDEN_NAMESPACE_BEGIN and HIDDEN_NAMESPACE_END below
+// are needed for maintaining robustness in our header APIs in
+// torch/headeronly and torch/csrc/stable under the namespaces
+// torch::headeronly and torch::stable respectively. We enforce
+// hidden visibility for these APIs because we want to enable
+// loading custom extensions compiled against different libtorch
+// versions where these APIs may have changed.
+
+// Helper macros to handle 1-3 hidden namespace levels when not windows
+#define _HIDDEN_NS_GET_MACRO(_1, _2, _3, NAME, ...) NAME
+#define _HIDDEN_NS_1(n1) namespace n1 __attribute__((visibility("hidden"))) {
+#define _HIDDEN_NS_2(n1, n2) \
+  namespace n1 {             \
+  namespace n2 __attribute__((visibility("hidden"))) {
+#define _HIDDEN_NS_3(n1, n2, n3) \
+  namespace n1::n2 {             \
+  namespace n3 __attribute__((visibility("hidden"))) {
+
+// Helper macros to close namespaces when not windows
+#define _HIDDEN_NS_END_1(n1) }
+#define _HIDDEN_NS_END_N(n1, ...) \
+  }                               \
+  }
+
+// Helper macros to join strs with :: (for win, where symbols are hidden by
+// default)
+#define _EXPAND(...) __VA_ARGS__
+#define _JOIN_GET_MACRO(_1, _2, _3, NAME, ...) NAME
+#define _JOIN_NS1(a) a
+#define _JOIN_NS2(a, b) a::b
+#define _JOIN_NS3(a, b, c) a::b::c
+
+#if !defined(HIDDEN_NAMESPACE_BEGIN)
+#if defined(__GNUG__) && !defined(_WIN32)
+#define HIDDEN_NAMESPACE_BEGIN(...) \
+  _HIDDEN_NS_GET_MACRO(             \
+      __VA_ARGS__, _HIDDEN_NS_3, _HIDDEN_NS_2, _HIDDEN_NS_1)(__VA_ARGS__)
+#else
+#define HIDDEN_NAMESPACE_BEGIN(...)  \
+  namespace _EXPAND(_JOIN_GET_MACRO( \
+      __VA_ARGS__, _JOIN_NS3, _JOIN_NS2, _JOIN_NS1)(__VA_ARGS__)) {
+#endif
+#endif
+
+#if !defined(HIDDEN_NAMESPACE_END)
+#if defined(__GNUG__) && !defined(_WIN32)
+#define HIDDEN_NAMESPACE_END(...)                                         \
+  _HIDDEN_NS_GET_MACRO(                                                   \
+      __VA_ARGS__, _HIDDEN_NS_END_N, _HIDDEN_NS_END_N, _HIDDEN_NS_END_1)( \
+      __VA_ARGS__)
+#else
+#define HIDDEN_NAMESPACE_END(...) }
+#endif
 #endif
 
 #endif // C10_MACROS_MACROS_H_

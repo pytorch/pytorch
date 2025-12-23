@@ -156,6 +156,10 @@
 #   USE_ROCM_KERNEL_ASSERT=1
 #     Enable kernel assert in ROCm platform
 #
+#   USE_LAYERNORM_FAST_RECIPROCAL
+#     If set, enables the use of builtin functions for fast reciprocals (1/x) w.r.t.
+#     layer normalization. Default: enabled.
+#
 #   USE_ROCM_CK_GEMM=1
 #     Enable building CK GEMM backend in ROCm platform
 #
@@ -225,10 +229,7 @@
 #
 #   USE_MIMALLOC
 #      Static link mimalloc into C10, and use mimalloc in alloc_cpu & alloc_free.
-#      By default, It is only enabled on Windows.
-#
-#   USE_PRIORITIZED_TEXT_FOR_LD
-#      Uses prioritized text form cmake/prioritized_text.txt for LD
+#      By default, It is only enabled on Windows and AArch64.
 #
 #   BUILD_LIBTORCH_WHL
 #      Builds libtorch.so and its dependencies as a wheel
@@ -259,7 +260,7 @@ import platform
 
 
 # Also update `project.requires-python` in pyproject.toml when changing this
-python_min_version = (3, 9, 0)
+python_min_version = (3, 10, 0)
 python_min_version_str = ".".join(map(str, python_min_version))
 if sys.version_info < python_min_version:
     print(
@@ -323,8 +324,6 @@ from tools.setup_helpers.env import (
     IS_LINUX,
     IS_WINDOWS,
 )
-from tools.setup_helpers.generate_linker_script import gen_linker_script
-from tools.setup_helpers.rocm_env import get_ck_dependency_string, IS_ROCM
 
 
 def str2bool(value: str | None) -> bool:
@@ -386,12 +385,6 @@ def _get_package_path(package_name: str) -> Path:
 
 BUILD_LIBTORCH_WHL = str2bool(os.getenv("BUILD_LIBTORCH_WHL"))
 BUILD_PYTHON_ONLY = str2bool(os.getenv("BUILD_PYTHON_ONLY"))
-
-# set up appropriate env variables
-if BUILD_LIBTORCH_WHL:
-    # Set up environment variables for ONLY building libtorch.so and not libtorch_python.so
-    # functorch is not supported without python
-    os.environ["BUILD_FUNCTORCH"] = "OFF"
 
 if BUILD_PYTHON_ONLY:
     os.environ["BUILD_LIBTORCHLESS"] = "ON"
@@ -506,6 +499,7 @@ else:
     CMAKE_PYTHON_LIBRARY = Path(
         sysconfig.get_config_var("LIBDIR")
     ) / sysconfig.get_config_var("INSTSONAME")
+
 
 ################################################################################
 # Version, create_version_file, and package_name
@@ -634,6 +628,47 @@ def mirror_files_into_torchgen() -> None:
             shutil.copytree(orig_path, new_path)
             continue
         raise RuntimeError("Check the file paths in `mirror_files_into_torchgen()`")
+
+
+def mirror_inductor_external_kernels() -> None:
+    """
+    Copy external kernels into Inductor so they are importable.
+    """
+    cuda_is_disabled = not str2bool(os.getenv("USE_CUDA"))
+    paths = [
+        (
+            CWD / "torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py",
+            CWD
+            / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
+            True,
+        ),
+    ]
+    for new_path, orig_path, allow_missing_if_cuda_is_disabled in paths:
+        # Create the dirs involved in new_path if they don't exist
+        if not new_path.exists():
+            new_path.parent.mkdir(parents=True, exist_ok=True)
+            # Add `__init__.py` for find_packages to see `new_path.parent` as a submodule
+            (new_path.parent / "__init__.py").touch(exist_ok=True)
+
+        # Copy the files from the orig location to the new location
+        if orig_path.is_file():
+            shutil.copyfile(orig_path, new_path)
+            continue
+        if orig_path.is_dir():
+            if new_path.exists():
+                # copytree fails if the tree exists already, so remove it.
+                shutil.rmtree(new_path)
+            shutil.copytree(orig_path, new_path)
+            continue
+        if (
+            not orig_path.exists()
+            and allow_missing_if_cuda_is_disabled
+            and cuda_is_disabled
+        ):
+            continue
+        raise RuntimeError(
+            "Check the file paths in `mirror_inductor_external_kernels()`"
+        )
 
 
 # ATTENTION: THIS IS AI SLOP
@@ -1064,6 +1099,60 @@ def check_pydep(importname: str, module: str) -> None:
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
+    def _wrap_headers_with_macro(self, include_dir: Path) -> None:
+        """Wrap all header files with #if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION).
+
+        Excludes:
+        - torch/headeronly/*
+        - torch/csrc/stable/*
+        - torch/csrc/inductor/aoti_torch/c/ (only shim headers)
+        - torch/csrc/inductor/aoti_torch/generated/
+
+        This method is idempotent - it will not wrap headers that are already wrapped.
+        """
+        header_extensions = (".h", ".hpp", ".cuh")
+        header_files = [
+            f for ext in header_extensions for f in include_dir.rglob(f"*{ext}")
+        ]
+
+        # Paths to exclude from wrapping (relative to include_dir)
+        exclude_dir_patterns = [
+            "torch/headeronly/",
+            "torch/csrc/stable/",
+            "torch/csrc/inductor/aoti_torch/c/",
+            "torch/csrc/inductor/aoti_torch/generated/",
+        ]
+
+        # Marker to detect if a header is already wrapped
+        wrap_start_marker = (
+            "#if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
+        )
+
+        for header_file in header_files:
+            rel_path = header_file.relative_to(include_dir).as_posix()
+
+            if any(rel_path.startswith(pattern) for pattern in exclude_dir_patterns):
+                report(f"Skipping header: {rel_path}")
+                continue
+
+            original_content = header_file.read_text(encoding="utf-8")
+
+            # Check if already wrapped (idempotency check)
+            if original_content.startswith(wrap_start_marker):
+                report(f"Already wrapped, skipping: {rel_path}")
+                continue
+
+            wrapped_content = (
+                wrap_start_marker
+                + f"{original_content}"
+                + "\n#else\n"
+                + '#error "This file should not be included when either TORCH_STABLE_ONLY or TORCH_TARGET_VERSION is defined."\n'
+                + "#endif  // !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
+            )
+
+            header_file.write_text(wrapped_content, encoding="utf-8")
+            report(f"Wrapped header: {rel_path}")
+
     def _embed_libomp(self) -> None:
         # Copy libiomp5.dylib/libomp.dylib inside the wheel package on MacOS
         build_lib = Path(self.build_lib)
@@ -1112,7 +1201,7 @@ class build_ext(setuptools.command.build_ext.build_ext):
                 continue
             self.copy_file(source_lib, target_lib)
             # Delete old rpath and add @loader_lib to the rpath
-            # This should prevent delocate from attempting to package another instance
+            # This should prevent deallocate from attempting to package another instance
             # of OpenMP library in torch wheel as well as loading two libomp.dylib into
             # the address space, as libraries are cached by their unresolved names
             install_name_tool_args = [
@@ -1231,6 +1320,15 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
         super().run()
 
+        # Wrap headers with TORCH_STABLE_ONLY and TORCH_TARGET_VERSION guards
+        build_lib = Path(self.build_lib)
+        build_torch_include_dir = build_lib / "torch" / "include"
+        if build_torch_include_dir.exists():
+            report(
+                "-- Wrapping header files with if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)"
+            )
+            self._wrap_headers_with_macro(build_torch_include_dir)
+
         if IS_DARWIN:
             self._embed_libomp()
 
@@ -1253,21 +1351,6 @@ class build_ext(setuptools.command.build_ext.build_ext):
 
     def build_extensions(self) -> None:
         self.create_compile_commands()
-
-        build_lib = Path(self.build_lib).resolve()
-
-        # Copy functorch extension
-        for ext in self.extensions:
-            if ext.name != "functorch._C":
-                continue
-            fullname = self.get_ext_fullname(ext.name)
-            filename = Path(self.get_ext_filename(fullname))
-            src = filename.with_stem("functorch")
-            dst = build_lib / filename
-            if src.exists():
-                report(f"Copying {ext.name} from {src} to {dst}")
-                dst.parent.mkdir(parents=True, exist_ok=True)
-                self.copy_file(src, dst)
 
         super().build_extensions()
 
@@ -1494,12 +1577,6 @@ def configure_extension_build() -> tuple[
             map(str.strip, pytorch_extra_install_requires.split("|"))
         )
 
-    # Adding extra requirements for ROCm builds
-    if IS_ROCM and platform.system() == "Linux":
-        extra_install_requires.append(
-            f"rocm-composable-kernel {get_ck_dependency_string()}"
-        )
-
     # Cross-compile for M1
     if IS_DARWIN:
         macos_target_arch = os.getenv("CMAKE_OSX_ARCHITECTURES", "")
@@ -1562,11 +1639,6 @@ def configure_extension_build() -> tuple[
     )
     ext_modules.append(C)
 
-    # These extensions are built by cmake and copied manually in build_extensions()
-    # inside the build_ext implementation
-    if cmake_cache_vars["BUILD_FUNCTORCH"]:
-        ext_modules.append(Extension(name="functorch._C", sources=[]))
-
     cmdclass = {
         "bdist_wheel": bdist_wheel,
         "build_ext": build_ext,
@@ -1586,7 +1658,7 @@ def configure_extension_build() -> tuple[
     if cmake_cache_vars["USE_DISTRIBUTED"]:
         # Only enable fr_trace command if distributed is enabled
         entry_points["console_scripts"].append(
-            "torchfrtrace = tools.flight_recorder.fr_trace:main",
+            "torchfrtrace = torch.distributed.flight_recorder.fr_trace:main",
         )
     return ext_modules, cmdclass, packages, entry_points, extra_install_requires
 
@@ -1633,26 +1705,6 @@ def main() -> None:
     if BUILD_PYTHON_ONLY:
         install_requires += [f"{LIBTORCH_PKG_NAME}=={TORCH_VERSION}"]
 
-    if str2bool(os.getenv("USE_PRIORITIZED_TEXT_FOR_LD")):
-        gen_linker_script(
-            filein="cmake/prioritized_text.txt", fout="cmake/linker_script.ld"
-        )
-        linker_script_path = os.path.abspath("cmake/linker_script.ld")
-        os.environ["LDFLAGS"] = os.getenv("LDFLAGS", "") + f" -T{linker_script_path}"
-        os.environ["CFLAGS"] = (
-            os.getenv("CFLAGS", "") + " -ffunction-sections -fdata-sections"
-        )
-        os.environ["CXXFLAGS"] = (
-            os.getenv("CXXFLAGS", "") + " -ffunction-sections -fdata-sections"
-        )
-    elif platform.system() == "Linux" and platform.processor() == "aarch64":
-        print_box(
-            """
-            WARNING: we strongly recommend enabling linker script optimization for ARM + CUDA.
-            To do so please export USE_PRIORITIZED_TEXT_FOR_LD=1
-            """
-        )
-
     # Parse the command line and check the arguments before we proceed with
     # building deps and setup. We need to set values so `--help` works.
     dist = Distribution()
@@ -1667,6 +1719,7 @@ def main() -> None:
     mirror_files_into_torchgen()
     if RUN_BUILD_DEPS:
         build_deps()
+        mirror_inductor_external_kernels()
 
     (
         ext_modules,
@@ -1701,6 +1754,7 @@ def main() -> None:
         "_inductor/codegen/aoti_runtime/*.cpp",
         "_inductor/script.ld",
         "_inductor/kernel/flex/templates/*.jinja",
+        "_inductor/kernel/templates/*.jinja",
         "_export/serde/*.yaml",
         "_export/serde/*.thrift",
         "share/cmake/ATen/*.cmake",
@@ -1760,7 +1814,18 @@ def main() -> None:
     package_data = {
         "torch": torch_package_data,
     }
-    exclude_package_data = {}
+    # some win libraries are excluded
+    # these are statically linked
+    exclude_windows_libs = [
+        "lib/dnnl.lib",
+        "lib/kineto.lib",
+        "lib/libprotobuf-lite.lib",
+        "lib/libprotobuf.lib",
+        "lib/libprotoc.lib",
+    ]
+    exclude_package_data = {
+        "torch": exclude_windows_libs,
+    }
 
     if not BUILD_LIBTORCH_WHL:
         package_data["torchgen"] = torchgen_package_data

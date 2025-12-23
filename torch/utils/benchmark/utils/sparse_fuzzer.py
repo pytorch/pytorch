@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 from numbers import Number
 import torch
 from torch.utils.benchmark import FuzzedTensor
@@ -9,17 +8,17 @@ class FuzzedSparseTensor(FuzzedTensor):
     def __init__(
         self,
         name: str,
-        size: tuple[Union[str, int], ...],
-        min_elements: Optional[int] = None,
-        max_elements: Optional[int] = None,
-        dim_parameter: Optional[str] = None,
-        sparse_dim: Optional[str] = None,
-        nnz: Optional[str] = None,
-        density: Optional[str] = None,
-        coalesced: Optional[str] = None,
+        size: tuple[str | int, ...],
+        min_elements: int | None = None,
+        max_elements: int | None = None,
+        dim_parameter: str | None = None,
+        sparse_dim: str | None = None,
+        nnz: str | None = None,
+        density: str | None = None,
+        coalesced: str | None = None,
         dtype=torch.float32,
         cuda=False
-    ):
+    ) -> None:
         """
         Args:
             name:
@@ -70,7 +69,8 @@ class FuzzedSparseTensor(FuzzedTensor):
         """
         if isinstance(size, Number):
             size = [size] * sparse_dim
-        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
+        if all(size[d] <= 0 for d in range(sparse_dim)) and nnz != 0:
+            raise AssertionError('invalid arguments')
         v_size = [nnz] + list(size[sparse_dim:])
         if dtype.is_floating_point:
             v = torch.rand(size=v_size, dtype=dtype, device="cpu")
@@ -91,16 +91,20 @@ class FuzzedSparseTensor(FuzzedTensor):
         return x
 
     def _make_tensor(self, params, state):
+        # pyrefly: ignore [missing-attribute]
         size, _, _ = self._get_size_and_steps(params)
         density = params['density']
         nnz = math.ceil(sum(size) * density)
-        assert nnz <= sum(size)
+        if nnz > sum(size):
+            raise AssertionError('nnz cannot exceed total number of elements')
 
         is_coalesced = params['coalesced']
         sparse_dim = params['sparse_dim'] if self._sparse_dim else len(size)
         sparse_dim = min(sparse_dim, len(size))
+        # pyrefly: ignore [missing-attribute]
         tensor = self.sparse_tensor_constructor(size, self._dtype, sparse_dim, nnz, is_coalesced)
 
+        # pyrefly: ignore [missing-attribute]
         if self._cuda:
             tensor = tensor.cuda()
         sparse_dim = tensor.sparse_dim()
@@ -116,6 +120,7 @@ class FuzzedSparseTensor(FuzzedTensor):
             "sparse_dim": sparse_dim,
             "dense_dim": dense_dim,
             "is_hybrid": is_hybrid,
+            # pyrefly: ignore [missing-attribute]
             "dtype": str(self._dtype),
         }
         return tensor, properties

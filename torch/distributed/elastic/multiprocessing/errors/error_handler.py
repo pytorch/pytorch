@@ -13,7 +13,7 @@ import os
 import time
 import traceback
 import warnings
-from typing import Any, Optional
+from typing import Any
 
 
 __all__ = ["ErrorHandler"]
@@ -33,7 +33,7 @@ class ErrorHandler:
     Subclasses should override ``initialize()`` and ``record_exception()``.
     """
 
-    def _get_error_file_path(self) -> Optional[str]:
+    def _get_error_file_path(self) -> str | None:
         """
         Return the error file path.
 
@@ -52,7 +52,9 @@ class ErrorHandler:
         try:
             faulthandler.enable(all_threads=True)
         except Exception as e:
-            warnings.warn(f"Unable to enable fault handler. {type(e).__name__}: {e}")
+            warnings.warn(
+                f"Unable to enable fault handler. {type(e).__name__}: {e}", stacklevel=2
+            )
 
     def _write_error_file(self, file_path: str, error_msg: str) -> None:
         """Write error message to the file."""
@@ -60,7 +62,9 @@ class ErrorHandler:
             with open(file_path, "w") as fp:
                 fp.write(error_msg)
         except Exception as e:
-            warnings.warn(f"Unable to write error to file. {type(e).__name__}: {e}")
+            warnings.warn(
+                f"Unable to write error to file. {type(e).__name__}: {e}", stacklevel=2
+            )
 
     def record_exception(self, e: BaseException) -> None:
         """

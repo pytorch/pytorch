@@ -1,9 +1,7 @@
 from typing import Any
 
 import torch
-
-# Import centralized distributed components
-from torch.distributed._distributed_c10d import (
+from torch._C._distributed_c10d import (
     _resolve_process_group,
     FakeWork,
     ProcessGroup,
@@ -48,6 +46,7 @@ functional_collectives: set[torch._ops.OpOverload] = {
     _c10d_functional.all_reduce.default,
     _c10d_functional.all_gather_into_tensor.default,
     _c10d_functional.reduce_scatter_tensor.default,
+    _c10d_functional.reduce_scatter_tensor_out.default,
     _c10d_functional.all_to_all_single.default,
     _c10d_functional_autograd.all_to_all_single.default,
     _c10d_functional.wait_tensor.default,
@@ -226,14 +225,14 @@ class CollectiveOp:
             return res.untyped_storage().nbytes()
         if func in CollectiveOp.COMM_TENSOR_SINGLE_UNTYPED_STORAGE:
             return args[0].untyped_storage().nbytes()
-        if func == c10d._reduce_scatter_base_.default:
+        if func is c10d._reduce_scatter_base_.default:
             return args[1].untyped_storage().nbytes()
-        if func == c10d.alltoall_.default:
+        if func is c10d.alltoall_.default:
             # TODO(@sanketpurandare) - Confirm size computation
             return max(
                 CollectiveOp.sum_tensors(args[0]), CollectiveOp.sum_tensors(args[1])
             )
-        if func == c10d.alltoall_base_.default:
+        if func is c10d.alltoall_base_.default:
             # TODO(@sanketpurandare) - Confirm size computation
             return max(
                 args[0].untyped_storage().nbytes(), args[1].untyped_storage().nbytes()
