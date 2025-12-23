@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     IS_X86,
     parametrize,
+    skipIfRocm,
     TEST_CUDA_GRAPH,
 )
 from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
