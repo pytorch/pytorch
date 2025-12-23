@@ -4720,8 +4720,6 @@ def interpolate(  # noqa: F811
     if size is not None and scale_factor is not None:
         raise ValueError("only one of size or scale_factor should be defined")
     elif size is not None:
-        if scale_factor is not None:
-            raise AssertionError("scale_factor must be None when size is specified")
         scale_factors = None
         if isinstance(size, (list, tuple)):
             if len(size) != dim:
@@ -4741,8 +4739,6 @@ def interpolate(  # noqa: F811
         else:
             output_size = [size for _ in range(dim)]
     elif scale_factor is not None:
-        if size is not None:
-            raise AssertionError("size must be None when scale_factor is specified")
         output_size = None
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
