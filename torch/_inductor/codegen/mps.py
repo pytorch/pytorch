@@ -212,8 +212,21 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
-        with V.kernel.mask_loads(mask, other):
-            return body()
+        masked_code = IndentedBuffer()
+        masked_code.writeline(f"if ({mask}) {{")
+        with V.kernel.swap_buffers(masked_code), masked_code.indent():
+            rc = body()
+
+        var = V.kernel.cse.generate(
+            V.kernel.compute,
+            f"static_cast<{DTYPE_TO_METAL[rc.dtype]}>({other})",
+            dtype=rc.dtype,
+        )
+        with masked_code.indent():
+            masked_code.writeline(f"{var} = {rc};")
+        masked_code.writeline("}")
+        V.kernel.compute.splice(masked_code)
+        return var
 
     @staticmethod
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
@@ -493,8 +506,6 @@ class MetalKernel(SIMDKernel):
         index = self.prepare_indexing(index)
         dtype = V.graph.get_dtype(name)
         line = f"{var}[{self.index_to_str(index)}]"
-        if self._load_mask and self._load_other:
-            line = f"{self._load_mask} ? {line} : {value_to_metal(self._load_other)}"
         if dtype in [torch.float16, torch.bfloat16]:
             # TODO(NS): Figure out the right balance between optype casts
             # op_math_t for half-precision floats should be float32
@@ -1070,9 +1081,6 @@ class MetalKernel(SIMDKernel):
             condition = f"{expr_str} < 0"
         else:
             condition = f"{expr_str} >= {size_str}"
-
-        if self._load_mask:
-            condition = f"{condition} && {self._load_mask}"
 
         # Generate error reporting code
         self.compute.splice(f"""if ({condition}) {{

@@ -2092,9 +2092,9 @@ void ProcessGroupNCCL::Watchdog::run() {
           e.what());
       LOG(ERROR) << exitMsg;
       if (C10_LIKELY(rethrowCUDAErrors_) ||
-          !(std::string(e.what()).find("CUDA Error"))) {
-        // TODO(whc) clean up the rethrow - why is it stored in a class var and
-        // rethrown?
+          std::string(e.what()).find("CUDA Error") != std::string::npos) {
+        // TODO(whc) clean up the rethrow - why is it stored in a class var
+        // and rethrown?
         watchDogException_ =
             std::make_exception_ptr(C10_BUILD_ERROR(DistBackendError, exitMsg));
         std::rethrow_exception(watchDogException_);
@@ -3753,7 +3753,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collective(
 #else
   C10D_NCCL_CHECK_TIMEOUT(
       fn(inputs[0], outputs[0], comm, ncclStream),
-      comm,
+      ncclComm,
       ncclComm->getNcclCommFailureReason());
 #endif // NCCL_HAS_COMM_NONBLOCKING
 
@@ -3925,7 +3925,7 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::collectiveCoalesced(
 #else
       C10D_NCCL_CHECK_TIMEOUT(
           fn(inputs[i], outputs[i], comm, ncclStream),
-          comm,
+          ncclComm,
           ncclComm->getNcclCommFailureReason());
 #endif // NCCL_HAS_COMM_NONBLOCKING
     }
@@ -4937,6 +4937,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter(
             at::Tensor& output,
             ncclComm_t comm,
             at::cuda::CUDAStream& stream) {
+          // TODO: remove once upstream NCCL is fixed
+          // https://github.com/pytorch/pytorch/issues/168092
+          if (this->getSize() == 1) {
+            at::cuda::CUDAStreamGuard guard(stream);
+            output.flatten().copy_(input.flatten(), true);
+            return ncclSuccess;
+          }
+
           const auto ncclDataType = getNcclDataType(input.scalar_type());
           const auto ncclReduceOp =
               getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
@@ -5045,6 +5053,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::_reduce_scatter_base(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
+        // TODO: remove once upstream NCCL is fixed
+        // https://github.com/pytorch/pytorch/issues/168092
+        if (this->getSize() == 1) {
+          at::cuda::CUDAStreamGuard guard(stream);
+          output.flatten().copy_(input.flatten(), true);
+          return ncclSuccess;
+        }
+
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
@@ -5096,6 +5112,14 @@ c10::intrusive_ptr<Work> ProcessGroupNCCL::reduce_scatter_tensor_coalesced(
           at::Tensor& output,
           ncclComm_t comm,
           at::cuda::CUDAStream& stream) {
+        // TODO: remove once upstream NCCL is fixed
+        // https://github.com/pytorch/pytorch/issues/168092
+        if (this->getSize() == 1) {
+          at::cuda::CUDAStreamGuard guard(stream);
+          output.flatten().copy_(input.flatten(), true);
+          return ncclSuccess;
+        }
+
         auto ncclDataType = getNcclDataType(input.scalar_type());
         auto ncclReduceOp =
             getNcclReduceOp(opts.reduceOp, input, ncclDataType, comm);
