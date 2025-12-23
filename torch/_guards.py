@@ -1149,7 +1149,16 @@ def dataclass_with_cached_hash(
                 object.__setattr__(self, "_hash", old_hash(self))
             return self._hash
 
+        def __reduce__(self):
+            # Exclude _hash from pickling to ensure deterministic cache keys.
+            # The _hash is a cached value that can be nondeterministically computed
+            # (e.g., based on id() of objects), so it should not affect pickling.
+            fields = dataclasses.fields(self)
+            field_values = tuple(getattr(self, f.name) for f in fields)
+            return (self.__class__, field_values)
+
         new_cls.__hash__ = __hash__
+        new_cls.__reduce__ = __reduce__
         return new_cls  # type: ignore[return-value]
 
     if cls is None:
