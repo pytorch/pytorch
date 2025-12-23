@@ -1199,8 +1199,12 @@ def maybe_inline_graph_saved_tensors_hooks(
             [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
         )
         inner_meta.num_opaque_objects_saved_for_bw = len(
-            [n for n in fw_outs_saved_for_bw 
-             if isinstance(n, torch.fx.Node) and isinstance(n.meta.get("val"), FakeScriptObject)]
+            [
+                n
+                for n in fw_outs_saved_for_bw
+                if isinstance(n, torch.fx.Node)
+                and isinstance(n.meta.get("val"), FakeScriptObject)
+            ]
         )
         bw_donated_idxs = collect_bw_donated_buffer_idxs(
             fw_module,
@@ -1722,9 +1726,8 @@ def _aot_stage2a_partition(
             for idx, node in enumerate(fw_outs_saved_for_bw):
                 if is_sym_node(node):
                     symint_outs_saved_for_bw.append(node)
-                elif (
-                    isinstance(node, torch.fx.Node)
-                    and "val" in getattr(node, "meta", {})
+                elif isinstance(node, torch.fx.Node) and "val" in getattr(
+                    node, "meta", {}
                 ):
                     val = node.meta["val"]
                     if isinstance(val, FakeTensor):
@@ -1743,7 +1746,9 @@ def _aot_stage2a_partition(
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
             num_opaque_objects_saved_for_bw = len(opaque_outs_saved_for_bw)
             fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
-            fw_metadata.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
+            fw_metadata.num_opaque_objects_saved_for_bw = (
+                num_opaque_objects_saved_for_bw
+            )
             inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
             inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
             if torch._functorch.config.donated_buffer:
@@ -2246,7 +2251,9 @@ def _cache_autograd_info(
                 guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
 
                 # Get num_opaque_objects_saved_for_bw from metadata
-                num_opaque_objects_saved_for_bw = fw_metadata.num_opaque_objects_saved_for_bw
+                num_opaque_objects_saved_for_bw = (
+                    fw_metadata.num_opaque_objects_saved_for_bw
+                )
 
                 entry = AOTAutogradCache.make_entry(
                     compiled_fw_func,  # type: ignore[arg-type]

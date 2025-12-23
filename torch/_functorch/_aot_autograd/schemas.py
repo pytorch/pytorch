@@ -667,7 +667,9 @@ class ViewAndMutationMeta:
     def tensors_saved_for_backwards_slice(self):
         assert self.num_symints_saved_for_bw is not None
         assert self.num_opaque_objects_saved_for_bw is not None
-        num_non_tensors = self.num_symints_saved_for_bw + self.num_opaque_objects_saved_for_bw
+        num_non_tensors = (
+            self.num_symints_saved_for_bw + self.num_opaque_objects_saved_for_bw
+        )
         if num_non_tensors > 0:
             return slice(self.num_forward, -num_non_tensors)
         else:

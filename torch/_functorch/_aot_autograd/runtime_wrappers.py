@@ -1602,7 +1602,12 @@ def _raise_if_functorch_active():
 
 # NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
 def _backward_prologue_functional(
-    ctx_saved_tensors, ctx_symints, metadata, maybe_subclass_metadata, *flat_args, ctx_saved_opaque=None
+    ctx_saved_tensors,
+    ctx_symints,
+    metadata,
+    maybe_subclass_metadata,
+    *flat_args,
+    ctx_saved_opaque=None,
 ):
     # Calling convention: we expect a grad_out passed to the backward:
     # - for every output of the fw that does *not* alias an input or graph intermediate
@@ -2171,7 +2176,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 ]
                 assert all(
                     isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
-                ), f"Expected all tensors, got: {[type(x) for x in tensors_saved_for_backwards]}"	
+                ), (
+                    f"Expected all tensors, got: {[type(x) for x in tensors_saved_for_backwards]}"
+                )
 
                 def mark_dynamic_activations(activations: list[torch.Tensor]):
                     for (
@@ -2288,7 +2295,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
                     *flat_args,
-                    ctx_saved_opaque=getattr(ctx, 'saved_opaque_objects', None),
+                    ctx_saved_opaque=getattr(ctx, "saved_opaque_objects", None),
                 )
 
                 if num_rng:
