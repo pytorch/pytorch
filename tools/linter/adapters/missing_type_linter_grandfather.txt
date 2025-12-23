@@ -3004,10 +3004,6 @@ torch.distributed.pipelining.schedules.forward_stage_index
 torch.distributed.pipelining.schedules.forward_stage_index(step=)
 torch.distributed.pipelining.schedules.forward_stage_index[2]
 torch.distributed.pipelining.schedules.forward_stage_index[2](step=)
-torch.distributed.pipelining.schedules.get_rank_warmup_ops
-torch.distributed.pipelining.schedules.get_rank_warmup_ops(rank=)
-torch.distributed.pipelining.schedules.get_rank_warmup_ops[2]
-torch.distributed.pipelining.schedules.get_rank_warmup_ops[2](rank=)
 torch.distributed.pipelining.schedules.get_schedule_class
 torch.distributed.pipelining.schedules.increment_backward_counts
 torch.distributed.pipelining.schedules.need_bubble
