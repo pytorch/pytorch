@@ -202,8 +202,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results to OSS benchmark database for the dashboard
-        # DEBUG: REVERT ONCE https://github.com/pytorch/test-infra/pull/7612 LANDS
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@update-upload-bm-results-gha
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
         with:
           benchmark-results-dir: vllm-project/vllm/benchmarks/results
           benchmark-name: 'PyTorch x vLLM benchmark'
