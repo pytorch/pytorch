@@ -1179,6 +1179,7 @@ class PythonWrapperCodegen(CodeGen):
         self.header.writeline(f"{name} = None  # {hashed}")
 
     def write_header(self) -> None:
+        """Write the header section of the generated Python wrapper code."""
         context = torch._guards.TracingContext.try_get()
         aot_config_comment = ""
         if context is not None and context.aot_graph_name is not None:
@@ -1243,6 +1244,53 @@ class PythonWrapperCodegen(CodeGen):
             pass
         if config.annotate_training:
             self.header.writeline("from torch.cuda import nvtx")
+        if config.triton.proton_profiling:
+            self.header.writeline("import triton.profiler as proton")
+            self.header.writeline("import triton.profiler.language as pl")
+            self.header.writeline(
+                "from triton.profiler.hooks import HookManager as _ProtonHookManager"
+            )
+            self.header.writeline("import triton")
+            self.header.writeline("import atexit")
+            self.header.writeline("import os")
+            self.header.writeline(
+                "triton.set_allocator(lambda size, align, stream: "
+                "torch.empty(size, dtype=torch.uint8, device='cuda').data_ptr())"
+            )
+            output_dir = config.triton.proton_output_dir
+            if output_dir:
+                proton_name = f'os.path.join("{output_dir}", "inductor")'
+                trace_path = f'os.path.join("{output_dir}", "inductor.chrome_trace")'
+            else:
+                proton_name = '"inductor"'
+                trace_path = '"inductor.chrome_trace"'
+            group_by_sm = config.triton.proton_group_by_sm
+            split_invocations = config.triton.proton_split_invocations
+            per_cta_occupancy = config.triton.proton_per_cta_occupancy
+            self.header.writeline(
+                "from torch._inductor.runtime.proton_utils import process_proton_trace as _proton_process_trace"
+            )
+            self.header.splice(
+                f"""
+                def _proton_finalize_and_postprocess():
+                    proton.finalize()
+                    _trace_path = {trace_path}
+                    if os.path.exists(_trace_path):
+                        _proton_process_trace(
+                            _trace_path,
+                            group_by_sm={group_by_sm},
+                            split_invocations={split_invocations},
+                            per_cta_occupancy={per_cta_occupancy},
+                        )
+                """
+            )
+            # Start proton before kernel compilation (instrumentation backend needs to hook JIT)
+            self.header.writeline(
+                "if not _ProtonHookManager.active_hooks: "
+                f'proton.start({proton_name}, backend="instrumentation", data="trace"); '
+                "atexit.register(_proton_finalize_and_postprocess)"
+            )
+            self.header.writeline('pl.enable_semantic("triton")')
 
     def include_extra_header(self, header: str):
         pass
@@ -1778,6 +1826,9 @@ class PythonWrapperCodegen(CodeGen):
 
             if config.profile_bandwidth:
                 self.generate_end_graph()
+
+            if config.triton.proton_profiling:
+                self.generate_proton_finalize()
 
             if config.triton.store_cubin and not config.triton.autotune_at_compile_time:
                 self.generate_save_uncompiled_kernels()
@@ -2591,6 +2642,8 @@ class PythonWrapperCodegen(CodeGen):
         inductor_meta.update(TritonKernel.inductor_meta_common())
 
         compile_wrapper.splice(gen_common_triton_imports())
+        if config.triton.proton_profiling:
+            compile_wrapper.writeline('pl.enable_semantic("triton")')
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(
@@ -2711,6 +2764,10 @@ class PythonWrapperCodegen(CodeGen):
 
     def generate_end_graph(self):
         self.wrapper_call.writeline(f"end_graph({config.profile_bandwidth_output!r})")
+
+    def generate_proton_finalize(self):
+        """Synchronize GPU to ensure proton captures all kernel events."""
+        self.wrapper_call.writeline(V.graph.device_ops.synchronize())
 
     def generate_reset_kernel_saved_flags(self):
         self.wrapper_call.splice(
