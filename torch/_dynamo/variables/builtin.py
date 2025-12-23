@@ -1114,7 +1114,16 @@ class BuiltinVariable(VariableTracker):
                 )
                 for t in arg_types
             )
-            if all_constant_like and obj.can_constant_fold_through() and not has_kwargs:
+            # Check upfront if we have a reconstruct_fn for this operation.
+            # Only use ComputedLazyConstantVariable if we can reconstruct
+            # the result at runtime (via bytecode generation).
+            reconstruct_fn = _make_binary_op_reconstruct_fn(fn)
+            if (
+                all_constant_like
+                and obj.can_constant_fold_through()
+                and not has_kwargs
+                and reconstruct_fn is not None
+            ):
                 # Return a ComputedLazyConstantVariable instead of realizing.
                 # This allows operations on lazy constants to remain lazy, deferring
                 # guard installation until the result is actually used.
@@ -1125,20 +1134,6 @@ class BuiltinVariable(VariableTracker):
 
                 def handle_lazy_constant(tx, args, kwargs):
                     from .. import config
-
-                    # Check if we have a reconstruct_fn for this operation.
-                    # Only use ComputedLazyConstantVariable if we can reconstruct
-                    # the result at runtime (via bytecode generation).
-                    reconstruct_fn = _make_binary_op_reconstruct_fn(fn)
-                    if reconstruct_fn is None:
-                        # No reconstruct_fn - fall back to realizing lazy args.
-                        # Note: Special handlers like call_isinstance and call_type
-                        # are already handled above in the first_arg_is_lazy path.
-                        return obj.call_function(
-                            tx,
-                            [v.realize() for v in args],
-                            kwargs,
-                        )
 
                     # Check if any lazy constant might become symbolic due to
                     # specialize_int=False or specialize_float=False. If so, we must
@@ -1173,6 +1168,7 @@ class BuiltinVariable(VariableTracker):
                                     )
 
                     try:
+                        assert reconstruct_fn is not None
                         return ComputedLazyConstantVariable.create(
                             fn, list(args), reconstruct_fn
                         )
