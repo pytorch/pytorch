@@ -1073,7 +1073,7 @@ class TensorVariable(VariableTracker):
         out = tolist(tensor, self.as_proxy())
         return VariableTracker.build(tx, out)
 
-    def _collect_backward_inputs(self, vars_iter, error_on_non_leaf=False):
+    def _collect_backward_inputs(self, vars_iter, error_on_non_leaf):
         """
         Collect unique leaf tensors from an iterable of variables for backward.
 
@@ -1150,12 +1150,16 @@ class TensorVariable(VariableTracker):
                 tx.output.leaf_var_creation_order,
                 tx.output.input_source_to_var.values(),
             )
-            indexed_inputs = self._collect_backward_inputs(all_vars)
+            indexed_inputs = self._collect_backward_inputs(
+                all_vars, error_on_non_leaf=False
+            )
             if not indexed_inputs:
                 return ConstantVariable.create(None)
             input_vars = [var for _, var in indexed_inputs]
             inputs = VariableTracker.build(tx, input_vars)
         else:
+            # We are inside user supplied inputs case
+            # loss.backward(inputs=[bla, bla])
             if isinstance(inputs, variables.BaseListVariable):
                 input_vars = inputs.items
             else:

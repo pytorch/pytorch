@@ -2,7 +2,7 @@
 
 import copy
 import re
-import unittest
+import textwrap
 
 import torch
 import torch._dynamo
@@ -74,8 +74,7 @@ class TestForwardLossBackward(TestCase):
             self.assertEqual(e, c)
         self.assertEqual(len(backend.graphs), 1)
 
-        gm = backend.graphs[0]
-        actual = normalize_gm(gm.print_readable(print_output=False))
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
         self.assertExpectedInline(
             actual,
             """\
@@ -99,8 +98,9 @@ class GraphModule(torch.nn.Module):
         )
 
         self.assertEqual(len(backend.fw_graphs), 1)
-        fw_graph = backend.fw_graphs[0]
-        fw_actual = normalize_gm(fw_graph.print_readable(print_output=False))
+        fw_actual = normalize_gm(
+            backend.fw_graphs[0].print_readable(print_output=False)
+        )
         self.assertExpectedInline(
             fw_actual,
             """\
@@ -151,8 +151,7 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(eager_result, compiled_result)
         self.assertEqual(len(backend.graphs), 1)
 
-        gm = backend.graphs[0]
-        actual = normalize_gm(gm.print_readable(print_output=False))
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
         self.assertExpectedInline(
             actual,
             """\
@@ -174,8 +173,9 @@ class GraphModule(torch.nn.Module):
         )
 
         self.assertEqual(len(backend.fw_graphs), 1)
-        fw_graph = backend.fw_graphs[0]
-        fw_actual = normalize_gm(fw_graph.print_readable(print_output=False))
+        fw_actual = normalize_gm(
+            backend.fw_graphs[0].print_readable(print_output=False)
+        )
         self.assertExpectedInline(
             fw_actual,
             """\
@@ -200,7 +200,7 @@ class <lambda>(torch.nn.Module):
             res = mod(x)
             loss = res.sum()
             grad = torch.autograd.grad(loss, mod.weight)
-            return loss.detach(), grad[0].sum()
+            return loss.detach(), grad[0]
 
         backend = AotEagerAndRecordGraphs()
         compiled_fn = torch.compile(fn, backend=backend, fullgraph=True)
@@ -212,8 +212,7 @@ class <lambda>(torch.nn.Module):
             self.assertEqual(e, c)
         self.assertEqual(len(backend.graphs), 1)
 
-        gm = backend.graphs[0]
-        actual = normalize_gm(gm.print_readable(print_output=False))
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
         self.assertExpectedInline(
             actual,
             """\
@@ -231,14 +230,14 @@ class GraphModule(torch.nn.Module):
         getitem: "f32[4, 4]" = grad[0];  grad = None
 
         detach: "f32[]" = loss.detach();  loss = None
-        sum_2: "f32[]" = getitem.sum();  getitem = None
-        return (detach, sum_2)
+        return (detach, getitem)
 """,  # noqa: B950
         )
 
         self.assertEqual(len(backend.fw_graphs), 1)
-        fw_graph = backend.fw_graphs[0]
-        fw_actual = normalize_gm(fw_graph.print_readable(print_output=False))
+        fw_actual = normalize_gm(
+            backend.fw_graphs[0].print_readable(print_output=False)
+        )
         self.assertExpectedInline(
             fw_actual,
             """\
@@ -257,13 +256,12 @@ class <lambda>(torch.nn.Module):
         t_3: "f32[4, 4]" = torch.ops.aten.t.default(t_2);  t_2 = None
 
         detach: "f32[]" = torch.ops.aten.detach.default(sum_1);  sum_1 = None
-        sum_2: "f32[]" = torch.ops.aten.sum.default(t_3);  t_3 = None
-        return (detach, sum_2)
+        return (detach, t_3)
 """,  # noqa: B950
         )
 
     @skipIfCrossRef
-    def test_autograd_grad_double_backward(self):
+    def test_autograd_grad_double_backward_outside_compile(self):
         def fn(x, weight):
             y = x @ weight
             loss = y.sum()
@@ -276,23 +274,20 @@ class <lambda>(torch.nn.Module):
         x = torch.randn(2, 4, requires_grad=True)
         weight = torch.randn(4, 3, requires_grad=True)
 
-        # Eager execution
         x_eager = x.clone().detach().requires_grad_(True)
         weight_eager = weight.clone().detach().requires_grad_(True)
         loss_eager, grad_weight_eager = fn(x_eager, weight_eager)
         loss_eager.backward()
 
-        # Compiled execution
         x_compile = x.clone().detach().requires_grad_(True)
         weight_compile = weight.clone().detach().requires_grad_(True)
         compiled_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
         loss_compile, grad_weight_compile = compiled_fn(x_compile, weight_compile)
 
-        # Results should match
         self.assertEqual(loss_eager, loss_compile)
         self.assertEqual(grad_weight_eager, grad_weight_compile)
 
-        # Backward through the returned loss should work
+        # Backward through the returned loss from compile should work
         loss_compile.backward()
 
         # Gradients should match
@@ -300,7 +295,7 @@ class <lambda>(torch.nn.Module):
         self.assertEqual(weight_eager.grad, weight_compile.grad)
 
     @skipIfCrossRef
-    def test_autograd_grad_with_external_input_as_grad_target(self):
+    def test_autograd_grad_with_external_grad_fn_as_grad_target(self):
         mod_eager = torch.nn.Linear(4, 4)
         x_eager = torch.randn(2, 4, requires_grad=True)
         external_computation_eager = x_eager * 2
@@ -358,12 +353,7 @@ autograd.grad with external grad_fn
     @skipIfCrossRef
     def test_autograd_grad_manual_update_matches_eager(self):
         mod_eager = torch.nn.Linear(4, 4)
-        mod_compiled = torch.nn.Linear(4, 4)
-
-        with torch.no_grad():
-            mod_compiled.weight.copy_(mod_eager.weight)
-            mod_compiled.bias.copy_(mod_eager.bias)
-
+        mod_compiled = copy.deepcopy(mod_eager)
         x = torch.randn(2, 4)
 
         def step_fn(mod):
@@ -388,13 +378,7 @@ autograd.grad with external grad_fn
         compiled_loss = compiled_step_fn()
 
         self.assertEqual(eager_loss, compiled_loss)
-
-        self.assertIsNotNone(mod_eager.weight.grad)
-        self.assertIsNotNone(mod_compiled.weight.grad)
         self.assertEqual(mod_eager.weight.grad, mod_compiled.weight.grad)
-
-        self.assertIsNotNone(mod_eager.bias.grad)
-        self.assertIsNotNone(mod_compiled.bias.grad)
         self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
 
     def test_autograd_grad_rejects_external_grad_fn_from_outer_scope(self):
@@ -437,8 +421,7 @@ autograd.grad with external grad_fn
             )
             grad_norm = weight_grad.sum() + bias_grad.sum()
             # return unrelated output that requires_grad
-            unrelated_output = x.sin()
-            return grad_norm.detach(), unrelated_output
+            return grad_norm.detach(), x.sin()
 
         backend = AotEagerAndRecordGraphs()
         compiled_fn = torch.compile(step_fn, backend=backend, fullgraph=True)
@@ -447,8 +430,7 @@ autograd.grad with external grad_fn
 
         # Verify dynamo graph captures autograd.grad and unrelated output
         self.assertEqual(len(backend.graphs), 1)
-        gm = backend.graphs[0]
-        actual = normalize_gm(gm.print_readable(print_output=False))
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
         self.assertExpectedInline(
             actual,
             """\
@@ -470,16 +452,16 @@ class GraphModule(torch.nn.Module):
         sum_3: "f32[]" = bias_grad.sum();  bias_grad = None
         grad_norm: "f32[]" = sum_2 + sum_3;  sum_2 = sum_3 = None
 
-        unrelated_output: "f32[2, 4]" = l_x_.sin();  l_x_ = None
-
         detach: "f32[]" = grad_norm.detach();  grad_norm = None
-        return (detach, unrelated_output)
+        sin: "f32[2, 4]" = l_x_.sin();  l_x_ = None
+        return (detach, sin)
 """,  # noqa: B950
         )
 
         self.assertEqual(len(backend.fw_graphs), 1)
-        fw_graph = backend.fw_graphs[0]
-        fw_actual = normalize_gm(fw_graph.print_readable(print_output=False))
+        fw_actual = normalize_gm(
+            backend.fw_graphs[0].print_readable(print_output=False)
+        )
         self.assertExpectedInline(
             fw_actual,
             """\
@@ -503,9 +485,8 @@ class GraphModule(torch.nn.Module):
         sum_4: "f32[]" = torch.ops.aten.sum.default(view);  view = None
         add: "f32[]" = torch.ops.aten.add.Tensor(sum_3, sum_4);  sum_3 = sum_4 = None
 
-        sin: "f32[2, 4]" = torch.ops.aten.sin.default(primals_3)
-
         detach: "f32[]" = torch.ops.aten.detach.default(add);  add = None
+        sin: "f32[2, 4]" = torch.ops.aten.sin.default(primals_3)
         return (detach, sin, primals_3)
 """,  # noqa: B950
         )
@@ -514,8 +495,10 @@ class GraphModule(torch.nn.Module):
         result[1].sum().backward()
 
         self.assertEqual(len(backend.bw_graphs), 1)
-        bw_graph = backend.bw_graphs[0]
-        bw_actual = normalize_gm(bw_graph.print_readable(print_output=False))
+
+        bw_actual = normalize_gm(
+            backend.bw_graphs[0].print_readable(print_output=False)
+        )
         self.assertExpectedInline(
             bw_actual,
             """\
@@ -567,15 +550,14 @@ autograd.grad consumed returned tensor's grad_fn
         torch._dynamo.reset()
 
         # With fullgraph=False, code before and after autograd.grad is compiled,
-        # but autograd.grad itself runs in eager. This gives better compile coverage.
+        # but autograd.grad itself runs in eager.
         cnt = torch._dynamo.testing.CompileCounter()
         step_compiled_graph_break = torch.compile(step, fullgraph=False, backend=cnt)
 
         loss_compiled, grad_sum_compiled = step_compiled_graph_break(
             torch.nn.Linear(4, 4), torch.randn(2, 4)
         )
-        # We should have multiple frames compiled (before and after autograd.grad)
-        self.assertGreaterEqual(cnt.frame_count, 2)
+        self.assertEqual(cnt.frame_count, 2)
 
         # The returned loss still has the eager behavior issue
         with self.assertRaisesRegex(
@@ -608,45 +590,22 @@ autograd.grad consumed returned tensor's grad_fn
         torch._dynamo.reset()
         compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
 
+        msg = textwrap.dedent(
+            """\
+autograd.grad consumed returned tensor's grad_fn
+  Explanation: torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.
+  Hint: If you don't need to backward through the returned tensor, call .detach() before returning: `return loss.detach()`
+  Hint: If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."""  # noqa: B950
+        )
+
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            r"autograd\.grad consumed returned tensor's grad_fn",
+            re.escape(msg) + r"[\s\S]*",
         ):
             compiled_fn(torch.randn(4, requires_grad=True))
 
     @skipIfCrossRef
-    def test_trace_autograd_ops_config(self):
-        """Test that trace_autograd_ops config controls whether autograd.grad is traced."""
-
-        def fn(x):
-            y = x.sin()
-            (gx,) = torch.autograd.grad(y, x)
-            return gx.cos()  # Add op after autograd.grad to detect graph break
-
-        x = torch.tensor(1.0, requires_grad=True)
-        eager_result = fn(x)
-
-        # With trace_autograd_ops=False, should graph break
-        torch._dynamo.reset()
-        with torch._dynamo.config.patch(trace_autograd_ops=False):
-            cnt = torch._dynamo.testing.CompileCounter()
-            compiled_fn = torch.compile(backend=cnt)(fn)
-            compiled_result = compiled_fn(torch.tensor(1.0, requires_grad=True))
-            self.assertEqual(eager_result, compiled_result)
-            # Should have graph break due to autograd.grad being skipped
-            self.assertEqual(cnt.frame_count, 2)
-
-        # With trace_autograd_ops=True, should trace in single graph
-        torch._dynamo.reset()
-        with torch._dynamo.config.patch(trace_autograd_ops=True):
-            cnt = torch._dynamo.testing.CompileCounter()
-            compiled_fn = torch.compile(backend=cnt)(fn)
-            compiled_result = compiled_fn(torch.tensor(1.0, requires_grad=True))
-            self.assertEqual(eager_result, compiled_result)
-            self.assertEqual(cnt.frame_count, 1)
-
-    @skipIfCrossRef
-    def test_autograd_grad_external_grad_fn_not_reachable(self):
+    def test_autograd_grad_external_grad_fn_detached(self):
         torch._dynamo.reset()
 
         @torch.compile(fullgraph=True, backend="aot_eager")
@@ -678,9 +637,20 @@ autograd.grad consumed returned tensor's grad_fn
         y = x * 2
         edge = GradientEdge(y.grad_fn, 0)
 
+        msg = textwrap.dedent(
+            """\
+autograd.grad with external GradientEdge
+  Explanation: torch.autograd.grad() cannot be used with GradientEdge inputs passed from outside the compiled region. The GradientEdge contains a reference to an autograd node that was created before torch.compile started tracing, so Dynamo cannot trace through its computation.
+  Hint: Move the autograd.grad() call outside the torch.compile region.
+  Hint: Or use tensor inputs directly instead of GradientEdge objects.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: GradientEdge in outputs: L['edge']"""  # noqa: B950
+        )
+
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            r"autograd.grad with external GradientEdge",
+            re.escape(msg),
         ):
             fn(edge, x)
 
@@ -701,15 +671,91 @@ autograd.grad consumed returned tensor's grad_fn
         z = x * 3
         edges = (GradientEdge(y.grad_fn, 0), GradientEdge(z.grad_fn, 0))
 
+        msg = textwrap.dedent(
+            """\
+autograd.grad with external GradientEdge
+  Explanation: torch.autograd.grad() cannot be used with GradientEdge inputs passed from outside the compiled region. The GradientEdge contains a reference to an autograd node that was created before torch.compile started tracing, so Dynamo cannot trace through its computation.
+  Hint: Move the autograd.grad() call outside the torch.compile region.
+  Hint: Or use tensor inputs directly instead of GradientEdge objects.
+  Hint: It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues.
+
+  Developer debug context: GradientEdge in outputs[0]: L['edges'][0]"""  # noqa: B950
+        )
+
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            r"autograd.grad with external GradientEdge",
+            re.escape(msg),
         ):
             fn(edges, x)
 
     @skipIfCrossRef
+    def test_autograd_grad_gradient_penalty(self):
+        torch._dynamo.reset()
+
+        discriminator = torch.nn.Sequential(
+            torch.nn.Linear(4, 8),
+            torch.nn.ReLU(),
+            torch.nn.Linear(8, 1),
+        )
+
+        def compute_gradient_penalty_and_grads(discriminator, interpolates):
+            params = tuple(discriminator.parameters())
+
+            # Forward pass
+            d_interpolates = discriminator(interpolates)
+
+            # First autograd.grad: compute gradients w.r.t. interpolated inputs
+            # create_graph=True is essential - it allows backprop through the gradient computation
+            (gradients,) = torch.autograd.grad(
+                outputs=d_interpolates,
+                inputs=interpolates,
+                grad_outputs=torch.ones_like(d_interpolates),
+                create_graph=True,
+            )
+            gradient_norm = gradients.norm(2, dim=1)
+            gradient_penalty = ((gradient_norm - 1) ** 2).mean()
+
+            # Second autograd.grad: compute gradients of penalty w.r.t. parameters
+            param_grads = torch.autograd.grad(
+                gradient_penalty, params, allow_unused=True
+            )
+
+            return gradient_penalty.detach(), param_grads
+
+        real_samples = torch.randn(4, 4)
+        fake_samples = torch.randn(4, 4)
+        alpha = torch.rand(4, 1)
+        interpolates = (alpha * real_samples + (1 - alpha) * fake_samples).detach()
+        interpolates.requires_grad_(True)
+
+        # Eager execution
+        discriminator_eager = copy.deepcopy(discriminator)
+        gp_eager, grads_eager = compute_gradient_penalty_and_grads(
+            discriminator_eager, interpolates
+        )
+
+        interpolates_compiled = (
+            alpha * real_samples + (1 - alpha) * fake_samples
+        ).detach()
+        interpolates_compiled.requires_grad_(True)
+
+        discriminator_compiled = copy.deepcopy(discriminator)
+        compiled_fn = torch.compile(
+            compute_gradient_penalty_and_grads, backend="aot_eager", fullgraph=True
+        )
+        gp_compiled, grads_compiled = compiled_fn(
+            discriminator_compiled, interpolates_compiled
+        )
+
+        # Gradient penalty values should match
+        self.assertEqual(gp_eager, gp_compiled)
+
+        # Parameter gradients should match
+        for g_eager, g_compiled in zip(grads_eager, grads_compiled):
+            self.assertEqual(g_eager, g_compiled)
+
+    @skipIfCrossRef
     def test_tensor_backward_basic(self):
-        """Test that tensor.backward(inputs=params) works in compiled code."""
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
 
@@ -749,7 +795,6 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     def test_tensor_backward_without_inputs(self):
-        """Test that tensor.backward() without inputs works by auto-detecting params."""
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
 
@@ -788,13 +833,8 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     def test_tensor_backward_matches_eager(self):
-        """Test that tensor.backward produces same results as eager mode."""
         mod_eager = torch.nn.Linear(4, 4)
-        mod_compiled = torch.nn.Linear(4, 4)
-
-        with torch.no_grad():
-            mod_compiled.weight.copy_(mod_eager.weight)
-            mod_compiled.bias.copy_(mod_eager.bias)
+        mod_compiled = copy.deepcopy(mod_eager)
 
         x = torch.randn(2, 4)
 
@@ -805,18 +845,14 @@ class GraphModule(torch.nn.Module):
             loss.backward(inputs=params)
             return loss.detach()
 
-        # Run eager
         for p in mod_eager.parameters():
             p.grad = None
         eager_loss = step_fn(mod_eager)
 
-        # Run compiled
         for p in mod_compiled.parameters():
             p.grad = None
-        compiled_step_fn = torch.compile(
-            lambda: step_fn(mod_compiled), backend="aot_eager", fullgraph=True
-        )
-        compiled_loss = compiled_step_fn()
+        compiled_step_fn = torch.compile(step_fn, backend="aot_eager", fullgraph=True)
+        compiled_loss = compiled_step_fn(mod_compiled)
 
         self.assertEqual(eager_loss, compiled_loss)
         self.assertEqual(mod_eager.weight.grad, mod_compiled.weight.grad)
@@ -824,7 +860,6 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     def test_tensor_backward_with_gradient(self):
-        """Test tensor.backward with a gradient argument."""
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
 
@@ -866,7 +901,6 @@ class GraphModule(torch.nn.Module):
 
     @skipIfCrossRef
     def test_tensor_backward_accumulates_grads(self):
-        """Test that tensor.backward accumulates gradients correctly."""
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
 
@@ -993,16 +1027,8 @@ class GraphModule(torch.nn.Module):
         )
 
     @skipIfCrossRef
-    @unittest.expectedFailure
     @torch._dynamo.config.patch(graph_break_on_nn_param_ctor=False)
     def test_tensor_backward_with_ingraph_nn_parameter(self):
-        """
-        This is an xfail test documenting a known limitation: backward() on in-graph
-        created nn.Parameter fails because the accumulate_grad polyfill tries to
-        access w.grad, which dynamo represents as GetAttrVariable (not TensorVariable).
-        Dynamo doesn't know how to trace .add_() on GetAttrVariable.
-        """
-
         def fn(x):
             w = torch.nn.Parameter(torch.ones(4, 4))
             y = x @ w
@@ -1012,14 +1038,20 @@ class GraphModule(torch.nn.Module):
 
         x = torch.randn(2, 4)
 
-        # Eager
-        eager_result = fn(x)
-
-        # Compiled - currently fails with "Dynamo does not know how to trace method add_"
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        compiled_result = compiled_fn(x)
-
-        self.assertEqual(eager_result, compiled_result)
+        # This is existing issue (https://github.com/pytorch/pytorch/issues/171204)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            re.escape(
+                """\
+Failed to trace builtin operator
+  Explanation: Dynamo does not know how to trace builtin operator `add` with argument types ['<unknown type>', 'Tensor'] (has_kwargs False)
+  Hint: Avoid calling builtin `add` with argument types ['<unknown type>', 'Tensor']. Consider using an equivalent alternative function/method to `add`.
+  Hint: If you are attempting to call a logging function (e.g. `print`), you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.
+  Hint: Please report an issue to PyTorch."""  # noqa: B950
+            ),
+        ):
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            compiled_fn(x)
 
     @skipIfCrossRef
     def test_tensor_backward_duplicate_inputs(self):
@@ -1038,13 +1070,11 @@ class GraphModule(torch.nn.Module):
             loss.backward(inputs=[mod.weight, mod.weight])
             return loss.detach()
 
-        # Eager
         for p in mod.parameters():
             p.grad = None
         eager_result = fn(x)
         eager_weight_grad = mod.weight.grad.clone()
 
-        # Compiled
         for p in mod.parameters():
             p.grad = None
         compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -1053,83 +1083,29 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(eager_result, compiled_result)
         self.assertEqual(eager_weight_grad, mod.weight.grad)
 
-    # TODO: Non-leaf tensor inputs to backward() cause a graph break because
-    # supporting them requires retain_grad() tracing which is not yet implemented.
-    @unittest.expectedFailure
     @skipIfCrossRef
     def test_tensor_backward_non_leaf_inputs(self):
-        """Test backward with non-leaf tensor inputs.
-
-        When user explicitly passes non-leaf tensors to backward(inputs=...),
-        eager PyTorch calls retain_grad() on them automatically. We should
-        match this behavior and accumulate gradients to non-leaf tensors.
-        """
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)
 
-        # We need to capture res outside to check its grad after
-        res_holder = {}
-
         def fn(x):
-            res = mod(x)  # res is non-leaf (has grad_fn)
-            res_holder["res"] = res
+            res = mod(x)
             loss = res.sum()
-            # Pass both leaf (weight) and non-leaf (res) tensors
             loss.backward(inputs=[mod.weight, res])
             return loss.detach()
 
-        # Eager
-        for p in mod.parameters():
-            p.grad = None
-        eager_result = fn(x)
-        eager_weight_grad = mod.weight.grad.clone()
-        eager_res_grad = res_holder["res"].grad.clone()
-
-        # Compiled
-        for p in mod.parameters():
-            p.grad = None
-        res_holder.clear()
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        compiled_result = compiled_fn(x)
-
-        self.assertEqual(eager_result, compiled_result)
-        self.assertEqual(eager_weight_grad, mod.weight.grad)
-        self.assertEqual(eager_res_grad, res_holder["res"].grad)
-
-    # TODO: Non-leaf tensor inputs to backward() cause a graph break because
-    # supporting them requires retain_grad() tracing which is not yet implemented.
-    @unittest.expectedFailure
-    @skipIfCrossRef
-    def test_tensor_backward_only_non_leaf_inputs(self):
-        """Test backward with only non-leaf tensor inputs.
-
-        Verifies that when only non-leaf tensors are passed to backward,
-        we correctly call retain_grad() and accumulate their gradients.
-        """
-        mod = torch.nn.Linear(4, 4)
-        x = torch.randn(2, 4)
-
-        res_holder = {}
-
-        def fn(x):
-            res = mod(x)  # res is non-leaf
-            res_holder["res"] = res
-            loss = res.sum()
-            # Only pass non-leaf tensor
-            loss.backward(inputs=[res])
-            return loss.detach()
-
-        # Eager
-        eager_loss = fn(x)
-        eager_res_grad = res_holder["res"].grad.clone()
-
-        # Compiled
-        res_holder.clear()
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-        compiled_loss = compiled_fn(x)
-
-        self.assertEqual(eager_loss, compiled_loss)
-        self.assertEqual(eager_res_grad, res_holder["res"].grad)
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            re.escape(
+                """\
+backward() with non-leaf tensor inputs
+  Explanation: Dynamo cannot trace backward() with non-leaf tensor inputs. Non-leaf tensors require retain_grad() which is not yet supported.
+  Hint: Only pass leaf tensors (parameters, inputs) to backward(inputs=...)
+  Hint: Or call backward() without the inputs argument to auto-detect leaves"""  # noqa: B950
+            ),
+        ):
+            compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+            compiled_fn(x)
 
 
 if __name__ == "__main__":

@@ -252,8 +252,7 @@ def _check_for_gradient_edge(var, arg_name="argument"):
                 "started tracing, so Dynamo cannot trace through its computation."
             ),
             hints=[
-                "Create the GradientEdge inside the compiled function instead of passing it in.",
-                "Or move the autograd.grad() call outside the torch.compile region.",
+                "Move the autograd.grad() call outside the torch.compile region.",
                 "Or use tensor inputs directly instead of GradientEdge objects.",
                 *graph_break_hints.SUPPORTABLE,
             ],

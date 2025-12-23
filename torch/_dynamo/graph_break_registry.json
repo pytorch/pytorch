@@ -1007,8 +1007,7 @@
       "Context": "context",
       "Explanation": "torch.autograd.grad() cannot be used with GradientEdge inputs passed from outside the compiled region. The GradientEdge contains a reference to an autograd node that was created before torch.compile started tracing, so Dynamo cannot trace through its computation.",
       "Hints": [
-        "Create the GradientEdge inside the compiled function instead of passing it in.",
-        "Or move the autograd.grad() call outside the torch.compile region.",
+        "Move the autograd.grad() call outside the torch.compile region.",
         "Or use tensor inputs directly instead of GradientEdge objects.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
@@ -1018,8 +1017,7 @@
       "Context": "",
       "Explanation": "torch.autograd.grad() cannot be used with GradientEdge inputs passed from outside the compiled region. The GradientEdge contains an autograd node that was created outside the compiled region boundary.",
       "Hints": [
-        "Create the GradientEdge inside the compiled function instead of passing it in.",
-        "Or move the autograd.grad() call outside the torch.compile region.",
+        "Move the autograd.grad() call outside the torch.compile region.",
         "Or use tensor inputs directly instead of GradientEdge objects.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]

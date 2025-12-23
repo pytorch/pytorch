@@ -343,12 +343,11 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
             x = torch.tensor(1.0, requires_grad=True)
             err = "torch.compile with aot_autograd does not currently support double backward"
 
-            # Cases (1) and (2) now cause graph breaks (not RuntimeError) because
-            # autograd.grad is traced and outputs requiring grad are detected early.
-            # This causes fallback to eager mode where double backward works fine.
-
             # (1) double backward entirely inside compiled function
-            # Now causes graph break and falls back to eager (no error)
+            # Graph break happens at autograd.grad, but y = x.sin().exp() already
+            # went through AOT autograd. When autograd.grad(y, x, create_graph=True)
+            # runs in eager, it backwards through AOT nodes, creating gx with grad_fn
+            # pointing to CompiledFunctionBackward. Second autograd.grad(gx, x) fails.
             def f1(x):
                 y = x.sin().exp()
                 (gx,) = torch.autograd.grad(
@@ -358,13 +357,13 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
                 return gx
 
             compiled_f1 = torch.compile(backend="aot_eager")(f1)
-            f1(x)
-            # Graph break happens, falls back to eager which works
-            result = compiled_f1(x)
-            self.assertEqual(result, f1(x))
+            with self.assertRaisesRegex(RuntimeError, err):
+                compiled_f1(x)
 
             # (2) the second half of double backward outside compiled function
-            # Now causes graph break and falls back to eager (no error)
+            # This works because autograd.grad inside the compiled function is traced,
+            # so gx.grad_fn is CompiledFunctionBackward (not BackwardBackward).
+            # The second autograd.grad(gx, x) is just first-level backward.
             def f2(x):
                 y = x.sin().exp()
                 (gx,) = torch.autograd.grad(
@@ -374,7 +373,6 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
             compiled_f2 = torch.compile(backend="aot_eager")(f2)
             gx = compiled_f2(x)
-            # Falls back to eager, so this works now
             torch.autograd.grad(gx, x)
 
             # (3) double backward entirely outside compiled function
