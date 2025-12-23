@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 """
 Custom extern kernel codegen registry.
 
@@ -13,22 +12,43 @@ To add a new custom implementation:
 
 Example:
     CUSTOM_EXTERN_KERNEL_CODEGEN = {
-        "torch.ops.higher_order.print": {
-            "python": generate_print_python,
-            "cpp": generate_print_cpp,  # Optional, falls back to python if not provided
-        },
+        "torch.ops.higher_order.print": CustomCodegen(
+            python=generate_print_python,
+            cpp=generate_print_cpp,  # Optional
+        ),
     }
+
+Usage:
+    codegen = CUSTOM_EXTERN_KERNEL_CODEGEN[op]
+    codegen.python(node, writeline)  # Direct attribute access
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import Any, TYPE_CHECKING
 
 
 if TYPE_CHECKING:
-    from collections.abc import Callable
-
     from .. import ir
+
+    # Type alias for codegen function signature (only used for type checking)
+    CodegenFunc = Callable[[ir.FallbackKernel, Callable[[str], None]], None]
+
+
+@dataclass
+class CustomCodegen:
+    """
+    Container for custom codegen implementations.
+
+    Attributes:
+        python: Codegen function for Python wrapper (optional)
+        cpp: Codegen function for C++ wrapper (optional)
+    """
+
+    python: Any = None
+    cpp: Any = None
 
 
 def generate_print_python(
@@ -50,42 +70,38 @@ def generate_print_python(
         print('x = {x}, y = {y}'.format(x=buf0, y=buf1))
         print('x = {}, y = {y}'.format(buf0, y=buf1))
     """
-    codegen_args = node.codegen_args()
-    codegen_kwargs = node.codegen_kwargs()
+    codegen_args: list[str] = node.codegen_args()
+    codegen_kwargs: list[str] = node.codegen_kwargs()
 
     # First arg is the format string
-    format_str = codegen_args[0] if codegen_args else "''"
+    if not codegen_args:
+        raise ValueError("generate_print_python requires a format string as the first positional argument")
+    format_str: str = codegen_args[0]
 
-    # Remaining args are positional arguments for .format()
-    positional_args = codegen_args[1:] if len(codegen_args) > 1 else []
-    
-    args_str = ", ".join(position_args + codegen_kwargs)
+# Remaining args are positional arguments for .format()
+    positional_args = codegen_args[1:]
+
+    args_str = ", ".join(positional_args + codegen_kwargs)
     writeline(
         f"print({format_str}.format({args_str}))"
         if args_str
         else f"print({format_str})"
     )
 
-
 # Registry mapping operator names to their custom codegen implementations
-# Each entry can have:
-#   - "python": codegen function for Python wrapper (required)
-#   - "cpp": codegen function for C++ wrapper (optional, falls back to default if not provided)
-CUSTOM_EXTERN_KERNEL_CODEGEN: dict[
-    str,
-    dict[str, Callable[[ir.FallbackKernel, Callable[[str], None]], None]],
-] = {
-    "torch.ops.higher_order.print": {
-        "python": generate_print_python,
-        # "cpp": generate_print_cpp,  # Add C++ implementation when needed
-    },
+# Usage: CUSTOM_EXTERN_KERNEL_CODEGEN[op_name].python(node, writeline)
+CUSTOM_EXTERN_KERNEL_CODEGEN: dict[str, CustomCodegen] = {
+    "torch.ops.higher_order.print": CustomCodegen(
+        python=generate_print_python,
+        # cpp=generate_print_cpp,  # Add C++ implementation when needed
+    ),
 }
 
 
 def get_custom_codegen(
     op_name: str | None,
     wrapper_type: str = "python",
-) -> Callable[[ir.FallbackKernel, Callable[[str], None]], None] | None:
+) -> CodegenFunc | None:
     """
     Get the custom codegen function for an operator.
 
@@ -95,14 +111,13 @@ def get_custom_codegen(
 
     Returns:
         The codegen function if found, None otherwise.
-        For cpp wrapper, falls back to python implementation if cpp not provided.
     """
     if op_name is None or op_name not in CUSTOM_EXTERN_KERNEL_CODEGEN:
         return None
 
-    codegen_map = CUSTOM_EXTERN_KERNEL_CODEGEN[op_name]
-    # Try to get the specific wrapper type without fallback between cpp and python
-    return codegen_map.get(wrapper_type)
+    codegen: CustomCodegen = CUSTOM_EXTERN_KERNEL_CODEGEN[op_name]
+    result: CodegenFunc | None = getattr(codegen, wrapper_type, None)
+    return result
 
 
 def has_custom_codegen(op_name: str) -> bool:
