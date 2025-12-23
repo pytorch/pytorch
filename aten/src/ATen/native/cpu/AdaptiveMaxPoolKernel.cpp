@@ -67,7 +67,7 @@ void cpu_adaptive_max_pool2d(
 
           // set output to local max and store location of max
           output_ptr[oh * output_width + ow] = maxval;
-          indices_ptr[oh * output_width + ow] = scalar_t(maxindex);
+          indices_ptr[oh * output_width + ow] = maxindex;
         }
       }
     }
@@ -540,7 +540,7 @@ void cpu_adaptive_max_pool3d(
 
             // set output to local max and store location of max
             output_ptr[od * output_height * output_width + oh * output_width + ow] = maxval;
-            indices_ptr[od * output_height * output_width + oh * output_width + ow] = scalar_t(maxindex);
+            indices_ptr[od * output_height * output_width + oh * output_width + ow] = maxindex;
           }
         }
       }

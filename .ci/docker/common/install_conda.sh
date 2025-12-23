@@ -53,7 +53,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Also ensure sysroot is using a modern GLIBC to match system compilers
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
              python="$ANACONDA_PYTHON_VERSION" \
-             ${SYSROOT_DEP}
+             ${SYSROOT_DEP} \
+             "icu<78"
+
 
   # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
   # which is provided in libstdcxx 12 and up.
