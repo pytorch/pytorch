@@ -255,7 +255,7 @@ static void maybe_initialize_env_vars() {
   auto nccl_ib_gid_index = c10::utils::get_env("NCCL_IB_GID_INDEX");
   auto nvshmem_socket_if_name =
       c10::utils::get_env("NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME");
-  auto nvshmem_hca_list = c10::utils::get_env("NCCL_IB_HCA");
+  auto nvshmem_hca_list = c10::utils::get_env("NVSHMEM_HCA_LIST");
   auto nvshmem_ib_gid_index = c10::utils::get_env("NVSHMEM_IB_GID_INDEX");
 
   if (!nvshmem_socket_if_name.has_value() && nccl_socket_if_name.has_value()) {

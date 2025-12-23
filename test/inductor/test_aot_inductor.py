@@ -42,12 +42,12 @@ from torch.export.pt2_archive._package import load_pt2
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
 from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
     CDNA2OrLater,
     IS_SM90,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    requires_triton_ptxas_compat,
     SM80OrLater,
     tf32_on_and_off,
 )
@@ -245,10 +245,7 @@ class AOTInductorTestsTemplate:
     # Skip embed_kernel_binary == True for now as it shows random
     # failure on CI
     @common_utils.parametrize("embed_kernel_binary", [False])
-    @unittest.skipIf(
-        torch.version.hip is None and _get_torch_cuda_version() < (12, 8),
-        "Test is only supported on CUDA 12.8+",
-    )
+    @requires_triton_ptxas_compat
     def test_simple_multi_arch(self, embed_kernel_binary):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU_TYPE")
@@ -6864,9 +6861,6 @@ class AOTInductorTestsTemplate:
         self.check_model(Model(), example_inputs)
 
     @skipIfMPS
-    @skipIfXpu(
-        msg="aten::convert_weight_to_int4pack is not currently implemented for XPU"
-    )
     @parametrize("m", [32])
     @parametrize("n", [64])
     @parametrize("q_group", [32, 64])
@@ -7048,7 +7042,6 @@ class AOTInductorTestsTemplate:
         ):
             torch._export.aot_compile(Model(), (x, y, m))
 
-    @skipIfRocm  # RoCM does not support the config block size in test suite.
     def test_triton_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7080,12 +7073,14 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             # The tuned best config on XPU is different with CUDA.
-            grid_0 = 32736 if GPU_TYPE == "xpu" else 1023
+            if GPU_TYPE == "xpu" or torch.version.hip:
+                grid_0 = 32736
+            else:
+                grid_0 = 1023
             self.code_check_count(
                 Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
             )
 
-    @skipIfRocm  # RoCM does not support the config block size in test suite.
     def test_triton_mutated_autotuning(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7128,12 +7123,14 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             # The tuned best config on XPU is different with CUDA.
-            grid_0 = 32736 if GPU_TYPE == "xpu" else 1023
+            if GPU_TYPE == "xpu" or torch.version.hip:
+                grid_0 = 32736
+            else:
+                grid_0 = 1023
             self.code_check_count(
                 Model(), (x, y, m), f"uint32_t grid_0 = {grid_0}L;", 1
             )
 
-    @skipIfRocm
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
     def test_triton_dynamic_launcher_grid(self):
         if self.device != GPU_TYPE:
@@ -7179,7 +7176,6 @@ class AOTInductorTestsTemplate:
             dynamic_shapes = {"x": {0: dim0_x}, "value": {0: Dim.AUTO}}
             self.check_model(Model(), example_inputs, dynamic_shapes=dynamic_shapes)
 
-    @skipIfRocm
     @patch.dict(os.environ, {"TRITON_DEBUG": "1"})
     def test_triton_dynamic_launcher_grid_infer_from_tensor(self):
         if self.device != GPU_TYPE:
