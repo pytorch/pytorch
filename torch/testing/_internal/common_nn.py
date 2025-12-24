@@ -109,7 +109,8 @@ module_tests = [
         input_size=(4, 10),
         reference_fn=lambda i, p, _: torch.mm(i, p[0].t()) + p[1].view(1, -1).expand(4, 8),
         with_tf32=True,
-        tf32_precision=0.005,
+        # ROCm TF32 has different precision characteristics - use higher tolerance
+        tf32_precision=0.02 if TEST_WITH_ROCM else 0.005,
         default_dtype=torch.double,
     ),
     dict(
@@ -2542,7 +2543,8 @@ def get_new_module_tests():
             check_gradgrad=False,
             desc='gelu_activation',
             with_tf32=True,
-            tf32_precision=0.08 if SM90OrLater else 0.05,
+            # ROCm TF32 has different precision characteristics - use higher tolerance
+            tf32_precision=0.15 if TEST_WITH_ROCM else (0.08 if SM90OrLater else 0.05),
             default_dtype=torch.double,
         ),
         dict(
@@ -2587,7 +2589,8 @@ def get_new_module_tests():
             check_gradgrad=False,
             desc='multilayer_coder',
             with_tf32=True,
-            tf32_precision=0.05 if SM90OrLater else 0.03,
+            # ROCm TF32 has different precision characteristics - use higher tolerance
+            tf32_precision=0.1 if TEST_WITH_ROCM else (0.05 if SM90OrLater else 0.03),
             default_dtype=torch.double,
         ),
         dict(
