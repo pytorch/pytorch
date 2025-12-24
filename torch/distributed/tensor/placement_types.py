@@ -757,9 +757,8 @@ class _StridedShard(torch._C._distributed.StridedShard):
         if not tensor.is_contiguous():
             tensor = tensor.contiguous()
 
-        # For reduce_scatter, the input is replicated and output is sharded.
-        # We use pad_new_strided since we're creating a new strided shard dimension.
-        # tensor.size(self.dim) is the logical size since input is replicated.
+        # `tensor.size(self.dim)` is the logical size since input is the same
+        # size as replicated on that mesh dim.
         return (
             CollectivePaddingContext(mesh, mesh_dim)
             .pad_new_strided(self.dim, tensor.size(self.dim), self.split_factor)
