@@ -29,7 +29,7 @@ REGULAR_SIZES.sort()
 
 class SpectralOpFuzzer(benchmark.Fuzzer):
     def __init__(self, *, seed: int, dtype=torch.float64,
-                 cuda: bool = False, probability_regular: float = 1.0):
+                 cuda: bool = False, probability_regular: float = 1.0) -> None:
         super().__init__(
             parameters=[
                 # Dimensionality of x. (e.g. 1D, 2D, or 3D.)

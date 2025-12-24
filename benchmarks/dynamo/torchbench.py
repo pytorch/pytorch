@@ -125,6 +125,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._skip["device"]["cuda"]
 
     @property
+    def skip_models_for_xpu(self):
+        return self._skip["device"]["xpu"]
+
+    @property
     def skip_models_for_freezing_cuda(self):
         return self._skip["freezing"]["cuda"]
 
@@ -167,6 +171,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     @property
     def force_fp16_for_bf16_models(self):
         return self._config["dtype"]["force_fp16_for_bf16_models"]
+
+    @property
+    def amp_dtype_bfloat16(self):
+        return self._config["dtype"]["amp_dtype_bfloat16"]
 
     @property
     def skip_accuracy_checks_large_models_dashboard(self):

@@ -34,6 +34,7 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     is_privateuse1_backend_available,
     IS_REMOTE_GPU,
+    IS_S390X,
     IS_SANDCASTLE,
     IS_WINDOWS,
     NATIVE_DEVICES,
@@ -390,8 +391,8 @@ class DeviceTypeTestBase(TestCase):
         return test.tolerance_overrides.get(dtype, tol(self.precision, self.rel_tol))
 
     def _apply_precision_override_for_test(self, test, param_kwargs):
-        dtype = param_kwargs["dtype"] if "dtype" in param_kwargs else None
-        dtype = param_kwargs["dtypes"] if "dtypes" in param_kwargs else dtype
+        dtype = param_kwargs.get("dtype")
+        dtype = param_kwargs.get("dtypes", dtype)
         if dtype:
             self.precision = self._get_precision_override(test, dtype)
             self.precision, self.rel_tol = self._get_tolerance_override(test, dtype)
@@ -1337,6 +1338,10 @@ def _has_sufficient_memory(device, size):
     else:
         effective_size = size
 
+    # don't try using all RAM on s390x, leave some for service processes
+    if IS_S390X:
+        effective_size = effective_size * 2
+
     if psutil.virtual_memory().available < effective_size:
         gc.collect()
     return psutil.virtual_memory().available >= effective_size
@@ -1425,6 +1430,12 @@ class onlyOn:
         def only_fn(slf, *args, **kwargs):
             if slf.device_type not in self.device_type:
                 reason = f"Only runs on {self.device_type}"
+                if IS_SANDCASTLE or IS_FBCODE:
+                    print(
+                        f"Skipping {fn.__name__} on sandcastle for following reason: {reason}",
+                        file=sys.stderr,
+                    )
+                    return
                 raise unittest.SkipTest(reason)
 
             return fn(slf, *args, **kwargs)
@@ -1450,6 +1461,12 @@ class deviceCountAtLeast:
         def multi_fn(slf, devices, *args, **kwargs):
             if len(devices) < self.num_required_devices:
                 reason = f"fewer than {self.num_required_devices} devices detected"
+                if IS_SANDCASTLE or IS_FBCODE:
+                    print(
+                        f"Skipping {fn.__name__} on sandcastle for following reason: {reason}",
+                        file=sys.stderr,
+                    )
+                    return
                 raise unittest.SkipTest(reason)
 
             return fn(slf, devices, *args, **kwargs)
@@ -1511,7 +1528,7 @@ class precisionOverride:
         assert isinstance(d, dict), (
             "precisionOverride not given a dtype : precision dict!"
         )
-        for dtype in d.keys():
+        for dtype in d:
             assert isinstance(dtype, torch.dtype), (
                 f"precisionOverride given unknown dtype {dtype}"
             )
@@ -2021,7 +2038,11 @@ flex_attention_supported_platform = unittest.skipUnless(
     ),
     "Requires CUDA and Triton, Intel GPU and triton, or CPU with avx2 and later",
 )
-if torch.version.hip and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName:
+if (
+    torch.version.hip
+    and torch.cuda.device_count() > 0
+    and "gfx94" in torch.cuda.get_device_properties(0).gcnArchName
+):
     e4m3_type = torch.float8_e4m3fnuz
     e5m2_type = torch.float8_e5m2fnuz
     E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fnuz).max

@@ -147,7 +147,7 @@ static void check_shape_forward(const Tensor& input,
 //  blocked format will propagate between layers. Input, output will be in blocked format.
 //
 //  For inference case, weight can be prepacked into blocked format by
-//  (so as to save weight reoder overhead):
+//  (so as to save weight reorder overhead):
 //      model = torch.utils.mkldnn.to_mkldnn(model)
 //
 //  For training case, grad_output can be CPU tensor or MKLDNN tensor,
@@ -160,8 +160,12 @@ static bool mkldnn_conv_enabled_fpmath_mode_bf16(){
 }
 
 static bool mkldnn_conv_enabled_fpmath_mode_tf32(){
-  return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::TF32 &&
-      cpuinfo_has_x86_amx_fp16();
+#if defined(__x86_64__) || defined(_M_X64)
+    return at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::CONV) == at::Float32Precision::TF32 &&
+        cpuinfo_has_x86_amx_fp16();
+#else
+    return false;   //TF32 not supported on power system
+#endif
 }
 
 static inline at::MemoryFormat mkldnn_convolution_memory_format(int64_t dims, bool is_channels_last) {
@@ -719,7 +723,7 @@ Tensor _mkldnn_convolution_transpose(
   ideep::tensor w = itensor_from_tensor(weight, /*from_const_data_ptr*/true);
   if (!weight.is_mkldnn()) {
     // mkldnn transposed convolution has weight in logical order of OIHW or OIDHW,
-    // while PyTorch has IOHW or IODHW, `._tranpose()` switches strides (no memory copy).
+    // while PyTorch has IOHW or IODHW, `._transpose()` switches strides (no memory copy).
     w.transpose_(0, 1);
   }
 
@@ -839,7 +843,7 @@ Tensor mkldnn_convolution_backward_input(
       padding.vec(),
       padding.vec(),
       groups,
-#if IDEEP_PREREQ(3, 4, 1, 3)
+#if DNNL_PREREQ(3, 4, 1)
       is_channels_last,
       op_attr);
 #else
@@ -847,12 +851,12 @@ Tensor mkldnn_convolution_backward_input(
   if (mkldnn_conv_enabled_fpmath_mode_bf16() &&
       weight.scalar_type() == at::kFloat) {
     TORCH_WARN_ONCE(
-        "Unexpected ideep version to support fpmath_mode_bf16, please update ideep version to align with pytorch main branch");
+        "Unexpected oneDNN version to support fpmath_mode_bf16, please update oneDNN version to align with pytorch main branch");
       }
   if (mkldnn_conv_enabled_fpmath_mode_tf32() &&
       weight.scalar_type() == at::kFloat) {
     TORCH_WARN_ONCE(
-        "Unexpected ideep version to support fpmath_mode_tf32, please update ideep version to align with pytorch main branch");
+        "Unexpected oneDNN version to support fpmath_mode_tf32, please update oneDNN version to align with pytorch main branch");
       }
 #endif
 

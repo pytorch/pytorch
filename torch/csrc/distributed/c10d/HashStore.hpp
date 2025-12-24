@@ -59,6 +59,8 @@ class TORCH_API HashStore : public Store {
 
   int64_t queueLen(const std::string& key) override;
 
+  std::vector<std::string> listKeys() override;
+
  protected:
   bool checkLocked(
       const std::unique_lock<std::mutex>& lock,

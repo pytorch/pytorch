@@ -83,7 +83,7 @@ def get_torch_version(sha: str | None = None) -> str:
         version = sdist_version
         origin = "PKG-INFO"
     else:
-        version = open(pytorch_root / "version.txt").read().strip()
+        version = Path(pytorch_root / "version.txt").read_text().strip()
         origin = "version.txt"
         if sdist_version is None and sha != UNKNOWN:
             if sha is None:
@@ -119,6 +119,7 @@ if __name__ == "__main__":
     )
     parser.add_argument("--cuda-version", "--cuda_version", type=str)
     parser.add_argument("--hip-version", "--hip_version", type=str)
+    parser.add_argument("--rocm-version", "--rocm_version", type=str)
     parser.add_argument("--xpu-version", "--xpu_version", type=str)
 
     args = parser.parse_args()
@@ -126,6 +127,7 @@ if __name__ == "__main__":
     assert args.is_debug is not None
     args.cuda_version = None if args.cuda_version == "" else args.cuda_version
     args.hip_version = None if args.hip_version == "" else args.hip_version
+    args.rocm_version = None if args.rocm_version == "" else args.rocm_version
     args.xpu_version = None if args.xpu_version == "" else args.xpu_version
 
     pytorch_root = Path(__file__).parent.parent
@@ -141,7 +143,7 @@ if __name__ == "__main__":
     with open(version_path, "w") as f:
         f.write("from typing import Optional\n\n")
         f.write(
-            "__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip', 'xpu']\n"
+            "__all__ = ['__version__', 'debug', 'cuda', 'git_version', 'hip', 'rocm', 'xpu']\n"
         )
         f.write(f"__version__ = '{version}'\n")
         # NB: This is not 100% accurate, because you could have built the
@@ -151,4 +153,5 @@ if __name__ == "__main__":
         f.write(f"cuda: Optional[str] = {repr(args.cuda_version)}\n")
         f.write(f"git_version = {repr(sha)}\n")
         f.write(f"hip: Optional[str] = {repr(args.hip_version)}\n")
+        f.write(f"rocm: Optional[str] = {repr(args.rocm_version)}\n")
         f.write(f"xpu: Optional[str] = {repr(args.xpu_version)}\n")

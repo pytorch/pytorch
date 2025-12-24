@@ -2,7 +2,7 @@
 import copy
 import warnings
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -28,8 +28,8 @@ __all__ = [
 
 def _generate_square_subsequent_mask(
     sz: int,
-    device: Optional[torch.device] = None,
-    dtype: Optional[torch.dtype] = None,
+    device: torch.device | None = None,
+    dtype: torch.dtype | None = None,
 ) -> Tensor:
     r"""Generate a square causal mask for the sequence.
 
@@ -41,7 +41,7 @@ def _generate_square_subsequent_mask(
     )
 
 
-def _get_seq_len(src: Tensor, batch_first: bool) -> Optional[int]:
+def _get_seq_len(src: Tensor, batch_first: bool) -> int | None:
     if src.is_nested:
         return None
     else:
@@ -105,9 +105,9 @@ class Transformer(Module):
         num_decoder_layers: int = 6,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
-        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
-        custom_encoder: Optional[Any] = None,
-        custom_decoder: Optional[Any] = None,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
+        custom_encoder: Any | None = None,
+        custom_decoder: Any | None = None,
         layer_norm_eps: float = 1e-5,
         batch_first: bool = False,
         norm_first: bool = False,
@@ -138,7 +138,7 @@ class Transformer(Module):
                 d_model,
                 eps=layer_norm_eps,
                 bias=bias,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 **factory_kwargs,
             )
             self.encoder = TransformerEncoder(
@@ -164,7 +164,7 @@ class Transformer(Module):
                 d_model,
                 eps=layer_norm_eps,
                 bias=bias,
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 **factory_kwargs,
             )
             self.decoder = TransformerDecoder(
@@ -182,14 +182,14 @@ class Transformer(Module):
         self,
         src: Tensor,
         tgt: Tensor,
-        src_mask: Optional[Tensor] = None,
-        tgt_mask: Optional[Tensor] = None,
-        memory_mask: Optional[Tensor] = None,
-        src_key_padding_mask: Optional[Tensor] = None,
-        tgt_key_padding_mask: Optional[Tensor] = None,
-        memory_key_padding_mask: Optional[Tensor] = None,
-        src_is_causal: Optional[bool] = None,
-        tgt_is_causal: Optional[bool] = None,
+        src_mask: Tensor | None = None,
+        tgt_mask: Tensor | None = None,
+        memory_mask: Tensor | None = None,
+        src_key_padding_mask: Tensor | None = None,
+        tgt_key_padding_mask: Tensor | None = None,
+        memory_key_padding_mask: Tensor | None = None,
+        src_is_causal: bool | None = None,
+        tgt_is_causal: bool | None = None,
         memory_is_causal: bool = False,
     ) -> Tensor:
         r"""Take in and process masked source/target sequences.
@@ -301,8 +301,8 @@ class Transformer(Module):
     @staticmethod
     def generate_square_subsequent_mask(
         sz: int,
-        device: Optional[torch.device] = None,
-        dtype: Optional[torch.dtype] = None,
+        device: torch.device | None = None,
+        dtype: torch.dtype | None = None,
     ) -> Tensor:
         r"""Generate a square causal mask for the sequence.
 
@@ -354,7 +354,7 @@ class TransformerEncoder(Module):
         self,
         encoder_layer: "TransformerEncoderLayer",
         num_layers: int,
-        norm: Optional[Module] = None,
+        norm: Module | None = None,
         enable_nested_tensor: bool = True,
         mask_check: bool = True,
     ) -> None:
@@ -399,16 +399,17 @@ class TransformerEncoder(Module):
 
         if enable_nested_tensor and why_not_sparsity_fast_path:
             warnings.warn(
-                f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}"
+                f"enable_nested_tensor is True, but self.use_nested_tensor is False because {why_not_sparsity_fast_path}",
+                stacklevel=2,
             )
             self.use_nested_tensor = False
 
     def forward(
         self,
         src: Tensor,
-        mask: Optional[Tensor] = None,
-        src_key_padding_mask: Optional[Tensor] = None,
-        is_causal: Optional[bool] = None,
+        mask: Tensor | None = None,
+        src_key_padding_mask: Tensor | None = None,
+        is_causal: bool | None = None,
     ) -> Tensor:
         r"""Pass the input through the encoder layers in turn.
 
@@ -510,6 +511,7 @@ class TransformerEncoder(Module):
             _supported_device_type = [
                 "cpu",
                 "cuda",
+                "xpu",
                 torch.utils.backend_registration._privateuse1_backend_name,
             ]
             if torch.overrides.has_torch_function(tensor_args):
@@ -586,7 +588,7 @@ class TransformerDecoder(Module):
         self,
         decoder_layer: "TransformerDecoderLayer",
         num_layers: int,
-        norm: Optional[Module] = None,
+        norm: Module | None = None,
     ) -> None:
         super().__init__()
         torch._C._log_api_usage_once(f"torch.nn.modules.{self.__class__.__name__}")
@@ -598,11 +600,11 @@ class TransformerDecoder(Module):
         self,
         tgt: Tensor,
         memory: Tensor,
-        tgt_mask: Optional[Tensor] = None,
-        memory_mask: Optional[Tensor] = None,
-        tgt_key_padding_mask: Optional[Tensor] = None,
-        memory_key_padding_mask: Optional[Tensor] = None,
-        tgt_is_causal: Optional[bool] = None,
+        tgt_mask: Tensor | None = None,
+        memory_mask: Tensor | None = None,
+        tgt_key_padding_mask: Tensor | None = None,
+        memory_key_padding_mask: Tensor | None = None,
+        tgt_is_causal: bool | None = None,
         memory_is_causal: bool = False,
     ) -> Tensor:
         r"""Pass the inputs (and mask) through the decoder layer in turn.
@@ -744,7 +746,7 @@ class TransformerEncoderLayer(Module):
         nhead: int,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
-        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
         layer_norm_eps: float = 1e-5,
         batch_first: bool = False,
         norm_first: bool = False,
@@ -768,9 +770,9 @@ class TransformerEncoderLayer(Module):
         self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
         self.norm_first = norm_first
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
@@ -797,8 +799,8 @@ class TransformerEncoderLayer(Module):
     def forward(
         self,
         src: Tensor,
-        src_mask: Optional[Tensor] = None,
-        src_key_padding_mask: Optional[Tensor] = None,
+        src_mask: Tensor | None = None,
+        src_key_padding_mask: Tensor | None = None,
         is_causal: bool = False,
     ) -> Tensor:
         r"""Pass the input through the encoder layer.
@@ -894,6 +896,7 @@ class TransformerEncoderLayer(Module):
             _supported_device_type = [
                 "cpu",
                 "cuda",
+                "xpu",
                 torch.utils.backend_registration._privateuse1_backend_name,
             ]
             if torch.overrides.has_torch_function(tensor_args):
@@ -958,8 +961,8 @@ class TransformerEncoderLayer(Module):
     def _sa_block(
         self,
         x: Tensor,
-        attn_mask: Optional[Tensor],
-        key_padding_mask: Optional[Tensor],
+        attn_mask: Tensor | None,
+        key_padding_mask: Tensor | None,
         is_causal: bool = False,
     ) -> Tensor:
         x = self.self_attn(
@@ -1030,7 +1033,7 @@ class TransformerDecoderLayer(Module):
         nhead: int,
         dim_feedforward: int = 2048,
         dropout: float = 0.1,
-        activation: Union[str, Callable[[Tensor], Tensor]] = F.relu,
+        activation: str | Callable[[Tensor], Tensor] = F.relu,
         layer_norm_eps: float = 1e-5,
         batch_first: bool = False,
         norm_first: bool = False,
@@ -1062,11 +1065,11 @@ class TransformerDecoderLayer(Module):
         self.linear2 = Linear(dim_feedforward, d_model, bias=bias, **factory_kwargs)
 
         self.norm_first = norm_first
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         self.norm1 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         self.norm2 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         self.norm3 = LayerNorm(d_model, eps=layer_norm_eps, bias=bias, **factory_kwargs)
         self.dropout1 = Dropout(dropout)
         self.dropout2 = Dropout(dropout)
@@ -1087,10 +1090,10 @@ class TransformerDecoderLayer(Module):
         self,
         tgt: Tensor,
         memory: Tensor,
-        tgt_mask: Optional[Tensor] = None,
-        memory_mask: Optional[Tensor] = None,
-        tgt_key_padding_mask: Optional[Tensor] = None,
-        memory_key_padding_mask: Optional[Tensor] = None,
+        tgt_mask: Tensor | None = None,
+        memory_mask: Tensor | None = None,
+        tgt_key_padding_mask: Tensor | None = None,
+        memory_key_padding_mask: Tensor | None = None,
         tgt_is_causal: bool = False,
         memory_is_causal: bool = False,
     ) -> Tensor:
@@ -1155,8 +1158,8 @@ class TransformerDecoderLayer(Module):
     def _sa_block(
         self,
         x: Tensor,
-        attn_mask: Optional[Tensor],
-        key_padding_mask: Optional[Tensor],
+        attn_mask: Tensor | None,
+        key_padding_mask: Tensor | None,
         is_causal: bool = False,
     ) -> Tensor:
         x = self.self_attn(
@@ -1175,8 +1178,8 @@ class TransformerDecoderLayer(Module):
         self,
         x: Tensor,
         mem: Tensor,
-        attn_mask: Optional[Tensor],
-        key_padding_mask: Optional[Tensor],
+        attn_mask: Tensor | None,
+        key_padding_mask: Tensor | None,
         is_causal: bool = False,
     ) -> Tensor:
         x = self.multihead_attn(
@@ -1211,9 +1214,9 @@ def _get_activation_fn(activation: str) -> Callable[[Tensor], Tensor]:
 
 
 def _detect_is_causal_mask(
-    mask: Optional[Tensor],
-    is_causal: Optional[bool] = None,
-    size: Optional[int] = None,
+    mask: Tensor | None,
+    is_causal: bool | None = None,
+    size: int | None = None,
 ) -> bool:
     """Return whether the given attention mask is causal.
 

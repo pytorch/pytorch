@@ -111,9 +111,7 @@ class TORCH_API TensorBase {
   explicit TensorBase(
       c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
       : impl_(std::move(tensor_impl)) {
-    if (impl_.get() == nullptr) {
-      throw std::runtime_error("TensorImpl with nullptr is not supported");
-    }
+    TORCH_CHECK(impl_.get(), "TensorImpl with nullptr is not supported");
   }
   TensorBase(const TensorBase&) = default;
   TensorBase(TensorBase&&) noexcept = default;
@@ -246,6 +244,9 @@ class TORCH_API TensorBase {
   }
   size_t weak_use_count() const noexcept {
     return impl_.weak_use_count();
+  }
+  bool is_uniquely_owned() const noexcept {
+    return impl_.is_uniquely_owned();
   }
 
   std::string toString() const;

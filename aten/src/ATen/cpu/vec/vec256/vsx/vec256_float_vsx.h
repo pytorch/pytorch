@@ -142,7 +142,7 @@ class Vectorized<float> {
       const Vectorized<float>& a,
       const Vectorized<float>& b,
       const Vectorized<float>& mask) {
-    // the mask used here returned by comparision of vec256
+    // the mask used here returned by comparison of vec256
     // assuming this we can use the same mask directly with vec_sel
     return {
         vec_sel(a._vec0, b._vec0, mask._vecb0),

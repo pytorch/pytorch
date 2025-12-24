@@ -73,7 +73,7 @@ def basichandlers(extension: str, data):
     if extension in ["pyd", "pickle"]:
         return pickle.loads(data)
 
-    if extension in ["pt"]:
+    if extension == "pt":
         stream = io.BytesIO(data)
         return torch.load(stream)
 
@@ -168,10 +168,9 @@ class ImageHandler:
     - pilrgba: pil None rgba
     """
 
-    def __init__(self, imagespec):
-        assert imagespec in list(imagespecs.keys()), (
-            f"unknown image specification: {imagespec}"
-        )
+    def __init__(self, imagespec) -> None:
+        if imagespec not in list(imagespecs.keys()):
+            raise AssertionError(f"unknown image specification: {imagespec}")
         self.imagespec = imagespec.lower()
 
     def __call__(self, extension, data):
@@ -205,18 +204,20 @@ class ImageHandler:
                 return img
             elif atype == "numpy":
                 result = np.asarray(img)
-                assert result.dtype == np.uint8, (
-                    f"numpy image array should be type uint8, but got {result.dtype}"
-                )
+                if result.dtype != np.uint8:
+                    raise AssertionError(
+                        f"numpy image array should be type uint8, but got {result.dtype}"
+                    )
                 if etype == "uint8":
                     return result
                 else:
                     return result.astype("f") / 255.0
             elif atype == "torch":
                 result = np.asarray(img)
-                assert result.dtype == np.uint8, (
-                    f"numpy image array should be type uint8, but got {result.dtype}"
-                )
+                if result.dtype != np.uint8:
+                    raise AssertionError(
+                        f"numpy image array should be type uint8, but got {result.dtype}"
+                    )
 
                 if etype == "uint8":
                     result = np.array(result.transpose(2, 0, 1))
@@ -334,13 +335,13 @@ class Decoder:
     handlers until some handler returns something other than None.
     """
 
-    def __init__(self, *handler, key_fn=extension_extract_fn):
+    def __init__(self, *handler, key_fn=extension_extract_fn) -> None:
         self.handlers = list(handler) if handler else []
         self.key_fn = key_fn
 
     # Insert new handler from the beginning of handlers list to make sure the new
     # handler having the highest priority
-    def add_handler(self, *handler):
+    def add_handler(self, *handler) -> None:
         if not handler:
             return
         self.handlers = list(handler) + self.handlers

@@ -132,7 +132,7 @@ class ModelReportVisualizer:
                 # if we need plottable, ensure type of val is tensor
                 if (
                     not plottable_features_only
-                    or type(feature_dict[feature_name]) == torch.Tensor
+                    or type(feature_dict[feature_name]) is torch.Tensor
                 ):
                     unique_feature_names.add(feature_name)
 
@@ -223,7 +223,7 @@ class ModelReportVisualizer:
                         feature_val = feature_val.item()
 
                     # we add to our list of values
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     tensor_table_row.append(feature_val)
 
                 tensor_table.append(tensor_table_row)
@@ -284,7 +284,7 @@ class ModelReportVisualizer:
                             feature_val = feature_val.item()
 
                         # add value to channel specific row
-                        # pyrefly: ignore  # bad-argument-type
+                        # pyrefly: ignore [bad-argument-type]
                         new_channel_row.append(feature_val)
 
                     # add to table and increment row index counter

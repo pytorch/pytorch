@@ -3,8 +3,9 @@ import functools
 import itertools
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr, symbols
 
@@ -29,7 +30,6 @@ from ...ir import (
     IRNode,
     Layout,
     PrimitiveInfoType,
-    ShapeAsConstantBuffer,
     TensorBox,
 )
 from ...utils import sympy_product
@@ -311,7 +311,7 @@ class CUDATemplateKernel(CUDAKernel):
         size_vars.extend(str(s) for s in free_symbols)
         self.size_args.extend(free_symbols)
         size_args = [f"const int {s}" for s in size_vars]
-        offset_args = [f"const int {name}_offset" for name in self.named_nodes.keys()]
+        offset_args = [f"const int {name}_offset" for name in self.named_nodes]
         runtime_arg_decls = ",".join(
             [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
         )
@@ -672,7 +672,7 @@ class CUDATemplateCaller(ChoiceCaller):
         else:
             return {"backend": "CUDA", "op_type": "unknown"}
 
-    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()
         return TensorBox.create(
             CUDATemplateBuffer(

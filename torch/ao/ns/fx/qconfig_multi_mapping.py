@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.ao.quantization import QConfigMapping
@@ -126,7 +126,7 @@ class QConfigMultiMapping:
     def _insert_qconfig_list(
         self,
         style: str,
-        args: list[Union[str, int, Callable]],
+        args: list[str | int | Callable],
         qconfig_list: list[QConfigAny],
     ) -> None:
         # we remove duplicates and None to make the ordering of qconfigs
@@ -149,7 +149,7 @@ class QConfigMultiMapping:
         return self
 
     def set_object_type(
-        self, object_type: Union[Callable, str], qconfig_list: list[QConfigAny]
+        self, object_type: Callable | str, qconfig_list: list[QConfigAny]
     ) -> QConfigMultiMapping:
         """
         Set object type QConfigs

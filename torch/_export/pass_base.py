@@ -188,7 +188,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
             self.callback = callback
             self.node: torch.fx.Node = next(iter(gm.graph.nodes))
 
-        # pyrefly: ignore  # bad-override
+        # pyrefly: ignore [bad-override]
         def placeholder(
             self,
             target: str,  # type: ignore[override]
@@ -214,7 +214,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         ) -> ProxyValue:
             meta = NodeMetadata(self.node.meta)
 
-            if target == operator.getitem:
+            if target is operator.getitem:
                 value, key = args
                 return self.callback.call_getitem(value, key, meta)
             elif getattr(target, "__module__", None) in {
@@ -236,10 +236,10 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
                     kwargs,
                     meta,
                 )
-            elif target == torch.ops.higher_order.cond:
+            elif target is torch.ops.higher_order.cond:
                 pred, true_fn, false_fn, inputs = args
                 return self.callback.call_cond(pred, true_fn, false_fn, inputs, meta)
-            elif target == torch.ops.higher_order.map_impl:
+            elif target is torch.ops.higher_order.map_impl:
                 f, mapped_args, operands = args  # type: ignore[assignment]
                 return self.callback.call_map(f, mapped_args, operands, meta)
             # For other unregistered HigherOrderOps, just interpret them blindly
@@ -317,7 +317,6 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         )
         res_proxy.node.meta.update(meta.data)
         if self.fake_tensor_mode and (shape_env := self.fake_tensor_mode.shape_env):
-            # pyrefly: ignore  # unbound-name
             if symbol_to_path := compute_unbacked_bindings(shape_env, res_data):
                 res_proxy.node.meta["unbacked_bindings"] = symbol_to_path
         self.tracer.set_metadata(res_proxy.node, res_data)
@@ -441,7 +440,7 @@ class _ExportPassBaseDeprecatedDoNotUse(PassBase):
         )
         self.tracer.fake_tensor_mode = prev_tracer.fake_tensor_mode
         interpreter = self.ExportInterpreter(self, graph_module)
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         prev_interpreter, self.interpreter = (
             self.interpreter,
             torch.fx.Interpreter(  # type: ignore[assignment]

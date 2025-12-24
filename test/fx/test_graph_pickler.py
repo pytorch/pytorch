@@ -66,7 +66,7 @@ if HAS_CPU:
 class TestGraphPickler(TestCase):
     def setUp(self):
         torch._dynamo.reset()
-        TestCase.setUp(self)
+        super().setUp()
 
         self._stack = contextlib.ExitStack()
         self._stack.enter_context(

@@ -1,7 +1,5 @@
 """Constant operator implementation."""
 
-from typing import Optional
-
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import (
     fuzz_scalar,
@@ -20,7 +18,7 @@ class ConstantOperator(Operator):
         self.template = "default"  # Track template for DTensor compatibility
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Constant is not a torch operation, it generates constant values."""
         return None
 
@@ -111,6 +109,7 @@ class ConstantOperator(Operator):
                 ]:
                     # Clamp integer values to [0, 3] to avoid index overflow in multiplication
                     # Even with multiplication, indices should stay in reasonable range
+                    # pyrefly: ignore [bad-argument-type]
                     fill_value = max(0, min(3, abs(fill_value)))
 
                 tensor_creation = (
