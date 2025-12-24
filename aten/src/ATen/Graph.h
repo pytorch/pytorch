@@ -3,7 +3,7 @@
 namespace at::accelerator {
 
 struct Graph {
-  Graph();
+  explicit Graph(bool keep_graph = false);
   ~Graph() = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(Graph);
