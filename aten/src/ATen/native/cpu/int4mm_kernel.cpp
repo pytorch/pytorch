@@ -18,13 +18,9 @@
 #include <ATen/ops/cat.h>
 #endif
 
-// also require bf16 support, see https://github.com/pytorch/pytorch/issues/170787
-#if AT_KLEIDIAI_ENABLED() && defined(__ARM_FEATURE_BF16)
-#define IS_KLEIDIAI_INT4MM_SUPPORTED 1
+#if AT_KLEIDIAI_ENABLED()
 #include <ATen/native/kleidiai/kai_kernels.h>
 #include <cpuinfo.h>
-#else
-#define IS_KLEIDIAI_INT4MM_SUPPORTED 0
 #endif
 
 #if (defined(_WIN32) || defined(_WIN64))
@@ -777,7 +773,7 @@ void int4pack_mm_kernel(
   }
 }
 
-#if IS_KLEIDIAI_INT4MM_SUPPORTED
+#if AT_KLEIDIAI_ENABLED()
 bool can_use_kleidiai(
     const at::Tensor& scales_zeros,
     const int64_t K,
@@ -793,7 +789,8 @@ bool can_use_kleidiai(
       ret = true;
     }
   }
-  return ret;
+  // require bf16 support, see https://github.com/pytorch/pytorch/issues/170787
+  return ret && cpuinfo_has_arm_bf16();
 }
 #endif
 
@@ -953,7 +950,7 @@ void dyn_quant_pack_4bit_weight_kernel(
     const int64_t N,
     const int64_t K,
     const int64_t block_size) {
-#if IS_KLEIDIAI_INT4MM_SUPPORTED
+#if AT_KLEIDIAI_ENABLED()
   if (can_use_kleidiai(scales_zeros, K, block_size)) {
     const int64_t weight_packed_size =
         kleidiai::kai_pack_rhs_int4_size(N, K, block_size, weights.scalar_type());
@@ -1311,10 +1308,10 @@ void dyn_quant_matmul_4bit_kernel(
     const int64_t N,
     const int64_t K,
     const int64_t block_size) {
-#if IS_KLEIDIAI_INT4MM_SUPPORTED
+#if AT_KLEIDIAI_ENABLED()
   const int64_t weight_packed_size =
       kleidiai::kai_pack_rhs_int4_size(N, K, block_size, inp.scalar_type());
-  if (weight_packed_size == packed_weights.numel()) {
+  if (weight_packed_size == packed_weights.numel() && cpuinfo_has_arm_bf16()) {
     // KleidiAI interface internally handles the Channelwise and groupwise
     // distinction
     kleidiai::kai_quant_pack_lhs_int4_mm(output, inp, packed_weights, M, N, K, block_size);
