@@ -4,7 +4,7 @@ import io
 import logging
 import pickle
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING
@@ -78,6 +78,7 @@ class AOTCompilePickler(pickle.Pickler):
 class AOTCompiledFunction:
     _artifacts: CompileArtifacts
     _guard_check_enabled: bool = True
+    _extra_globals: Optional[dict[str, object]] = None
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
         f_locals: dict[str, Any] = {}
@@ -101,7 +102,9 @@ class AOTCompiledFunction:
 
         # pyrefly: ignore [read-only]
         self.fn = self._artifacts.runtime_env.forward_callable(
-            self._artifacts.backend_id, self._artifacts.compiled_fn
+            self._artifacts.backend_id,
+            self._artifacts.compiled_fn,
+            extra_globals=self._extra_globals,
         )
 
         if self._artifacts.guard_manager is None:
@@ -149,7 +152,9 @@ class AOTCompiledFunction:
         return buf.getvalue()
 
     @classmethod
-    def deserialize(cls, data: bytes) -> "AOTCompiledFunction":
+    def deserialize(
+        cls, data: bytes, f_globals: Optional[dict[str, object]] = None
+    ) -> "AOTCompiledFunction":
         from torch._dynamo.package import SerializedCode
 
         state = pickle.loads(data)
@@ -163,7 +168,7 @@ class AOTCompiledFunction:
         state["original_code"] = SerializedCode.to_code_object(state["original_code"])
 
         artifacts = CompileArtifacts(**state)
-        return cls(artifacts)
+        return cls(artifacts, _extra_globals=f_globals)
 
     def disable_guard_check(self) -> None:
         self._guard_check_enabled = False
@@ -195,8 +200,8 @@ def aot_compile_fullgraph(
             from torch._dynamo.types import GuardFilterEntry
 
             def new_guard_filter_fn(
-                guard_entries: list[GuardFilterEntry],
-            ) -> list[bool]:
+                guard_entries: Sequence[GuardFilterEntry],
+            ) -> Sequence[bool]:
                 return [
                     (
                         not (
@@ -211,22 +216,22 @@ def aot_compile_fullgraph(
             hooks.guard_filter_fn = new_guard_filter_fn
 
         fn, _ = convert_frame.get_traced_fn(model)
-        check_fn = graph_capture_output.build_guards(
-            fn.__code__, hooks=hooks, save=True, strict_error=True
-        )
-
-        assert check_fn.guards_state is not None
 
         backend_input = capture_output.backend_input
         assert backend_input is not None
         backend_input.graph_module._backend_id = backend_input.backend_id  # type: ignore[assignment]
         device_type = _graph_device_type(backend_input.graph_module.graph)
+        assert (
+            backend_input.fake_mode.shape_env
+            is graph_capture_output.output_graph.shape_env
+        )
         tracing_context = TracingContext(backend_input.fake_mode)
         tracing_context.tensor_to_context = backend_input.tensor_to_context
         with (
             torch._guards.tracing(tracing_context),
             torch._functorch.config.patch(
                 {
+                    "bypass_autograd_cache_key": True,
                     "bundled_autograd_cache": True,
                     "force_non_lazy_backward_lowering": True,
                 }
@@ -250,6 +255,12 @@ def aot_compile_fullgraph(
                 + f"from backend {compiler_fn}) does not implement SerializableCallable."
             )
 
+        check_fn = graph_capture_output.build_guards(
+            fn.__code__, hooks=hooks, save=True, strict_error=True
+        )
+
+        assert check_fn.guards_state is not None
+
         source_info = SourceInfo(inlined_sources=set())
         for traced_code in graph_capture_output.traced_code:
             source_info.add_code(traced_code)
@@ -266,7 +277,9 @@ def aot_compile_fullgraph(
             device_type=device_type,
             backend_name=getattr(backend, "compiler_name", "unknown"),
         )
-        aot_compiled_fn = AOTCompiledFunction(_artifacts=artifacts)
+        aot_compiled_fn = AOTCompiledFunction(
+            _artifacts=artifacts, _extra_globals=fn.__globals__
+        )
 
     return aot_compiled_fn
 

@@ -45,7 +45,7 @@ dev = [
     "optree>=0.13.0",
     "psutil",
     "sympy>=1.13.3",
-    "typing-extensions>=4.13.2",
+    "typing-extensions>=4.15.0",
     "wheel",
 ]
 
@@ -174,10 +174,8 @@ ignore = [
     "SIM108", # SIM108 ignored because we prefer if-else-block instead of ternary expression
     "SIM110", # Checks for for loops that can be replaced with a builtin function, like any or all.
     "SIM114", # Combine `if` branches using logical `or` operator
-    "SIM115", # Checks for cases where files are opened without using a context manager.
     "SIM116", # Disable Use a dictionary instead of consecutive `if` statements
     "SIM117",
-    "SIM118",
     "SIM300", # Yoda condition detected
     "UP007", # keep-runtime-typing
     "UP045", # keep-runtime-typing
@@ -349,9 +347,31 @@ keep-runtime-typing = true
 "torchgen/**" = [
     "S101"
 ]
-"torch/**" = [
-    "S101"
-]
+"torch/_decomp/decompositions.py" = ["S101"]
+"torch/_dynamo/**" = ["S101"]
+"torch/_export/**" = ["S101"]
+"torch/_functorch/**" = ["S101"]
+"torch/_higher_order_ops/**" = ["S101"]
+"torch/_inductor/**" = ["S101"]
+"torch/_library/**" = ["S101"]
+"torch/_meta_registrations.py" = ["S101"]
+"torch/_numpy/testing/**" = ["S101"]
+"torch/_prims/**" = ["S101"]
+"torch/_prims_common/**" = ["S101"]
+"torch/_refs/__init__.py" = ["S101"]
+"torch/_refs/special/**" = ["S101"]
+"torch/_subclasses/**" = ["S101"]
+"torch/ao/nn/**" = ["S101"]
+"torch/ao/pruning/_experimental/data_sparsifier/lightning/tests/test_callbacks.py" = ["S101"]
+"torch/backends/_nnapi/**" = ["S101"]
+"torch/cuda/**" = ["S101"]
+"torch/distributed/**" = ["S101"]
+"torch/export/**" = ["S101"]
+"torch/fx/**" = ["S101"]
+"torch/jit/**" = ["S101"]
+"torch/nn/modules/**" = ["S101"]
+"torch/onnx/_internal/**" = ["S101"]
+"torch/testing/**" = ["S101"]
 "tools/**" = [
     "S101"
 ]
@@ -361,18 +381,11 @@ keep-runtime-typing = true
 "functorch/**" = [
     "S101"
 ]
-"docs/**" = [
-    "S101"
-]
-"android/**" = [
-    "S101"
-]
-".github/**" = [
-    "S101"
-]
-".ci/**" = [
-    "S101"
-]
+"docs/source/scripts/exportdb/generate_example_rst.py" = ["S101"]
+"android/pytorch_android/generate_test_torchscripts.py" = ["S101"]
+".github/scripts/gitutils.py" = ["S101"]
+".github/scripts/test_trymerge.py" = ["S101"]
+".github/scripts/trymerge.py" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"

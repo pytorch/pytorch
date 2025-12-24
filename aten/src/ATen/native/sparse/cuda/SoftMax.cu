@@ -31,11 +31,13 @@
 #include <thrust/binary_search.h>
 #include <thrust/device_ptr.h>
 #include <thrust/distance.h>
+#include <thrust/for_each.h>
 #include <thrust/iterator/constant_iterator.h>
+#include <thrust/iterator/discard_iterator.h>
 #include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
-#include <thrust/system/cuda/execution_policy.h>
+#include <thrust/transform.h>
 
 #include <cuda_runtime_api.h>
 #include <cusparse.h>
@@ -47,20 +49,6 @@
 #include <ATen/native/cuda/Loops.cuh>
 
 #include <c10/macros/Macros.h>
-#include <thrust/copy.h>
-#include <thrust/device_ptr.h>
-#include <thrust/distance.h>
-#include <thrust/for_each.h>
-#include <thrust/functional.h>
-#include <thrust/gather.h>
-#include <thrust/generate.h>
-#include <thrust/iterator/discard_iterator.h>
-#include <thrust/reduce.h>
-#include <thrust/scan.h>
-#include <thrust/sequence.h>
-#include <thrust/sort.h>
-#include <thrust/transform.h>
-#include <thrust/unique.h>
 
 #include <c10/cuda/CUDAMathCompat.h>
 

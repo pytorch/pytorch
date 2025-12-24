@@ -20,6 +20,7 @@ import functools
 import importlib
 import importlib.metadata
 import json
+import sys
 import threading
 import types
 import warnings
@@ -35,13 +36,18 @@ from typing import (
     NoReturn,
     overload,
     Protocol,
+    TYPE_CHECKING,
     TypeAlias,
     TypeVar,
     Union,
 )
-from typing_extensions import deprecated, NamedTuple, Self
+from typing_extensions import deprecated, NamedTuple, Self, TypeIs
 
 from torch.torch_version import TorchVersion as _TorchVersion
+
+
+if TYPE_CHECKING:
+    import torch.utils._cxx_pytree as cxx_pytree
 
 
 __all__ = [
@@ -249,9 +255,9 @@ def register_pytree_node(
         return
 
     if _cxx_pytree_imported:
-        from . import _cxx_pytree as cxx
+        import torch.utils._cxx_pytree as cxx_pytree
 
-        cxx._private_register_pytree_node(
+        cxx_pytree._private_register_pytree_node(
             cls,
             flatten_fn,
             unflatten_fn,
@@ -602,6 +608,14 @@ def _private_register_pytree_node(
     for the Python pytree only. End-users should use :func:`register_pytree_node`
     instead.
     """
+    from torch._library.opaque_object import is_opaque_type
+
+    if is_opaque_type(cls):
+        raise ValueError(
+            f"{cls} cannot be registered as a pytree as it has been "
+            "registered as an opaque object. Opaque objects must be pytree leaves."
+        )
+
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
             # TODO: change this warning to an error after OSS/internal stabilize
@@ -1009,6 +1023,7 @@ _private_register_pytree_node(
 
 
 STANDARD_DICT_TYPES: frozenset[type] = frozenset({dict, OrderedDict, defaultdict})
+# pyrefly: ignore [no-matching-overload]
 BUILTIN_TYPES: frozenset[type] = frozenset(
     {
         tuple,
@@ -1107,8 +1122,10 @@ class TreeSpec:
 
     def __post_init__(self) -> None:
         if self.type is None:
-            assert self._context is None
-            assert len(self._children) == 0
+            if self._context is not None:
+                raise AssertionError("leaf node should not have a context")
+            if len(self._children) != 0:
+                raise AssertionError("leaf node should not have children")
             num_nodes = 1
             num_leaves = 1
             num_children = 0
@@ -1176,12 +1193,12 @@ class TreeSpec:
         return self._children[index]
 
     def flatten_up_to(self, tree: PyTree) -> list[PyTree]:
-        def helper(treespec: TreeSpec, tree: PyTree, subtrees: list[PyTree]) -> None:
+        def helper(treespec: TreeSpec, node: PyTree, subtrees: list[PyTree]) -> None:
             if treespec.is_leaf():
-                subtrees.append(tree)
+                subtrees.append(node)
                 return
 
-            node_type = _get_node_type(tree)
+            node_type = _get_node_type(node)
             if treespec.type not in BUILTIN_TYPES:
                 # Always require custom node types to match exactly
                 if node_type != treespec.type:
@@ -1190,7 +1207,7 @@ class TreeSpec:
                         f"expected {treespec.type!r}, but got {node_type!r}.",
                     )
                 flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-                children, context = flatten_fn(tree)
+                children, context = flatten_fn(node)
                 if len(children) != treespec.num_children:
                     raise ValueError(
                         f"Node arity mismatch; "
@@ -1212,10 +1229,10 @@ class TreeSpec:
                         f"Node type mismatch; "
                         f"expected {treespec.type!r}, but got {node_type!r}.",
                     )
-                if len(tree) != treespec.num_children:
+                if len(node) != treespec.num_children:
                     raise ValueError(
                         f"Node arity mismatch; "
-                        f"expected {treespec.num_children}, but got {len(tree)}.",
+                        f"expected {treespec.num_children}, but got {len(node)}.",
                     )
 
                 if both_standard_dict:
@@ -1227,7 +1244,7 @@ class TreeSpec:
                         else treespec._context[1]
                     )
                     expected_keys = dict_context
-                    got_key_set = set(tree)
+                    got_key_set = set(node)
                     expected_key_set = set(expected_keys)
                     if got_key_set != expected_key_set:
                         missing_keys = expected_key_set.difference(got_key_set)
@@ -1238,11 +1255,11 @@ class TreeSpec:
                         if extra_keys:
                             message += f"; extra key(s): {extra_keys}"
                         raise ValueError(f"Node keys mismatch{message}.")
-                    children = [tree[key] for key in expected_keys]
+                    children = [node[key] for key in expected_keys]
                 else:
                     # node_type is treespec.type
                     flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-                    children, context = flatten_fn(tree)
+                    children, context = flatten_fn(node)
                     if (
                         node_type is not deque  # ignore mismatch of `maxlen` for deque
                     ) and context != treespec._context:
@@ -1366,6 +1383,44 @@ def treespec_dict(
     return TreeSpec(dict, list(dct.keys()), list(dct.values()))
 
 
+def _is_pytreespec_instance(
+    obj: Any,
+) -> TypeIs[Union[TreeSpec, "cxx_pytree.PyTreeSpec"]]:
+    if isinstance(obj, TreeSpec):
+        return True
+    if "torch.utils._cxx_pytree" in sys.modules:
+        # The C++ pytree module is not always available, so we check if it is loaded.
+        # If the C++ pytree module is loaded, we can check if the treespec
+        # is an instance of the C++ TreeSpec class.
+        import torch.utils._cxx_pytree as cxx_pytree
+
+        if isinstance(obj, cxx_pytree.PyTreeSpec):
+            return True
+    if "torch._dynamo.polyfills.pytree" in sys.modules:
+        # The PyTorch Dynamo pytree module is not always available, so we check if it is loaded.
+        # If the PyTorch Dynamo pytree module is loaded, we can check if the treespec
+        # is an instance of the PyTorch Dynamo TreeSpec class.
+        import torch._dynamo.polyfills.pytree as dynamo_pytree
+
+        return isinstance(obj, dynamo_pytree.PyTreeSpec)
+    return False
+
+
+def _ensure_python_treespec_instance(
+    treespec: Union[TreeSpec, "cxx_pytree.PyTreeSpec"],
+) -> TreeSpec:
+    if isinstance(treespec, TreeSpec):
+        return treespec
+
+    if not _is_pytreespec_instance(treespec):
+        raise TypeError(
+            f"Expected `treespec` to be an instance of "
+            f"PyTreeSpec but got item of type {type(treespec)}."
+        )
+    dummy_tree = treespec.unflatten([0] * treespec.num_leaves)
+    return tree_structure(dummy_tree)
+
+
 def tree_flatten(
     tree: PyTree,
     is_leaf: Callable[[PyTree], bool] | None = None,
@@ -1396,11 +1451,14 @@ def tree_unflatten(leaves: Iterable[Any], treespec: TreeSpec) -> PyTree:
     """Given a list of values and a TreeSpec, builds a pytree.
     This is the inverse operation of `tree_flatten`.
     """
-    if not isinstance(treespec, TreeSpec):
-        raise TypeError(
-            f"tree_unflatten(leaves, treespec): Expected `treespec` to be "
-            f"instance of TreeSpec but got item of type {type(treespec)}.",
-        )
+    if not _is_pytreespec_instance(treespec):
+        if not _is_pytreespec_instance(leaves):
+            raise TypeError(
+                f"Expected `treespec` to be an instance of "
+                f"PyTreeSpec but got item of type {type(treespec)}."
+            )
+        # Allow passing the PyTreeSpec instance as the first argument
+        leaves, treespec = treespec, leaves
     return treespec.unflatten(leaves)
 
 
@@ -1517,7 +1575,7 @@ def tree_map_(
 
 Type2 = tuple[type[T], type[S]]
 Type3 = tuple[type[T], type[S], type[U]]
-TypeAny = Union[type[Any], tuple[type[Any], ...], types.UnionType]
+TypeAny = type[Any] | tuple[type[Any], ...] | types.UnionType
 
 Fn2 = Callable[[T | S], R]
 Fn3 = Callable[[T | S | U], R]
@@ -1830,34 +1888,30 @@ def _broadcast_to_and_flatten(
     treespec: TreeSpec,
     is_leaf: Callable[[PyTree], bool] | None = None,
 ) -> list[Any] | None:
-    if not isinstance(treespec, TreeSpec):
-        raise AssertionError("treespec must be a TreeSpec")
+    def broadcast_prefix(
+        prefix_tree: PyTree,
+        full_tree: PyTree,
+        is_leaf: Callable[[PyTree], bool] | None = None,
+    ) -> list[Any]:
+        result: list[Any] = []
 
-    if tree_is_leaf(tree, is_leaf=is_leaf):
-        return [tree] * treespec.num_leaves
-    if treespec.is_leaf():
+        def add_leaves(x: Any, subtree: PyTree) -> None:
+            subtreespec = tree_structure(subtree, is_leaf=is_leaf)
+            result.extend([x] * subtreespec.num_leaves)
+
+        tree_map_(
+            add_leaves,
+            prefix_tree,
+            full_tree,
+            is_leaf=is_leaf,
+        )
+        return result
+
+    full_tree = tree_unflatten([0] * treespec.num_leaves, treespec)
+    try:
+        return broadcast_prefix(tree, full_tree, is_leaf=is_leaf)
+    except ValueError:
         return None
-    node_type = _get_node_type(tree)
-    if node_type != treespec.type:
-        return None
-
-    flatten_fn = SUPPORTED_NODES[node_type].flatten_fn
-    child_pytrees, context = flatten_fn(tree)
-
-    # Check if the Node is different from the spec
-    if len(child_pytrees) != treespec.num_children or context != treespec._context:
-        return None
-
-    # Recursively flatten the children
-    result: list[Any] = []
-    for child, child_spec in zip(child_pytrees, treespec._children, strict=True):
-        flat = _broadcast_to_and_flatten(child, child_spec, is_leaf=is_leaf)
-        if flat is not None:
-            result += flat
-        else:
-            return None
-
-    return result
 
 
 @dataclasses.dataclass
@@ -1971,11 +2025,7 @@ _SUPPORTED_PROTOCOLS[1] = _ProtocolFn(_treespec_to_json, _json_to_treespec)
 
 
 def treespec_dumps(treespec: TreeSpec, protocol: int | None = None) -> str:
-    if not isinstance(treespec, TreeSpec):
-        raise TypeError(
-            f"treespec_dumps(treespec, protocol): Expected `treespec` to be instance of "
-            f"TreeSpec but got item of type {type(treespec)}.",
-        )
+    treespec = _ensure_python_treespec_instance(treespec)
 
     if protocol is None:
         protocol = DEFAULT_TREESPEC_SERIALIZATION_PROTOCOL

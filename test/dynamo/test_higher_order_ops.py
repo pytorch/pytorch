@@ -207,7 +207,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         x = torch.randn(3)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)",
+            "HOP: Unsafe side effect",
         ):
             f(x)
 
@@ -343,9 +343,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             return dynamo_bypassing_wrapper(wrapper, outer_wrapped, x)
 
         x = torch.tensor(1.0)
-        with self.assertRaisesRegex(
-            RuntimeError, "Mutating a variable not in the current scope"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "HOP: Unsafe side effect"):
             fn_nested(x)
 
     def test_symint_input(self):
@@ -1149,6 +1147,18 @@ class GraphModule(torch.nn.Module):
         a = torch.tensor([1.0, 0.0, 1.0])
         b = torch.randn(3)
         t = TwoTensor(a, b)
+
+        prev_impl = cond_op.python_key_table.pop(TwoTensor, None)
+        cond_op._dispatch_cache.clear()
+
+        def restore_twotensor_impl():
+            cond_op.python_key_table.pop(TwoTensor, None)
+            if prev_impl is not None:
+                cond_op.python_key_table[TwoTensor] = prev_impl
+            cond_op._dispatch_cache.clear()
+
+        self.addCleanup(restore_twotensor_impl)
+
         with self.assertRaisesRegex(
             NotImplementedError,
             "no rule registered for HOP cond and subclass .*TwoTensor'>",
@@ -2088,13 +2098,13 @@ def forward(self, child : torch.Tensor, const_unused : int):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_eager(torch.ones(6, 4))
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_compile(torch.ones(3, 4))
 
@@ -2182,7 +2192,7 @@ def forward(self, child : torch.Tensor, const_unused : int):
         gm = backend.graphs[0]
         graph = gm.code.strip()
         subgraphs = []
-        for module_name in gm._modules.keys():
+        for module_name in gm._modules:
             subgraphs.append(getattr(gm, module_name).code.strip())
         return (graph, *subgraphs)
 
@@ -2300,13 +2310,13 @@ def forward(self):
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_eager(torch.tensor(True), torch.tensor(5))
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_compile(torch.tensor(True), torch.tensor(5))
 
@@ -2347,7 +2357,7 @@ def forward(self):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
@@ -2377,7 +2387,7 @@ def forward(self):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
@@ -2520,9 +2530,7 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 1
-            },
+            {"HOP: Unsafe side effect": 1},
         )
 
     def test_fallback_on_graph_break_simple(self):
@@ -3189,7 +3197,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                r"Cond doesn't work unless it is captured completely with torch.compile",
+                r"Higher Order Operator: torch\.cond",
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
@@ -3763,23 +3771,38 @@ class FuncTorchHigherOrderOpTests(
         # because of a previous call to _vmap_increment_nesting that wasn't undone
         # i.e. test_vmap_free_tensor fails when PYTORCH_TEST_WITH_DYNAMO=1
         # and the call to increment nesting is not undone
-        if not TEST_WITH_TORCHDYNAMO:
-            return
+        try:
+            if TEST_WITH_TORCHDYNAMO:
+                warn = False
+                while ci := torch._C._functorch.peek_interpreter_stack():
+                    if ci.key() == torch._C._functorch.TransformType.Vmap:
+                        warn = True
+                        torch._C._functorch._vmap_decrement_nesting()
+                    else:
+                        break
 
-        warn = False
-        while ci := torch._C._functorch.peek_interpreter_stack():
-            if ci.key() == torch._C._functorch.TransformType.Vmap:
-                warn = True
-                torch._C._functorch._vmap_decrement_nesting()
-            else:
-                break
+                if warn:
+                    msg = (
+                        "Interpreter stack is not empty. Test should have called "
+                        "'torch._C._functorch._vmap_decrement_nesting()'"
+                    )
+                    warnings.warn(msg)
+        finally:
+            super().tearDown()
 
-        if warn:
-            msg = (
-                "Interpreter stack is not empty. Test should have called "
-                "'torch._C._functorch._vmap_decrement_nesting()'"
+    def test_teardown_resets_nested_graph_breaks(self):
+        expected_nested_state = getattr(
+            self, "prev_nested_graph_breaks", torch._dynamo.config.nested_graph_breaks
+        )
+
+        def _check_flag():
+            self.assertEqual(
+                torch._dynamo.config.nested_graph_breaks, expected_nested_state
             )
-            warnings.warn(msg)
+
+        self.addCleanup(_check_flag)
+        # Sanity check: these tests always run with nested graph breaks enabled.
+        self.assertTrue(torch._dynamo.config.nested_graph_breaks)
 
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
@@ -6386,9 +6409,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[3, 3, 3]", L_y_: "f32[3, 3]"):
-        l_x_ = L_x_
+    def forward(self, L_y_: "f32[3, 3]", L_x_: "f32[3, 3, 3]"):
         l_y_ = L_y_
+        l_x_ = L_x_
 
         lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 
@@ -6560,9 +6583,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_: "f32[5, 3]", L_x_: "f32[2, 3]"):
-        l_y_ = L_y_
+    def forward(self, L_x_: "f32[2, 3]", L_y_: "f32[5, 3]"):
         l_x_ = L_x_
+        l_y_ = L_y_
 
         lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 

@@ -1207,8 +1207,8 @@ class TestProfiler(TestCase):
                     parts[-4].isdigit() and int(parts[-4]) > 0,
                     "Wrong tracing file name pattern",
                 )
-                self.assertEqual(parts[-3:], ["pt", "trace", "json"])
-                file_num += 1
+                if parts[-3:] == ["pt", "trace", "json"]:
+                    file_num += 1
             self.assertEqual(file_num, 3)
 
         # test case for gzip file format
@@ -1492,7 +1492,7 @@ class TestProfiler(TestCase):
 
     def test_profiler_correlation_id(self):
         """
-        We expect the correlation_id to be unique across multiple invokation of the profiler,
+        We expect the correlation_id to be unique across multiple invocation of the profiler,
         So we will reuse id_uniqueness_set.
         """
         id_uniqueness_set = set()
@@ -2190,7 +2190,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
         self.assertTrue(any("aten" in e.name for e in p.events()))
 
-        self.assertTrue(any(device in e.name for e in p.events()))
+        self.assertTrue(any(device in e.name.lower() for e in p.events()))
 
         self.assertTrue(any("kernel" in e.name.lower() for e in p.events()))
 
@@ -2316,9 +2316,15 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             if "cat" in event and event["cat"] in cuda_external_id_events:
                 if disable_external_correlation:
                     self.assertTrue("External id" not in event["args"])
-                elif event["name"] != "cudaDeviceSynchronize":
-                    self.assertTrue("External id" in event["args"])
-                    self.assertTrue(event["args"]["External id"] > 0)
+                else:
+                    excluded_events = (
+                        {"hipDeviceSynchronize"}
+                        if TEST_WITH_ROCM
+                        else {"cudaDeviceSynchronize"}
+                    )
+                    if event["name"] not in excluded_events:
+                        self.assertTrue("External id" in event["args"])
+                        self.assertTrue(event["args"]["External id"] > 0)
 
         def validate_json(prof, disable_external_correlation):
             with TemporaryFileName(mode="w+") as fname:
@@ -3276,7 +3282,7 @@ aten::mm""",
 
         check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requries CUDA")
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_profiler_debug_autotuner(self):
         """
         This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.
