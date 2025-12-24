@@ -365,6 +365,25 @@ class FakeTensorConverter:
         symbolic_context: Optional[SymbolicContext] = None,
         trace: bool = True,
     ) -> FakeTensor:
+        # Handle FakeTensors from a different fake mode (e.g., in cross-compilation
+        # where the user creates tensors under their own FakeTensorMode). We need to
+        # re-fakeify them under the target fake mode.
+        if isinstance(t, FakeTensor) and t.fake_mode is not fake_mode:
+            # For FakeTensors from a different mode, we convert them by creating
+            # a new FakeTensor in the target mode. We need to access the underlying
+            # meta tensor, which requires setting in_kernel_invocation to True.
+            outer_fake_mode = t.fake_mode
+            fake_device = t.fake_device
+            constant = t.constant if hasattr(t, 'constant') else None
+
+            # Use in_kernel_invocation to make the FakeTensor report its true
+            # meta device, so we can pass it to from_meta_and_device
+            with in_kernel_invocation_manager(outer_fake_mode):
+                new_fake = self.from_meta_and_device(fake_mode, t, fake_device)
+
+            self.set_tensor_memo(t, new_fake)
+            return new_fake
+
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
             if tracing_context := torch._guards.TracingContext.try_get():
