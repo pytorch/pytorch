@@ -88,6 +88,8 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                 self.assignments: dict[str, list[ast.expr]] = {}
                 # track function calls
                 self.called_functions: list[str] = []
+                # track torch.ops.namespace.op_name calls (stored as "namespace::op_name")
+                self.torch_ops_calls: list[str] = []
 
             def visit_Assign(self, node: ast.Assign) -> None:
                 for target in node.targets:
@@ -99,16 +101,24 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                 triton_func_names = ("capture_triton", "wrap_triton")
                 if isinstance(node.func, ast.Attribute):
                     attr = node.func
-                    if (
-                        isinstance(attr.value, ast.Attribute)
-                        and isinstance(attr.value.value, ast.Name)
-                        and attr.value.value.id == "torch"
-                        and attr.value.attr == "_library"
-                        and attr.attr in triton_func_names
-                    ):
-                        if node.args and isinstance(node.args[0], ast.Name):
-                            self.triton_kernels.append(node.args[0].id)
-
+                    if isinstance(attr.value, ast.Attribute):
+                        if (
+                            isinstance(attr.value.value, ast.Name)
+                            and attr.value.value.id == "torch"
+                            and attr.value.attr == "_library"
+                            and attr.attr in triton_func_names
+                        ):
+                            if node.args and isinstance(node.args[0], ast.Name):
+                                self.triton_kernels.append(node.args[0].id)
+                        elif (
+                            isinstance(attr.value.value, ast.Attribute)
+                            and isinstance(attr.value.value.value, ast.Name)
+                            and attr.value.value.value.id == "torch"
+                            and attr.value.value.attr == "ops"
+                        ):
+                            self.called_functions.append(
+                                f"{attr.value.attr}::{attr.attr}"
+                            )
                 # Catch capture_triton, wrap_triton that's been
                 # imported directly
                 elif isinstance(node.func, ast.Name):
@@ -243,6 +253,12 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                 func_obj = all_globals[func_name]
             elif func_name in closure_vars.nonlocals:
                 func_obj = closure_vars.nonlocals[func_name]
+
+            if func_obj is None:
+                from torch._library.custom_ops import OPDEFS
+
+                if func_name in OPDEFS:
+                    func_obj = impl_fn = OPDEFS[func_name]._abstract_fn
 
             # skip if not a callable or if it's a triton kernel itself
             if func_obj is None or not callable(func_obj):
