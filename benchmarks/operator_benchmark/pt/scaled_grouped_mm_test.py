@@ -147,13 +147,12 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
         }
 
     def _init_mx_nvfp4(self, M, N, K, G, device, scaling):
-        """Initialize MX or NVFP4 blocked scaling (CUDA-only, non-HIP)."""
+        """Initialize MX or NVFP4 blocked scaling."""
         helpers = get_test_scaled_matmul_cuda()
 
-        if torch.version.hip is not None:
-            raise ValueError(
-                f"{scaling} benchmarks are only wired for CUDA swizzled scales (non-HIP)."
-            )
+        # NVFP4 is not supported on HIP
+        if scaling == "nvfp4" and torch.version.hip is not None:
+            raise ValueError("nvfp4 not supported on HIP/ROCm")
 
         # We interpret offs as group end offsets along K (grouped-K).
         # Use deterministic equal-sized groups.
@@ -185,6 +184,7 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
 
         self._scale_recipe_a = kwargs["scale_recipe_a"]
         self._scale_recipe_b = kwargs["scale_recipe_b"]
+        # _build_scaled_grouped_mm_kwargs already handles HIP vs CUDA swizzle selection
         self._swizzle_a = kwargs.get("swizzle_a", None)
         self._swizzle_b = kwargs.get("swizzle_b", None)
 
@@ -239,14 +239,26 @@ if _should_generate_scaled_grouped_mm_configs():
             tags=["long"],
         )
 
-    # MX + NVFP4 are CUDA-only (non-HIP) due to swizzled scale requirements.
+    # MX supports both CUDA (with swizzle) and HIP (with NO_SWIZZLE).
+    scaled_grouped_mm_configs_long += op_bench.config_list(
+        attr_names=["M", "N", "K", "G"],
+        attrs=[[m, n, k, g] for (m, n, k, g) in MNKG_list],
+        cross_product_configs={
+            "device": ["cuda"],
+            "scaling": ["mxfp4", "mxfp8"],
+            "output_dtype": ["bfloat16"],
+        },
+        tags=["long"],
+    )
+
+    # NVFP4 is CUDA-only (non-HIP) due to swizzled scale requirements.
     if torch.version.hip is None:
         scaled_grouped_mm_configs_long += op_bench.config_list(
             attr_names=["M", "N", "K", "G"],
             attrs=[[m, n, k, g] for (m, n, k, g) in MNKG_list],
             cross_product_configs={
                 "device": ["cuda"],
-                "scaling": ["mxfp4", "mxfp8", "nvfp4"],
+                "scaling": ["nvfp4"],
                 "output_dtype": ["bfloat16"],
             },
             tags=["long"],

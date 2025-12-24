@@ -324,13 +324,9 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     def _init_mx_blockwise(
         self, M: int, N: int, K: int, device: str, *, mx_format: str
     ) -> None:
-        # MX uses BlockWise1x32 with swizzled scales on CUDA.
+        # MX uses BlockWise1x32 with swizzled scales on CUDA, NO_SWIZZLE on HIP.
         if device != "cuda":
             raise RuntimeError(f"MX scaling requires CUDA device, got: {device}")
-        if torch.version.hip is not None:
-            raise RuntimeError(
-                "MXFP benchmarks are only wired for CUDA swizzled scales (non-HIP)."
-            )
 
         # Important cuBLASLt requirement: mat_b must be column-major.
         # We satisfy this by passing a transpose view (non-contiguous) for `mat_b`.
@@ -356,6 +352,13 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         scale_a = to_blocked(scale_a)
         scale_b = to_blocked(scale_b)
 
+        # HIP requires NO_SWIZZLE, CUDA uses SWIZZLE_32_4_4
+        swizzle_type = (
+            SwizzleType.NO_SWIZZLE
+            if torch.version.hip is not None
+            else SwizzleType.SWIZZLE_32_4_4
+        )
+
         self.inputs = {
             "x": x_lp,
             "y": y_lp.t(),  # column-major mat_b
@@ -365,8 +368,8 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         self._set_scaled_mm_call_config(
             scale_recipe_a=ScalingType.BlockWise1x32,
             scale_recipe_b=ScalingType.BlockWise1x32,
-            swizzle_a=SwizzleType.SWIZZLE_32_4_4,
-            swizzle_b=SwizzleType.SWIZZLE_32_4_4,
+            swizzle_a=swizzle_type,
+            swizzle_b=swizzle_type,
         )
 
     def _init_nvfp4_blockwise_and_tensorwise(
@@ -513,8 +516,21 @@ if _should_generate_scaled_mm_configs():
             tags=["long"],
         )
 
-    # MX + NVFP4: keep bf16-only for now.
-    # These are CUDA-only (non-HIP) due to swizzled scale requirements.
+    # MX supports both CUDA (with swizzle) and HIP (with NO_SWIZZLE).
+    # NVFP4 is CUDA-only (non-HIP) due to swizzled scale requirements.
+    scaled_mm_configs_long += op_bench.config_list(
+        attr_names=["M", "N", "K"],
+        attrs=_scaled_mm_long_shapes,
+        cross_product_configs={
+            "device": ["cuda"],
+            "float8_dtype": ["e4m3fn"],
+            "output_dtype": ["bfloat16"],
+            "scaling": ["mxfp8", "mxfp4"],
+        },
+        tags=["long"],
+    )
+
+    # NVFP4 is CUDA-only (non-HIP)
     if torch.version.hip is None:
         scaled_mm_configs_long += op_bench.config_list(
             attr_names=["M", "N", "K"],
@@ -523,7 +539,7 @@ if _should_generate_scaled_mm_configs():
                 "device": ["cuda"],
                 "float8_dtype": ["e4m3fn"],
                 "output_dtype": ["bfloat16"],
-                "scaling": ["mxfp8", "mxfp4", "nvfp4"],
+                "scaling": ["nvfp4"],
             },
             tags=["long"],
         )
