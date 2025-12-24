@@ -6,7 +6,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
-from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available
+from torch._inductor.kernel.flex.flex_flash_attention import (
+    _hierarchical_indexer_cute,
+    ensure_flash_available,
+    HierarchicalIndex,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
@@ -802,8 +806,6 @@ class TestHierarchicalIndex(InductorTestCase):
     def test_hierarchical_index_preserves_args(self):
         from sympy import Symbol
 
-        from torch._inductor.kernel.flex.flex_flash_attention import HierarchicalIndex
-
         b = Symbol("b")
         q_idx = Symbol("q_idx")
         idx = HierarchicalIndex(b, q_idx)
@@ -814,10 +816,6 @@ class TestHierarchicalIndex(InductorTestCase):
     def test_hierarchical_indexer_single_dim_no_wrap(self):
         from sympy import Symbol
 
-        from torch._inductor.kernel.flex.flex_flash_attention import (
-            _hierarchical_indexer_cute,
-        )
-
         indexer = _hierarchical_indexer_cute(size=[10])
         q_idx = Symbol("q_idx")
 
@@ -825,11 +823,6 @@ class TestHierarchicalIndex(InductorTestCase):
 
     def test_hierarchical_indexer_multi_dim_wraps(self):
         from sympy import Symbol
-
-        from torch._inductor.kernel.flex.flex_flash_attention import (
-            _hierarchical_indexer_cute,
-            HierarchicalIndex,
-        )
 
         indexer = _hierarchical_indexer_cute(size=[4, 128])
         b = Symbol("b")
@@ -842,11 +835,6 @@ class TestHierarchicalIndex(InductorTestCase):
 
     def test_hierarchical_indexer_3d_and_4d(self):
         from sympy import Symbol
-
-        from torch._inductor.kernel.flex.flex_flash_attention import (
-            _hierarchical_indexer_cute,
-            HierarchicalIndex,
-        )
 
         b, h, q_idx, kv_idx = (
             Symbol("b"),
@@ -868,8 +856,6 @@ class TestHierarchicalIndex(InductorTestCase):
     def test_isinstance_detection_for_load(self):
         from sympy import Symbol
 
-        from torch._inductor.kernel.flex.flex_flash_attention import HierarchicalIndex
-
         b = Symbol("b")
         q_idx = Symbol("q_idx")
 
@@ -878,10 +864,6 @@ class TestHierarchicalIndex(InductorTestCase):
 
     def test_hierarchical_indexer_rank_mismatch(self):
         from sympy import Symbol
-
-        from torch._inductor.kernel.flex.flex_flash_attention import (
-            _hierarchical_indexer_cute,
-        )
 
         indexer = _hierarchical_indexer_cute(size=[2, 4])
         b = Symbol("b")
@@ -926,7 +908,7 @@ class TestHierarchicalIndex(InductorTestCase):
         )
         code_str = "\n".join(code)
 
-        expected_pattern = "in_ptr0[tmp0, tmp1]"
+        expected_pattern = "in_ptr4[tmp3, tmp4]"
         self.assertIn(
             expected_pattern,
             code_str,
@@ -971,7 +953,7 @@ class TestHierarchicalIndex(InductorTestCase):
         )
         code_str = "\n".join(code)
 
-        expected_pattern = "in_ptr0[tmp0, tmp1, tmp2]"
+        expected_pattern = "in_ptr4[tmp4, tmp5, tmp6]"
         self.assertIn(
             expected_pattern,
             code_str,
@@ -1016,7 +998,7 @@ class TestHierarchicalIndex(InductorTestCase):
         )
         code_str = "\n".join(code)
 
-        expected_pattern = "in_ptr0[tmp0, tmp1, tmp2, tmp3]"
+        expected_pattern = "in_ptr4[tmp5, tmp6, tmp7, tmp8]"
         self.assertIn(
             expected_pattern,
             code_str,
