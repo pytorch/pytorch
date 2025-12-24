@@ -3988,10 +3988,22 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                         result_var, reduction_type, value, where_cond, acc_type, dtype
                     )
                 else:
-                    # For persistent reductions, don't bother with
-                    # welford's algorithm since it uses more registers, and
-                    # taking two reductions doesn't increase memory usage.
-                    result_var = self.welford_reduce_fallback(dtype, value)
+                    # For persistent reductions, don't bother with welford's
+                    # algorithm since it uses more registers, and taking two
+                    # reductions doesn't increase memory usage.
+                    #
+                    # Tile reductions require full welford for correctness.
+                    if config.triton.tile_reductions or config.triton.prefer_nd_tiling:
+                        result_var = self.welford_reduce(
+                            result_var,
+                            reduction_type,
+                            value,
+                            where_cond,
+                            acc_type,
+                            dtype,
+                        )
+                    else:
+                        result_var = self.welford_reduce_fallback(dtype, value)
             elif reduction_type == "welford_combine":
                 assert isinstance(masked_value, Sequence)
                 (mean, m2, weight) = masked_value
