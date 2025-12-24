@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Optional, Sequence
 from functools import partial
 
 import torch
@@ -20,7 +20,11 @@ from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 __all__ = ["register_sharding"]
 
 
-def register_sharding(op: OpOverload | list[OpOverload]):
+def register_sharding(
+    op: OpOverload | list[OpOverload],
+    static_argnum: Optional[int] = None,
+    static_kwargkey: Optional[list[str]] = None
+):
     """
     :meth:`register_sharding` is an experimental API that allows users to register sharding
     strategies for an operator when the tensor inputs and outputs are DTensor.
@@ -31,6 +35,14 @@ def register_sharding(op: OpOverload | list[OpOverload]):
     Args:
         op (Union[OpOverload, List[OpOverload]]):
             An op or a list of ops to register the customized sharding function.
+        static_argnum (Optional[int]):
+            The starting index of non-tensor args which would affect sharding propagation results.
+            It will be used to derive :class:`RuntimeSchemaInfo` and all args starting from this
+            index would be hashed to sharding cache. default: None
+        static_kwargkey (Optional[List[str]]):
+            The list of kwarg keys whose values would affect sharding propagation results. It will
+            be used to derive :class:`RuntimeSchemaInfo` and all values of these keys would be
+            hashed to sharding cache. default: None
 
     Returns:
         A function decorator which can be used to wrap a function that defines the sharding
@@ -106,21 +118,22 @@ def register_sharding(op: OpOverload | list[OpOverload]):
         def derive_schema_info(op):
             # NOTE: without user directly providing RuntimeSchemaInfo, for now
             #       we create it in a conservative fashion as follows:
-            #       1. let static_argnum be the first int argument
-            #       2. let static_kwargkey include all the int type kwargs
+            #       1. let static_argnum be the first int argument if user does not set it
+            #       2. let static_kwargkey include all the int type kwargs if user does not set it
             #       3. always set needs_pytree=True
-            static_argnum = 100
-            static_kwargkey: list[str] = []
+            static_argnum_ = 100 if static_argnum is None else static_argnum
+            static_kwargkey_: list[str] = [] if static_kwargkey is None else static_kwargkey
             for i, arg in enumerate(op._schema.arguments):
                 if isinstance(arg.type, torch.IntType) or (
                     isinstance(arg.type, torch.OptionalType)
                     and isinstance(arg.type.getElementType(), torch.IntType)
                 ):
-                    static_argnum = min(i, static_argnum)
-                    if arg.kwarg_only:
-                        static_kwargkey.append(arg.name)
+                    if static_argnum is None:
+                        static_argnum_ = min(i, static_argnum_)
+                    if static_kwargkey is not None and arg.kwarg_only:
+                        static_kwargkey_.append(arg.name)
             return RuntimeSchemaInfo(
-                static_argnum, static_kwargkey or None, needs_pytree=True
+                static_argnum_, static_kwargkey_ or None, needs_pytree=True
             )
 
         overloads = op if isinstance(op, list) else [op]
