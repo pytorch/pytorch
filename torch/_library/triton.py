@@ -88,8 +88,6 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                 self.assignments: dict[str, list[ast.expr]] = {}
                 # track function calls
                 self.called_functions: list[str] = []
-                # track torch.ops.namespace.op_name calls (stored as "namespace::op_name")
-                self.torch_ops_calls: list[str] = []
 
             def visit_Assign(self, node: ast.Assign) -> None:
                 for target in node.targets:
