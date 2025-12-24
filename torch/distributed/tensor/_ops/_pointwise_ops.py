@@ -248,7 +248,7 @@ pointwise_ops = [
     aten.isneginf.out,
     aten.isposinf.default,
     aten.isposinf.out,
-    aten.ldexp.default,
+    aten.ldexp.Tensor,
     aten.ldexp.out,
     aten.ldexp_.default,
     aten.lt.Tensor,
