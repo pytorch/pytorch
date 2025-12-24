@@ -474,8 +474,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results
-        # DEBUG, TO BE REVERT ONCE https://github.com/pytorch/test-infra/pull/7620 LANDS
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@reland-7619
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
         if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.check-tpu.outputs.has_tpu != 'true'
         with:
           benchmark-results-dir: test/test-reports
