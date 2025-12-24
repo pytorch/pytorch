@@ -820,7 +820,13 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         cls: type[AOTAutogradCache], cache_info: AOTAutogradCacheInfo
     ) -> Optional[str]:
         shape_env = cls._get_shape_env()
-        assert shape_env is not None
+
+        # Sometimes we will not have a shape environment, for example in the
+        # case when we do aot precompile using the compiler toolkit framework.
+        if shape_env is None:
+            return None
+
+
         symints = cache_info.forward_symints
         guards = shape_env.get_pruned_guards(symints)
         return shape_env.produce_guards_expression(placeholders=symints, guards=guards)
