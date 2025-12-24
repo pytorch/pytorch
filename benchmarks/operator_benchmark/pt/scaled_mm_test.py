@@ -1,17 +1,18 @@
+from types import ModuleType
+
+from pt.scaled_mm_common import (
+    get_float8_dtype,
+    get_test_scaled_matmul_cuda,
+    SCALED_MM_BASE_SHAPES,
+    supports_fp8_deepseek_blockwise_scaling,
+)
+
 import operator_benchmark as op_bench
 
 import torch
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.torch_version import TorchVersion
-from types import ModuleType
-
-from pt.scaled_mm_common import (
-    get_test_scaled_matmul_cuda,
-    get_float8_dtype,
-    supports_fp8_deepseek_blockwise_scaling,
-    SCALED_MM_BASE_SHAPES,
-)
 
 
 """
@@ -293,7 +294,11 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     ) -> None:
         # FP8 blockwise scaling with 1x128 blocks.
         self._init_fp8_blockwise_common(
-            M, N, K, device, helpers,
+            M,
+            N,
+            K,
+            device,
+            helpers,
             block_m=1,
             block_k=self._FP8_BLOCK_K,
             scaling_type=ScalingType.BlockWise1x128,
@@ -305,7 +310,11 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     ) -> None:
         # FP8 blockwise scaling with 128x128 blocks.
         self._init_fp8_blockwise_common(
-            M, N, K, device, helpers,
+            M,
+            N,
+            K,
+            device,
+            helpers,
             block_m=self._FP8_BLOCK_K,
             block_k=self._FP8_BLOCK_K,
             scaling_type=ScalingType.BlockWise128x128,

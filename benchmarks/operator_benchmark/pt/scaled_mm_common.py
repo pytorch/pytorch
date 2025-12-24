@@ -30,7 +30,6 @@ SCALED_MM_BASE_SHAPES = [
 ]
 
 
-
 def get_test_scaled_matmul_cuda() -> ModuleType:
     """
     Reuse scale/quantization helpers from `test/test_scaled_matmul_cuda.py`.

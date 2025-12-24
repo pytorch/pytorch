@@ -1,4 +1,10 @@
 from pt import configs  # noqa: F401
+from pt.scaled_mm_common import (
+    build_equal_k_group_offs,
+    get_float8_dtype,
+    get_test_scaled_matmul_cuda,
+    SCALED_MM_BASE_SHAPES,
+)
 
 import operator_benchmark as op_bench
 
@@ -10,14 +16,6 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
 )
 from torch.torch_version import TorchVersion
-
-from pt.scaled_mm_common import (
-    get_test_scaled_matmul_cuda,
-    get_float8_dtype,
-    build_equal_k_group_offs,
-    SCALED_MM_BASE_SHAPES,
-)
-
 
 
 """
@@ -219,10 +217,9 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
 # Generate MNKG shapes from shared base shapes
 # First 2 shapes use all group counts [1, 2, 4, 8]
 # Remaining shapes use only [1, 8] for faster benchmarking
-MNKG_list = (
-    [(m, n, k, g) for (m, n, k) in SCALED_MM_BASE_SHAPES[:2] for g in [1, 2, 4, 8]]
-    + [(m, n, k, g) for (m, n, k) in SCALED_MM_BASE_SHAPES[2:] for g in [1, 8]]
-)
+MNKG_list = [
+    (m, n, k, g) for (m, n, k) in SCALED_MM_BASE_SHAPES[:2] for g in [1, 2, 4, 8]
+] + [(m, n, k, g) for (m, n, k) in SCALED_MM_BASE_SHAPES[2:] for g in [1, 8]]
 
 scaled_grouped_mm_configs_long = []
 
