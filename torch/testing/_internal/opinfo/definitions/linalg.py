@@ -25,13 +25,10 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_dtype import (
-    all_types,
     all_types_and_complex,
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
-    floating_types,
-    floating_types_and,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
@@ -1766,7 +1763,6 @@ op_db: list[OpInfo] = [
         "linalg.matrix_norm",
         aten_name="linalg_matrix_norm",
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         check_batched_forward_grad=False,
         check_batched_gradgrad=False,
@@ -1812,6 +1808,16 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_eager",
                 device_type="mps",
             ),
+            # Exception: norm ops are not supported for complex yet
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -1834,11 +1840,22 @@ op_db: list[OpInfo] = [
         aten_name="linalg_slogdet",
         op=torch.linalg.slogdet,
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_types(),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
+        skips=(
+            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+        ),
     ),
     OpInfo(
         "linalg.vander",
@@ -1846,7 +1863,6 @@ op_db: list[OpInfo] = [
         ref=np_vander_batched,
         op=torch.linalg.vander,
         dtypes=all_types_and_complex(),
-        dtypesIfMPS=all_types(),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         supports_out=False,
@@ -1856,6 +1872,16 @@ op_db: list[OpInfo] = [
                 unittest.skip("Unsupported on MPS for now"),
                 "TestCommon",
                 "test_numpy_ref_mps",
+            ),
+            # Exception: cumulative ops are not yet supported for complex
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
     ),
@@ -1872,16 +1898,26 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         dtypes=floating_and_complex_types_and(torch.float16, torch.bfloat16),
-        dtypesIfMPS=floating_types_and(torch.float16, torch.bfloat16),
         generate_args_kwargs=sample_kwargs_vector_norm,
         aten_name="linalg_vector_norm",
+        skips=(
+            # Exception: norm ops are not supported for complex yet
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+        ),
     ),
     OpInfo(
         "linalg.lu_factor",
         aten_name="linalg_lu_factor",
         op=torch.linalg.lu_factor,
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_types(),
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
@@ -1901,6 +1937,16 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
             ),
+            # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -1908,7 +1954,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_lu_factor_ex",
         op=torch.linalg.lu_factor_ex,
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_types(),
         # https://github.com/pytorch/pytorch/issues/80411
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -1927,6 +1972,16 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
             ),
+            # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -1934,7 +1989,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_lu",
         op=torch.linalg.lu,
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_types(),
         # https://github.com/pytorch/pytorch/issues/80411
         # Runs very slowly on slow-gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -1954,6 +2008,16 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
             ),
+            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -1961,7 +2025,6 @@ op_db: list[OpInfo] = [
         op=torch.linalg.lu_solve,
         aten_name="linalg_lu_solve",
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_types(),
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
         supports_forward_ad=True,
@@ -1991,6 +2054,13 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_noncontiguous_samples",
                 device_type="mps",
+            ),
+            # RuntimeError: linalg.solve.triangular(); Only float is supported!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
         decorators=[skipCPUIfNoLapack, skipCUDAIfNoMagmaAndNoCusolver],
@@ -2089,7 +2159,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_solve",
         op=torch.linalg.solve,
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_types(),
         sample_inputs_func=sample_inputs_linalg_solve,
         # Runs very slowly on slow gradcheck - alternatively reduce input sizes
         gradcheck_fast_mode=True,
@@ -2110,6 +2179,16 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_noncontiguous_samples",
                 device_type="mps",
+            ),
+            # Exception: linalg.lu_factor(): MPS only supports floats.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ],
         skips=(
@@ -2141,7 +2220,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_solve_ex",
         op=torch.linalg.solve_ex,
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_types(),
         sample_inputs_func=sample_inputs_linalg_solve,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -2184,6 +2262,16 @@ op_db: list[OpInfo] = [
                 "test_noncontiguous_samples",
                 device_type="mps",
             ),
+            # Exception: linalg.lu_factor(): MPS only supports floats.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
@@ -2191,7 +2279,6 @@ op_db: list[OpInfo] = [
         aten_name="linalg_solve_triangular",
         op=torch.linalg.solve_triangular,
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_types(),
         sample_inputs_func=sample_inputs_linalg_solve_triangular,
         supports_fwgrad_bwgrad=True,
         skips=(
@@ -2205,6 +2292,16 @@ op_db: list[OpInfo] = [
             ),
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            # Exception: linalg.solve.triangular(); Only float is supported!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
         # linalg.solve_triangular cannot be batched over because of a call to out.copy_(result);
@@ -2474,7 +2571,6 @@ op_db: list[OpInfo] = [
         "linalg.tensorinv",
         ref=np.linalg.tensorinv,
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_types(),
         sample_inputs_func=sample_inputs_tensorinv,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -2487,13 +2583,22 @@ op_db: list[OpInfo] = [
                 "TestCommon",
                 "test_numpy_ref_mps",
             ),
+            # Exception: linalg_inv: not supported for complex types yet!
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     OpInfo(
         "linalg.tensorsolve",
         ref=lambda a, b, dims=None: np.linalg.tensorsolve(a, b, axes=dims),
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_types(),
         sample_inputs_func=sample_inputs_tensorsolve,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -2538,6 +2643,16 @@ op_db: list[OpInfo] = [
                 unittest.skip("Unsupported on MPS for now"),
                 "TestCommon",
                 "test_numpy_ref_mps",
+            ),
+            # Exception: linalg.lu_factor(): MPS only supports floats.
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
     ),
@@ -2605,6 +2720,21 @@ python_ref_db: list[OpInfo] = [
                 device_type="mps",
                 dtypes=(torch.float16,),
             ),
+            # Exception: norm ops are not supported for complex yet
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
         ),
     ),
     PythonRefInfo(
@@ -2630,6 +2760,21 @@ python_ref_db: list[OpInfo] = [
                 "test_python_ref",
                 device_type="mps",
                 dtypes=(torch.float32,),
+            ),
+            # Exception: norm ops are not supported for complex yet
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
     ),
