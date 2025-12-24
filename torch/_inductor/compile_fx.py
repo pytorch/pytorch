@@ -824,6 +824,13 @@ def _compile_fx_inner(
     """
     aot_mode: bool = V.aot_compilation
 
+    if config.pipeline_max_autotune_gemm:
+        # Warm up max-autotune process pool asap
+        from torch._inductor.autotune_process import AutotuneProcessPool
+
+        pool_instance = AutotuneProcessPool.get_instance()
+        pool_instance.warm_up()
+
     # Clean up Compiled Triton Kernels per inductor compile, as the future objects
     # may not be valid for use after they are run/autotuned
     torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
@@ -1066,7 +1073,7 @@ def _compile_fx_inner(
         )
         # Add event data about cache hits/miss
         # TODO: add remote cache get/put timings here too
-        CompileEventLogger.pt2_compile(
+        CompileEventLogger.try_add_pt2_compile(
             "inductor_compile",
             cache_state=cache_state,
             cache_event_time=start_time,
