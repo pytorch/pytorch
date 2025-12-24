@@ -14387,6 +14387,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "f32[s77, 3, 2][6, 2, 1]{device_st
         torch._dynamo.mark_dynamic(x, 2)
 
         post_grad_graph = get_post_grad_graph(f, (x,))
+        device_str = "hip" if TEST_WITH_ROCM else "cuda"
         expected_graph = f"""\
 def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", arg3_1: "u8[s77, s27, s53][s27*s53, s53, 1]{device_str}"):
         permute: "u8[s77, s53, s27][s27*s53, 1, s53]{device_str}" = torch.ops.aten.permute.default(arg3_1, [0, 2, 1]);  arg3_1 = None
