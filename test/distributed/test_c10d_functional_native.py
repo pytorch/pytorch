@@ -780,6 +780,13 @@ class CompileTest(TestCase):
     def setUp(self):
         super().setUp()
 
+        # This test can be rerun in the same Python process (pytest reruns),
+        # and other tests in this file may also initialize the default process
+        # group. Defensively tear down any existing default PG to avoid:
+        #   ValueError: trying to initialize the default process group twice!
+        if dist.is_initialized():
+            dist.destroy_process_group()
+
         self.rank = 0
         self.world_size = 2
         torch.accelerator.set_device_index(0)
@@ -794,7 +801,8 @@ class CompileTest(TestCase):
         )
 
     def tearDown(self):
-        dist.destroy_process_group()
+        if dist.is_initialized():
+            dist.destroy_process_group()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
