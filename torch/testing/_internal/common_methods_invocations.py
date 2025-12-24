@@ -11450,6 +11450,14 @@ foreach_pointwise_op_db: list[ForeachFuncInfo] = [
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_meta_inplace", dtypes=(torch.bool,)),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_inplace_all_strides",
                          dtypes=integral_types() + complex_types_and(torch.bool)),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestForeach",
+                "test_pointwise_op_with_tensor_of_scalarlist_overload",
+                device_type="cuda",
+                dtypes=(torch.complex64,),
+                active_if=TEST_WITH_ROCM,
+            ),
         ),
     ),
     ForeachFuncInfo(
