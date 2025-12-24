@@ -13574,6 +13574,33 @@ fn
         self.assertEqual(ref, res)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_builtin_bool_on_tensor(self):
+        def f_all(mask):
+            return bool((mask == 0).all())
+
+        opt_f_all = torch.compile(f_all, backend="eager", fullgraph=True)
+
+        mask_zeros = torch.zeros(2, 3)
+        mask_nonzero = torch.tensor([[0, 1], [0, 0]])
+
+        self.assertEqual(f_all(mask_zeros), opt_f_all(mask_zeros))
+        self.assertEqual(f_all(mask_nonzero), opt_f_all(mask_nonzero))
+
+        def f(x):
+            return bool(x)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+
+        for val in [42, 0, 3.14, 0.0]:
+            x = torch.tensor(val)
+            self.assertEqual(f(x), opt_f(x))
+        non_scalar = torch.tensor([1, 2, 3])
+        with self.assertRaises(RuntimeError):
+            f(non_scalar)
+        with self.assertRaises(RuntimeError):
+            opt_f(non_scalar)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_builtin_bool_on_symfloat(self):
         def f(x):
             return bool(x.item())

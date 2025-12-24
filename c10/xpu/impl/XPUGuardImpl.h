@@ -45,6 +45,27 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     c10::xpu::set_device(d.index());
   }
 
+  DeviceCapability getDeviceCapability(Device d) const override {
+    DeviceCapability cap;
+    cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
+        (1ULL << kIndex_Char) | (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
+        (1ULL << kIndex_Long) | (1ULL << kIndex_Float) |
+        (1ULL << kIndex_ComplexFloat) | (1ULL << kIndex_Bool);
+    // BFloat16 may be emulated. We always assume BFloat16 is available;
+    // users can call is_bf16_supported() to check for native hardware support.
+    cap.capability_data.capability_bits |= (1ULL << kIndex_BFloat16);
+    auto& device = c10::xpu::get_raw_device(d.index());
+    if (device.has(sycl::aspect::fp16)) {
+      cap.capability_data.capability_bits |= (1ULL << kIndex_Half);
+      cap.capability_data.capability_bits |= (1ULL << kIndex_ComplexHalf);
+    }
+    if (device.has(sycl::aspect::fp64)) {
+      cap.capability_data.capability_bits |= (1ULL << kIndex_Double);
+      cap.capability_data.capability_bits |= (1ULL << kIndex_ComplexDouble);
+    }
+    return cap;
+  }
+
   Stream getStream(Device d) const override {
     return getCurrentXPUStream(d.index()).unwrap();
   }
