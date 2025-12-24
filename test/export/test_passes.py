@@ -70,12 +70,12 @@ def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> 
 
 class _AddOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {operator.add}
+        return node.op == "call_function" and node.target == operator.add
 
 
 class _AtenAddOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {torch.ops.aten.add.Tensor}
+        return node.op == "call_function" and node.target == torch.ops.aten.add.Tensor
 
 
 def _to_partition_names(partitions: list[Partition]) -> list[set[str]]:
