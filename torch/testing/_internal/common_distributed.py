@@ -1788,6 +1788,13 @@ class MultiProcContinuousTest(TestCase):
                         # Skip exception handling below, move to main thread for processing the skip
                         continue
 
+                # Some test decorators raise SkipTest inside the worker.
+                # Propagate the skip back to the main process instead of
+                # treating it as an error.
+                if isinstance(ex, unittest.SkipTest):
+                    completion_queue.put(ex)
+                    continue
+
                 raised_exception = True
                 # Send the exception and stack trace back to the dispatcher
                 exc_info = sys.exc_info()
