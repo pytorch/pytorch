@@ -840,6 +840,26 @@ class TestHierarchicalIndex(InductorTestCase):
         self.assertIsInstance(result, HierarchicalIndex)
         self.assertEqual(result.args, (b, q_idx))
 
+    def test_hierarchical_indexer_3d_and_4d(self):
+        from sympy import Symbol
+
+        from torch._inductor.kernel.flex.flex_flash_attention import (
+            _hierarchical_indexer_cute,
+            HierarchicalIndex,
+        )
+
+        b, h, q_idx, kv_idx = Symbol("b"), Symbol("h"), Symbol("q_idx"), Symbol("kv_idx")
+
+        indexer_3d = _hierarchical_indexer_cute(size=[2, 4, 512])
+        result_3d = indexer_3d([b, h, q_idx])
+        self.assertIsInstance(result_3d, HierarchicalIndex)
+        self.assertEqual(result_3d.args, (b, h, q_idx))
+
+        indexer_4d = _hierarchical_indexer_cute(size=[2, 4, 512, 512])
+        result_4d = indexer_4d([b, h, q_idx, kv_idx])
+        self.assertIsInstance(result_4d, HierarchicalIndex)
+        self.assertEqual(result_4d.args, (b, h, q_idx, kv_idx))
+
     def test_isinstance_detection_for_load(self):
         from sympy import Symbol
 
@@ -850,6 +870,20 @@ class TestHierarchicalIndex(InductorTestCase):
 
         self.assertIsInstance(HierarchicalIndex(b, q_idx), HierarchicalIndex)
         self.assertNotIsInstance(b * Symbol("S") + q_idx, HierarchicalIndex)
+
+    def test_hierarchical_indexer_rank_mismatch(self):
+        from sympy import Symbol
+
+        from torch._inductor.kernel.flex.flex_flash_attention import (
+            _hierarchical_indexer_cute,
+        )
+
+        indexer = _hierarchical_indexer_cute(size=[2, 4])
+        b = Symbol("b")
+
+        with self.assertRaises(AssertionError) as ctx:
+            indexer([b])  # 1 index for 2D tensor
+        self.assertIn("Rank mismatch", str(ctx.exception))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
@@ -892,6 +926,96 @@ class TestHierarchicalIndex(InductorTestCase):
         self.assertIsNotNone(
             re.search(multi_dim_pattern, code_str),
             f"Expected multi-dimensional indexing pattern {multi_dim_pattern} "
+            f"in generated code.\nExcerpt:\n{code_str[:2000]}",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        not ensure_flash_available(), "Flash attention (CUTE) library not available"
+    )
+    def test_hierarchical_indexing_3d(self):
+        batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
+        dtype = torch.float16
+        device = "cuda"
+
+        bias_3d = torch.randn(batch_size, num_heads, seq_len, device=device, dtype=dtype)
+
+        def score_mod_3d(score, b, h, q_idx, kv_idx):
+            return score + bias_3d[b, h, q_idx]
+
+        q, k, v = create_test_tensors(
+            batch_size=batch_size,
+            num_heads=num_heads,
+            seq_len=seq_len,
+            dim=dim,
+            dtype=dtype,
+            device=device,
+        )
+
+        compiled_fn = torch.compile(flex_attention)
+        _, code = run_and_get_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=score_mod_3d,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+
+        code_str = "\n".join(code)
+
+        import re
+
+        pattern_3d = r"in_ptr\d*\[tmp\d+,\s*tmp\d+,\s*tmp\d+\]"
+        self.assertIsNotNone(
+            re.search(pattern_3d, code_str),
+            f"Expected 3D indexing pattern {pattern_3d} "
+            f"in generated code.\nExcerpt:\n{code_str[:2000]}",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        not ensure_flash_available(), "Flash attention (CUTE) library not available"
+    )
+    def test_hierarchical_indexing_4d(self):
+        batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
+        dtype = torch.float16
+        device = "cuda"
+
+        bias_4d = torch.randn(
+            batch_size, num_heads, seq_len, seq_len, device=device, dtype=dtype
+        )
+
+        def score_mod_4d(score, b, h, q_idx, kv_idx):
+            return score + bias_4d[b, h, q_idx, kv_idx]
+
+        q, k, v = create_test_tensors(
+            batch_size=batch_size,
+            num_heads=num_heads,
+            seq_len=seq_len,
+            dim=dim,
+            dtype=dtype,
+            device=device,
+        )
+
+        compiled_fn = torch.compile(flex_attention)
+        _, code = run_and_get_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=score_mod_4d,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+
+        code_str = "\n".join(code)
+
+        import re
+
+        pattern_4d = r"in_ptr\d*\[tmp\d+,\s*tmp\d+,\s*tmp\d+,\s*tmp\d+\]"
+        self.assertIsNotNone(
+            re.search(pattern_4d, code_str),
+            f"Expected 4D indexing pattern {pattern_4d} "
             f"in generated code.\nExcerpt:\n{code_str[:2000]}",
         )
 
