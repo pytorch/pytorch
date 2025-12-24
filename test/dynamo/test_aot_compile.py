@@ -954,17 +954,23 @@ from user code:
             ((torch.randn(4, 3),), {})
         )
         mod.forward = compiled_fn
-        result = compiled_fn.save_compiled_function(self.path())
-        values = list(result.external_data.values())
-        self.assertIn(with_processing, values)
-        self.assertIn(mod, values)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Failed to serialize the following objects: \\[SimpleLinearModule",
+        ):
+            compiled_fn.save_compiled_function(self.path())
+        compiled_fn.save_compiled_function(
+            self.path(),
+            external_data={"mod": mod},
+        )
         with open(self.path(), "rb") as f:
             with self.assertRaisesRegex(RuntimeError, "Missing required external ref"):
                 torch.compiler.load_compiled_function(f)
 
         with open(self.path(), "rb") as f:
             compiled_fn = torch.compiler.load_compiled_function(
-                f, external_data=result.external_data
+                f,
+                external_data={"mod": mod},
             )
             test_inputs = (torch.randn(4, 3),)
             expected = fn(*test_inputs)
@@ -987,17 +993,23 @@ from user code:
             ((torch.randn(4, 3),), {})
         )
         mod.forward = compiled_fn
-        result = compiled_fn.save_compiled_function(self.path())
-        values = list(result.external_data.values())
-        self.assertIn(with_processing, values)
-        self.assertIn(mod, values)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Failed to serialize the following objects: \\[SimpleLinearModule",
+        ):
+            compiled_fn.save_compiled_function(self.path())
+        compiled_fn.save_compiled_function(
+            self.path(),
+            external_data={"mod": mod},
+        )
         with open(self.path(), "rb") as f:
             with self.assertRaisesRegex(RuntimeError, "Missing required external ref"):
                 torch.compiler.load_compiled_function(f)
 
         with open(self.path(), "rb") as f:
             compiled_fn = torch.compiler.load_compiled_function(
-                f, external_data=result.external_data
+                f,
+                external_data={"mod": mod},
             )
             test_inputs = (torch.randn(4, 3),)
             expected = fn(*test_inputs)
