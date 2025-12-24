@@ -22,6 +22,7 @@ from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, CompileId
 from torch._dynamo.package import CompilePackage
+from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
     ExceptionStack,
     InstructionTranslator,
@@ -1839,6 +1840,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
             {"x": x, "backend": torch.nn.attention.SDPBackend.CUDNN_ATTENTION},
             False,
         )
+
+    def test_source_serialization(self):
+        # Test that "equal" sources with different hashes serialize to the same result
+        src1 = LocalSource("x")
+        src2 = LocalSource("x")
+
+        # Force different cached hashes to test that serialization excludes _hash
+        object.__setattr__(src1, "_hash", 12345)
+        object.__setattr__(src2, "_hash", 67890)
+
+        self.assertEqual(pickle.dumps(src1), pickle.dumps(src2))
 
 
 class SimpleModule(torch.nn.Module):

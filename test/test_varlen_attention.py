@@ -9,7 +9,7 @@ from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import parametrize, run_tests, skipIfRocm
+from torch.testing._internal.common_utils import parametrize, run_tests
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -84,22 +84,28 @@ class AttentionBlock(nn.Module):
         qkv = self.qkv_proj(x_padded)
         q, k, v = qkv.chunk(3, dim=-1)
 
-        mask = (
+        padding_mask = (
             torch.arange(seq_len, device=x_padded.device)[None, :]
             < seq_lengths[:, None]
         )
 
-        attn_mask = mask[:, None, None, :].expand(
+        attn_mask = padding_mask[:, None, None, :].expand(
             batch_size, self.num_heads, seq_len, seq_len
         )
+
+        if is_causal:
+            causal_mask = torch.tril(
+                torch.ones(seq_len, seq_len, device=x_padded.device, dtype=torch.bool)
+            )
+            # Combine: attention allowed where BOTH padding is valid AND causal constraint is met
+            attn_mask = attn_mask & causal_mask[None, None, :, :]
 
         q = q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
-        attn_out = F.scaled_dot_product_attention(
-            q, k, v, attn_mask=attn_mask, is_causal=is_causal
-        )
+        # Don't pass is_causal since we already incorporated it into attn_mask
+        attn_out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
 
         attn_out = (
             attn_out.transpose(1, 2)
@@ -159,7 +165,6 @@ def create_variable_length_batch(
 
 
 class TestVarlenAttention(NNTestCase):
-    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -208,7 +213,6 @@ class TestVarlenAttention(NNTestCase):
         self.assertEqual(varlen_grad.shape, x_packed.shape)
         self.assertEqual(varlen_grad.dtype, x_packed.dtype)
 
-    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -266,7 +270,6 @@ class TestVarlenAttention(NNTestCase):
             test_utils=["test_schema", "test_faketensor"],
         )
 
-    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -317,7 +320,6 @@ class TestVarlenAttention(NNTestCase):
         ) and any("torch_attn._varlen_attn_backward" in op for op in called_ops)
         assert custom_ops_called
 
-    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -436,7 +438,6 @@ class TestVarlenAttention(NNTestCase):
 
             start_idx = end_idx
 
-    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )

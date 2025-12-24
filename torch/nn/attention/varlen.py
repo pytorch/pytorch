@@ -115,9 +115,16 @@ def _varlen_attn_fake(
     # For varlen path: logsumexp shape is (num_heads, total_q)
     total_q = query.size(0)
     num_heads = query.size(1)
-    logsumexp = torch.empty(
-        (num_heads, total_q), dtype=torch.float, device=query.device
-    )
+    if torch.version.hip:
+        # ROCm uses batched format: [batch_size, num_heads, max_q]
+        batch_size = cu_seq_q.size(0) - 1
+        logsumexp = torch.empty(
+            (batch_size, num_heads, max_q), dtype=torch.float, device=query.device
+        )
+    else:
+        logsumexp = torch.empty(
+            (num_heads, total_q), dtype=torch.float, device=query.device
+        )
 
     rng_state = torch.empty((2,), dtype=torch.uint64, device=query.device)
 

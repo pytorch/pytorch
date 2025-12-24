@@ -1383,8 +1383,8 @@ def load(
             tensor storages from disk to CPU memory in the first step, ``f`` is mapped, which means tensor storages
             will be lazily loaded when their data is accessed.
         pickle_load_args: (Python 3 only) optional keyword arguments passed over to
-            :func:`pickle_module.load` and :func:`pickle_module.Unpickler`, e.g.,
-            :attr:`errors=...`.
+            :func:`pickle_module.load` and :func:`pickle_module.Unpickler`,
+            only works if :attr:`weights_only=False`, e.g., :attr:`errors=...`.
 
     .. note::
         When you call :func:`torch.load()` on a file which contains GPU tensors, those tensors
@@ -1510,6 +1510,9 @@ def load(
     else:
         if pickle_module is None:
             pickle_module = pickle
+
+    if pickle_load_args != {} and weights_only:
+        warnings.warn("pickle_load_args only works if `weights_only=False`.")
 
     # make flipping default BC-compatible
     if mmap is None:
