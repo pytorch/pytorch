@@ -1616,7 +1616,9 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
                 )
 
 
-class TestStridedShardAlltoAll(TestStridedShardCollectiveOpUtils, LocalTensorTestBase):
+class TestStridedShardCollective(
+    TestStridedShardCollectiveOpUtils, LocalTensorTestBase
+):
     """Tests for _StridedShard layout and collective operations."""
 
     @property
@@ -1739,6 +1741,92 @@ class TestStridedShardAlltoAll(TestStridedShardCollectiveOpUtils, LocalTensorTes
                     src_data_rank=None,
                 )
                 self.assertEqual(dt_after_a2a, dt_expected.to_local())
+
+    def _do_reduce_scatter_to_StridedShard(
+        self,
+        local_tensor: torch.Tensor,
+        src_spec: Placement,
+        tgt_spec: Placement,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+    ) -> torch.Tensor:
+        """Perform reduce_scatter from Partial to _StridedShard placement."""
+        assert isinstance(src_spec, Partial)
+        assert isinstance(tgt_spec, _StridedShard)
+        return tgt_spec._reduce_shard_tensor(
+            local_tensor, mesh, src_spec.reduce_op, mesh_dim
+        )
+
+    def test_reduce_scatter_to_StridedShard(self):
+        """
+        Test reduce_scatter from Partial to _StridedShard.
+
+        This tests that _StridedShard._reduce_shard_tensor correctly reduces
+        and scatters a partial tensor to produce strided shards.
+        """
+        S = Shard
+        SS = lambda x, y: S(x) if y == 1 else _StridedShard(x, split_factor=y)  # noqa: E731
+        P = Partial
+        # Each test case format: (mesh shape, tensor shape, src_placements,
+        # target_placements, target_tensor_dim, operate_mesh_dim).
+        # We start with a Partial tensor and reduce_scatter to target_placements.
+        test_cases = [
+            ((3, 2), (11,), (S(0), P()), (S(0), SS(0, 4)), 1),
+            ((3, 2), (11,), (SS(0, 2), P()), (SS(0, 2), SS(0, 4)), 1),
+            ((2, 3), (23, 17), (P(), S(1)), (SS(0, 2), S(1)), 0),
+            ((3,), (7,), (P(),), (SS(0, 3),), 0),
+            ((3, 2), (31, 53), (P(), S(1)), (SS(0, 4), S(1)), 0),
+            ((3, 2), (31, 53), (P("max"), S(1)), (SS(0, 4), S(1)), 0),
+            ((3, 2), (31, 53), (S(1), P("min")), (S(1), SS(0, 4)), 1),
+            ((3, 2), (31, 53), (S(1), P("avg")), (S(1), SS(0, 4)), 1),
+            ((3, 2), (31, 53), (S(1), P("max")), (S(1), SS(0, 4)), 1),
+            (
+                (3, 3, 3),
+                (143, 71, 146),
+                (SS(1, 5), S(0), P()),
+                (SS(1, 5), S(0), SS(1, 3)),
+                2,
+            ),
+        ]
+        for (
+            mesh_shape,
+            tensor_shape,
+            src_p,
+            tgt_p,
+            operate_mesh_dim,
+        ) in test_cases:
+            world_size = math.prod(mesh_shape)
+            with LocalTensorMode(ranks=world_size):
+                mesh = init_device_mesh("cpu", mesh_shape)
+
+                tensor = self._range_tensor(*tensor_shape).float()
+                dt = distribute_tensor(
+                    tensor,
+                    mesh,
+                    src_p,
+                    src_data_rank=None,
+                )
+                strided_shard_placement = tgt_p[operate_mesh_dim]
+                # Perform reduce_scatter from Partial to _StridedShard
+                result = self._do_reduce_scatter_to_StridedShard(
+                    dt.to_local(),
+                    src_p[operate_mesh_dim],
+                    strided_shard_placement,
+                    mesh,
+                    operate_mesh_dim,
+                )
+                dt_expected = distribute_tensor(
+                    tensor,
+                    mesh,
+                    tgt_p,
+                    src_data_rank=None,
+                )
+                self.assertEqual(
+                    result,
+                    dt_expected.to_local(),
+                    msg=f"mesh_shape={mesh_shape}, tensor_shape={tensor_shape}, "
+                    f"src_p={src_p}, tgt_p={tgt_p}",
+                )
 
     def test_Shard_alltoall_to_StridedShard(self):
         """
