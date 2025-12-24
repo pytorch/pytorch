@@ -134,7 +134,7 @@ class AOTCompilePickler(pickle.Pickler):
             if func is not inner_func:
                 return type(self)._unpickle_bound_method, (func, method_self)
         elif inspect.isfunction(obj):
-            if obj.__code__.co_flags & inspect.CO_NESTED:
+            if "<locals>" in obj.__qualname__:
                 return type(self)._unpickle_nested_function, (
                     obj.__code__,
                     obj.__module__,
