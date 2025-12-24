@@ -96,7 +96,9 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
       : device_id_(std::exchange(other.device_id_, -1)),
         green_ctx_(std::exchange(other.green_ctx_, nullptr)),
         context_(std::exchange(other.context_, nullptr)),
-        parent_stream_(std::exchange(other.parent_stream_, nullptr)) {
+        parent_stream_(std::exchange(other.parent_stream_, nullptr)),
+        curr_stream_idx_(std::exchange(other.curr_stream_idx_, -1)) {
+        std::swap(this->green_ctx_streams_, other.green_ctx_streams_);
   }
 #else
   GreenContext::GreenContext(GreenContext&& other) noexcept {
@@ -126,6 +128,8 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
       green_ctx_ = std::exchange(other.green_ctx_, nullptr);
       context_ = std::exchange(other.context_, nullptr);
       parent_stream_ = std::exchange(other.parent_stream_, nullptr);
+      curr_stream_idx_ = std::exchange(other.curr_stream_idx_, -1);
+      std::swap(this->green_ctx_streams_, other.green_ctx_streams_);
     }
     return *this;
 #else
@@ -191,14 +195,21 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
 
   CUDAStream GreenContext::Stream() {
 #if HAS_CUDA_GREEN_CONTEXT()
-    CUstream green_ctx_side_stream;
-    C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuGreenCtxStreamCreate_(
-      &green_ctx_side_stream, green_ctx_, CU_STREAM_NON_BLOCKING, 0));
-    // implies we leak side-streams, but this has precedent in e.g., c10/cuda/CUDAStream.cpp
-    return c10::cuda::getStreamFromExternal(green_ctx_side_stream, device_id_);
+    curr_stream_idx_++;
+    auto idx = curr_stream_idx_ % kStreamPerGreenContextPool;
+    if (curr_stream_idx_ < kStreamPerGreenContextPool) {
+       CUstream green_ctx_side_stream;
+       C10_CUDA_DRIVER_CHECK(c10::cuda::DriverAPI::get()->cuGreenCtxStreamCreate_(
+         &green_ctx_side_stream, green_ctx_, CU_STREAM_NON_BLOCKING, 0));
+       // implies we leak side-streams, but this has precedent in e.g., c10/cuda/CUDAStream.cpp
+       // if we do not have any statically allocated GreenContexts, would it be safe to
+       // destroy these streams in a destructor?
+       green_ctx_streams_[idx] = green_ctx_side_stream;
+       return c10::cuda::getStreamFromExternal(green_ctx_side_stream, device_id_);
+    }
+    return c10::cuda::getStreamFromExternal(green_ctx_streams_[idx], device_id_);
 #else
     TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
 #endif
-
   }
 } // namespace at::cuda

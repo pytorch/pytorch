@@ -7,6 +7,10 @@ typedef struct CUgreenCtx_st* CUgreenCtx;
 
 namespace at::cuda {
 
+namespace {
+  constexpr int kStreamPerGreenContextPool = 16;
+}
+
 class TORCH_CUDA_CPP_API GreenContext {
  public:
   // Green context creation
@@ -36,5 +40,7 @@ class TORCH_CUDA_CPP_API GreenContext {
   CUgreenCtx green_ctx_ = nullptr;
   CUcontext context_ = nullptr;
   cudaStream_t parent_stream_ = nullptr;
+  std::array<CUstream, kStreamPerGreenContextPool> green_ctx_streams_;
+  int32_t curr_stream_idx_ = -1;
 };
 } // namespace at::cuda
