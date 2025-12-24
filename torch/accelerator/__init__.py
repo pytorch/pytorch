@@ -12,6 +12,7 @@ from ._utils import _device_t, _get_device_index
 from .graphs import Graph
 from .memory import (
     empty_cache,
+    empty_host_cache,
     get_memory_info,
     max_memory_allocated,
     max_memory_reserved,
@@ -33,6 +34,7 @@ __all__ = [
     "device_count",
     "device_index",
     "empty_cache",
+    "empty_host_cache",
     "get_memory_info",
     "is_available",
     "max_memory_allocated",
