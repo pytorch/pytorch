@@ -957,6 +957,10 @@ class MockFXGraphCacheOutput(OutputCode):
         # Serialize the FX graph via GraphPickler and clear gm to avoid std pickle issues.
         if self.gm is not None:
             from torch.fx._graph_pickler import GraphPickler
+            for node in self.gm.graph.nodes:
+                node.meta.pop("source_fn_stack", None)
+                node.meta.pop("nn_module_stack", None)
+                node.meta.pop("fwd_source_fn_stack", None)
             self._serialized_graph_module = GraphPickler.dumps(self.gm)
             self.gm = None
 
