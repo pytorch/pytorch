@@ -21,6 +21,11 @@ _TEST_SCALED_MATMUL_CUDA_MOD: Optional[ModuleType] = None
 # Shared benchmark shapes for scaled matmul operations
 # These shapes are used by both scaled_mm and scaled_grouped_mm benchmarks
 SCALED_MM_BASE_SHAPES = [
+    # Small shapes for faster benchmarking
+    (1024, 1024, 1024),
+    (2048, 4096, 2048),
+    (4096, 2048, 4096),
+    # Original larger shapes
     (16384, 8192, 5120),
     (128000, 8192, 5120),
     (16384, 1536, 5120),
