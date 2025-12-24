@@ -253,6 +253,11 @@ void nll_loss2d_forward_out_cuda_template(
   total_weight.resize_({});
 
   if (reduction == at::Reduction::None) {
+    // total_weight is part of the forward API return. For reduction=None it is
+    // semantically unused, but must be well-defined (CPU sets it to 0). Leaving
+    // it uninitialized can cause flaky comparisons in decomposition tests.
+    total_weight.zero_();
+
     int64_t batch_size = input.size(0);
     int64_t H = input.size(2);
     int64_t W = input.size(3);

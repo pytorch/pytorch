@@ -1075,6 +1075,55 @@ class DecompOneOffTests(TestCase):
         self.assertEqual(ref.stride(), res.stride())
 
     @onlyCUDA
+    @skipIfCrossRef
+    def test_nll_loss2d_forward_total_weight_is_initialized_for_reduction_none(
+        self, device
+    ):
+        # Regression test for flaky/uninitialized total_weight on CUDA/ROCm when
+        # reduction=None. See https://github.com/pytorch/pytorch/issues/118355
+        x = torch.tensor(
+            [
+                [
+                    [[-4.4896, 3.0513], [-5.4787, 1.1693]],
+                    [[-3.6457, -3.2967], [-4.9368, 6.3443]],
+                    [[-2.4919, -0.1966], [4.2073, 7.7745]],
+                ],
+                [
+                    [[2.5429, 6.0313], [3.0112, 4.1608]],
+                    [[7.4791, -2.5155], [-0.7277, 7.4173]],
+                    [[-7.6495, -8.6749], [7.0393, -4.4170]],
+                ],
+            ],
+            device=device,
+            dtype=torch.float64,
+        )
+        target = torch.tensor(
+            [
+                [[0, 1], [1, 2]],
+                [[1, 0], [0, 0]],
+            ],
+            device=device,
+            dtype=torch.int64,
+        )
+        weight = torch.tensor(
+            [6.1917, 8.9439, 7.1373], device=device, dtype=torch.float64
+        )
+        reduction = 0  # none
+        ignore_index = 1
+
+        ref_out, ref_tw = torch.ops.aten.nll_loss2d_forward.default(
+            x, target, weight, reduction, ignore_index
+        )
+        decomp_out, decomp_tw = torch._decomp.decompositions.nll_loss2d_forward(
+            x, target, weight, reduction, ignore_index
+        )
+
+        # total_weight is not used for reduction=None, but it must be well-defined
+        # for determinism and decomp comparisons.
+        self.assertEqual(ref_tw, decomp_tw)
+        self.assertEqual(ref_out, decomp_out)
+
+    @onlyCUDA
     def test_exponential_non_inf(self, device):
         inp = torch.empty((4, 400, 256), device=device)
 
