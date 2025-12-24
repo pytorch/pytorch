@@ -256,7 +256,7 @@ def get_inner_triton_kernels(fn: Callable[..., Any]) -> list[object]:
                 from torch._library.custom_ops import OPDEFS
 
                 if func_name in OPDEFS:
-                    func_obj = impl_fn = OPDEFS[func_name]._abstract_fn
+                    func_obj = OPDEFS[func_name]._abstract_fn
 
             # skip if not a callable or if it's a triton kernel itself
             if func_obj is None or not callable(func_obj):
