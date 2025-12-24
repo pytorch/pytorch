@@ -1,14 +1,17 @@
-import importlib.util
-import os
-from types import ModuleType
-from typing import Optional
-
 import operator_benchmark as op_bench
 
 import torch
 from torch.nn.functional import ScalingType, SwizzleType
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.torch_version import TorchVersion
+from types import ModuleType
+
+from pt.scaled_mm_common import (
+    get_test_scaled_matmul_cuda,
+    get_float8_dtype,
+    supports_fp8_deepseek_blockwise_scaling,
+    SCALED_MM_BASE_SHAPES,
+)
 
 
 """
@@ -16,8 +19,6 @@ Operator microbenchmarks for `scaled_mm`.
 Uses the same dtype + scale/quantize helpers as `test/test_scaled_matmul_cuda.py`
 (bf16/fp16/fp32, fp8 e4m3/e5m2, MX e8m0 scales, NVFP4 packed fp4).
 """
-
-_TEST_SCALED_MATMUL_CUDA_MOD: Optional[ModuleType] = None
 
 
 def _should_generate_scaled_mm_configs() -> bool:
@@ -33,58 +34,6 @@ def _should_generate_scaled_mm_configs() -> bool:
             or (torch.version.hip is not None and bool(PLATFORM_SUPPORTS_FP8))
         )
     )
-
-
-def _get_test_scaled_matmul_cuda() -> ModuleType:
-    """
-    Reuse scale/quantization helpers from `test/test_scaled_matmul_cuda.py`.
-    `test/` isn't a package, so we import by path and cache the module.
-    """
-    global _TEST_SCALED_MATMUL_CUDA_MOD
-    if _TEST_SCALED_MATMUL_CUDA_MOD is not None:
-        return _TEST_SCALED_MATMUL_CUDA_MOD
-
-    pytorch_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "..")
-    )
-    test_file = os.path.join(pytorch_root, "test", "test_scaled_matmul_cuda.py")
-    if not os.path.exists(test_file):
-        raise RuntimeError(
-            f"Expected to find {test_file} to reuse scaled_mm test helpers, but it does not exist."
-        )
-
-    spec = importlib.util.spec_from_file_location(
-        "_test_scaled_matmul_cuda_bench_import", test_file
-    )
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Failed to create import spec for {test_file}")
-
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    _TEST_SCALED_MATMUL_CUDA_MOD = mod
-    return mod
-
-
-def _get_float8_dtype(float8_dtype):
-    """Normalize the FP8 dtype arg (handles ROCm fnuz variants via test aliases)."""
-    from torch.testing._internal.common_device_type import e4m3_type, e5m2_type
-
-    if float8_dtype in ("e4m3fn", e4m3_type, torch.float8_e4m3fn):
-        return e4m3_type
-    if float8_dtype in ("e5m2", e5m2_type, torch.float8_e5m2):
-        return e5m2_type
-    return e4m3_type  # default
-
-
-def _supports_fp8_deepseek_blockwise_scaling() -> bool:
-    # PyTorch currently gates "DeepSeek style" FP8 blockwise scaling (1x128/128x128)
-    # to SM90 (H100) only. On SM100 (B200) this errors with NotImplementedError.
-    if not torch.cuda.is_available() or torch.version.cuda is None:
-        return False
-    # These scaling modes require CUDA 12.9+ (see `aten/src/ATen/cuda/CUDABlas.cpp:get_scale_mode`).
-    if torch.version.hip is None and TorchVersion(torch.version.cuda) < "12.9":
-        return False
-    return torch.cuda.get_device_capability(0) == (9, 0)
 
 
 def _supports_fp8_rowwise_fp32_output() -> bool:
@@ -154,7 +103,7 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     def _init_fp8_tensorwise(
         self, M: int, N: int, K: int, device: str, helpers: ModuleType
     ) -> None:
-        self.float8_dtype = _get_float8_dtype(self._float8_dtype_arg)
+        self.float8_dtype = get_float8_dtype(self._float8_dtype_arg)
 
         # Base tensors carry grad in backward benches; fp8 tensors are created as leaves.
         x_base = torch.randn(
@@ -205,7 +154,7 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
     ) -> None:
         # Row-wise scaling (per-row A scales and per-column B scales).
         # Mirrors `test_scaled_mm_vs_emulated_row_wise` in test_scaled_matmul_cuda.py.
-        self.float8_dtype = _get_float8_dtype(self._float8_dtype_arg)
+        self.float8_dtype = get_float8_dtype(self._float8_dtype_arg)
 
         x_base = torch.randn(
             M,
@@ -253,21 +202,51 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             scale_recipe_b=ScalingType.RowWise,
         )
 
-    def _init_fp8_blockwise_1x128(
-        self, M: int, N: int, K: int, device: str, helpers: ModuleType
+    def _init_fp8_blockwise_common(
+        self,
+        M: int,
+        N: int,
+        K: int,
+        device: str,
+        helpers: ModuleType,
+        block_m: int,
+        block_k: int,
+        scaling_type: ScalingType,
+        use_padding: bool,
     ) -> None:
-        # FP8 blockwise scaling with 1x128 blocks.
-        # Scale layout mirrors `test_scaled_mm_block_wise_numerics` for the 1x128 case.
-        self.float8_dtype = _get_float8_dtype(self._float8_dtype_arg)
+        """
+        Common initialization for FP8 blockwise scaling.
+
+        Args:
+            block_m: Block size for M dimension (1 for 1x128, 128 for 128x128)
+            block_k: Block size for K dimension (always 128)
+            scaling_type: ScalingType enum value
+            use_padding: If True, pad scales for 128x128; if False, use simple transpose for 1x128
+        """
+        self.float8_dtype = get_float8_dtype(self._float8_dtype_arg)
+
+        # Validate SM90 support
         if device == "cuda" and torch.cuda.get_device_capability(0) != (9, 0):
+            mode_name = "1x128" if block_m == 1 else "128x128"
             raise RuntimeError(
-                "FP8 BlockWise1x128 (DeepSeek style) scaling is only supported on CUDA SM90 (H100)."
-            )
-        if K % self._FP8_BLOCK_K != 0:
-            raise RuntimeError(
-                f"FP8 BlockWise1x128 requires K divisible by {self._FP8_BLOCK_K}, got K={K}"
+                f"FP8 BlockWise{mode_name} (DeepSeek style) scaling is only supported on CUDA SM90 (H100)."
             )
 
+        # Validate dimension divisibility
+        if block_m == 1:
+            # 1x128 only requires K divisible by block_k
+            if K % block_k != 0:
+                raise RuntimeError(
+                    f"FP8 BlockWise1x128 requires K divisible by {block_k}, got K={K}"
+                )
+        else:
+            # 128x128 requires M, N, K all divisible by block size
+            if (M % block_k) != 0 or (N % block_k) != 0 or (K % block_k) != 0:
+                raise RuntimeError(
+                    f"FP8 BlockWise128x128 requires M,N,K divisible by {block_k}, got M={M}, N={N}, K={K}"
+                )
+
+        # Create high-precision input tensors
         x_hp = torch.randn(
             M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()
         )
@@ -275,20 +254,28 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()
         )
 
+        # Quantize to FP8 with block-wise scaling
         with torch.no_grad():
             x_lp, x_scales = helpers.tensor_to_scale_block(
-                x_hp, self.float8_dtype, 1, self._FP8_BLOCK_K
+                x_hp, self.float8_dtype, block_m, block_k
             )
             y_lp, y_scales = helpers.tensor_to_scale_block(
-                y_hp, self.float8_dtype, 1, self._FP8_BLOCK_K
+                y_hp, self.float8_dtype, block_m, block_k
             )
-
             x_lp = x_lp.detach().requires_grad_(self.auto_set())
             y_lp = y_lp.detach().requires_grad_(self.auto_set())
 
-        # 1x128 requires "outer-dim-major" scales: (M, K//128) with stride ~ (1, M).
-        x_scales = x_scales.t().contiguous().t().detach()
-        y_scales = y_scales.t().contiguous().t().detach()
+        # Process scales based on block configuration
+        if use_padding:
+            # 128x128: pad scales to multiple of 4, then transpose
+            x_scales, _ = helpers._pad_128x128_scales(x_scales.detach())
+            y_scales, _ = helpers._pad_128x128_scales(y_scales.detach())
+            x_scales = x_scales.t()
+            y_scales = y_scales.t()
+        else:
+            # 1x128: simple transpose to get "outer-dim-major" layout
+            x_scales = x_scales.t().contiguous().t().detach()
+            y_scales = y_scales.t().contiguous().t().detach()
 
         self.inputs = {
             "x": x_lp,
@@ -297,62 +284,32 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
             "scale_b": y_scales.reciprocal(),
         }
         self._set_scaled_mm_call_config(
-            scale_recipe_a=ScalingType.BlockWise1x128,
-            scale_recipe_b=ScalingType.BlockWise1x128,
+            scale_recipe_a=scaling_type,
+            scale_recipe_b=scaling_type,
+        )
+
+    def _init_fp8_blockwise_1x128(
+        self, M: int, N: int, K: int, device: str, helpers: ModuleType
+    ) -> None:
+        # FP8 blockwise scaling with 1x128 blocks.
+        self._init_fp8_blockwise_common(
+            M, N, K, device, helpers,
+            block_m=1,
+            block_k=self._FP8_BLOCK_K,
+            scaling_type=ScalingType.BlockWise1x128,
+            use_padding=False,
         )
 
     def _init_fp8_blockwise_128x128(
         self, M: int, N: int, K: int, device: str, helpers: ModuleType
     ) -> None:
         # FP8 blockwise scaling with 128x128 blocks.
-        # Scale layout mirrors `test_scaled_mm_block_wise_numerics` for the 128x128 case.
-        self.float8_dtype = _get_float8_dtype(self._float8_dtype_arg)
-        if device == "cuda" and torch.cuda.get_device_capability(0) != (9, 0):
-            raise RuntimeError(
-                "FP8 BlockWise128x128 (DeepSeek style) scaling is only supported on CUDA SM90 (H100)."
-            )
-        if (
-            (M % self._FP8_BLOCK_K) != 0
-            or (N % self._FP8_BLOCK_K) != 0
-            or (K % self._FP8_BLOCK_K) != 0
-        ):
-            raise RuntimeError(
-                f"FP8 BlockWise128x128 requires M,N,K divisible by {self._FP8_BLOCK_K}, got M={M}, N={N}, K={K}"
-            )
-
-        x_hp = torch.randn(
-            M, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()
-        )
-        y_hp = torch.randn(
-            N, K, device=device, dtype=self.base_dtype, requires_grad=self.auto_set()
-        )
-
-        with torch.no_grad():
-            x_lp, x_scales = helpers.tensor_to_scale_block(
-                x_hp, self.float8_dtype, self._FP8_BLOCK_K, self._FP8_BLOCK_K
-            )
-            y_lp, y_scales = helpers.tensor_to_scale_block(
-                y_hp, self.float8_dtype, self._FP8_BLOCK_K, self._FP8_BLOCK_K
-            )
-            x_lp = x_lp.detach().requires_grad_(self.auto_set())
-            y_lp = y_lp.detach().requires_grad_(self.auto_set())
-
-        # For 128x128, scales need L padded to L4 (multiple of 4), then transposed:
-        #   scales: [M//128, L] -> pad -> [M//128, L4] -> transpose -> [L4, M//128]
-        x_scales, _ = helpers._pad_128x128_scales(x_scales.detach())
-        y_scales, _ = helpers._pad_128x128_scales(y_scales.detach())
-        x_scales = x_scales.t()
-        y_scales = y_scales.t()
-
-        self.inputs = {
-            "x": x_lp,
-            "y": y_lp.t(),  # mat_b is (K, N)
-            "scale_a": x_scales.reciprocal(),
-            "scale_b": y_scales.reciprocal(),
-        }
-        self._set_scaled_mm_call_config(
-            scale_recipe_a=ScalingType.BlockWise128x128,
-            scale_recipe_b=ScalingType.BlockWise128x128,
+        self._init_fp8_blockwise_common(
+            M, N, K, device, helpers,
+            block_m=self._FP8_BLOCK_K,
+            block_k=self._FP8_BLOCK_K,
+            scaling_type=ScalingType.BlockWise128x128,
+            use_padding=True,
         )
 
     def _init_mx_blockwise(
@@ -458,7 +415,7 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         output_dtype="bfloat16",
         scaling="fp8_tensorwise",
     ):
-        helpers = _get_test_scaled_matmul_cuda()
+        helpers = get_test_scaled_matmul_cuda()
         self._float8_dtype_arg = float8_dtype
         self.base_dtype = torch.bfloat16
         self.scaling = scaling
@@ -501,18 +458,10 @@ class ScaledMMBenchmark(op_bench.TorchBenchmarkBase):
         return torch.nn.functional.scaled_mm(x, y, **kwargs)
 
 
-MNK_list = [
-    (16384, 8192, 5120),
-    (128000, 8192, 5120),
-    (16384, 1536, 5120),
-    (128000, 1536, 5120),
-    (16384, 2048, 7168),
-    (128000, 2048, 7168),
-]
-
+# Use shared base shapes from scaled_mm_common
 _scaled_mm_long_shapes = []
 _seen = set()
-for m, n, k in MNK_list:
+for m, n, k in SCALED_MM_BASE_SHAPES:
     shape = (m, n, k)
     if shape in _seen:
         continue
@@ -571,7 +520,7 @@ if _should_generate_scaled_mm_configs():
         )
 
     # DeepSeek FP8 blockwise (1x128 / 128x128) is SM90-only.
-    if _supports_fp8_deepseek_blockwise_scaling():
+    if supports_fp8_deepseek_blockwise_scaling():
         scaled_mm_configs_long += op_bench.config_list(
             attr_names=["M", "N", "K"],
             attrs=_scaled_mm_long_shapes,

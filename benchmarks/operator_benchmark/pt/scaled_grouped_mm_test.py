@@ -1,8 +1,3 @@
-import importlib.util
-import os
-from types import ModuleType
-from typing import Optional
-
 from pt import configs  # noqa: F401
 
 import operator_benchmark as op_bench
@@ -15,6 +10,14 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
 )
 from torch.torch_version import TorchVersion
+
+from pt.scaled_mm_common import (
+    get_test_scaled_matmul_cuda,
+    get_float8_dtype,
+    build_equal_k_group_offs,
+    SCALED_MM_BASE_SHAPES,
+)
+
 
 
 """
@@ -30,8 +33,6 @@ This benchmark supports:
 
 All modes reuse the same conversion helpers as `test/test_scaled_matmul_cuda.py`.
 """
-
-_TEST_SCALED_MATMUL_CUDA_MOD: Optional[ModuleType] = None
 
 
 def _should_generate_scaled_grouped_mm_configs() -> bool:
@@ -54,63 +55,6 @@ def _should_generate_scaled_grouped_mm_configs() -> bool:
         return False
 
     return bool(IS_SM90) or bool(IS_SM100)
-
-
-def _get_test_scaled_matmul_cuda() -> ModuleType:
-    """
-    Reuse scale/quantization helpers from `test/test_scaled_matmul_cuda.py`.
-
-    `test/` isn't a package, so we import by path and cache the module.
-    """
-    global _TEST_SCALED_MATMUL_CUDA_MOD
-    if _TEST_SCALED_MATMUL_CUDA_MOD is not None:
-        return _TEST_SCALED_MATMUL_CUDA_MOD
-
-    pytorch_root = os.path.abspath(
-        os.path.join(os.path.dirname(__file__), "..", "..", "..")
-    )
-    test_file = os.path.join(pytorch_root, "test", "test_scaled_matmul_cuda.py")
-    if not os.path.exists(test_file):
-        raise RuntimeError(
-            f"Expected to find {test_file} to reuse scaled_grouped_mm test helpers, but it does not exist."
-        )
-
-    spec = importlib.util.spec_from_file_location(
-        "_test_scaled_matmul_cuda_grouped_bench_import", test_file
-    )
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Failed to create import spec for {test_file}")
-
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    _TEST_SCALED_MATMUL_CUDA_MOD = mod
-    return mod
-
-
-def _build_equal_k_group_offs(total_k: int, groups: int, device: str) -> torch.Tensor:
-    if groups <= 0:
-        raise ValueError(f"groups must be > 0, got {groups}")
-    if total_k % groups != 0:
-        raise ValueError(f"total_k ({total_k}) must be divisible by groups ({groups})")
-    k_per_group = total_k // groups
-    if k_per_group % 32 != 0:
-        raise ValueError(
-            f"K per group must be divisible by 32 for these kernels, got {k_per_group}"
-        )
-    return torch.arange(
-        k_per_group, total_k + 1, k_per_group, device=device, dtype=torch.int32
-    )
-
-
-def _get_float8_dtype(float8_dtype):
-    """Normalize the FP8 dtype arg (handles ROCm fnuz variants via test aliases)."""
-    from torch.testing._internal.common_device_type import e4m3_type, e5m2_type
-
-    if float8_dtype in ("e4m3fn", e4m3_type, torch.float8_e4m3fn):
-        return e4m3_type
-    if float8_dtype in ("e5m2", e5m2_type, torch.float8_e5m2):
-        return e5m2_type
-    return e4m3_type  # default
 
 
 class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
@@ -152,11 +96,11 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
 
     def _init_fp8(self, M, N, K, G, device, float8_dtype, scaling):
         """Initialize FP8 tensorwise or rowwise scaling."""
-        self.float8_dtype = _get_float8_dtype(float8_dtype)
+        self.float8_dtype = get_float8_dtype(float8_dtype)
 
         # We interpret offs as group end offsets along K (grouped-K).
         # Use deterministic equal-sized groups.
-        offs = _build_equal_k_group_offs(K, G, device)
+        offs = build_equal_k_group_offs(K, G, device)
 
         # Create FP8 inputs directly (similar to test_scaled_grouped_gemm_2d_2d)
         # Input shapes: (M, K) and (N, K) where K is the total K dimension
@@ -206,7 +150,7 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
 
     def _init_mx_nvfp4(self, M, N, K, G, device, scaling):
         """Initialize MX or NVFP4 blocked scaling (CUDA-only, non-HIP)."""
-        helpers = _get_test_scaled_matmul_cuda()
+        helpers = get_test_scaled_matmul_cuda()
 
         if torch.version.hip is not None:
             raise ValueError(
@@ -215,7 +159,7 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
 
         # We interpret offs as group end offsets along K (grouped-K).
         # Use deterministic equal-sized groups.
-        offs = _build_equal_k_group_offs(K, G, device)
+        offs = build_equal_k_group_offs(K, G, device)
 
         # Create high-precision inputs and quantize per-group along K into the requested format.
         # Use modest magnitudes to avoid degenerate saturation.
@@ -272,26 +216,13 @@ class ScaledGroupedMMBenchmark(op_bench.TorchBenchmarkBase):
         return torch.nn.functional.scaled_grouped_mm(x, w_t, **call_kwargs)
 
 
-# Reduced shapes for faster runs.
-# Note: K must be divisible by G and (K/G) must be divisible by 32.
-MNKG_list = [
-    (16384, 8192, 5120, 1),
-    (16384, 8192, 5120, 2),
-    (16384, 8192, 5120, 4),
-    (16384, 8192, 5120, 8),
-    (128000, 8192, 5120, 1),
-    (128000, 8192, 5120, 2),
-    (128000, 8192, 5120, 4),
-    (128000, 8192, 5120, 8),
-    (16384, 1536, 5120, 1),
-    (16384, 1536, 5120, 8),
-    (128000, 1536, 5120, 1),
-    (128000, 1536, 5120, 8),
-    (16384, 2048, 7168, 1),
-    (16384, 2048, 7168, 8),
-    (128000, 2048, 7168, 1),
-    (128000, 2048, 7168, 8),
-]
+# Generate MNKG shapes from shared base shapes
+# First 2 shapes use all group counts [1, 2, 4, 8]
+# Remaining shapes use only [1, 8] for faster benchmarking
+MNKG_list = (
+    [(m, n, k, g) for (m, n, k) in SCALED_MM_BASE_SHAPES[:2] for g in [1, 2, 4, 8]]
+    + [(m, n, k, g) for (m, n, k) in SCALED_MM_BASE_SHAPES[2:] for g in [1, 8]]
+)
 
 scaled_grouped_mm_configs_long = []
 
