@@ -646,12 +646,14 @@ GQA_MQA_BLOCK_MASK_CASES = [
         lambda _dtype, _device: _causal_mask,
         num_heads=8,
         num_heads_kv=2,
+        block_mask_num_heads=1,
     ),
     MaskModCase(
         "backward_gqa_block_mask_causal",
         lambda _dtype, _device: _causal_mask,
         num_heads=8,
         num_heads_kv=2,
+        block_mask_num_heads=1,
         seq_len=257,
         requires_grad=True,
     ),
@@ -660,12 +662,14 @@ GQA_MQA_BLOCK_MASK_CASES = [
         lambda _dtype, _device: _causal_mask,
         num_heads=8,
         num_heads_kv=1,
+        block_mask_num_heads=1,
     ),
     MaskModCase(
         "backward_mqa_block_mask_causal",
         lambda _dtype, _device: _causal_mask,
         num_heads=8,
         num_heads_kv=1,
+        block_mask_num_heads=1,
         seq_len=257,
         requires_grad=True,
     ),
@@ -733,9 +737,6 @@ class TestFlexFlash(InductorTestCase):
             ),
         )
 
-    @unittest.skip(
-        "GQA/MQA + block_mask produces incorrect results - needs investigation"
-    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
     def test_flash_attention_gqa_mqa_block_mask_cases(self, device, dtype, case):
