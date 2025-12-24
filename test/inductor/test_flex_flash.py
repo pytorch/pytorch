@@ -848,7 +848,12 @@ class TestHierarchicalIndex(InductorTestCase):
             HierarchicalIndex,
         )
 
-        b, h, q_idx, kv_idx = Symbol("b"), Symbol("h"), Symbol("q_idx"), Symbol("kv_idx")
+        b, h, q_idx, kv_idx = (
+            Symbol("b"),
+            Symbol("h"),
+            Symbol("q_idx"),
+            Symbol("kv_idx"),
+        )
 
         indexer_3d = _hierarchical_indexer_cute(size=[2, 4, 512])
         result_3d = indexer_3d([b, h, q_idx])
@@ -882,22 +887,22 @@ class TestHierarchicalIndex(InductorTestCase):
         b = Symbol("b")
 
         with self.assertRaises(AssertionError) as ctx:
-            indexer([b])  # 1 index for 2D tensor
+            indexer([b])
         self.assertIn("Rank mismatch", str(ctx.exception))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @unittest.skipIf(
         not ensure_flash_available(), "Flash attention (CUTE) library not available"
     )
-    def test_hierarchical_indexing_in_generated_code(self):
+    def test_hierarchical_indexing_2d(self):
         batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
         dtype = torch.float16
         device = "cuda"
 
-        bias_matrix = torch.randn(batch_size, num_heads, device=device, dtype=dtype)
+        bias_2d = torch.randn(batch_size, num_heads, device=device, dtype=dtype)
 
-        def batch_head_score_mod(score, b, h, q_idx, kv_idx):
-            return score + bias_matrix[b, h]
+        def score_mod_2d(score, b, h, q_idx, kv_idx):
+            return score + bias_2d[b, h]
 
         q, k, v = create_test_tensors(
             batch_size=batch_size,
@@ -908,25 +913,24 @@ class TestHierarchicalIndex(InductorTestCase):
             device=device,
         )
 
+        flash_vs_triton(q, k, v, score_mod=score_mod_2d)
+
         compiled_fn = torch.compile(flex_attention)
         _, code = run_and_get_code(
             compiled_fn,
             q,
             k,
             v,
-            score_mod=batch_head_score_mod,
+            score_mod=score_mod_2d,
             kernel_options={"BACKEND": "FLASH"},
         )
-
         code_str = "\n".join(code)
 
-        import re
-
-        multi_dim_pattern = r"in_ptr\d*\[tmp\d+,\s*tmp\d+\]"
-        self.assertIsNotNone(
-            re.search(multi_dim_pattern, code_str),
-            f"Expected multi-dimensional indexing pattern {multi_dim_pattern} "
-            f"in generated code.\nExcerpt:\n{code_str[:2000]}",
+        expected_pattern = "in_ptr0[tmp0, tmp1]"
+        self.assertIn(
+            expected_pattern,
+            code_str,
+            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
@@ -938,7 +942,9 @@ class TestHierarchicalIndex(InductorTestCase):
         dtype = torch.float16
         device = "cuda"
 
-        bias_3d = torch.randn(batch_size, num_heads, seq_len, device=device, dtype=dtype)
+        bias_3d = torch.randn(
+            batch_size, num_heads, seq_len, device=device, dtype=dtype
+        )
 
         def score_mod_3d(score, b, h, q_idx, kv_idx):
             return score + bias_3d[b, h, q_idx]
@@ -952,6 +958,8 @@ class TestHierarchicalIndex(InductorTestCase):
             device=device,
         )
 
+        flash_vs_triton(q, k, v, score_mod=score_mod_3d)
+
         compiled_fn = torch.compile(flex_attention)
         _, code = run_and_get_code(
             compiled_fn,
@@ -961,16 +969,13 @@ class TestHierarchicalIndex(InductorTestCase):
             score_mod=score_mod_3d,
             kernel_options={"BACKEND": "FLASH"},
         )
-
         code_str = "\n".join(code)
 
-        import re
-
-        pattern_3d = r"in_ptr\d*\[tmp\d+,\s*tmp\d+,\s*tmp\d+\]"
-        self.assertIsNotNone(
-            re.search(pattern_3d, code_str),
-            f"Expected 3D indexing pattern {pattern_3d} "
-            f"in generated code.\nExcerpt:\n{code_str[:2000]}",
+        expected_pattern = "in_ptr0[tmp0, tmp1, tmp2]"
+        self.assertIn(
+            expected_pattern,
+            code_str,
+            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
         )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
@@ -998,6 +1003,8 @@ class TestHierarchicalIndex(InductorTestCase):
             device=device,
         )
 
+        flash_vs_triton(q, k, v, score_mod=score_mod_4d)
+
         compiled_fn = torch.compile(flex_attention)
         _, code = run_and_get_code(
             compiled_fn,
@@ -1007,16 +1014,13 @@ class TestHierarchicalIndex(InductorTestCase):
             score_mod=score_mod_4d,
             kernel_options={"BACKEND": "FLASH"},
         )
-
         code_str = "\n".join(code)
 
-        import re
-
-        pattern_4d = r"in_ptr\d*\[tmp\d+,\s*tmp\d+,\s*tmp\d+,\s*tmp\d+\]"
-        self.assertIsNotNone(
-            re.search(pattern_4d, code_str),
-            f"Expected 4D indexing pattern {pattern_4d} "
-            f"in generated code.\nExcerpt:\n{code_str[:2000]}",
+        expected_pattern = "in_ptr0[tmp0, tmp1, tmp2, tmp3]"
+        self.assertIn(
+            expected_pattern,
+            code_str,
+            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
         )
 
 
