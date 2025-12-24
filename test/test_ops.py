@@ -494,7 +494,9 @@ class TestCommon(TestCase):
             and device.startswith("cuda")
             and not TEST_WITH_ROCM
         ):
-            self.skipTest("Skipping conv1d float32 with Inductor on CUDA due to precision issues")
+            self.skipTest(
+                "Skipping conv1d float32 with Inductor on CUDA due to precision issues"
+            )
 
         def to_cpu(arg):
             if isinstance(arg, torch.Tensor):
@@ -2331,7 +2333,7 @@ class TestMathBits(TestCase):
             and TEST_WITH_ROCM
         ):
             self.skipTest("Skipping ldexp float64 with Inductor on ROCm")
-            
+
         math_op_physical = torch.neg
         math_op_view = torch._neg_view
         is_bit_set = torch.is_neg
