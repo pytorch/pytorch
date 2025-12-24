@@ -49,3 +49,13 @@
      reset_accumulated_memory_stats
      reset_peak_memory_stats
 ```
+
+## Graphs (beta)
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Graph
+```
