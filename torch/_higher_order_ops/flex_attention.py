@@ -6,7 +6,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch import Tensor
 from torch._C import DispatchKey
-from torch.amp.autocast_mode import _cast as _autocast_cast
 from torch._higher_order_ops.utils import (
     _has_potential_branch_input_mutation,
     _maybe_reenter_make_fx,
@@ -23,6 +22,7 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
+from torch.amp.autocast_mode import _cast as _autocast_cast
 from torch.fx.experimental.proxy_tensor import (
     make_fx,
     ProxyTorchDispatchMode,
