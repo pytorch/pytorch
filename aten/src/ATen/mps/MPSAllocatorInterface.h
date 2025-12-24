@@ -43,23 +43,23 @@ class IMPSAllocator : public c10::DeviceAllocator {
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
 
   // Required by c10::DeviceAllocator interface (must match base class signatures - NO const)
-  virtual bool initialized() = 0;
+  virtual bool initialized() override = 0;
 
   // Override emptyCache to match DeviceAllocator signature
-  void emptyCache(c10::MempoolId_t mempool_id = {0, 0}) override = 0;
+  virtual void emptyCache(c10::MempoolId_t mempool_id = {0, 0}) override = 0;
 
   virtual c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
-      c10::DeviceIndex device) = 0;
+      c10::DeviceIndex device) override = 0;
 
-  virtual void resetAccumulatedStats(c10::DeviceIndex device) = 0;
+  virtual void resetAccumulatedStats(c10::DeviceIndex device) override = 0;
 
-  virtual void resetPeakStats(c10::DeviceIndex device) = 0;
+  virtual void resetPeakStats(c10::DeviceIndex device) override = 0;
 
   virtual std::pair<size_t, size_t> getMemoryInfo(
-      c10::DeviceIndex device) = 0;
+      c10::DeviceIndex device) override = 0;
 
   // Required by base Allocator (from c10::Allocator)
-  virtual void recordStream(const c10::DataPtr& ptr, c10::Stream stream) = 0;
+  virtual void recordStream(const c10::DataPtr& ptr, c10::Stream stream) override = 0;
 };
 
 class IMpsAllocatorCallback {
