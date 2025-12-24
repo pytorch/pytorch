@@ -133,10 +133,12 @@ class TestMemoryPlanning(TestCase):
         self.assertTrue(same(model(*example_inputs), result))
 
         # check allocation is done after the unbacked symint is computed
+        # NOTE: the exact `int_array_N` numbering is not stable across codegen
+        # changes; match the shape expression itself and its ordering.
         FileCheck().check("auto u0 = u0_raw;").check(
-            "const int64_t int_array_2[] = {10L, 8L*u0, 32L};"
+            "{10L, 8L*u0, 32L};"
         ).check("AtenTensorHandle pool0_handle;").check(
-            "aoti_torch_empty_strided(3, int_array_2, int_array_3"
+            "aoti_torch_empty_strided(3,"
         ).run(code)
 
         # all AtenTensorHandle allocated using aoti_torch__alloc_from_pool are wrapped with RAIIAtenTensorHandle
@@ -145,10 +147,11 @@ class TestMemoryPlanning(TestCase):
             "aoti_torch__alloc_from_pool(pool1", 1, exactly=True
         ).check_count("aoti_torch__alloc_from_pool(pool0", 1, exactly=True).run(code)
 
+        # Similar to above, don't hardcode `int_array_N` numbering.
         FileCheck().check(
-            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_int32, 0, int_array_1, int_array_1, &tmp_tensor_handle_0));"  # noqa: B950
+            "aoti_torch__alloc_from_pool(pool1, 0, cached_torch_dtype_int32, 0,"
         ).check("RAIIAtenTensorHandle(tmp_tensor_handle_0);").check(
-            "AOTI_TORCH_ERROR_CODE_CHECK(aoti_torch__alloc_from_pool(pool0, 0, cached_torch_dtype_float32, 3, int_array_4, int_array_5, &tmp_tensor_handle_1));"  # noqa: B950
+            "aoti_torch__alloc_from_pool(pool0, 0, cached_torch_dtype_float32, 3,"
         ).check("RAIIAtenTensorHandle(tmp_tensor_handle_1);").run(code)
 
 
