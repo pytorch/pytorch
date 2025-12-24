@@ -1276,6 +1276,289 @@ class InterfacesTest(TestMixin, TestCase):
         self.assertEqual(result1, 10)
         self.assertEqual(result2, 10)
 
+    # ============= Cache Loading Tests =============
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_loads_cache_from_dump_file(self) -> None:
+        """Test that Memoizer loads cache entries from dump file on initialization.
+
+        Verifies that when CACHE_DUMP_FILE_PATH is configured and the file exists,
+        a new Memoizer instance pre-populates its in-memory cache with the dump contents.
+        """
+        import json
+        import os
+        import tempfile
+
+        # Setup: Create a dump file with cache entries
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_file:
+            test_filepath = tmp_file.name
+            dump_data = {
+                "cache_size": 2,
+                "cache_entries": {
+                    "key1": {"params": {"x": 1}, "result": 10},
+                    "key2": {"params": {"x": 2}, "result": 20},
+                },
+            }
+            json.dump(dump_data, tmp_file)
+
+        try:
+            # Setup: Configure CACHE_DUMP_FILE_PATH
+            with patch.object(
+                config, "CACHE_DUMP_FILE_PATH", return_value=test_filepath
+            ):
+                # Execute: Create a new Memoizer (should load from dump)
+                memoizer = interfaces.Memoizer()
+
+                # Assert: Cache was populated from dump file
+                hit1 = memoizer._cache.get("key1")
+                self.assertIsNotNone(hit1)
+                cache_entry1 = hit1.value
+                self.assertEqual(cache_entry1.encoded_result, 10)
+
+                hit2 = memoizer._cache.get("key2")
+                self.assertIsNotNone(hit2)
+                cache_entry2 = hit2.value
+                self.assertEqual(cache_entry2.encoded_result, 20)
+        finally:
+            # Cleanup
+            if os.path.exists(test_filepath):
+                os.unlink(test_filepath)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_skips_loading_when_no_dump_file_configured(self) -> None:
+        """Test that Memoizer skips loading when CACHE_DUMP_FILE_PATH is not set.
+
+        Verifies that when no dump file path is configured, the Memoizer
+        initializes with an empty cache without errors.
+        """
+        # Setup: Configure CACHE_DUMP_FILE_PATH to return None
+        with patch.object(config, "CACHE_DUMP_FILE_PATH", return_value=None):
+            # Execute: Create a new Memoizer
+            memoizer = interfaces.Memoizer()
+
+            # Assert: Cache is empty (not loaded from any file)
+            self.assertEqual(len(memoizer._cache._memory), 0)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_handles_missing_dump_file_gracefully(self) -> None:
+        """Test that Memoizer handles missing dump file gracefully.
+
+        Verifies that when CACHE_DUMP_FILE_PATH points to a non-existent file,
+        the Memoizer initializes with an empty cache without crashing.
+        """
+        # Setup: Configure path to non-existent file
+        non_existent_path = "/tmp/this_file_does_not_exist_12345.json"
+
+        with patch.object(
+            config, "CACHE_DUMP_FILE_PATH", return_value=non_existent_path
+        ):
+            # Execute: Create a new Memoizer
+            memoizer = interfaces.Memoizer()
+
+            # Assert: Cache is empty (no crash)
+            self.assertEqual(len(memoizer._cache._memory), 0)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_handles_corrupt_dump_file_gracefully(self) -> None:
+        """Test that Memoizer handles corrupt dump file gracefully.
+
+        Verifies that when the dump file contains invalid JSON, the Memoizer
+        initializes with an empty cache without crashing.
+        """
+        import os
+        import tempfile
+
+        # Setup: Create a corrupt dump file
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_file:
+            test_filepath = tmp_file.name
+            tmp_file.write("{ this is not valid json")
+
+        try:
+            with patch.object(
+                config, "CACHE_DUMP_FILE_PATH", return_value=test_filepath
+            ):
+                # Execute: Create a new Memoizer
+                memoizer = interfaces.Memoizer()
+
+                # Assert: Cache is empty (no crash, handled gracefully)
+                self.assertEqual(len(memoizer._cache._memory), 0)
+        finally:
+            # Cleanup
+            if os.path.exists(test_filepath):
+                os.unlink(test_filepath)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_loads_from_sub_key(self) -> None:
+        """Test that PersistentMemoizer loads cache from sub_dir nested structure.
+
+        Verifies that when sub_dir is set, the PersistentMemoizer loads entries
+        from the nested cache_entries[sub_dir] structure.
+        """
+        import json
+        import os
+        import tempfile
+        from pathlib import Path
+
+        # Setup: Create a dump file with nested structure
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_file:
+            test_filepath = tmp_file.name
+            dump_data = {
+                "cache_size": 2,
+                "cache_entries": {
+                    "test_subdir": {
+                        "nested_key1": {"params": {"x": 1}, "result": 100},
+                        "nested_key2": {"params": {"x": 2}, "result": 200},
+                    },
+                    "other_subdir": {
+                        "other_key": {"params": {"x": 3}, "result": 300},
+                    },
+                },
+            }
+            json.dump(dump_data, tmp_file)
+
+        try:
+            with patch.object(
+                config, "CACHE_DUMP_FILE_PATH", return_value=test_filepath
+            ):
+                # Execute: Create PersistentMemoizer with sub_dir="test_subdir"
+                pm = interfaces.PersistentMemoizer(sub_dir=Path("test_subdir"))
+
+                # Assert: Cache loaded entries from test_subdir only
+                hit1 = pm._memoizer._cache.get("nested_key1")
+                self.assertIsNotNone(hit1)
+                cache_entry1 = hit1.value
+                self.assertEqual(cache_entry1.encoded_result, 100)
+
+                hit2 = pm._memoizer._cache.get("nested_key2")
+                self.assertIsNotNone(hit2)
+                cache_entry2 = hit2.value
+                self.assertEqual(cache_entry2.encoded_result, 200)
+
+                # Assert: Did not load entries from other_subdir
+                hit_other = pm._memoizer._cache.get("other_key")
+                self.assertIsNone(hit_other)
+        finally:
+            # Cleanup
+            if os.path.exists(test_filepath):
+                os.unlink(test_filepath)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_loads_from_root_when_sub_dir_empty(self) -> None:
+        """Test that PersistentMemoizer loads from root when sub_dir is empty.
+
+        Verifies that when sub_dir is empty string, entries are loaded from
+        the root cache_entries level (not from any nested structure).
+        """
+        import json
+        import os
+        import tempfile
+
+        # Setup: Create a dump file with mixed root and nested entries
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_file:
+            test_filepath = tmp_file.name
+            dump_data = {
+                "cache_size": 3,
+                "cache_entries": {
+                    "root_key1": {"params": {"x": 1}, "result": 10},
+                    "root_key2": {"params": {"x": 2}, "result": 20},
+                    "some_subdir": {
+                        "nested_key": {"params": {"x": 3}, "result": 30},
+                    },
+                },
+            }
+            json.dump(dump_data, tmp_file)
+
+        try:
+            with patch.object(
+                config, "CACHE_DUMP_FILE_PATH", return_value=test_filepath
+            ):
+                # Execute: Create PersistentMemoizer with empty sub_dir
+                pm = interfaces.PersistentMemoizer(sub_dir="")
+
+                # Assert: Loaded root-level entries
+                hit1 = pm._memoizer._cache.get("root_key1")
+                self.assertIsNotNone(hit1)
+                cache_entry1 = hit1.value
+                self.assertEqual(cache_entry1.encoded_result, 10)
+
+                hit2 = pm._memoizer._cache.get("root_key2")
+                self.assertIsNotNone(hit2)
+                cache_entry2 = hit2.value
+                self.assertEqual(cache_entry2.encoded_result, 20)
+
+                # Assert: Did not load nested entries
+                hit_nested = pm._memoizer._cache.get("nested_key")
+                self.assertIsNone(hit_nested)
+        finally:
+            # Cleanup
+            if os.path.exists(test_filepath):
+                os.unlink(test_filepath)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_replay_uses_preloaded_cache(self) -> None:
+        """Test that memoizer replay successfully retrieves from preloaded cache.
+
+        Verifies end-to-end workflow: load cache from dump file, then use
+        replay to retrieve cached results without executing the function.
+        """
+        import json
+        import os
+        import tempfile
+
+        # Setup: Create a dump file with a cached result
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_file:
+            test_filepath = tmp_file.name
+            # Simulate a cache entry for compute(5) -> 10
+            cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+            dump_data = {
+                "cache_size": 1,
+                "cache_entries": {
+                    cache_key: {"params": {"args": (5,), "kwargs": {}}, "result": 10},
+                },
+            }
+            json.dump(dump_data, tmp_file)
+
+        try:
+            with patch.object(
+                config, "CACHE_DUMP_FILE_PATH", return_value=test_filepath
+            ):
+                # Execute: Create a memoizer (loads cache from dump)
+                memoizer = interfaces.Memoizer()
+
+                # Create a replay function
+                @memoizer.replay()
+                def compute(x: int) -> int:
+                    raise AssertionError(
+                        "Function should not be executed during replay"
+                    )
+
+                # Execute: Call replay (should use preloaded cache)
+                result = compute(5)
+
+                # Assert: Got cached result without executing function
+                self.assertEqual(result, 10)
+        finally:
+            # Cleanup
+            if os.path.exists(test_filepath):
+                os.unlink(test_filepath)
+
     # ============= Memoizer._dump_to_disk Tests =============
 
     @patch_on_disk_cache_base_dir
