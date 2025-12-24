@@ -14497,17 +14497,20 @@ op_db: list[OpInfo] = [
     OpInfo('lu_unpack',
            op=torch.lu_unpack,
            dtypes=floating_and_complex_types(),
-           dtypesIfMPS=floating_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
-           skips=(skipCPUIfNoLapack,),
+           skips=(
+               skipCPUIfNoLapack,
+               # RuntimeError: linalg.lu_factor(): MPS doesn't support complex types.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+           ),
            sample_inputs_func=sample_inputs_lu_unpack),
     OpInfo('lu',
            op=torch.lu,
            dtypes=floating_and_complex_types(),
-           dtypesIfMPS=floating_types(),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_forward_ad=True,
@@ -14529,11 +14532,13 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
                # UserWarning not triggered : Resized a non-empty tensor but did not warn about it.
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
+               # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            )),
     OpInfo('lu_solve',
            op=torch.lu_solve,
            dtypes=floating_and_complex_types(),
-           dtypesIfMPS=floating_types(),
            supports_forward_ad=True,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
@@ -14548,6 +14553,8 @@ op_db: list[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                # RuntimeError: The size of tensor a (5) must match the size of tensor b (4) at non-singleton dimension 1
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+               # Exception: linalg.solve.triangular(); Only float is supported!
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
                # AssertionError: Tensor-likes are not close!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                DecorateInfo(unittest.skip("Tests different backward paths"),
@@ -14565,7 +14572,6 @@ op_db: list[OpInfo] = [
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.int8, torch.bool, torch.int32),
-           backward_dtypesIfMPS=(),
            sample_inputs_func=sample_inputs_masked_scatter,
            error_inputs_func=error_inputs_masked_scatter,
            supports_forward_ad=True,
@@ -14584,6 +14590,10 @@ op_db: list[OpInfo] = [
                # Exception: "masked_scatter_ only supports boolean masks" does not match
                # "masked_scatter: expected BoolTensor or ByteTensor for mask"
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
+               # The following dtypes did not work in backward but are listed by
+               # the OpInfo: {torch.float32, torch.float16, torch.complex64,
+               # torch.bfloat16}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo('masked_select',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -20890,11 +20900,15 @@ op_db: list[OpInfo] = [
     OpInfo(
         'logdet',
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_types(),
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_linalg_det_logdet_slogdet,
+        skips=(
+            # Exception: linalg.lu_factor(): MPS doesn't support complex types.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+        ),
         decorators=[skipCUDAIfNoMagma, skipCPUIfNoLapack]),
     # `log_softmax` supports different dtypes based on whether `dtype` argument,
     # is passed or not. Hence two OpInfo entries, one with dtype and other without.
