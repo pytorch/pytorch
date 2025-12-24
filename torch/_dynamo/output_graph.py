@@ -49,6 +49,7 @@ from torch import fx, Tensor
 from torch._C._dynamo import guards
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
+    active_fake_mode,
     CompileContext,
     CompileId,
     GlobalContextCheckpointState,
@@ -2232,9 +2233,25 @@ class OutputGraph(OutputGraphCommon):
                     # from scratch when we go to AOTAutograd. But the ShapeEnv must be preserved as
                     # Dynamo made decisions about what is dynamic or not / guards from the user code
                     # that is not in graph.
-                    backend_fake_mode = torch._subclasses.FakeTensorMode(
-                        shape_env=old_fake_mode.shape_env,
-                    )
+                    #
+                    # However, if there's already an outer fake mode active (e.g., for cross-compilation
+                    # with fake CUDA tensors), we should reuse it to avoid conflicts in detect_fake_mode.
+                    outer_fake_mode = active_fake_mode()
+                    if outer_fake_mode is not None:
+                        # Reuse the outer fake mode, ensuring it has the ShapeEnv
+                        if outer_fake_mode.shape_env is None:
+                            outer_fake_mode.shape_env = old_fake_mode.shape_env
+                        # Update static_shapes since we now have a ShapeEnv
+                        if outer_fake_mode.shape_env is not None:
+                            outer_fake_mode.static_shapes = False
+                        backend_fake_mode = outer_fake_mode
+                        # Skip guards check since we're cross-compiling with fake tensors.
+                        # The guards will expect real tensor types but inputs are fake.
+                        self.skip_guards_check = True
+                    else:
+                        backend_fake_mode = torch._subclasses.FakeTensorMode(
+                            shape_env=old_fake_mode.shape_env,
+                        )
                 # TODO(voz): Ostensibly, this should be scoped and
                 # restore back to old_fake_mode, but doing so currently violates
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode

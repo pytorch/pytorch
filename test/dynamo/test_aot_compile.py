@@ -886,6 +886,35 @@ from user code:
         actual = compiled_fn(*test_inputs)
         self.assertEqual(expected.x, actual.x)
 
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_cross_aot_compile(self):
+        """Test cross-compilation using fake cuda tensors"""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def fn(x, y):
+            return x + y
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            fake_inputs = (
+                torch.randn(3, 4, device="cuda"),
+                torch.randn(3, 4, device="cuda"),
+            )
+            compiled_fn = torch.compile(
+                fn,
+                fullgraph=True,
+            ).aot_compile((fake_inputs, {}))
+
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+
+        with open(self.path(), "rb") as f:
+            loaded_fn = torch.compiler.load_compiled_function(f)
+
+        inputs = (torch.randn(3, 4, device="cuda"), torch.randn(3, 4, device="cuda"))
+        expected = fn(*inputs)
+        actual = loaded_fn(*inputs)
+        self.assertEqual(expected, actual)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
