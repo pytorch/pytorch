@@ -42,7 +42,10 @@ inner(torch.randn(2, 2).to("{device}"))
     @requires_gpu
     @inductor_config.patch("triton.inject_relu_bug_TESTING_ONLY", "runtime_error")
     def test_after_aot_gpu_runtime_error(self):
-        self._test_after_aot_runtime_error(GPU_TYPE, "device-side assert")
+        expected_error = (
+            "injected assert fail" if GPU_TYPE == "xpu" else "device-side assert"
+        )
+        self._test_after_aot_runtime_error(GPU_TYPE, expected_error)
 
 
 if __name__ == "__main__":

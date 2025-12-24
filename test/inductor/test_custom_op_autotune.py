@@ -458,7 +458,6 @@ class TestCustomOpAutoTune(TestCase):
             multi_param_op, (test_x, test_factor), expected_result, "MultiParam"
         )
 
-    @skipIfXpu
     def test_range_based_static_shape_no_cond_dispatch(self):
         """Test dispatch code generation for static vs dynamic shapes.
 
