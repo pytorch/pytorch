@@ -1862,6 +1862,28 @@ class StringFormatVariable(VariableTracker):
 
         return (True, self.format_string.format(*arg_values, **kwarg_values))
 
+    def is_python_constant(self) -> bool:
+        """Return True if this StringFormatVariable can be converted to a constant.
+
+        Returns False if any argument is an unrealized lazy constant, since those
+        should be reconstructed at runtime rather than loaded as a constant (to
+        avoid unnecessary guard installation and recompilation).
+        """
+        for x in itertools.chain(self.sym_args, self.sym_kwargs.values()):
+            can_peek, is_unrealized, _value = x.try_peek_constant()
+            if not can_peek or is_unrealized:
+                # Can't peek or has unrealized lazy constant - don't treat as constant
+                return False
+        return True
+
+    def as_python_constant(self) -> str:
+        """Return the formatted string value, realizing any lazy constants."""
+        self._realize_lazy_args()
+        return self.format_string.format(
+            *[v.as_python_constant() for v in self.sym_args],
+            **{k: v.as_python_constant() for k, v in self.sym_kwargs.items()},
+        )
+
     def is_python_hashable(self) -> bool:
         # Strings are always hashable, and we can peek at all values
         success, _ = self._try_get_format_value()
