@@ -25,12 +25,10 @@ from torch.testing._internal.common_device_type import (
     toleranceOverride,
 )
 from torch.testing._internal.common_dtype import (
-    all_types,
     all_types_and_complex,
     all_types_and_complex_and,
     floating_and_complex_types,
     floating_and_complex_types_and,
-    floating_types,
 )
 from torch.testing._internal.common_utils import (
     GRADCHECK_NONDET_TOL,
