@@ -12381,6 +12381,10 @@ op_db: list[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
                                      device_type='cuda'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='xpu'),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
@@ -12400,6 +12404,10 @@ op_db: list[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
                                      device_type='cuda'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='xpu'),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
@@ -14471,9 +14479,16 @@ op_db: list[OpInfo] = [
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
                     dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.complex32),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+                    # XPU issue, see https://github.com/intel/torch-xpu-ops/issues/2376
+                    dtypesIfXPU=floating_types_and(torch.bfloat16, torch.float16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_rhs_python_scalar=False),
+                    supports_rhs_python_scalar=False,
+                    skips=(
+                        # XPU issue, see https://github.com/intel/torch-xpu-ops/issues/2376
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion',
+                                     device_type='xpu'),
+                    )),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16, torch.half),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
@@ -14900,6 +14915,7 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
             # TODO: FIXME: RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='xpu'),
         )),
     BinaryUfuncInfo(
         'maximum',
@@ -14912,6 +14928,7 @@ op_db: list[OpInfo] = [
         skips=(
             # TODO: FIXME: RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='xpu'),
         )),
     BinaryUfuncInfo(
         'min',
@@ -14932,6 +14949,10 @@ op_db: list[OpInfo] = [
                          'TestBinaryUfuncs',
                          'test_type_promotion',
                          device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure,
+                         'TestBinaryUfuncs',
+                         'test_type_promotion',
+                         device_type='xpu'),
         )),
     BinaryUfuncInfo(
         'minimum',
@@ -14947,6 +14968,10 @@ op_db: list[OpInfo] = [
                          'TestBinaryUfuncs',
                          'test_type_promotion',
                          device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure,
+                         'TestBinaryUfuncs',
+                         'test_type_promotion',
+                         device_type='xpu'),
         ),
     ),
     BinaryUfuncInfo('logical_and',
@@ -14984,6 +15009,8 @@ op_db: list[OpInfo] = [
                         # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
                                      'test_type_promotion', device_type='cuda'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+                                     'test_type_promotion', device_type='xpu'),
                     )),
     BinaryUfuncInfo('bitwise_or',
                     ref=np.bitwise_or,
@@ -14999,6 +15026,10 @@ op_db: list[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
                                      device_type='cuda'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='xpu'),
                     )),
     BinaryUfuncInfo('bitwise_xor',
                     ref=np.bitwise_xor,
@@ -15014,6 +15045,10 @@ op_db: list[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
                                      device_type='cuda'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='xpu'),
                     )),
     BinaryUfuncInfo('heaviside',
                     ref=lambda a, b: (
