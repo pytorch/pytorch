@@ -150,11 +150,14 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(len(new_results), 1)
         self.assertEqual(
             set(key_1.keys()),
-            {j for i in new_results.keys() for j in i}
+            {j for i in new_results.keys() for j in i}  # noqa: SIM118
             - set(MODULE_DEFAULTS["torch._inductor.config"].keys()),
         )
 
     @unittest.skipIf(not IS_LINUX, "PerfCounters are only supported on Linux")
+    @unittest.skip(
+        "Need default values for dynamo flags - https://github.com/pytorch/pytorch/issues/164062"
+    )
     def test_config_fuzzer_dynamo_bisect(self):
         # these values just chosen randomly, change to different ones if necessary
         key_1 = {"dead_code_elimination": False, "specialize_int": True}
@@ -181,7 +184,7 @@ class TestConfigFuzzer(TestCase):
         self.assertEqual(len(new_results), 1)
         self.assertEqual(
             set(key_1.keys()),
-            {j for i in new_results.keys() for j in i}
+            {j for i in new_results for j in i}  # noqa: SIM118
             - set(MODULE_DEFAULTS["torch._dynamo.config"].keys()),
         )
 

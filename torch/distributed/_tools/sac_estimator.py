@@ -3,7 +3,7 @@ import os
 import sys
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 from typing_extensions import Self
 
 import torch
@@ -429,7 +429,7 @@ class SACEstimator(TorchDispatchMode):
         # sdpa has non-deterministic seed, but might be deterministic
         # if no dropout is applied
         if func.overloadpacket.__name__ == "_scaled_dot_product_flash_attention":
-            # pyrefly: ignore  # missing-attribute
+            # pyrefly: ignore [missing-attribute]
             is_rand_op = kwargs.get("dropout_p", 0) != 0
         # 5. Create metadata information per active non-leaf module
         for mod_fqn in self._mod_tracker.parents:
@@ -711,7 +711,7 @@ class SACEstimator(TorchDispatchMode):
                 str(i in sac_stats.view_like_ops),
                 str(i in sac_stats.rand_ops),
                 str(i in sac_stats.saved_autograd_ops),
-                str(op_parent.get(i, None)),
+                str(op_parent.get(i)),
             ]
             table_data.append(row)
         # Define headers
@@ -777,9 +777,9 @@ class SACEstimator(TorchDispatchMode):
         def append_row(
             op_indices: set[int],
             func_names: set[str],
-            msps: Optional[float] = None,
-            stored: Optional[bool] = False,
-            recomputed: Optional[bool] = False,
+            msps: float | None = None,
+            stored: bool | None = False,
+            recomputed: bool | None = False,
         ) -> None:
             row = [
                 str(op_indices),

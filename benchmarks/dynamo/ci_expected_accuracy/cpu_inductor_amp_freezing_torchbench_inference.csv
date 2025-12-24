@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,fail_accuracy,46
 
 
 
-detectron2_fcos_r_50_fpn,fail_accuracy,22
+detectron2_fcos_r_50_fpn,fail_accuracy,24
 
 
 
@@ -123,10 +123,6 @@ functorch_maml_omniglot,pass,0
 
 
 lennard_jones,pass,0
-
-
-
-llama,pass,0
 
 
 
@@ -238,10 +234,6 @@ squeezenet1_1,pass,0
 
 
 
-stable_diffusion_unet,pass_due_to_skip,0
-
-
-
 torch_multimodal_clip,pass,0
 
 
@@ -254,7 +246,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,fail_accuracy,29
+vision_maskrcnn,fail_accuracy,30
 
 
 

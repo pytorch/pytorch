@@ -74,6 +74,17 @@ def export_compat(
     if opset_version is None:
         opset_version = onnx_constants.ONNX_DEFAULT_OPSET
 
+    if isinstance(model, torch.nn.Module):
+        if model.training:
+            warnings.warn(
+                "Exporting a model while it is in training mode. "
+                "Please ensure that this is intended, as it may lead to "
+                "different behavior during inference. "
+                "Calling model.eval() before export is recommended.",
+                UserWarning,
+                stacklevel=3,
+            )
+
     if isinstance(model, torch.export.ExportedProgram):
         # We know the model is already exported program, so the args, kwargs, and dynamic_shapes
         # are not used

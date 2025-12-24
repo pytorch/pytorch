@@ -208,15 +208,17 @@ TORCH_META_FUNC(hardshrink_backward) (
   build_borrowing_binary_op(maybe_get_output(), grad, self);
 }
 
-static inline void softshrink_check(const Scalar& lambd) {
-  double lamb = lambd.to<double>();
-  TORCH_CHECK(lamb >= 0, "lambda must be greater or equal to 0, but found to be ", lamb, ".");
-}
-
 TORCH_META_FUNC(softshrink) (
   const Tensor & self, const Scalar& lambd
 ) {
-  softshrink_check(lambd);
+  double lamb = lambd.to<double>();
+  AT_DISPATCH_FLOATING_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16,
+    self.scalar_type(), "softshrink_check", [&] {
+    auto max_val = static_cast<double>(std::numeric_limits<scalar_t>::max());
+    TORCH_CHECK(0 <= lamb && lamb <= max_val,
+      "lambda must be in range [0, ", max_val, "] for input dtype ",
+      self.scalar_type(), ", but found ", lamb);
+  });
   build_unary_op(maybe_get_output(), self);
 }
 
@@ -240,8 +242,8 @@ TORCH_META_FUNC(gelu_backward) (
 
 namespace at::native {
 
-static const double SELU_ALPHA = 1.6732632423543772848170429916717;
-static const double SELU_SCALE = 1.0507009873554804934193349852946;
+static constexpr double SELU_ALPHA = 1.6732632423543772848170429916717;
+static constexpr double SELU_SCALE = 1.0507009873554804934193349852946;
 
 DEFINE_DISPATCH(elu_stub);
 DEFINE_DISPATCH(elu_backward_stub);

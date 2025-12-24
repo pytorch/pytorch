@@ -5,9 +5,11 @@ from typing import TYPE_CHECKING, Union
 import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
+from torch._inductor.kernel.mm_common import load_kernel_template
 
-from .. import ir, lowering as L
+from .. import config as inductor_config, ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
+from ..lowering import lowerings, make_pointwise, make_reduction, transform_args
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -22,8 +24,13 @@ from ..utils import (
     use_cutlass_template,
     use_triton_template,
 )
-from ..virtualized import V
-from .mm_common import _is_static_problem, is_batch_stride_largest_or_zero, mm_args
+from ..virtualized import ops, V
+from .mm_common import (
+    _is_static_problem,
+    is_batch_stride_largest_or_zero,
+    mm_args,
+    use_native_matmul,
+)
 
 
 if TYPE_CHECKING:
@@ -39,84 +46,20 @@ def bmm_grid(b, m, n, meta, *, cdiv):
     return (cdiv(m, meta["BLOCK_M"]) * cdiv(n, meta["BLOCK_N"]), b, 1)
 
 
+# We define each template kernel in a separate file which is the name of the input to load_kernel_template
+# (e.g. triton_bmm for templates/triton_bmm.py.jinja).
+# If you are adding a new template, please follow that pattern and add a new file with your implementation in the templates folder.
 bmm_template = TritonTemplate(
     name="bmm",
     grid=bmm_grid,
-    source=r"""
-{{def_kernel("A", "B")}}
-    M = {{size("A", -2)}}
-    N = {{size("B", -1)}}
-    K = {{size("A", -1)}}
-
-    stride_aq = {{stride("A", 0)}}
-    stride_am = {{stride("A", 1)}}
-    stride_ak = {{stride("A", 2)}}
-
-    stride_bq = {{stride("B", 0)}}
-    stride_bk = {{stride("B", 1)}}
-    stride_bn = {{stride("B", 2)}}
-
-    # based on triton.ops.matmul
-    pid = tl.program_id(0).to(INDEX_DTYPE)
-    grid_m = (M + BLOCK_M - 1) // BLOCK_M
-    grid_n = (N + BLOCK_N - 1) // BLOCK_N
-
-    # re-order program ID for better L2 performance
-    width = GROUP_M * grid_n
-    group_id = pid // width
-    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
-    pid_m = group_id * GROUP_M + (pid % group_size)
-    pid_n = (pid % width) // (group_size)
-    tl.assume(pid_m >= 0)
-    tl.assume(pid_n >= 0)
-
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
-        ram = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    else:
-        ram = rm % M
-    if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
-        rbn = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
-    else:
-        rbn = rn % N
-
-    rk = tl.arange(0, BLOCK_K)
-
-    idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
-    A = A + (ram[:, None] * stride_am + rk[None, :] * stride_ak + idx_q*stride_aq)
-    B = B + (rk[:, None] * stride_bk + rbn[None, :] * stride_bn + idx_q*stride_bq)
-
-    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    for k in range(K, 0, -BLOCK_K):
-        if EVEN_K:
-            a = tl.load(A)
-            b = tl.load(B)
-        else:
-            a = tl.load(A, mask=rk[None, :] < k, other=0.)
-            b = tl.load(B, mask=rk[:, None] < k, other=0.)
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32)
-        A += BLOCK_K * stride_ak
-        B += BLOCK_K * stride_bk
-
-    # rematerialize rm and rn to save registers
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    idx_q = tl.program_id(1).to(INDEX_DTYPE)  # batch dimension for BMM
-    idx_m = rm[:, None]
-    idx_n = rn[None, :]
-    mask = (idx_m < M) & (idx_n < N)
-
-    # inductor generates a suffix
-    {{store_output(("idx_q", "idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
-""",
+    source=load_kernel_template("triton_bmm"),
     cache_codegen_enabled_for_template=True,
 )
 
-aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out")
+aten_bmm = ExternKernelChoice(torch.bmm, "at::bmm_out", op_overload=aten.bmm.out)
 aten_bmm_dtype = ExternKernelChoice(
     torch.bmm,
-    "at::_bmm_out_dtype_cuda",
+    "at::_bmm_out_dtype_xpu" if torch.xpu.is_available() else "at::_bmm_out_dtype_cuda",
     name="bmm_dtype",
     op_overload=aten.bmm.dtype_out,
 )
@@ -167,6 +110,32 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
             meta_mat2 = V.graph.current_node.args[1]
             mat2 = may_require_contiguous(mat2, meta_mat2)
 
+    if use_native_matmul(mat1, mat2):
+        mat1 = lowerings[aten.unsqueeze](mat1, -1)
+        mat2 = lowerings[aten.unsqueeze](mat2, 1)
+        args, kwargs = transform_args(
+            args=[mat1, mat2],
+            kwargs={},
+            broadcast=True,
+            type_promotion_kind=None,
+            convert_input_to_bool=False,
+        )  # Handles broadcasting the arguments
+
+        if inductor_config.triton.codegen_upcast_to_fp32 and mat1.dtype in [
+            torch.float16,
+            torch.bfloat16,
+        ]:
+
+            def _to_dtype(x):
+                return ops.to_dtype(x, mat1.dtype, use_compute_types=False)
+
+            args = [make_pointwise(_to_dtype)(x) for x in args]
+
+        mul_pointwise = make_pointwise(ops.dot)(*args)
+        dot_reduction = make_reduction("dot")(mul_pointwise, 2)
+
+        return dot_reduction
+
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1, mat2, layout=layout, out_dtype=out_dtype
@@ -193,7 +162,9 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     aten_handler: ExternKernelChoice = aten_bmm
     aten_extra_kwargs = {}
     if out_dtype:
-        assert mat1.get_device().type == "cuda", "out_dtype is only supported for CUDA"
+        assert mat1.get_device().type in ("cuda", "xpu"), (
+            "out_dtype is only supported for CUDA or XPU"
+        )
         aten_handler = aten_bmm_dtype
         aten_extra_kwargs = {"out_dtype": out_dtype}
 
@@ -207,9 +178,10 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
         templates_to_use.append(aten_handler)
         kwarg_overrides[aten_handler.uid] = aten_extra_kwargs
 
-    if use_triton_template(layout, check_max_autotune=False):
+    if use_triton_template(layout, check_max_autotune=False) and (
+        out_dtype is None or out_dtype == mat1.get_dtype()
+    ):
         # TODO: add out_dtype support for Triton Template
-        assert out_dtype is None, "out_dtype is not supported for Triton"
         templates_to_use.append(bmm_template)
 
     # Single unified call for all templates
@@ -255,6 +227,19 @@ def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
     """
+    if use_native_matmul(mat1, mat2):
+        if beta == 0:
+            arg1 = 0
+        else:
+            arg1 = lowerings[aten.mul](beta, inp)
+
+        if alpha == 0:
+            arg2 = 0
+        else:
+            arg2 = lowerings[aten.mul](alpha, lowerings[aten.bmm](mat1, mat2))
+
+        return lowerings[aten.add](arg1, arg2)
+
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2, inp = mm_args(mat1, mat2, inp, layout=layout)
 

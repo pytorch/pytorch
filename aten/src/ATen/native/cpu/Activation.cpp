@@ -998,7 +998,7 @@ void softplus_backward_kernel(TensorIteratorBase& iter, const Scalar& beta_, con
     auto threshold = threshold_.to<float>();
     const Vec beta_vec(beta);
     const Vec threshold_vec(threshold);
-    const Vec one_vec(static_cast<float>(1.0));
+    const Vec one_vec(1.0f);
     cpu_kernel_vec(
         iter,
         [beta, threshold](scalar_t a, scalar_t b) -> scalar_t {

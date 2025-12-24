@@ -9,7 +9,7 @@ import logging
 import os
 from itertools import zip_longest
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -45,7 +45,7 @@ class CheckpointReader:
     def read(
         self,
         path: str,
-        state_dict: Optional[STATE_DICT] = None,
+        state_dict: STATE_DICT | None = None,
         *,
         map_location: Any = None,
         **kwargs: dict[str, Any],
@@ -122,7 +122,7 @@ class CheckpointReader:
         with open(file_path, "rb") as file:
             # Helper function to load tensor data from file
             def load_tensor(
-                target: Optional[torch.Tensor], source: torch.Tensor, full_key: str
+                target: torch.Tensor | None, source: torch.Tensor, full_key: str
             ) -> torch.Tensor:
                 if target is not None and (
                     target.size() != source.size() or target.dtype != source.dtype
@@ -134,11 +134,12 @@ class CheckpointReader:
 
                 tensor_offset = source.untyped_storage()._checkpoint_offset
 
-                assert tensor_offset is not None, (
-                    "checkpoint_offset for tensor in torch serialized file is not set. This could"
-                    "happen if the checkpoint was saved with a older version of Pytorch."
-                    "Please make sure that the checkpoint was saved with Pytorch 2.7 or later."
-                )
+                if tensor_offset is None:
+                    raise AssertionError(
+                        "checkpoint_offset for tensor in torch serialized file is not set. This could "
+                        "happen if the checkpoint was saved with a older version of Pytorch. "
+                        "Please make sure that the checkpoint was saved with Pytorch 2.7 or later."
+                    )
 
                 tensor_len = source.nelement() * source.element_size()
                 file.seek(
@@ -175,7 +176,7 @@ class CheckpointReader:
                         # create a new map with all the keys present in source_value
                         target_value = dict.fromkeys(source_value.keys())
 
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     for key in list(target_value.keys()):
                         current_path = f"{key_path}.{key}" if key_path else key
                         if key in source_value:

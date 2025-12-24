@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
-from typing import Any, Callable
+from collections.abc import Callable
+from typing import Any
 
 import torch
 from torch._inductor.fx_passes.pre_grad import (

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, Optional, overload, TypeVar, Union
@@ -102,7 +102,7 @@ def _maybe_compile_and_run_fn(fn, *args):
         return fn(*args)
 
 
-def reenter_make_fx(fn):
+def reenter_make_fx(fn, subgraph_decomp_table=None):
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
 
     @functools.wraps(fn)
@@ -110,19 +110,25 @@ def reenter_make_fx(fn):
         assert _CURRENT_MAKE_FX_TRACER is not None, (
             "Cannot reenter make_fx when we're not under a make_fx tracing session"
         )
-        gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
-            _maybe_run_with_interpreter(fn), *args
-        )
+        if subgraph_decomp_table is None:
+            gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+                _maybe_run_with_interpreter(fn), *args
+            )
+        else:
+            gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph_custom_decomp(
+                _maybe_run_with_interpreter(fn), subgraph_decomp_table, *args
+            )
+
         return gm
 
     return wrapped
 
 
-def _maybe_reenter_make_fx(fn):
+def _maybe_reenter_make_fx(fn, subgraph_decomp_table=None):
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
 
     if _CURRENT_MAKE_FX_TRACER is not None:
-        return reenter_make_fx(fn)
+        return reenter_make_fx(fn, subgraph_decomp_table=subgraph_decomp_table)
     else:
 
         def _maybe_make_fx_with_fake_mode(fn):
@@ -134,9 +140,13 @@ def _maybe_reenter_make_fx(fn):
                 if fake_mode is None:
                     # we creaeta a fake_mode here to make sure we could
                     # trace the graph with data-dependent calls e.g. .item()
-                    return make_fx(fn, tracing_mode="fake")(*args)
+                    return make_fx(
+                        fn,
+                        tracing_mode="fake",
+                        decomposition_table=subgraph_decomp_table,
+                    )(*args)
                 # Tracing with real if all inputs have been fakfied
-                return make_fx(fn)(*args)
+                return make_fx(fn, decomposition_table=subgraph_decomp_table)(*args)
 
             return wrapped
 
@@ -225,6 +235,17 @@ def check_meta_consistency(
         )
 
 
+# Thread-local flag to indicate we're inside HOP internal compilation
+import threading
+
+
+_hop_compile_tls = threading.local()
+
+
+def _in_hop_compile() -> bool:
+    return getattr(_hop_compile_tls, "in_hop_compile", False)
+
+
 @contextmanager
 def setup_compilation_env():
     """
@@ -234,23 +255,29 @@ def setup_compilation_env():
     from torch._dynamo.backends.debugging import (
         make_eager_backend_with_torch_function_modes,
     )
+    from torch._dynamo.backends.registry import lookup_backend
     from torch.fx.experimental.proxy_tensor import (
         _temp_remove_pre_dispatch_torch_function_mode,
     )
 
-    with (
-        _set_compilation_env(),
-        torch._dynamo.utils.disable_cache_limit(),
-        _temp_remove_pre_dispatch_torch_function_mode() as pre_dispatch_mode,
-        _temp_remove_metadata_torch_function_mode() as metadata_mode,
-    ):
-        modes = [
-            mode for mode in (pre_dispatch_mode, metadata_mode) if mode is not None
-        ]
-        if modes:
-            yield make_eager_backend_with_torch_function_modes(modes)
-        else:
-            yield "eager"
+    old_in_hop_compile = getattr(_hop_compile_tls, "in_hop_compile", False)
+    _hop_compile_tls.in_hop_compile = True
+    try:
+        with (
+            _set_compilation_env(),
+            torch._dynamo.utils.disable_cache_limit(),
+            _temp_remove_pre_dispatch_torch_function_mode() as pre_dispatch_mode,
+            _temp_remove_metadata_torch_function_mode() as metadata_mode,
+        ):
+            modes = [
+                mode for mode in (pre_dispatch_mode, metadata_mode) if mode is not None
+            ]
+            if modes:
+                yield make_eager_backend_with_torch_function_modes(modes)
+            else:
+                yield lookup_backend("eager")
+    finally:
+        _hop_compile_tls.in_hop_compile = old_in_hop_compile
 
 
 @contextmanager
@@ -270,7 +297,7 @@ def _set_compilation_env():
         # We need to turn off the is_fx_tracing_flag. Remove this flag check from dyanmo
         # once we are confident fx tracing works with dynamo.
         torch.fx._symbolic_trace._is_fx_tracing_flag = False
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         torch._dynamo.config.allow_empty_graphs = True
         torch._dynamo.config.capture_scalar_outputs = True
         yield
@@ -337,7 +364,7 @@ def analyze_potential_input_alias_or_mutation(name, aliases, input_mutations):
         raise RuntimeError(
             f"{name} where aliases appear. "
             + f"In particular, these inputs \
-            {set(el for el_map in aliases if len(el_map.keys()) > 0 for el in el_map.keys())} "  # noqa: C401
+            {set(el for el_map in aliases if len(el_map.keys()) > 0 for el in el_map)} "  # noqa: C401
             + "get aliased. Please ensure that this doesn't happen."
         )
     if len(input_mutations):
@@ -441,7 +468,7 @@ def unique_graph_name_with_root(
 ) -> tuple[int, str]:
     next_name = None
     i = 0
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     while not next_name:
         candidate = f"{prefix}_{i}"
         if hasattr(root, candidate):
@@ -708,7 +735,7 @@ def _stack_pytree(pytrees):
 # is partitioned into in order to recover it in saved_tensors_and_symints.
 #
 # In saved_tensors_and_symints, we can recover the original args by:
-# iterating over the pos list and pop one item from the front of paritioned_args[pos[i]].
+# iterating over the pos list and pop one item from the front of partitioned_args[pos[i]].
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
 def save_tensors_and_symints_for_backward(ctx, args):
     assert all(
@@ -798,7 +825,7 @@ def create_bw_fn(
 
     from torch._functorch.aot_autograd import AOTConfig, create_joint
 
-    # pyrefly: ignore  # missing-module-attribute
+    # pyrefly: ignore [missing-module-attribute]
     from torch._higher_order_ops.utils import prepare_fw_with_masks_all_requires_grad
 
     dummy_aot_config = AOTConfig(
@@ -907,7 +934,7 @@ def diff_tensor_meta(
         try:
             if val1 != val2:
                 pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
-        except GuardOnDataDependentSymNode as _:
+        except GuardOnDataDependentSymNode:
             pair_diffs.append(f"'{meta_name}: {val1} vs {val2}'")
             continue
     return pair_diffs
@@ -943,7 +970,7 @@ def check_input_alias_and_mutation(
         out_out_alias_map,
         mutated_inputs,
     ) = check_input_alias_and_mutation_return_outputs(gm)[:-1]
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
     return inp_inp_alias_map, inp_out_alias_map, out_out_alias_map, mutated_inputs
 
 
@@ -1144,6 +1171,7 @@ def materialize_as_graph(
     include_key_set: Optional[torch._C.DispatchKeySet] = None,
     exclude_key_set: Optional[torch._C.DispatchKeySet] = None,
     force_enable_grad=False,
+    subgraph_decomp_table: Optional[Mapping[OpOverload, Callable]] = None,
 ) -> torch.fx.GraphModule:
     if include_key_set is None:
         include_key_set = torch._C._dispatch_tls_local_include_set()
@@ -1171,7 +1199,9 @@ def materialize_as_graph(
                 # make sure the fake mode when tracing subgraph is consistent.
                 if fake_mode := detect_fake_mode(unfunc_t):
                     stack.enter_context(fake_mode)
-                return _maybe_reenter_make_fx(fn)(*unfunc_t)
+                return _maybe_reenter_make_fx(
+                    fn, subgraph_decomp_table=subgraph_decomp_table
+                )(*unfunc_t)
 
     gm = _materialize_as_graph_inner()
     assert gm is not None
@@ -1197,7 +1227,7 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
 
     # call_op preserves ordering of proxies via schema
     materialized_args = []
-    for i, (proxy, arg) in enumerate(zip(arg_proxies, schema.arguments)):
+    for i, proxy in enumerate(arg_proxies):
         if (
             isinstance(proxy, torch.fx.Node)
             and proxy.op == "get_attr"

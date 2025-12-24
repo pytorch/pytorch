@@ -1,12 +1,10 @@
 #include <ATen/core/class_type.h>
 
 #include <ATen/core/Dict.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/core/function_schema.h>
 #include <ATen/core/ivalue.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <ATen/core/grad_mode.h>
 #include <ATen/core/function.h>
 
 namespace c10 {
@@ -456,8 +454,8 @@ bool ClassType::isSubtypeOfExt(const Type& rhs, std::ostream* why_not) const {
           *why_not << "Method on class '" << repr_str()
                    << "' (1) is not compatible with interface '"
                    << rhs.repr_str() << "' (2)\n"
-                   << "  (1) " << self_method->getSchema() << "\n"
-                   << "  (2) " << schema << "\n";
+                   << "  (1) " << self_method->getSchema() << '\n'
+                   << "  (2) " << schema << '\n';
         }
         return false;
       }

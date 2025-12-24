@@ -65,8 +65,8 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
 #ifdef USE_PYTORCH_QNNPACK
 
 LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
-  const int64_t N = static_cast<int64_t>(output_channels_);
-  const int64_t K = static_cast<int64_t>(input_channels_);
+  const int64_t N = output_channels_;
+  const int64_t K = input_channels_;
 
   float* w_scales_ptr = w_scales_.data_ptr<float>();
 

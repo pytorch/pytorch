@@ -916,43 +916,41 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
             dedent(
                 """\
 SeqNr|OrigAten|SrcFn|FwdSrcFn
-0|aten.convolution.default|l__self___conv1|
-0|aten.add.Tensor|l__self___bn1|
-1|aten._native_batch_norm_legit_functional.default|l__self___bn1|
-2|aten.relu.default|l__self___relu1|
-2|aten.detach.default|l__self___relu1|
-2|aten.detach.default|l__self___relu1|
+0|aten.convolution.default|conv2d|
+0|aten.add.Tensor|add_|
+1|aten._native_batch_norm_legit_functional.default|batch_norm|
+2|aten.relu.default|relu|
+2|aten.detach.default|relu|
 3|aten.add.Tensor|add|
 4|aten.view.default|flatten|
-5|aten.view.default|l__self___fc1|
-6|aten.t.default|l__self___fc1|
-7|aten.addmm.default|l__self___fc1|
-8|aten.view.default|l__self___fc1|
-9|aten.sub.Tensor|l__self___loss_fn|
-10|aten.abs.default|l__self___loss_fn|
-11|aten.mean.default|l__self___loss_fn|
-11|aten.ones_like.default||l__self___loss_fn
-11|aten.expand.default||l__self___loss_fn
-11|aten.div.Scalar||l__self___loss_fn
-10|aten.sgn.default||l__self___loss_fn
-10|aten.mul.Tensor||l__self___loss_fn
-8|aten.view.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.mm.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.mm.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.sum.dim_IntList||l__self___fc1
-7|aten.view.default||l__self___fc1
-6|aten.t.default||l__self___fc1
-5|aten.view.default||l__self___fc1
+5|aten.view.default|linear|
+6|aten.t.default|linear|
+7|aten.addmm.default|linear|
+8|aten.view.default|linear|
+9|aten.sub.Tensor|l1_loss|
+10|aten.abs.default|l1_loss|
+11|aten.mean.default|l1_loss|
+11|aten.ones_like.default||l1_loss
+11|aten.expand.default||l1_loss
+11|aten.div.Scalar||l1_loss
+10|aten.sgn.default||l1_loss
+10|aten.mul.Tensor||l1_loss
+8|aten.view.default||linear
+7|aten.t.default||linear
+7|aten.mm.default||linear
+7|aten.t.default||linear
+7|aten.mm.default||linear
+7|aten.t.default||linear
+7|aten.sum.dim_IntList||linear
+7|aten.view.default||linear
+6|aten.t.default||linear
+5|aten.view.default||linear
 4|aten.view.default||flatten
-2|aten.detach.default||l__self___relu1
-2|aten.detach.default||l__self___relu1
-2|aten.threshold_backward.default||l__self___relu1
-1|aten.native_batch_norm_backward.default||l__self___bn1
-0|aten.convolution_backward.default||l__self___conv1
-11|aten.add.Tensor||l__self___loss_fn
+2|aten.detach.default||relu
+2|aten.threshold_backward.default||relu
+1|aten.native_batch_norm_backward.default||batch_norm
+0|aten.convolution_backward.default||conv2d
+11|aten.add.Tensor||
 """
             ),
         )
@@ -1167,9 +1165,13 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     def test_data_ptr_access_fails_in_forward(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+            torch.library.define(
+                "mylib::foo_data_ptr_forward", "(Tensor x) -> Tensor", lib=lib
+            )
 
-            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.impl(
+                "mylib::foo_data_ptr_forward", "CompositeImplicitAutograd", lib=lib
+            )
             def _(x):
                 x.data_ptr()
                 return x.clone()
@@ -1177,12 +1179,12 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             x = torch.randn(3)
 
             def data_ptr_graph_input(x):
-                r0 = torch.ops.mylib.foo(x)
+                r0 = torch.ops.mylib.foo_data_ptr_forward(x)
                 return r0
 
             def data_ptr_graph_intermediate(x):
                 y = x.clone()
-                r0 = torch.ops.mylib.foo(y)
+                r0 = torch.ops.mylib.foo_data_ptr_forward(y)
                 return r0
 
             tests = [data_ptr_graph_input, data_ptr_graph_intermediate]
@@ -1202,7 +1204,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     def test_data_ptr_access_fails_in_backward(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+            torch.library.define(
+                "mylib::foo_data_ptr_backward", "(Tensor x) -> Tensor", lib=lib
+            )
 
             backward_called = False
 
@@ -1218,12 +1222,14 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                     grad.data_ptr()
                     return grad.clone()
 
-            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.impl(
+                "mylib::foo_data_ptr_backward", "CompositeImplicitAutograd", lib=lib
+            )
             def _(x):
                 return Foo.apply(x)
 
             def f(x):
-                return torch.ops.mylib.foo(x)
+                return torch.ops.mylib.foo_data_ptr_backward(x)
 
             x = torch.randn(3, requires_grad=True)
             with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer"):
@@ -1719,6 +1725,39 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         self.assertEqual(eager_no_sq, comp_aot_no_sq)
         self.assertEqual(eager_no_sq, comp_ind_no_sq)
         self.assertEqual(eager_no_sq.stride(), comp_ind_no_sq.stride())
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unbacked_activation_specialized_in_inductor(self):
+        """Test compilation with unbacked operations like nonzero."""
+        torch._dynamo.reset()
+
+        def fuzzed_program(arg_0, sentinel):
+            var_node_1 = arg_0
+            var_node_5 = torch.full((1, 2), -66, dtype=torch.int32)
+            var_node_6 = torch.full((1, 2), 77, dtype=torch.int64)
+            var_node_4 = torch.ops.aten.add(var_node_5, var_node_6)
+            var_node_7 = torch.full((1, 2), -64, dtype=torch.int32)
+            var_node_3 = torch.ops.aten.mul(var_node_4, var_node_7)
+            var_node_9 = torch.full((3, 4), False, dtype=torch.bool)
+            var_node_8 = torch.nonzero(var_node_9)
+            var_node_2 = torch.ops.aten.add(var_node_3, var_node_8)
+            var_node_0 = torch.ops.aten.div(var_node_1, var_node_2)
+            result = var_node_0 * sentinel
+            if result.is_complex():
+                result = result.real
+            return result
+
+        sentinel = torch.tensor(1.0, requires_grad=True)
+        arg_0 = torch.randint(0, 3, (1, 2), dtype=torch.int64)
+        args = (arg_0,) + (sentinel,)
+
+        result_original = fuzzed_program(*args)
+
+        compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)
+        result_compiled = compiled_program(*args)
+
+        self.assertTrue(torch.allclose(result_original, result_compiled))
 
 
 if __name__ == "__main__":

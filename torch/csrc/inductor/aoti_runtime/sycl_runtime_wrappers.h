@@ -143,7 +143,7 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   sycl::range<3> localRange(localRangeZ, localRangeY, localRangeX);
   sycl::nd_range<3> parallelWorkSize(globalRange, localRange);
   if (sharedMemory) {
-    // numParams from sycl info  = user provided args + sharedMemroyBuffer
+    // numParams from sycl info  = user provided args + sharedMemoryBuffer
     numParams -= 1;
   }
   // Submit the imported kernel.

@@ -129,14 +129,14 @@ void showRtol(const at::Tensor& a, const at::Tensor& b) {
   std::cout << "Max Diff allowed: " << maxDiff << std::endl;
   if (diff.sizes().size() == 2) {
     for (const auto y : c10::irange(diff.sizes()[0])) {
-      std::cout << y << ":";
+      std::cout << y << ':';
       for (const auto x : c10::irange(diff.sizes()[1])) {
         float diff_xy = diff[y][x].item<float>();
         if (diff_xy > maxDiff) {
           std::cout << std::setw(5) << x;
         }
         else {
-          std::cout << std::setw(5) << " ";
+          std::cout << std::setw(5) << ' ';
         }
       }
       std::cout << std::endl;
@@ -3276,7 +3276,7 @@ TEST_F(VulkanAPITest, masked_fill_invalidinputs_exceptions) {
 
 void print_shape(const std::vector<int64_t>& shape) {
   for (const auto& num : shape) {
-    std::cout << num << " ";
+    std::cout << num << ' ';
   }
 }
 
@@ -3367,7 +3367,7 @@ void test_masked_fill_scalar(
             print_shape(tmp_curr_input_shape);
             std::cout << "], and mask of shape [";
             print_shape(tmp_curr_mask_shape);
-            std::cout << "]" << std::endl;
+            std::cout << ']' << std::endl;
           }
 
           ASSERT_TRUE(check);
@@ -4542,9 +4542,9 @@ void test_softmax(const at::IntArrayRef shape, bool log_softmax = false) {
     if (!check) {
       std::cout << "Softmax test failed on axis " << dim << "for tensor dims {";
       for (uint32_t place = 0; place < shape.size() - 1; place++) {
-        std::cout << shape[place] << " ";
+        std::cout << shape[place] << ' ';
       }
-      std::cout << shape.back() << "}" << std::endl;
+      std::cout << shape.back() << '}' << std::endl;
       showRtol(out_cpu, out_vulkan.cpu());
     }
     ASSERT_TRUE(check);
@@ -6894,7 +6894,7 @@ TEST_F(VulkanAPITest, slice_height_success) {
     {2, {2, 3, 40, 50}},  // 4D tensors with dim=height
     {1, {3, 40, 50}},     // 3D tensors with dim=height
     {0, {40, 50}},        // 2D tensors with dim=height
-                          // 1D tesnors don't have height dim for test
+                          // 1D tensors don't have height dim for test
   };
 
   // Act/Assert
@@ -6906,7 +6906,7 @@ TEST_F(VulkanAPITest, slice_feature_success) {
   std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
     {1, {2, 40, 13, 14}}, // 4D tensors with dim=feature(channel)
     {0, {40, 13, 14}},    // 3D tensors with dim=feature(channel)
-                          // 1D and 2D tesnors don't have feature(channel) dim for test
+                          // 1D and 2D tensors don't have feature(channel) dim for test
   };
 
   // Act/Assert
@@ -6917,7 +6917,7 @@ TEST_F(VulkanAPITest, slice_batch_success) {
   // Arrange
   std::unordered_map<int64_t, std::vector<int64_t>> dim2sizes {
     {0, {40, 3, 13, 14}}, // 4D tensors with dim=batch
-                          // 1D, 2D and 3D tesnors don't have batch dim for test
+                          // 1D, 2D and 3D tensors don't have batch dim for test
   };
 
   // Act/Assert

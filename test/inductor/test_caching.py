@@ -1,15 +1,17 @@
 # Owner(s): ["module: inductor"]
 # pyre-strict
+from __future__ import annotations
 
+import json
 import os
-import pickle
 from concurrent.futures import Future, ThreadPoolExecutor, TimeoutError, wait
 from contextlib import contextmanager
+from functools import wraps
 from itertools import combinations
 from random import Random
 from shutil import rmtree
 from threading import Lock
-from typing import Any, Generator, Sequence, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 from unittest.mock import patch
 
@@ -20,7 +22,10 @@ from torch._inductor.runtime.caching import (
     context,
     exceptions,
     implementations as impls,
+    interfaces,
     locks,
+    Memoizer,
+    PersistentMemoizer,
     utils,
 )
 from torch._inductor.test_case import run_tests, TestCase
@@ -31,13 +36,66 @@ from torch.testing._internal.common_utils import (
 
 
 if TYPE_CHECKING:
+    from collections.abc import Generator, Sequence
     from pathlib import Path
 
 
+set_caching_module_enabled = lambda enabled: patch.object(  # noqa: E731
+    config, "IS_CACHING_MODULE_ENABLED", lambda: enabled
+)
+set_deterministic_caching_enabled = lambda enabled: patch.object(  # noqa: E731
+    config, "IS_DETERMINISTIC_CACHING_ENABLED", lambda: enabled
+)
+set_strictly_pre_populated_determinism = lambda enabled: patch.object(  # noqa: E731
+    config, "STRICTLY_PRE_POPULATED_DETERMINISM", enabled
+)
+set_strictly_cached_determinism = lambda enabled: patch.object(  # noqa: E731
+    config, "STRICTLY_CACHED_DETERMINISM", enabled
+)
+set_local_determinism = lambda enabled: patch.object(  # noqa: E731
+    config, "LOCAL_DETERMINISM", enabled
+)
+set_global_determinism = lambda enabled: patch.object(  # noqa: E731
+    config, "GLOBAL_DETERMINISM", enabled
+)
+
+
+def patch_on_disk_cache_base_dir(fn):
+    @wraps(fn)
+    def wrapper(self, *args, **kwargs):
+        default_base_dir = impls._OnDiskCacheImpl()._base_dir
+        with patch.object(
+            impls._OnDiskCacheImpl,
+            "_base_dir",
+            default_base_dir / f"{self.sub_dir()}/rng-{self.random_string[4:]}",
+        ):
+            return fn(self, *args, **kwargs)
+
+    return wrapper
+
+
+def patch_remote_cache_with_on_disk_cache(fn):
+    impls._OnDiskCacheImpl.has_strong_consistency = True
+    return patch.object(impls, "_RemoteCacheImpl", impls._OnDiskCacheImpl)(fn)
+
+
 class TestMixin:
+    impl_typenames: list[str] = [
+        "_InMemoryCacheImpl",
+        "_OnDiskCacheImpl",
+    ]
+    cls_id: int = Random().randint(0, 2**32)
+
+    def impl_from_typename(self, impl_typename: str) -> impls._CacheImpl:
+        return getattr(impls, impl_typename)()
+
     @property
     def random_string(self) -> str:
         return f"s-{Random().randint(0, 2**32)}"
+
+    @property
+    def random_bytes(self) -> bytes:
+        return f"s-{Random().randint(0, 2**32)}".encode()
 
 
 @instantiate_parametrized_tests
@@ -46,11 +104,19 @@ class ConfigTest(TestCase):
     FOO_JK_NAME: str = "foo_jk_name"
     FOO_OSS_DEFAULT: bool = False
     FOO_ENV_VAR_OVERRIDE: str = "foo_env_var_override"
-    FOO_ENV_VAR_OVERRIDE_LOCK: FileLock = FileLock(
-        f"/tmp/testing/{FOO_ENV_VAR_OVERRIDE}.lock"
-    )
+    FOO_ENV_VAR_OVERRIDE_LOCK_FPATH: str = f"/tmp/testing/{FOO_ENV_VAR_OVERRIDE}.lock"
+    FOO_ENV_VAR_OVERRIDE_LOCK: FileLock = FileLock(FOO_ENV_VAR_OVERRIDE_LOCK_FPATH)
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        rmtree(cls.FOO_ENV_VAR_OVERRIDE_LOCK_FPATH, ignore_errors=True)
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        rmtree(cls.FOO_ENV_VAR_OVERRIDE_LOCK_FPATH, ignore_errors=True)
 
     def assert_versioned_config(self, expected_enabled: bool) -> None:
+        config._versioned_config.cache_clear()
         actual_enabled: bool = config._versioned_config(
             self.FOO_JK_NAME,
             self.FOO_THIS_VERSION,
@@ -123,6 +189,7 @@ class ConfigTest(TestCase):
         value. This ensures proper behavior for open-source PyTorch distributions.
         """
         with (
+            self.FOO_ENV_VAR_OVERRIDE_LOCK.acquire(timeout=1),
             patch.dict(os.environ, {}, clear=True),
             patch(
                 "torch._inductor.runtime.caching.config.is_fbcode",
@@ -131,6 +198,27 @@ class ConfigTest(TestCase):
             patch.object(self, "FOO_OSS_DEFAULT", enabled),
         ):
             self.assert_versioned_config(enabled)
+
+    def test_versioned_config_jk_failure(self) -> None:
+        """Test that _versioned_config uses OSS default values in non-Facebook environments.
+
+        Verifies that when running in non-fbcode environments (is_fbcode=False) with no
+        environment variable overrides, the configuration falls back to the OSS default
+        value. This ensures proper behavior for open-source PyTorch distributions.
+        """
+        with (
+            self.FOO_ENV_VAR_OVERRIDE_LOCK.acquire(timeout=1),
+            patch.dict(os.environ, {}, clear=True),
+            patch(
+                "torch._inductor.runtime.caching.config.is_fbcode",
+                return_value=True,
+            ),
+            patch(
+                "torch._utils_internal.justknobs_getval_int",
+                return_value=0,
+            ),
+        ):
+            self.assert_versioned_config(False)
 
 
 @instantiate_parametrized_tests
@@ -308,11 +396,8 @@ class ExceptionsTest(TestCase):
         "FileLockTimeoutError",
         "UserError",
         "KeyEncodingError",
-        "KeyPicklingError",
         "ValueEncodingError",
-        "ValuePicklingError",
         "ValueDecodingError",
-        "ValueUnPicklingError",
     ]
 
     @parametrize("exception_typename", exception_typenames)
@@ -342,27 +427,12 @@ class ExceptionsTest(TestCase):
         )
         self.assertTrue(issubclass(exceptions.UserError, exceptions.CacheError))
         self.assertTrue(issubclass(exceptions.KeyEncodingError, exceptions.UserError))
-        self.assertTrue(
-            issubclass(exceptions.KeyPicklingError, exceptions.KeyEncodingError)
-        )
         self.assertTrue(issubclass(exceptions.ValueEncodingError, exceptions.UserError))
-        self.assertTrue(
-            issubclass(exceptions.ValuePicklingError, exceptions.ValueEncodingError)
-        )
         self.assertTrue(issubclass(exceptions.ValueDecodingError, exceptions.UserError))
-        self.assertTrue(
-            issubclass(exceptions.ValueUnPicklingError, exceptions.ValueDecodingError)
-        )
 
 
 @instantiate_parametrized_tests
 class ImplementationsTest(TestMixin, TestCase):
-    impl_typenames: list[str] = [
-        "_InMemoryCacheImpl",
-        "_OnDiskCacheImpl",
-    ]
-    cls_id: int = Random().randint(0, 2**32)
-
     @classmethod
     def sub_dir(cls) -> str:
         return f"testing-impls-instance-{cls.cls_id}"
@@ -379,36 +449,30 @@ class ImplementationsTest(TestMixin, TestCase):
             impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir, ignore_errors=True
         )
 
-    def impl_from_typename(self, impl_typename: str) -> impls._CacheImpl:
-        if impl_typename == "_OnDiskCacheImpl":
-            return impls._OnDiskCacheImpl(
-                sub_dir=f"{self.sub_dir()}/rng-{self.random_string[4:]}",
-            )
-        else:
-            return getattr(impls, impl_typename)()
-
-    def assert_key_in(self, key: Any, impl: impls._CacheImpl) -> None:
+    def assert_key_in(self, key: str, impl: impls._CacheImpl) -> None:
         self.assertTrue(impl.get(key) is not None)
 
-    def assert_key_not_in(self, key: Any, impl: impls._CacheImpl) -> None:
+    def assert_key_not_in(self, key: str, impl: impls._CacheImpl) -> None:
         self.assertTrue(impl.get(key) is None)
 
     def assert_key_value_inserted_in(
-        self, key: Any, value: Any, impl: impls._CacheImpl
+        self, key: str, value: Any, impl: impls._CacheImpl
     ) -> None:
         self.assertTrue(impl.insert(key, value))
 
     def assert_key_value_not_inserted_in(
-        self, key: Any, value: Any, impl: impls._CacheImpl
+        self, key: str, value: Any, impl: impls._CacheImpl
     ) -> None:
         self.assertFalse(impl.insert(key, value))
 
     def assert_key_has_value_in(
-        self, key: Any, value: Any, impl: impls._CacheImpl
+        self, key: str, value: Any, impl: impls._CacheImpl
     ) -> None:
         self.assertTrue(((get := impl.get(key)) is not None) and (get.value == value))
 
-    @parametrize("impl_typename", impl_typenames)
+    @patch_on_disk_cache_base_dir
+    @patch_remote_cache_with_on_disk_cache
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_get(self, impl_typename: str) -> None:
         """Test cache get operation returns cache miss for non-existent keys.
 
@@ -424,7 +488,9 @@ class ImplementationsTest(TestMixin, TestCase):
         with impl.lock():
             self.assert_key_not_in(self.random_string, impl)
 
-    @parametrize("impl_typename", impl_typenames)
+    @patch_on_disk_cache_base_dir
+    @patch_remote_cache_with_on_disk_cache
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_insert(self, impl_typename: str) -> None:
         """Test cache insert operation successfully stores and retrieves key-value pairs.
 
@@ -441,11 +507,13 @@ class ImplementationsTest(TestMixin, TestCase):
         with impl.lock():
             key: str = self.random_string
             self.assert_key_not_in(key, impl)
-            value: str = self.random_string
+            value: bytes = self.random_bytes
             self.assert_key_value_inserted_in(key, value, impl)
             self.assert_key_has_value_in(key, value, impl)
 
-    @parametrize("impl_typename", impl_typenames)
+    @patch_on_disk_cache_base_dir
+    @patch_remote_cache_with_on_disk_cache
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_insert_will_not_overwrite(self, impl_typename: str) -> None:
         """Test cache insert operation does not overwrite existing keys.
 
@@ -464,55 +532,42 @@ class ImplementationsTest(TestMixin, TestCase):
         with impl.lock():
             key: str = self.random_string
             self.assert_key_not_in(key, impl)
-            value: str = self.random_string
+            value: bytes = self.random_bytes
             self.assert_key_value_inserted_in(key, value, impl)
-            self.assert_key_value_not_inserted_in(key, self.random_string, impl)
+            self.assert_key_value_not_inserted_in(key, self.random_bytes, impl)
             self.assert_key_has_value_in(key, value, impl)
 
-    @parametrize("impl_typename", impl_typenames)
-    def test_key_encoding(self, impl_typename: str) -> None:
-        """Test that cache implementations properly handle non-serializable keys.
-
-        Verifies that both in-memory and on-disk cache implementations correctly
-        raise KeyPicklingError when attempting to insert keys that cannot be
-        pickled (such as lambda functions). This ensures proper error handling
-        for invalid key types that would break the caching system.
-
-        Args:
-            impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
-        """
-        impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
-        with impl.lock():
-            with self.assertRaises(exceptions.KeyPicklingError):
-                impl.insert(lambda: None, None)
-
-    @parametrize("impl_typename", impl_typenames)
+    @patch_on_disk_cache_base_dir
+    @patch_remote_cache_with_on_disk_cache
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_value_encoding(self, impl_typename: str) -> None:
-        """Test that on-disk cache implementations properly handle non-serializable values.
+        """Test that in-memory cache can store any value type.
 
-        Verifies that on-disk cache implementations correctly raise ValuePicklingError
-        when attempting to insert values that cannot be pickled (such as lambda functions).
-        This test only applies to on-disk implementations since in-memory caches don't
-        require serialization. Ensures proper error handling for invalid value types.
+        Verifies that in-memory cache implementations can store arbitrary values
+        including non-serializable ones (such as lambda functions) since they don't
+        require serialization. On-disk caches now expect bytes, so they skip this test.
 
         Args:
             impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
         """
         impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
         with impl.lock():
-            if isinstance(impl, impls._OnDiskCacheImpl):
-                with self.assertRaises(exceptions.ValuePicklingError):
-                    impl.insert(None, lambda: None)
+            if isinstance(impl, impls._InMemoryCacheImpl):
+                key: str = self.random_string
+                value = lambda: None  # noqa: E731
+                self.assert_key_value_inserted_in(key, value, impl)
+                self.assert_key_has_value_in(key, value, impl)
 
-    @parametrize("impl_typename", impl_typenames)
+    @patch_on_disk_cache_base_dir
+    @patch_remote_cache_with_on_disk_cache
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_value_decoding(self, impl_typename: str) -> None:
-        """Test that on-disk cache implementations properly handle corrupted cached values.
+        """Test that on-disk cache implementations return raw bytes from storage.
 
-        Verifies that on-disk cache implementations correctly raise ValueUnPicklingError
-        when attempting to retrieve values from cache files that contain corrupted or
-        invalid pickled data. This test ensures proper error handling when cached data
-        becomes corrupted on disk. Only applies to on-disk implementations since
-        in-memory caches don't involve serialization/deserialization.
+        Verifies that on-disk cache implementations return raw bytes from disk
+        without attempting to unpickle them, as values are now expected to be
+        stored as bytes. This test writes raw bytes to a cache file and confirms
+        they are returned as-is.
 
         Args:
             impl_typename: The cache implementation type to test ("_InMemoryCacheImpl" or "_OnDiskCacheImpl")
@@ -523,13 +578,15 @@ class ImplementationsTest(TestMixin, TestCase):
                 key: str = self.random_string
                 self.assert_key_not_in(key, impl)
                 fpath: Path = impl._fpath_from_key(key)
+                test_bytes: bytes = b"foo"
                 with open(fpath, "xb") as fp:
                     impl._write_version_header(fp)
-                    fp.write(b"foo")
-                with self.assertRaises(exceptions.ValueUnPicklingError):
-                    impl.get(key)
+                    fp.write(test_bytes)
+                self.assert_key_has_value_in(key, test_bytes, impl)
 
-    @parametrize("impl_typename", impl_typenames)
+    @patch_on_disk_cache_base_dir
+    @patch_remote_cache_with_on_disk_cache
+    @parametrize("impl_typename", TestMixin.impl_typenames)
     def test_version_mismatch(self, impl_typename: str) -> None:
         """Test that on-disk cache implementations properly handle version mismatches.
 
@@ -552,7 +609,7 @@ class ImplementationsTest(TestMixin, TestCase):
             if isinstance(impl, impls._OnDiskCacheImpl):
                 key: str = self.random_string
                 self.assert_key_not_in(key, impl)
-                value: str = self.random_string
+                value: bytes = self.random_bytes
                 self.assert_key_value_inserted_in(key, value, impl)
                 self.assert_key_has_value_in(key, value, impl)
                 with patch.object(
@@ -733,6 +790,35 @@ class LocksTest(TestMixin, TestCase):
 
         flock_fpath.unlink(missing_ok=True)
 
+    @patch.object(locks, "_BLOCKING_WITH_TIMEOUT", 1)
+    @patch.object(locks, "_DEFAULT_TIMEOUT", 1)
+    @parametrize(
+        "impl_typename_combos",
+        list(combinations(TestMixin.impl_typenames, 1))
+        + list(combinations(TestMixin.impl_typenames, 2)),
+    )
+    def test_acquire_many_impl_locks_with_timeout(
+        self,
+        impl_typename_combos: tuple[str, ...],
+    ) -> None:
+        impls: list[impls._CacheImpl] = []
+        for impl_typename in impl_typename_combos:
+            impl: impls._CacheImpl = self.impl_from_typename(impl_typename)
+            impls.append(impl)
+
+        with locks._acquire_many_impl_locks_with_timeout(*impls):
+            for impl in impls:
+                if hasattr(impl, "_lock"):
+                    self.assertTrue(impl._lock.locked())
+                elif hasattr(impl, "_flock"):
+                    self.assertTrue(impl._flock.is_locked)
+
+        for impl in impls:
+            if hasattr(impl, "_lock"):
+                self.assertFalse(impl._lock.locked())
+            elif hasattr(impl, "_flock"):
+                self.assertFalse(impl._flock.is_locked)
+
 
 @instantiate_parametrized_tests
 class UtilsTest(TestMixin, TestCase):
@@ -778,50 +864,1113 @@ class UtilsTest(TestMixin, TestCase):
             ),
         )
 
-    @parametrize("pickle_able", [True, False])
-    def test_try_pickle_key(self, pickle_able: bool) -> None:
-        """Test that cache key pickling works correctly and raises appropriate exceptions.
 
-        Verifies that the _try_pickle_key function successfully pickles serializable
-        cache keys and raises KeyPicklingError for non-serializable keys like lambda
-        functions. Tests both the successful pickling path and error handling.
+@instantiate_parametrized_tests
+class InterfacesTest(TestMixin, TestCase):
+    """Test class for Memoizer and PersistentMemoizer interfaces."""
+
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-interfaces-instance-{cls.cls_id}"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    # ============= Memoizer Tests =============
+
+    @set_caching_module_enabled(True)
+    def test_memoizer_record_caches_result(self) -> None:
+        """Test that Memoizer.record() caches function results.
+
+        Verifies that when a function is decorated with record(), its result
+        is cached and can be retrieved later.
         """
-        if pickle_able:
-            key: str = self.random_string
-            self.assertEqual(pickle.loads(utils._try_pickle_key(key)), key)
-        else:
-            with self.assertRaises(exceptions.KeyPicklingError):
-                _ = utils._try_pickle_key(lambda: None)
+        # Setup: create a memoizer and a function that tracks call count
+        memoizer = Memoizer()
+        call_count = 0
 
-    @parametrize("pickle_able", [True, False])
-    def test_try_pickle_value(self, pickle_able: bool) -> None:
-        """Test that cache value pickling works correctly and raises appropriate exceptions.
+        @memoizer.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
 
-        Verifies that the _try_pickle_value function successfully pickles serializable
-        cache values and raises ValuePicklingError for non-serializable values like
-        lambda functions. Tests both successful pickling and proper error handling.
+        # Execute: call the function twice with the same argument
+        result1 = compute(5)
+        result2 = compute(5)
+
+        # Assert: function was called twice (record always executes)
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
+
+    @set_caching_module_enabled(True)
+    def test_memoizer_replay_retrieves_cached_result(self) -> None:
+        """Test that Memoizer.replay() retrieves cached results without executing the function.
+
+        Verifies that when a function is decorated with replay(), it retrieves
+        results from cache without executing the original function.
         """
-        if pickle_able:
-            value: str = self.random_string
-            self.assertEqual(pickle.loads(utils._try_pickle_value(value)), value)
-        else:
-            with self.assertRaises(exceptions.ValuePicklingError):
-                _ = utils._try_pickle_value(lambda: None)
+        # Setup: create a memoizer, record a result, then try to replay it
+        memoizer = Memoizer()
+        call_count = 0
 
-    @parametrize("unpickle_able", [True, False])
-    def test_try_unpickle_value(self, unpickle_able: bool) -> None:
-        """Test that cache value unpickling works correctly and raises appropriate exceptions.
+        @memoizer.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
 
-        Verifies that the _try_unpickle_value function successfully unpickles valid
-        pickled data and raises ValueUnPicklingError for invalid data like None.
-        Tests both successful unpickling and proper error handling for corrupted data.
+        # Execute: record a result first
+        compute(5)
+        self.assertEqual(call_count, 1)
+
+        # Create a replay function for the same computation
+        @memoizer.replay()
+        def compute_replay(x: int) -> int:
+            # This should never be called
+            raise AssertionError("Function should not be executed during replay")
+
+        # Assert: replay retrieves the cached result without calling the function
+        result = compute_replay(5)
+        self.assertEqual(result, 10)
+        self.assertEqual(call_count, 1)  # No additional calls
+
+    @set_caching_module_enabled(True)
+    def test_memoizer_replay_raises_on_cache_miss(self) -> None:
+        """Test that Memoizer.replay() raises KeyError on cache miss.
+
+        Verifies that when replay() is called with arguments that have no cached
+        result, it raises a KeyError.
         """
-        if unpickle_able:
-            value: str = self.random_string
-            self.assertEqual(utils._try_unpickle_value(pickle.dumps(value)), value)
-        else:
-            with self.assertRaises(exceptions.ValueUnPicklingError):
-                _ = utils._try_unpickle_value(b"foo")
+        # Setup: create a memoizer with replay decorator
+        memoizer = Memoizer()
+
+        @memoizer.replay()
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Execute & Assert: replay raises KeyError for uncached arguments
+        with self.assertRaises(KeyError):
+            compute(5)
+
+    @set_caching_module_enabled(True)
+    def test_memoizer_memoize_caches_and_retrieves(self) -> None:
+        """Test that Memoizer.memoize() caches on first call and retrieves on subsequent calls.
+
+        Verifies that memoize() combines record and replay functionality:
+        - First call executes the function and caches the result
+        - Subsequent calls retrieve from cache without executing
+        """
+        # Setup: create a memoizer and a function that tracks call count
+        memoizer = Memoizer()
+        call_count = 0
+
+        @memoizer.memoize()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function twice with the same argument
+        result1 = compute(5)
+        self.assertEqual(call_count, 1)  # Function called on first invocation
+
+        result2 = compute(5)
+        self.assertEqual(call_count, 1)  # Function not called on second invocation
+
+        # Assert: both calls return the same result
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
+
+    @set_caching_module_enabled(False)
+    def test_memoizer_record_disabled_returns_original_function(self) -> None:
+        """Test that Memoizer.record() returns original function when caching is disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, record()
+        returns the original function without any caching behavior.
+        """
+        # Setup: create a memoizer with caching disabled
+        memoizer = Memoizer()
+        call_count = 0
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function twice
+        result1 = compute(5)
+        result2 = compute(5)
+
+        # Assert: function was called both times (no caching)
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
+
+    @set_caching_module_enabled(False)
+    def test_memoizer_replay_disabled_always_raises(self) -> None:
+        """Test that Memoizer.replay() always raises KeyError when caching is disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, replay()
+        always raises KeyError regardless of what's in the cache.
+        """
+        # Setup: create a memoizer with caching disabled
+        memoizer = Memoizer()
+
+        @memoizer.replay()
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Execute & Assert: replay always raises KeyError when disabled
+        with self.assertRaises(KeyError) as cm:
+            compute(5)
+        self.assertIn("Caching is disabled", str(cm.exception))
+
+    @set_caching_module_enabled(False)
+    def test_memoizer_memoize_disabled_returns_original_function(self) -> None:
+        """Test that Memoizer.memoize() returns original function when caching is disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, memoize()
+        returns the original function without any caching behavior.
+        """
+        # Setup: create a memoizer with caching disabled
+        memoizer = Memoizer()
+        call_count = 0
+
+        @memoizer.memoize()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function twice
+        result1 = compute(5)
+        result2 = compute(5)
+
+        # Assert: function was called both times (no caching)
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
+
+    # ============= PersistentMemoizer Tests =============
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_record_caches_to_both(self) -> None:
+        """Test that PersistentMemoizer.record() caches to both memory and disk.
+
+        Verifies that when a function is decorated with record(), its result
+        is cached in both the in-memory cache and the on-disk cache.
+        """
+        # Setup: create a persistent memoizer
+        persistent = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @persistent.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function
+        result = compute(5)
+
+        # Assert: result is correct and cached in memory
+        self.assertEqual(result, 10)
+        self.assertEqual(call_count, 1)
+
+        # Verify memory cache has the result as CacheEntry
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNotNone(memory_hit)
+        # Cache now stores CacheEntry with encoded_params and encoded_result
+        cache_entry = memory_hit.value
+        self.assertEqual(cache_entry.encoded_result, 10)
+        self.assertEqual(cache_entry.encoded_params, {"args": (5,), "kwargs": {}})
+
+        # Verify disk cache has the result (pickled)
+        disk_hit = persistent._disk_cache.get(cache_key)
+        self.assertIsNotNone(disk_hit)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_replay_checks_memory_then_disk(self) -> None:
+        """Test that PersistentMemoizer.replay() checks memory first, then disk.
+
+        Verifies that replay() uses a two-level cache strategy:
+        1. Check memory cache first (fast)
+        2. Fall back to disk cache on memory miss
+        3. Populate memory cache from disk on disk hit
+        """
+        # Setup: create a persistent memoizer and store only to disk
+        persistent = PersistentMemoizer(sub_dir=self.sub_dir())
+
+        # Store a value directly to disk cache only (as CacheEntry)
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+        import pickle
+
+        # Cache now stores CacheEntry with encoded_params and encoded_result
+        cache_entry = interfaces.CacheEntry(
+            encoded_params={"args": (5,), "kwargs": {}},
+            encoded_result=10,
+        )
+        pickled_value = pickle.dumps(cache_entry)
+        persistent._disk_cache.insert(cache_key, pickled_value)
+
+        # Verify it's not in memory cache yet
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNone(memory_hit)
+
+        # Create a replay function
+        @persistent.replay()
+        def compute(x: int) -> int:
+            raise AssertionError("Function should not be executed during replay")
+
+        # Execute: replay retrieves from disk and populates memory
+        result = compute(5)
+
+        # Assert: result is correct
+        self.assertEqual(result, 10)
+
+        # Verify memory cache was populated from disk
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNotNone(memory_hit)
+        # Memory cache should now contain the CacheEntry
+        cache_entry = memory_hit.value
+        self.assertEqual(cache_entry.encoded_result, 10)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_memoize_two_level_caching(self) -> None:
+        """Test that PersistentMemoizer.memoize() uses two-level caching.
+
+        Verifies that memoize() combines two-level caching behavior:
+        - First call executes and caches to both memory and disk
+        - Second call (same process) retrieves from memory
+        - After clearing memory, retrieves from disk
+        """
+        # Setup: create a persistent memoizer
+        persistent = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @persistent.memoize()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: first call - cache miss, executes function
+        result1 = compute(5)
+        self.assertEqual(call_count, 1)
+        self.assertEqual(result1, 10)
+
+        # Second call - memory cache hit
+        result2 = compute(5)
+        self.assertEqual(call_count, 1)  # No additional execution
+        self.assertEqual(result2, 10)
+
+        # Clear memory cache to simulate a new process
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+        persistent._memoizer._cache = impls._InMemoryCacheImpl()
+
+        # Third call - memory miss, disk hit, populates memory
+        result3 = compute(5)
+        self.assertEqual(call_count, 1)  # Still no additional execution
+        self.assertEqual(result3, 10)
+
+        # Verify memory cache was repopulated
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNotNone(memory_hit)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(False)
+    def test_persistent_memoizer_record_disabled(self) -> None:
+        """Test that PersistentMemoizer.record() returns original function when disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, record()
+        returns the original function without any caching to memory or disk.
+        """
+        # Setup: create a persistent memoizer with caching disabled
+        persistent = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @persistent.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function twice
+        result1 = compute(5)
+        result2 = compute(5)
+
+        # Assert: function was called both times (no caching)
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
+
+        # Verify nothing was cached
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNone(memory_hit)
+        disk_hit = persistent._disk_cache.get(cache_key)
+        self.assertIsNone(disk_hit)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(False)
+    def test_persistent_memoizer_replay_disabled(self) -> None:
+        """Test that PersistentMemoizer.replay() always raises when disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, replay()
+        always raises KeyError.
+        """
+        # Setup: create a persistent memoizer with caching disabled
+        persistent = PersistentMemoizer(sub_dir=self.sub_dir())
+
+        @persistent.replay()
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Execute & Assert: replay always raises KeyError when disabled
+        with self.assertRaises(KeyError) as cm:
+            compute(5)
+        self.assertIn("Caching is disabled", str(cm.exception))
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(False)
+    def test_persistent_memoizer_memoize_disabled(self) -> None:
+        """Test that PersistentMemoizer.memoize() returns original function when disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, memoize()
+        returns the original function without any caching behavior.
+        """
+        # Setup: create a persistent memoizer with caching disabled
+        persistent = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @persistent.memoize()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function twice
+        result1 = compute(5)
+        result2 = compute(5)
+
+        # Assert: function was called both times (no caching)
+        self.assertEqual(call_count, 2)
+        self.assertEqual(result1, 10)
+        self.assertEqual(result2, 10)
+
+    # ============= Memoizer._dump_to_disk Tests =============
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_creates_json_file(self) -> None:
+        """Test that _dump_to_disk creates a JSON file with cached entries.
+
+        Verifies that when _dump_to_disk is called, it creates a JSON file
+        containing the cached entries in a human-readable format.
+        """
+        # Setup: create a memoizer and cache some values
+        memoizer = interfaces.Memoizer()
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            return x * 2
+
+        compute(5)
+        compute(10)
+
+        # Execute: dump the cache to disk
+        memoizer._dump_to_disk()
+
+        # Assert: JSON file was created with correct structure
+        self.assertTrue(memoizer._shared_cache_filepath.exists())
+
+        with open(memoizer._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        self.assertIn("cache_entries", data)
+        self.assertIn("cache_size", data)
+        self.assertEqual(data["cache_size"], 2)
+
+        # Verify entries have correct format
+        for entry in data["cache_entries"].values():
+            self.assertIn("params", entry)
+            self.assertIn("result", entry)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_with_sub_key(self) -> None:
+        """Test that _dump_to_disk uses sub_key for nested structure.
+
+        Verifies that when a Memoizer is initialized with a sub_key,
+        the cache entries are stored under cache_entries[sub_key].
+        """
+        # Setup: create a memoizer with sub_key and cache a value
+        sub_key = "test_sub_key"
+        memoizer = interfaces.Memoizer(sub_key=sub_key)
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            return x * 2
+
+        compute(5)
+
+        # Execute: dump the cache to disk
+        memoizer._dump_to_disk()
+
+        # Assert: entries are stored under the sub_key
+        with open(memoizer._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        self.assertIn("cache_entries", data)
+        self.assertIn(sub_key, data["cache_entries"])
+
+        # The sub_key should contain the cache entries
+        sub_entries = data["cache_entries"][sub_key]
+        self.assertEqual(len(sub_entries), 1)
+
+        # Verify entry format
+        for entry in sub_entries.values():
+            self.assertIn("params", entry)
+            self.assertIn("result", entry)
+            self.assertEqual(entry["result"], 10)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_merges_with_existing(self) -> None:
+        """Test that _dump_to_disk merges with existing cache data.
+
+        Verifies that when multiple Memoizer instances dump to the same file,
+        their entries are merged additively.
+        """
+        # Setup: create first memoizer and cache a value
+        memoizer1 = interfaces.Memoizer()
+
+        @memoizer1.record()
+        def compute1(x: int) -> int:
+            return x * 2
+
+        compute1(5)
+        memoizer1._dump_to_disk()
+
+        # Create second memoizer and cache a different value
+        memoizer2 = interfaces.Memoizer()
+
+        @memoizer2.record()
+        def compute2(x: int) -> int:
+            return x * 3
+
+        compute2(10)
+
+        # Execute: dump second memoizer to disk
+        memoizer2._dump_to_disk()
+
+        # Assert: both entries are in the file
+        with open(memoizer1._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        self.assertEqual(data["cache_size"], 2)
+        self.assertEqual(len(data["cache_entries"]), 2)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_skips_empty_cache(self) -> None:
+        """Test that _dump_to_disk does nothing when cache is empty.
+
+        Verifies that when _dump_to_disk is called on an empty cache,
+        no file is created.
+        """
+        # Setup: create a memoizer with no cached values
+        memoizer = interfaces.Memoizer()
+
+        # Ensure the file doesn't exist beforehand
+        if memoizer._shared_cache_filepath.exists():
+            memoizer._shared_cache_filepath.unlink()
+
+        # Execute: dump the empty cache
+        memoizer._dump_to_disk()
+
+        # Assert: no file was created
+        self.assertFalse(memoizer._shared_cache_filepath.exists())
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_handles_corrupt_file(self) -> None:
+        """Test that _dump_to_disk handles corrupt JSON files gracefully.
+
+        Verifies that when the existing cache file contains invalid JSON,
+        _dump_to_disk starts fresh and overwrites the corrupt file.
+        """
+        # Setup: create a memoizer and cache a value
+        memoizer = interfaces.Memoizer()
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            return x * 2
+
+        compute(5)
+
+        # Create a corrupt JSON file
+        memoizer._shared_cache_filepath.parent.mkdir(parents=True, exist_ok=True)
+        with open(memoizer._shared_cache_filepath, "w") as f:
+            f.write("{ invalid json content")
+
+        # Execute: dump the cache (should handle corrupt file)
+        memoizer._dump_to_disk()
+
+        # Assert: file now contains valid JSON with our entry
+        with open(memoizer._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        self.assertIn("cache_entries", data)
+        self.assertEqual(data["cache_size"], 1)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_stores_encoded_params_and_result(self) -> None:
+        """Test that _dump_to_disk stores both encoded params and result.
+
+        Verifies that the dumped JSON contains both the encoded parameters
+        and the encoded result for each cache entry, making it useful for debugging.
+        """
+        # Setup: create a memoizer with custom encoder and cache a value
+        memoizer = interfaces.Memoizer()
+
+        @memoizer.record()
+        def compute(x: int, y: int) -> int:
+            return x + y
+
+        compute(5, 10)
+
+        # Execute: dump the cache to disk
+        memoizer._dump_to_disk()
+
+        # Assert: entry contains both params and result
+        with open(memoizer._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        # Get the single entry
+        entries = data["cache_entries"]
+        self.assertEqual(len(entries), 1)
+
+        entry = next(iter(entries.values()))
+        self.assertEqual(entry["result"], 15)
+        self.assertEqual(entry["params"]["args"], [5, 10])
+        self.assertEqual(entry["params"]["kwargs"], {})
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_dump_to_disk_multiple_sub_keys(self) -> None:
+        """Test that multiple Memoizers with different sub_keys coexist.
+
+        Verifies that Memoizers with different sub_keys store their entries
+        under separate namespaces in the same JSON file.
+        """
+        # Setup: create two memoizers with different sub_keys
+        memoizer1 = interfaces.Memoizer(sub_key="feature_a")
+        memoizer2 = interfaces.Memoizer(sub_key="feature_b")
+
+        @memoizer1.record()
+        def compute_a(x: int) -> int:
+            return x * 2
+
+        @memoizer2.record()
+        def compute_b(x: int) -> int:
+            return x * 3
+
+        compute_a(5)
+        compute_b(10)
+
+        # Execute: dump both caches
+        memoizer1._dump_to_disk()
+        memoizer2._dump_to_disk()
+
+        # Assert: both sub_keys exist with their respective entries
+        with open(memoizer1._shared_cache_filepath) as f:
+            data = json.load(f)
+
+        self.assertIn("feature_a", data["cache_entries"])
+        self.assertIn("feature_b", data["cache_entries"])
+
+        # Verify each sub_key has one entry with correct result
+        feature_a_entries = data["cache_entries"]["feature_a"]
+        feature_b_entries = data["cache_entries"]["feature_b"]
+
+        self.assertEqual(len(feature_a_entries), 1)
+        self.assertEqual(len(feature_b_entries), 1)
+
+        self.assertEqual(next(iter(feature_a_entries.values()))["result"], 10)
+        self.assertEqual(next(iter(feature_b_entries.values()))["result"], 30)
+
+
+@instantiate_parametrized_tests
+class ShouldPadMemoizerTest(TestMixin, TestCase):
+    """Test class for _should_pad memoizer integration.
+
+    These tests verify that the PersistentMemoizer applied to _should_pad
+    correctly memoizes and replays results based on tensor metadata and
+    operation parameters.
+    """
+
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-should-pad-memoizer-{cls.cls_id}"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    def _create_mock_match(self) -> Any:
+        """Create a mock Match object for testing.
+
+        Returns a mock that simulates the Match object from pattern_matcher,
+        providing the minimal interface needed for the should_pad_params_encoder.
+        """
+        from unittest.mock import MagicMock
+
+        mock_match = MagicMock()
+
+        # Create mock FX nodes for mat1 and mat2 kwargs
+        mock_mat1_node = MagicMock()
+        mock_mat1_node.op = "placeholder"
+
+        mock_mat2_node = MagicMock()
+        mock_mat2_node.op = "placeholder"
+
+        mock_match.kwargs = {
+            "mat1": mock_mat1_node,
+            "mat2": mock_mat2_node,
+        }
+
+        return mock_match
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_should_pad_memoizer_caches_result(self) -> None:
+        """Test that the should_pad_memoizer caches function results.
+
+        Verifies that when a function decorated with should_pad_memoizer.memoize
+        is called, the result is cached and can be retrieved on subsequent calls.
+        """
+        import torch
+        from torch._inductor.runtime.caching import encoders
+
+        # Setup: create a new memoizer instance for isolation
+        test_memoizer = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @test_memoizer.memoize(custom_params_encoder=encoders.should_pad_params_encoder)
+        def mock_should_pad(
+            match: Any,
+            mat1: torch.Tensor,
+            mat2: torch.Tensor,
+            op: Any,
+            input: torch.Tensor | None = None,
+        ) -> bool:
+            nonlocal call_count
+            call_count += 1
+            return True
+
+        # Create test inputs
+        mock_match = self._create_mock_match()
+        mat1 = torch.randn(8, 16, dtype=torch.float32)
+        mat2 = torch.randn(16, 32, dtype=torch.float32)
+        op = torch.ops.aten.mm
+
+        # Execute: call the function twice with the same parameters
+        result1 = mock_should_pad(mock_match, mat1, mat2, op)
+        self.assertEqual(call_count, 1)
+
+        result2 = mock_should_pad(mock_match, mat1, mat2, op)
+        self.assertEqual(call_count, 1)  # Should use cached result
+
+        # Assert: both calls return the same result
+        self.assertTrue(result1)
+        self.assertTrue(result2)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_should_pad_memoizer_different_shapes_different_cache_entries(
+        self,
+    ) -> None:
+        """Test that different tensor shapes result in different cache entries.
+
+        Verifies that the encoder correctly distinguishes between tensors with
+        different shapes, ensuring they don't share cached results.
+        """
+        import torch
+        from torch._inductor.runtime.caching import encoders
+
+        # Setup: create a new memoizer instance for isolation
+        test_memoizer = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @test_memoizer.memoize(custom_params_encoder=encoders.should_pad_params_encoder)
+        def mock_should_pad(
+            match: Any,
+            mat1: torch.Tensor,
+            mat2: torch.Tensor,
+            op: Any,
+            input: torch.Tensor | None = None,
+        ) -> bool:
+            nonlocal call_count
+            call_count += 1
+            # Return different values based on shape to verify no cross-caching
+            return mat1.shape[0] > 10
+
+        mock_match = self._create_mock_match()
+
+        # Execute: call with different shapes
+        mat1_small = torch.randn(8, 16, dtype=torch.float32)
+        mat2_small = torch.randn(16, 32, dtype=torch.float32)
+
+        mat1_large = torch.randn(12, 16, dtype=torch.float32)
+        mat2_large = torch.randn(16, 32, dtype=torch.float32)
+
+        op = torch.ops.aten.mm
+
+        result_small = mock_should_pad(mock_match, mat1_small, mat2_small, op)
+        self.assertEqual(call_count, 1)
+
+        result_large = mock_should_pad(mock_match, mat1_large, mat2_large, op)
+        self.assertEqual(call_count, 2)  # Should be a cache miss
+
+        # Assert: results are different (based on shape)
+        self.assertFalse(result_small)  # 8 <= 10
+        self.assertTrue(result_large)  # 12 > 10
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_should_pad_memoizer_different_dtypes_different_cache_entries(
+        self,
+    ) -> None:
+        """Test that different tensor dtypes result in different cache entries.
+
+        Verifies that the encoder correctly distinguishes between tensors with
+        different dtypes, ensuring they don't share cached results.
+        """
+        import torch
+        from torch._inductor.runtime.caching import encoders
+
+        # Setup: create a new memoizer instance for isolation
+        test_memoizer = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @test_memoizer.memoize(custom_params_encoder=encoders.should_pad_params_encoder)
+        def mock_should_pad(
+            match: Any,
+            mat1: torch.Tensor,
+            mat2: torch.Tensor,
+            op: Any,
+            input: torch.Tensor | None = None,
+        ) -> bool:
+            nonlocal call_count
+            call_count += 1
+            return mat1.dtype == torch.float32
+
+        mock_match = self._create_mock_match()
+        op = torch.ops.aten.mm
+
+        # Execute: call with different dtypes but same shapes
+        mat1_fp32 = torch.randn(8, 16, dtype=torch.float32)
+        mat2_fp32 = torch.randn(16, 32, dtype=torch.float32)
+
+        mat1_fp16 = torch.randn(8, 16, dtype=torch.float16)
+        mat2_fp16 = torch.randn(16, 32, dtype=torch.float16)
+
+        result_fp32 = mock_should_pad(mock_match, mat1_fp32, mat2_fp32, op)
+        self.assertEqual(call_count, 1)
+
+        result_fp16 = mock_should_pad(mock_match, mat1_fp16, mat2_fp16, op)
+        self.assertEqual(call_count, 2)  # Should be a cache miss
+
+        # Assert: results are different (based on dtype)
+        self.assertTrue(result_fp32)
+        self.assertFalse(result_fp16)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_should_pad_memoizer_different_ops_different_cache_entries(
+        self,
+    ) -> None:
+        """Test that different operations result in different cache entries.
+
+        Verifies that the encoder correctly distinguishes between different
+        operation types (mm vs bmm), ensuring they don't share cached results.
+        """
+        import torch
+        from torch._inductor.runtime.caching import encoders
+
+        # Setup: create a new memoizer instance for isolation
+        test_memoizer = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+        call_ops: list[Any] = []
+
+        @test_memoizer.memoize(custom_params_encoder=encoders.should_pad_params_encoder)
+        def mock_should_pad(
+            match: Any,
+            mat1: torch.Tensor,
+            mat2: torch.Tensor,
+            op: Any,
+            input: torch.Tensor | None = None,
+        ) -> bool:
+            nonlocal call_count
+            call_count += 1
+            call_ops.append(op)
+            return op is torch.ops.aten.mm
+
+        mock_match = self._create_mock_match()
+
+        # Create 2D tensors for mm
+        mat1 = torch.randn(8, 16, dtype=torch.float32)
+        mat2 = torch.randn(16, 32, dtype=torch.float32)
+
+        # Execute: call with different operations
+        result_mm = mock_should_pad(mock_match, mat1, mat2, torch.ops.aten.mm)
+        self.assertEqual(call_count, 1)
+
+        result_addmm = mock_should_pad(mock_match, mat1, mat2, torch.ops.aten.addmm)
+        self.assertEqual(call_count, 2)  # Should be a cache miss
+
+        # Assert: results are different (based on op)
+        self.assertTrue(result_mm)
+        self.assertFalse(result_addmm)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_should_pad_memoizer_replays_from_disk_cache(self) -> None:
+        """Test that the memoizer replays results from disk cache after memory clear.
+
+        Verifies that PersistentMemoizer correctly stores results to disk and
+        can replay them after the in-memory cache is cleared.
+        """
+        import torch
+        from torch._inductor.runtime.caching import encoders
+
+        # Setup: create a new memoizer instance for isolation
+        test_memoizer = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @test_memoizer.memoize(custom_params_encoder=encoders.should_pad_params_encoder)
+        def mock_should_pad(
+            match: Any,
+            mat1: torch.Tensor,
+            mat2: torch.Tensor,
+            op: Any,
+            input: torch.Tensor | None = None,
+        ) -> bool:
+            nonlocal call_count
+            call_count += 1
+            return True
+
+        mock_match = self._create_mock_match()
+        mat1 = torch.randn(8, 16, dtype=torch.float32)
+        mat2 = torch.randn(16, 32, dtype=torch.float32)
+        op = torch.ops.aten.mm
+
+        # Execute: cache a result
+        result1 = mock_should_pad(mock_match, mat1, mat2, op)
+        self.assertEqual(call_count, 1)
+        self.assertTrue(result1)
+
+        # Clear the in-memory cache to simulate a new process
+        test_memoizer._memoizer._cache = impls._InMemoryCacheImpl()
+
+        # Execute: call again - should replay from disk
+        result2 = mock_should_pad(mock_match, mat1, mat2, op)
+        self.assertEqual(call_count, 1)  # Function should NOT be called again
+        self.assertTrue(result2)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(False)
+    def test_should_pad_memoizer_disabled_does_not_cache(self) -> None:
+        """Test that the memoizer does not cache when caching is disabled.
+
+        Verifies that when IS_CACHING_MODULE_ENABLED is False, the function
+        is called every time without caching.
+        """
+        import torch
+        from torch._inductor.runtime.caching import encoders
+
+        # Setup: create a new memoizer instance for isolation
+        test_memoizer = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @test_memoizer.memoize(custom_params_encoder=encoders.should_pad_params_encoder)
+        def mock_should_pad(
+            match: Any,
+            mat1: torch.Tensor,
+            mat2: torch.Tensor,
+            op: Any,
+            input: torch.Tensor | None = None,
+        ) -> bool:
+            nonlocal call_count
+            call_count += 1
+            return True
+
+        mock_match = self._create_mock_match()
+        mat1 = torch.randn(8, 16, dtype=torch.float32)
+        mat2 = torch.randn(16, 32, dtype=torch.float32)
+        op = torch.ops.aten.mm
+
+        # Execute: call the function twice
+        result1 = mock_should_pad(mock_match, mat1, mat2, op)
+        result2 = mock_should_pad(mock_match, mat1, mat2, op)
+
+        # Assert: function was called both times (no caching)
+        self.assertEqual(call_count, 2)
+        self.assertTrue(result1)
+        self.assertTrue(result2)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_should_pad_memoizer_with_input_tensor(self) -> None:
+        """Test that the memoizer correctly handles the optional input tensor.
+
+        Verifies that different input tensors (for addmm) result in different
+        cache entries, and that None vs non-None input are distinguished.
+        """
+        import torch
+        from torch._inductor.runtime.caching import encoders
+
+        # Setup: create a new memoizer instance for isolation
+        test_memoizer = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @test_memoizer.memoize(custom_params_encoder=encoders.should_pad_params_encoder)
+        def mock_should_pad(
+            match: Any,
+            mat1: torch.Tensor,
+            mat2: torch.Tensor,
+            op: Any,
+            input: torch.Tensor | None = None,
+        ) -> bool:
+            nonlocal call_count
+            call_count += 1
+            return input is not None
+
+        mock_match = self._create_mock_match()
+        mat1 = torch.randn(8, 16, dtype=torch.float32)
+        mat2 = torch.randn(16, 32, dtype=torch.float32)
+        input_tensor = torch.randn(32, dtype=torch.float32)
+        op = torch.ops.aten.addmm
+
+        # Execute: call with and without input tensor
+        result_with_input = mock_should_pad(
+            mock_match, mat1, mat2, op, input=input_tensor
+        )
+        self.assertEqual(call_count, 1)
+
+        result_without_input = mock_should_pad(mock_match, mat1, mat2, op, input=None)
+        self.assertEqual(call_count, 2)  # Should be a cache miss
+
+        # Assert: results are different
+        self.assertTrue(result_with_input)
+        self.assertFalse(result_without_input)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_should_pad_params_encoder_produces_consistent_keys(self) -> None:
+        """Test that the encoder produces consistent keys for the same inputs.
+
+        Verifies that calling the encoder with the same tensor metadata produces
+        the same cache key, ensuring reliable cache hits.
+        """
+        import torch
+        from torch._inductor.runtime.caching import encoders
+
+        mock_match = self._create_mock_match()
+        mat1 = torch.randn(8, 16, dtype=torch.float32)
+        mat2 = torch.randn(16, 32, dtype=torch.float32)
+        op = torch.ops.aten.mm
+
+        # Execute: encode the same parameters multiple times
+        encoded1 = encoders.should_pad_params_encoder(mock_match, mat1, mat2, op)
+        encoded2 = encoders.should_pad_params_encoder(mock_match, mat1, mat2, op)
+
+        # Assert: encodings are identical
+        self.assertEqual(encoded1, encoded2)
+
+        # Also verify the structure of the encoded output
+        self.assertIn("mat1", encoded1)
+        self.assertIn("mat2", encoded1)
+        self.assertIn("op", encoded1)
+        self.assertEqual(encoded1["mat1"]["shape"], tuple(mat1.shape))
+        self.assertEqual(encoded1["mat2"]["shape"], tuple(mat2.shape))
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_should_pad_memoizer_same_shape_different_data_uses_cache(self) -> None:
+        """Test that tensors with the same metadata but different data share cache.
+
+        Verifies that the memoizer caches based on tensor metadata (shape, stride,
+        dtype) and not on the actual tensor data values.
+        """
+        import torch
+        from torch._inductor.runtime.caching import encoders
+
+        # Setup: create a new memoizer instance for isolation
+        test_memoizer = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+
+        @test_memoizer.memoize(custom_params_encoder=encoders.should_pad_params_encoder)
+        def mock_should_pad(
+            match: Any,
+            mat1: torch.Tensor,
+            mat2: torch.Tensor,
+            op: Any,
+            input: torch.Tensor | None = None,
+        ) -> bool:
+            nonlocal call_count
+            call_count += 1
+            return True
+
+        mock_match = self._create_mock_match()
+        op = torch.ops.aten.mm
+
+        # Execute: call with different tensors that have the same metadata
+        mat1_a = torch.randn(8, 16, dtype=torch.float32)
+        mat2_a = torch.randn(16, 32, dtype=torch.float32)
+
+        mat1_b = torch.randn(8, 16, dtype=torch.float32)  # Different data, same shape
+        mat2_b = torch.randn(16, 32, dtype=torch.float32)  # Different data, same shape
+
+        result1 = mock_should_pad(mock_match, mat1_a, mat2_a, op)
+        self.assertEqual(call_count, 1)
+
+        result2 = mock_should_pad(mock_match, mat1_b, mat2_b, op)
+        self.assertEqual(call_count, 1)  # Should use cached result
+
+        # Assert: both return the same cached result
+        self.assertTrue(result1)
+        self.assertTrue(result2)
 
 
 if __name__ == "__main__":
