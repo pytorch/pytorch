@@ -387,7 +387,7 @@ def generate_ttir(
                 except TypeError:  # Unknown arg `specialize_extra`
                     # Older versions of Triton take specialize_extra as an arg to specialize_impl
                     specialize_impl = functools.partial(
-                        # pyrefly: ignore [missing-argument]
+                        # pyrefly: ignore [missing-argument, bad-argument-type]
                         triton.runtime.jit.create_specialize_impl(),
                         specialize_extra=backend.get_arg_specialization,  # pyrefly: ignore [missing-attribute]
                     )
@@ -492,12 +492,12 @@ def generate_ttir(
         inspect.signature(backend.get_codegen_implementation).parameters
     )
     if make_ir_sig_params == 2:
-        # pyrefly: ignore [missing-argument]
+        # pyrefly: ignore [missing-argument, bad-argument-type]
         ttir_module = src.make_ir(options, context)
     elif make_ir_sig_params == 3:
         # pyrefly: ignore [missing-attribute]
         codegen_fns = backend.get_codegen_implementation()
-        # pyrefly: ignore [missing-argument]
+        # pyrefly: ignore [missing-argument, bad-argument-type]
         ttir_module = src.make_ir(options, codegen_fns, context)
     elif make_ir_sig_params == 4:
         codegen_args = [options] if get_codegen_implementation_sig_params == 1 else []
