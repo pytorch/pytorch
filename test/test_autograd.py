@@ -403,6 +403,18 @@ class TestAutograd(TestCase):
         out = Func.apply(a)[0]
         out.backward()
 
+    def test_unused_grad_requires_grad_with_materialize(self):
+        x = torch.ones(10, requires_grad=True)
+        y = torch.ones(10, requires_grad=True)
+        z = (x**2).sum()
+
+        g = torch.autograd.grad(
+            z, (x, y), allow_unused=True, materialize_grads=True, create_graph=False
+        )
+
+        self.assertFalse(g[0].requires_grad)
+        self.assertFalse(g[1].requires_grad)
+
     def test_legacy_function_deprecation_exception(self):
         # Trigger exception
         class MyFunction(Function):
@@ -13814,23 +13826,24 @@ class TestAutogradStreamSynchronization(TestCase):
 
         def do_test(suppress_warn, keep_grad_acc):
             def _test():
-                with warnings.catch_warnings(record=True) as warns:
-                    warnings.simplefilter("always")
+                with set_warn_always_context(True):
+                    with warnings.catch_warnings(record=True) as warns:
+                        warnings.simplefilter("always")
 
-                    with torch.Stream(0) as s0:
-                        a = torch.ones(8, 8, device=device, requires_grad=True)
-                        if keep_grad_acc:
-                            # create grad_acc under s1 and keep alive with b
-                            b = a.clone()
+                        with torch.Stream(0) as s0:
+                            a = torch.ones(8, 8, device=device, requires_grad=True)
+                            if keep_grad_acc:
+                                # create grad_acc under s1 and keep alive with b
+                                b = a.clone()
 
-                    with torch.Stream(0) as s1:
-                        s1.wait_stream(s0)
-                        c = a.sum()
+                        with torch.Stream(0) as s1:
+                            s1.wait_stream(s0)
+                            c = a.sum()
 
-                    c.backward()
+                        c.backward()
 
-                filter_str = "set_warn_on_accumulate_grad_stream_mismatch"
-                return sum([filter_str in str(w.message) for w in warns]) > 0
+                    filter_str = "set_warn_on_accumulate_grad_stream_mismatch"
+                    return sum([filter_str in str(w.message) for w in warns]) > 0
 
             if suppress_warn:
                 try:

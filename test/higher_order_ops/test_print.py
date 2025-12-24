@@ -3,12 +3,17 @@ import io
 from unittest.mock import patch
 
 import torch
-from torch._dynamo.utils import counters
 from torch._functorch.aot_autograd import aot_export_module
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 
 
+@instantiate_parametrized_tests
 class TestHopPrint(TestCase):
     def test_base_print(self):
         def f(x):
@@ -18,7 +23,6 @@ class TestHopPrint(TestCase):
             torch._higher_order_ops.print("moo")
             return x
 
-        counters.clear()
         x = torch.randn(3, 3)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f(x)
@@ -33,7 +37,6 @@ class TestHopPrint(TestCase):
             x = x * x
             return x
 
-        counters.clear()
         x = torch.randn(3, 3)
         with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
             f(x)
@@ -183,6 +186,62 @@ x = add_1, y = add_2);  getitem = None
             str(schema_no_kwargs),
             """print(str format_str) -> ()""",
         )
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_reorder_print_no_graph_break(self, backend):
+        def f(x):
+            x1 = x + x
+            torch._higher_order_ops.print("moo {x}", x=x1)
+            x2 = x1 * x1
+            torch._higher_order_ops.print("moo {x}", x=x2)
+            x3 = x2 + x2
+            return (x1, x3)
+
+        # Eager and aot_eager backend for dynamo tracing testing
+        x = torch.randn(3, 3)
+        opt_f = torch.compile(backend=backend, fullgraph=True)(f)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            opt_out = opt_f(x)
+            printed_output = mock_stdout.getvalue().strip()
+            orig_out = f(x)
+
+        self.assertEqual(
+            printed_output,
+            f"moo {x * 2}\nmoo {x * 2 * x * 2}",
+        )
+        self.assertEqual(orig_out, opt_out)
+
+        x_new = torch.randn(2, 2)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            opt_out = opt_f(x_new)
+            printed_output = mock_stdout.getvalue().strip()
+
+        self.assertEqual(
+            printed_output,
+            f"moo {x_new * 2}\nmoo {x_new * 2 * x_new * 2}",
+        )
+
+    @parametrize("backend", ["eager", "aot_eager"])
+    def test_constant_mutation(self, backend):
+        def f(x):
+            alist = [x]
+            alist.append(x + 1)
+            torch._higher_order_ops.print("moo {x}", x=alist[-1])
+            alist[0].sum().item()  # graph break
+            res = alist.pop()
+            torch._higher_order_ops.print("moo {x}", x=alist[-1])
+            res.sum().item()  # graph break
+            return res
+
+        inputs = (torch.tensor([1]),)
+        opt_f = torch.compile(backend=backend, fullgraph=True)(f)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            opt_out = opt_f(*inputs)
+            printed_output = mock_stdout.getvalue().strip()
+            orig_out = f(*inputs)
+
+        self.assertEqual(printed_output, "moo tensor([2])\nmoo tensor([1])")
+        self.assertEqual(orig_out, opt_out)
 
 
 if __name__ == "__main__":

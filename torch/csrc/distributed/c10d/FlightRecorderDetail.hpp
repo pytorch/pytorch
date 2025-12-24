@@ -24,8 +24,8 @@ std::string FlightRecorder<EventType>::Entry::getTraceback() {
   for (auto idx : c10::irange(s_tb.size())) {
     auto frame_id = s_tb[idx];
     const auto& frame = s_tbs.all_frames.at(frame_id);
-    oss << "#" << idx << " " << frame.funcname << " from " << frame.filename
-        << ":" << frame.lineno << '\n';
+    oss << '#' << idx << ' ' << frame.funcname << " from " << frame.filename
+        << ':' << frame.lineno << '\n';
   }
   /* Resulted format is like:
     #0 all_reduce from pytorch/torch/distributed/distributed_c10d.py:2696

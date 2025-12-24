@@ -44,6 +44,7 @@ Next, we will delve into each chapter of this guide. Each chapter focuses on a k
 
 device
 hooks
+guard
 autoload
 operators
 amp

@@ -127,11 +127,7 @@ bool should_allow_numbers_as_tensors(const std::string& name) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FunctionParameter::FunctionParameter(const std::string& fmt, bool keyword_only)
-    : optional(false),
-      allow_none(false),
-      keyword_only(keyword_only),
-      size(0),
-      default_scalar(0) {
+    : keyword_only(keyword_only), default_scalar(0) {
   auto space = fmt.find(' ');
   TORCH_CHECK(
       space != std::string::npos, "FunctionParameter(): missing type: " + fmt);
@@ -663,20 +659,20 @@ auto handle_torch_function_no_python_arg_parser(
     std::stringstream ss;
     ss << "Multiple dispatch failed for '";
     if (module_name && func_name) {
-      ss << module_name << "." << func_name;
+      ss << module_name << '.' << func_name;
     } else {
       py::handle fn = torch_api_function;
-      ss << py::str(fn.attr("__module__")) << "."
+      ss << py::str(fn.attr("__module__")) << '.'
          << py::str(fn.attr("__name__"));
     }
     ss << "'; all " << torch_function_name_str
        << " handlers returned NotImplemented:\n\n";
     if (mode_obj) {
-      ss << "  - mode object " << py::repr(mode_obj) << "\n";
+      ss << "  - mode object " << py::repr(mode_obj) << '\n';
     }
     for (auto& arg : overloaded_args) {
       ss << "  - tensor subclass " << py::repr(get_type_of_overloaded_arg(arg))
-         << "\n";
+         << '\n';
     }
     ss << "\nFor more information, try re-running with TORCH_LOGS=not_implemented";
     const std::string& tmp = ss.str();
@@ -1473,12 +1469,7 @@ void FunctionParameter::set_default_str(const std::string& str) {
 
 // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
 FunctionSignature::FunctionSignature(const std::string& fmt, int index)
-    : min_args(0),
-      max_args(0),
-      max_pos_args(0),
-      index(index),
-      hidden(false),
-      deprecated(false) {
+    : index(index) {
   auto open_paren = fmt.find('(');
   if (open_paren == std::string::npos) {
     TORCH_CHECK(false, "missing opening parenthesis: " + fmt);
@@ -1542,7 +1533,7 @@ std::string FunctionSignature::toString() const {
   // optionals, etc.
   std::ostringstream ss;
   bool keyword_already = false;
-  ss << "(";
+  ss << '(';
   int i = 0;
   for (auto& param : params) {
     if (i != 0) {
@@ -1552,13 +1543,13 @@ std::string FunctionSignature::toString() const {
       ss << "*, ";
       keyword_already = true;
     }
-    ss << param.type_name() << " " << param.name;
+    ss << param.type_name() << ' ' << param.name;
     if (param.optional) {
       ss << " = " << param.default_value;
     }
     i++;
   }
-  ss << ")";
+  ss << ')';
   return ss.str();
 }
 
@@ -1687,7 +1678,9 @@ bool FunctionSignature::parse(
   if (max_pos_args == 1 &&
       (params[0].type_ == ParameterType::INT_LIST ||
        params[0].type_ == ParameterType::SYM_INT_LIST)) {
-    allow_varargs_intlist = true;
+    int64_t failed_idx = -1;
+    allow_varargs_intlist = is_int_or_symint_list(
+        args, params[0].size, &failed_idx, &overloaded_args);
   }
 
   if (static_cast<size_t>(nargs) > max_pos_args && !allow_varargs_intlist) {
@@ -1818,7 +1811,7 @@ bool FunctionSignature::parse(
 PythonArgParser::PythonArgParser(
     const std::vector<std::string>& fmts,
     bool traceable)
-    : max_args(0), traceable(traceable) {
+    : traceable(traceable) {
   int index = 0;
   for (auto& fmt : fmts) {
     signatures_.emplace_back(fmt, index);

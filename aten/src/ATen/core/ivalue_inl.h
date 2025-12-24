@@ -992,7 +992,7 @@ struct C10_EXPORT ivalue::Future final : c10::intrusive_ptr_target {
     std::unique_lock<std::mutex> lock(mutex_);
     if (completed_) {
       // This should be rare and shouldn't cause log spew. Its important to
-      // log errors and thats why we have this log here.
+      // log errors and that's why we have this log here.
       std::string msg = c10::str(
           "Skipping setting following error on the Future since "
           "it is already marked completed (this is not necessarily "
@@ -1829,7 +1829,7 @@ c10::intrusive_ptr<T> IValue::toCustomClass() const& {
 
 template <typename T>
 T generic_to(IValue ivalue, _fake_type<T> /*unused*/) {
-  using ElemType = typename std::remove_pointer<T>::type::element_type;
+  using ElemType = typename std::remove_pointer_t<T>::element_type;
   return std::move(ivalue).template toCustomClass<ElemType>();
 }
 
@@ -1941,7 +1941,7 @@ Tuple generic_to_tuple_impl(
     const ivalue::TupleElements& t,
     std::index_sequence<INDEX...> /*unused*/) {
   return std::make_tuple(
-      t[INDEX].to<typename std::tuple_element<INDEX, Tuple>::type>()...);
+      t[INDEX].to<std::tuple_element_t<INDEX, Tuple>>()...);
 }
 } // namespace detail
 

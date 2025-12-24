@@ -36,6 +36,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    patch_custom_fallback_pass,
     requires_gpu,
     TRITON_HAS_CPU,
 )
@@ -323,6 +324,26 @@ class FxirTestCase(InductorTestCase):
         num_as_strided = self._count_ops(gm, torch.as_strided)
         self.assertEqual(num_as_strided, 1)
 
+    def test_reshape_fallback(self):
+        """
+        Test falling back to aten.reshape. This uses a custom pass to enable more fallbacks.
+        """
+
+        def always_fallback(node: torch.fx.Node) -> bool:
+            return True
+
+        def foo(x):
+            return x.reshape((2, 5))
+
+        args = (torch.randn(10, device=self.device),)
+        with patch_custom_fallback_pass(always_fallback):
+            (gm,) = self._compile_and_check(foo, args, expected_num_triton_kernels=0)
+
+        # Check for the reshape.
+        (reshape_node,) = gm.graph.find_nodes(
+            op="call_function", target=torch.ops.aten.reshape.default
+        )
+
     def test_extern_multi_output(self):
         """
         Test an extern kernel with multiple outputs.
@@ -516,7 +537,7 @@ class FxirTestCase(InductorTestCase):
 
     def test_dynamic_launch_grid_calc(self):
         """
-        Test the dyanmic launch grid calculation.
+        Test the dynamic launch grid calculation.
         """
 
         func = torch.add
@@ -831,7 +852,9 @@ class AOTFxirTestCase(InductorTestCase):
             gm = torch._inductor.aot_compile(
                 ep.module(), inp, options={"fx_wrapper": True, **test_config}
             )
-            self.assertTrue(same(model(*inp), gm(*inp)))
+            # Flatten args for fx_wrapper gm
+            flat_args, _ = pytree.tree_flatten(inp)
+            self.assertTrue(same(model(*inp), gm(*flat_args)))
 
             for node in gm.graph.nodes:
                 if (
@@ -1181,6 +1204,38 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
             compiled_out = compiled(*args)
             self.assertEqual(compiled_out.shape, shape)
+
+    def test_reshape_dynamic_ph(self):
+        """
+        Test dynamic scalars using SymInts placeholder
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x, shape):
+                return torch.reshape(x, shape) + 2
+
+        ds = {
+            "x": (torch.export.Dim.AUTO, torch.export.Dim.AUTO),
+            "shape": [torch.export.Dim.AUTO, torch.export.Dim.AUTO],
+        }
+        args = (torch.randn((12, 14), device=self.device), [6, 28])
+        self.check(TestModule(), args, ds)
+
+    def test_reshape_dynamic_tmd(self):
+        """
+        Test dynamic reshape using shape dependent information
+        """
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                new_shape = [x.shape[0] // 2, x.shape[1] * 2]
+                return torch.reshape(x, new_shape) + 2
+
+        ds = {
+            "x": (torch.export.Dim.AUTO, torch.export.Dim.AUTO),
+        }
+        args = (torch.randn((12, 14), device=self.device),)
+        self.check(TestModule(), args, ds)
 
 
 class TestReplaceFloorDiv(InductorTestCase):

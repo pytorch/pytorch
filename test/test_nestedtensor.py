@@ -52,7 +52,6 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     instantiate_parametrized_tests,
     IS_FBCODE,
-    IS_WINDOWS,
     markDynamoStrictTest,
     NestedTensorTestCase,
     parametrize,
@@ -63,6 +62,7 @@ from torch.testing._internal.common_utils import (
     subtest,
     TEST_WITH_ROCM,
     xfailIfTorchDynamo,
+    xfailIfWindows,
 )
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
@@ -6672,7 +6672,6 @@ torch.cuda.synchronize()
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_specialize_dynamic_shape(self, device):
         values = torch.randn((18, 16), device=device)
@@ -6694,7 +6693,6 @@ torch.cuda.synchronize()
         )
 
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_specialize_dynamic_shape_recompile(self, device):
         def generate_inp(total_len):
@@ -7005,9 +7003,9 @@ torch.cuda.synchronize()
                 check_forward_backward()
 
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     # Guarding with sqrt() doesn't work on ROCm?
+    @xfailIfWindows
     @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(
@@ -7192,8 +7190,8 @@ torch.cuda.synchronize()
                 out, out_component, atol=output_ref_atol, rtol=output_ref_rtol
             )
 
+    @decorateIf(xfailIfWindows, lambda params: params["dtype"] == torch.float32)
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     # mha_varlen_fwd not supported on ROCm
     @skipCUDAIfRocm
@@ -7230,7 +7228,6 @@ torch.cuda.synchronize()
     @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
             nt32 = convert_jagged_to_nested_tensor(values32, offsets, max_length=16)
@@ -7377,7 +7374,6 @@ torch.cuda.synchronize()
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
     @skipCUDAIfRocm  # not needed
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize("use_legacy_api", [True, False])
     @skipCPUIf(True, "SPDA Math NT fallback causes failure: see issue #133644")
@@ -7734,10 +7730,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_preserves_metadata_cache(self, device, dtype):
@@ -7765,10 +7757,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_with_dynamic_max_seq_len(self, device, dtype):
@@ -7802,10 +7790,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_with_dynamic_min_seq_len(self, device, dtype):
@@ -7839,10 +7823,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
@@ -7970,7 +7950,6 @@ torch.cuda.synchronize()
     # blows up due to test parametrization otherwise
     @torch._dynamo.utils.disable_cache_limit()
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     @dtypes(torch.float32, torch.double, torch.half)
@@ -8073,10 +8052,6 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @skipCUDAIfRocm
     def test_compile_padded_dense_conversion_preserves_metadata_cache(
@@ -8166,7 +8141,6 @@ torch.cuda.synchronize()
         self.assertEqual(res.shape, (4, nt.shape[1], 6))
 
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @dtypes(torch.float32)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
@@ -8490,7 +8464,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="SymIntArrayRef expected to contain only concrete integers",
-        op_match_fn=lambda device, op: (op.full_name in {"mean"}),
+        op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name
             and "normal dim reduction" not in sample.name
@@ -8525,7 +8499,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="cannot view shape",
-        op_match_fn=lambda device, op: (op.full_name in {"unflatten"}),
+        op_match_fn=lambda device, op: (op.full_name == "unflatten"),
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="broken_unflatten_backward",
     ),

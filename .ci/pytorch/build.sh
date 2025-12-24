@@ -36,6 +36,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+  # Disable FBGEMM for CUDA 13 builds
+  export USE_FBGEMM=0
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
@@ -86,20 +91,10 @@ else
   fi
 fi
 
-# Enable MKLDNN with ARM Compute Library for ARM builds
 if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export USE_MKLDNN=1
-
-  # ACL is required for aarch64 builds
-  if [[ ! -d "/acl" ]]; then
-    echo "ERROR: ARM Compute Library not found at /acl"
-    echo "ACL is required for aarch64 builds. Check Docker image setup."
-    exit 1
-  fi
-
   export USE_MKLDNN_ACL=1
   export ACL_ROOT_DIR=/acl
-  echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
@@ -363,13 +358,18 @@ else
       sudo rm -f /opt/cache/bin/c++
       sudo rm -f /opt/cache/bin/gcc
       sudo rm -f /opt/cache/bin/g++
-      pushd /opt/rocm/llvm/bin
-      if [[ -d original ]]; then
-        sudo mv original/clang .
-        sudo mv original/clang++ .
+      # Restore original clang compilers that were backed up during sccache wrapping.
+      # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
+      # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
+      if [[ -d /opt/rocm/llvm/bin ]]; then
+        pushd /opt/rocm/llvm/bin
+        if [[ -d original ]]; then
+          sudo mv original/clang .
+          sudo mv original/clang++ .
+        fi
+        sudo rm -rf original
+        popd
       fi
-      sudo rm -rf original
-      popd
     fi
 
     CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
