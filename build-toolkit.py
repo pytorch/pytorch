@@ -2,6 +2,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.fx.traceback as fx_traceback
+import torch.distributed as dist
+from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.distributed._tensor import DTensor, Replicate
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import (
+    Replicate,
+    Shard,
+)
 
 torch._dynamo.config.enable_aot_compile = True
 
@@ -53,24 +61,43 @@ class TransformerBlock(nn.Module):
         return x
 
 class Transformer(nn.Module):
-    def __init__(self, vocab_size: int, embed_dim: int, num_heads: int, num_layers: int, max_seq_len: int):
+    def __init__(self, vocab_size: int, embed_dim: int, num_heads: int, num_layers: int, max_seq_len: int, device_mesh=None):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, embed_dim)
         self.pos_embed = nn.Parameter(torch.zeros(1, max_seq_len, embed_dim))
         self.layers = nn.ModuleList([TransformerBlock(embed_dim, num_heads) for _ in range(num_layers)])
         self.ln_f = nn.LayerNorm(embed_dim)
         self.head = nn.Linear(embed_dim, vocab_size, bias=False)
+        self.device_mesh = device_mesh
+
     def forward(self, input_ids):
-        # input_ids: (batch, seq)
-        B, S = input_ids.shape
-        x = self.embed(input_ids) + self.pos_embed[:, :S, :]
+        input_ids = input_ids.redistribute(self.device_mesh, [Replicate()])
+        local_input_ids = input_ids.to_local()
+
+        B, S = local_input_ids.shape
+        x = self.embed(local_input_ids) + self.pos_embed[:, :S, :]
+
+        # Activation checkpointing: recompute each block in backward to save memory
+        def _run_block(block, hidden):
+            return block(hidden)
+
         for block in self.layers:
-            x = block(x)
+            x = torch.utils.checkpoint.checkpoint(_run_block, block, x, use_reentrant=False)
+
         x = self.ln_f(x)
         logits = self.head(x)  # (batch, seq, vocab)
         return logits
 
 def main():
+    # Distributed setup using a fake process group to run single-rank
+    if not dist.is_initialized():
+        fake_store = FakeStore()
+        dist.init_process_group(backend="fake", store=fake_store, rank=0, world_size=1)
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    device = torch.device(f"cuda:{rank}")
+    torch.cuda.set_device(device)
+
     # Hyperparameters
     vocab_size = 50257
     embed_dim = 256
@@ -79,34 +106,45 @@ def main():
     max_seq_len = 64
     batch_size = 2
     seq_len = 32
-    device = "cuda"
     torch.manual_seed(0)
     torch.set_default_device(device)
 
+    # Device mesh for DTensor
+    device_mesh = init_device_mesh(
+        "cuda",
+        (world_size,),
+        mesh_dim_names=("dp",),
+    )
+
     # Create model
-    model = Transformer(vocab_size, embed_dim, num_heads, num_layers, max_seq_len).to(device)
+    model = Transformer(vocab_size, embed_dim, num_heads, num_layers, max_seq_len, device_mesh=device_mesh).to(device)
     model.eval()  # export-friendly; switch to train() if you want training graphs
 
+    # Capture with Dynamo first, then export/compile with AOTAutograd using the captured GraphModule
     from torch._subclasses.fake_tensor import FakeTensorMode
-    with FakeTensorMode(allow_non_fake_inputs=True):
-        # Inputs
-        input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+    from torch._functorch.aot_autograd import (
+        aot_export_joint_with_descriptors,
+        aot_compile_joint_with_descriptors,
+    )
+    from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 
-        # Compiler toolkit imports
-        from contextlib import ExitStack
-        from torch._functorch.aot_autograd import (
-            aot_export_joint_with_descriptors,
-            aot_compile_joint_with_descriptors,
-        )
-        from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+    with fake_mode, torch._dynamo.config.patch(install_free_tensors=True):
+        local_input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+        input_ids_dt = DTensor.from_local(local_input_ids, device_mesh, [Shard(0)])
+
+        from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+        gm = _dynamo_graph_capture_for_export(model)((input_ids_dt,))
 
         # Export and compile the joint graph
+        from contextlib import ExitStack
         stack = ExitStack()
         with stack:
             jd = aot_export_joint_with_descriptors(
                 stack,
-                model,
-                (input_ids,),
+                gm,
+                (input_ids_dt,),
             )
 
             from torch.fx.passes.regional_inductor import regional_inductor
@@ -136,16 +174,21 @@ def main():
     with open(serialization_path, "rb") as f:
         loaded_fn = BundledAOTAutogradSerializableCallable.deserialize_compile_artifacts(f.read())
 
-    input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
-    targets = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
-    # Run loaded compiled callable: it expects (params, buffers, inputs)
-    (logits,) = loaded_fn(*model.parameters(), *model.buffers(), input_ids)
+    # Create DTensor inputs for run
+    local_input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+    input_ids_dt = DTensor.from_local(local_input_ids, device_mesh, [Shard(0)])
 
-    # Compute loss and backward for demonstration (note: compiled callable returns forward; backward graph is bundled)
+    targets = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+
+    # Run loaded compiled callable: it expects (params, buffers, inputs)
+    (logits,) = loaded_fn(*model.parameters(), *model.buffers(), input_ids_dt)
+
+    # Compute loss and backward for demonstration
     loss = F.cross_entropy(logits.view(-1, vocab_size), targets.view(-1))
     loss.backward()
 
-    print("Successfully cross compiled with compiler toolkit")
+    print("Successfully cross compiled with compiler toolkit using DTensor input_ids")
+    dist.destroy_process_group()
 
 if __name__ == "__main__":
     main()

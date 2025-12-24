@@ -1,10 +1,18 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import os
-import io
-import tempfile
-from typing import Any, Callable, Tuple, Dict
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import torch.fx.traceback as fx_traceback
+import torch.distributed as dist
+from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.distributed._tensor import DTensor, Replicate
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import (
+    Replicate,
+    Shard,
+)
 
 torch._dynamo.config.enable_aot_compile = True
 
@@ -53,15 +61,19 @@ class TransformerBlock(nn.Module):
         x = x + self.mlp(self.ln2(x))
         return x
 class Transformer(nn.Module):
-    def __init__(self, vocab_size: int, embed_dim: int, num_heads: int, num_layers: int, max_seq_len: int):
+    def __init__(self, vocab_size: int, embed_dim: int, num_heads: int, num_layers: int, max_seq_len: int, device_mesh = None):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, embed_dim)
         self.pos_embed = nn.Parameter(torch.zeros(1, max_seq_len, embed_dim))
         self.layers = nn.ModuleList([TransformerBlock(embed_dim, num_heads) for _ in range(num_layers)])
         self.ln_f = nn.LayerNorm(embed_dim)
         self.head = nn.Linear(embed_dim, vocab_size, bias=False)
+        self.device_mesh = device_mesh
+
     def forward(self, input_ids):
         # input_ids: (batch, seq)
+        input_ids = input_ids.redistribute(self.device_mesh, [Replicate()])
+        input_ids = input_ids.to_local()
         B, S = input_ids.shape
         x = self.embed(input_ids) + self.pos_embed[:, :S, :]
         for block in self.layers:
@@ -72,17 +84,35 @@ class Transformer(nn.Module):
 
 def main():
     # Hyperparameters
-    vocab_size = 50257
-    embed_dim = 256
-    num_heads = 8
-    num_layers = 4
-    max_seq_len = 64
-    batch_size = 2
-    seq_len = 32
+    vocab_size = 32
+    embed_dim = 4
+    num_heads = 2
+    num_layers = 1
+    max_seq_len = 8
+    batch_size = 1
+    seq_len = 8
     device = "cuda"
     torch.manual_seed(0)
     # Create model
-    model = Transformer(vocab_size, embed_dim, num_heads, num_layers, max_seq_len).to(device)
+
+    serialization_path = "/tmp/cross_precompile.pt"
+    from torch._subclasses.fake_tensor import FakeTensorMode
+    from torch.distributed._tensor import DTensor, Replicate
+    if not dist.is_initialized():
+        fake_store = FakeStore()
+        dist.init_process_group(backend="fake", store=fake_store, rank=0, world_size=1)
+    rank = dist.get_rank()
+    world_size = dist.get_world_size()
+    device = torch.device(f"cuda:{rank}")
+    torch.cuda.set_device(device)
+
+    # Device mesh for DTensor
+    device_mesh = init_device_mesh(
+        "cuda",
+        (world_size,),
+        mesh_dim_names=("dp",),
+    )
+    model = Transformer(vocab_size, embed_dim, num_heads, num_layers, max_seq_len, device_mesh=device_mesh).to(device)
     # Compile per transformer block using caching precompile
     compiled_model = torch.compile(
         model,
@@ -90,22 +120,26 @@ def main():
     )
 
     input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
-    targets = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+    input_ids_dt = DTensor.from_local(input_ids, device_mesh, [Shard(0)])
 
-    serialization_path = "/tmp/cross_precompile.pt"
-    from torch._subclasses.fake_tensor import FakeTensorMode
+    compiled_model(input_ids_dt)
+
     with FakeTensorMode(allow_non_fake_inputs=True):
         input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
-        compiled_model.forward.aot_compile(((input_ids, ), {})).save_compiled_function(serialization_path)
+        input_ids_dt = DTensor.from_local(input_ids, device_mesh, [Shard(0)])
+
+        compiled_model.forward.aot_compile(((input_ids_dt, ), {})).save_compiled_function(serialization_path)
 
     with open(serialization_path, "rb") as f:
         loaded_fn = torch.compiler.load_compiled_function(
             f,
         )
         input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+        input_ids_dt = DTensor.from_local(input_ids, device_mesh, [Shard(0)])
         targets = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
-        logits = loaded_fn(model, input_ids)
-        loss = F.cross_entropy(logits.view(-1, vocab_size), targets.view(-1))
+        targets_dt = DTensor.from_local(targets, device_mesh, [Shard(0)])
+        logits = loaded_fn(model, input_ids_dt)
+        loss = F.cross_entropy(logits.view(-1, vocab_size), targets_dt.view(-1))
         loss.backward()
 
         print("SUCCESS!")
