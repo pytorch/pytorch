@@ -256,7 +256,7 @@ Failed to trace einops function
 
   Developer debug context: einops function 'reduce'
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0363.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb2864.html
 
 from user code:
    File "test_einops.py", line N, in fn
