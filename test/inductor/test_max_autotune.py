@@ -3723,8 +3723,10 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                     FileCheck().check("triton_tem_fused_add_mm_mul").run(code[0])
                 else:
                     # Aten wins in unfused case
-                    FileCheck().check_not("triton_tem").check(
-                        "triton_poi_fused_add_mul"
+                    # Pointwise epilogue may appear as either `add`->`mul` or
+                    # `mul`->`add` depending on fusion / canonicalization.
+                    FileCheck().check_not("triton_tem").check_regex(
+                        "triton_poi_fused_(add_mul|mul_add)"
                     ).run(code[0])
 
                 if not config.cpp_wrapper:
