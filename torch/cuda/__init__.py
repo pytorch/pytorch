@@ -1310,7 +1310,12 @@ def _get_amdsmi_handler(device: Device = None):
             "amdsmi driver can't be loaded, requires >=ROCm5.6 installation"
         ) from e
     device = _get_amdsmi_device_index(device)
-    handle = amdsmi.amdsmi_get_processor_handles()[device]
+    try:
+        handle = amdsmi.amdsmi_get_processor_handles()[device]
+    except amdsmi.AmdSmiException as e:
+        raise RuntimeError(
+            f"Failed to get AMDSMI handle for device {device}"
+        ) from e
     return handle
 
 
