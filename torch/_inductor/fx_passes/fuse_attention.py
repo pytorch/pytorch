@@ -589,7 +589,13 @@ def _sfdp_pattern_21(query, key, value, attn_mask):
     score = torch.matmul(query, key.permute(0, 1, 3, 2))
     masked_score = score + attn_mask
     score = masked_score.type_as(query)
-    return score.float().softmax(dim=-1).type_as(query).matmul(value)
+    viewd_score1 = score.view(
+        score.size(0) * score.size(1), score.size(2), score.size(3)
+    )
+    viewd_score2 = viewd_score1.view(
+        score.size(0), score.size(1), score.size(2), score.size(3)
+    )
+    return viewd_score2.float().softmax(dim=-1).type_as(query).matmul(value)
 
 
 def _sfdp_replacement_21(query, key, value, attn_mask):
@@ -615,7 +621,13 @@ def _sfdp_pattern_22(query, key, value, attn_mask):
     score = torch.matmul(query, key.permute(0, 1, 3, 2))
     masked_score = score + attn_mask
     score = masked_score.type_as(query)
-    return score.float().softmax(dim=-1).type_as(query).matmul(value), key, value
+    viewd_score1 = score.view(
+        score.size(0) * score.size(1), score.size(2), score.size(3)
+    )
+    viewd_score2 = viewd_score1.view(
+        score.size(0), score.size(1), score.size(2), score.size(3)
+    )
+    return viewd_score2.float().softmax(dim=-1).type_as(query).matmul(value), key, value
 
 
 def _sfdp_replacement_22(query, key, value, attn_mask):
@@ -647,7 +659,13 @@ def _sfdp_pattern_23(query, key, value):
     score = torch.matmul(query, key.permute(0, 1, 3, 2))
     fp32_score = score.float()
     score = fp32_score.type_as(query)
-    return score.float().softmax(dim=-1).type_as(query).matmul(value), key, value
+    viewd_score1 = score.view(
+        score.size(0) * score.size(1), score.size(2), score.size(3)
+    )
+    viewd_score2 = viewd_score1.view(
+        score.size(0), score.size(1), score.size(2), score.size(3)
+    )
+    return viewd_score2.float().softmax(dim=-1).type_as(query).matmul(value), key, value
 
 
 def _sfdp_replacement_23(query, key, value):

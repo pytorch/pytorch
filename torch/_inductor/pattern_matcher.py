@@ -2196,10 +2196,6 @@ def fwd_only(
 
     if run_functional_passes:
         remove_noop_ops(gm.graph)
-
-        from .fx_passes.joint_graph import early_patterns
-
-        early_patterns.apply(gm.graph)
         gm.graph.eliminate_dead_code()
 
     gm.recompile()
@@ -2234,9 +2230,20 @@ def joint_fwd_bwd(fn: Callable[..., Any], args: Sequence[Any]) -> torch.fx.Graph
 
     remove_noop_ops(gm.graph)
 
-    from .fx_passes.joint_graph import early_patterns
+    from .fx_passes.joint_graph import pointless_view
 
-    early_patterns.apply(gm.graph)
+    matcher_pass = PatternMatcherPass()
+
+    pattern = CallFunction(
+        torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")
+    )
+    GraphPatternEntry(
+        pattern=pattern,
+        handler=pointless_view,
+        extra_check=_return_true,
+        # pyrefly: ignore [bad-argument-type]
+    ).register(matcher_pass.patterns)
+    matcher_pass.apply(gm.graph)
 
     # remove in/out specs
     gm.graph._codegen = torch.fx.graph.CodeGen()
