@@ -4968,10 +4968,11 @@ print(value, end="")
         uuids = subprocess.check_output(cmd, shell=True, text=True).strip().split("\n")
         uuids = [s.strip() for s in uuids]
         raw_uuids = torch.cuda._raw_device_uuid_amdsmi()
+        matching = True
         for uuid in uuids:
-            matching = True
             if not any(uuid in raw_id for raw_id in raw_uuids):
                 matching = False
+                break
         self.assertEqual(True, matching)
 
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
