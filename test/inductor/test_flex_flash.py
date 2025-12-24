@@ -798,6 +798,104 @@ class TestFlexFlash(InductorTestCase):
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
 
 
+class TestHierarchicalIndex(InductorTestCase):
+    def test_hierarchical_index_preserves_args(self):
+        from sympy import Symbol
+
+        from torch._inductor.kernel.flex.flex_flash_attention import HierarchicalIndex
+
+        b = Symbol("b")
+        q_idx = Symbol("q_idx")
+        idx = HierarchicalIndex(b, q_idx)
+
+        self.assertIsInstance(idx, HierarchicalIndex)
+        self.assertEqual(idx.args, (b, q_idx))
+
+    def test_hierarchical_indexer_single_dim_no_wrap(self):
+        from sympy import Symbol
+
+        from torch._inductor.kernel.flex.flex_flash_attention import (
+            _hierarchical_indexer_cute,
+        )
+
+        indexer = _hierarchical_indexer_cute(size=[10])
+        q_idx = Symbol("q_idx")
+
+        self.assertEqual(indexer([q_idx]), q_idx)
+
+    def test_hierarchical_indexer_multi_dim_wraps(self):
+        from sympy import Symbol
+
+        from torch._inductor.kernel.flex.flex_flash_attention import (
+            _hierarchical_indexer_cute,
+            HierarchicalIndex,
+        )
+
+        indexer = _hierarchical_indexer_cute(size=[4, 128])
+        b = Symbol("b")
+        q_idx = Symbol("q_idx")
+
+        result = indexer([b, q_idx])
+
+        self.assertIsInstance(result, HierarchicalIndex)
+        self.assertEqual(result.args, (b, q_idx))
+
+    def test_isinstance_detection_for_load(self):
+        from sympy import Symbol
+
+        from torch._inductor.kernel.flex.flex_flash_attention import HierarchicalIndex
+
+        b = Symbol("b")
+        q_idx = Symbol("q_idx")
+
+        self.assertIsInstance(HierarchicalIndex(b, q_idx), HierarchicalIndex)
+        self.assertNotIsInstance(b * Symbol("S") + q_idx, HierarchicalIndex)
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        not ensure_flash_available(), "Flash attention (CUTE) library not available"
+    )
+    def test_hierarchical_indexing_in_generated_code(self):
+        batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
+        dtype = torch.float16
+        device = "cuda"
+
+        bias_matrix = torch.randn(batch_size, num_heads, device=device, dtype=dtype)
+
+        def batch_head_score_mod(score, b, h, q_idx, kv_idx):
+            return score + bias_matrix[b, h]
+
+        q, k, v = create_test_tensors(
+            batch_size=batch_size,
+            num_heads=num_heads,
+            seq_len=seq_len,
+            dim=dim,
+            dtype=dtype,
+            device=device,
+        )
+
+        compiled_fn = torch.compile(flex_attention)
+        _, code = run_and_get_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=batch_head_score_mod,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+
+        code_str = "\n".join(code)
+
+        import re
+
+        multi_dim_pattern = r"in_ptr\d*\[tmp\d+,\s*tmp\d+\]"
+        self.assertIsNotNone(
+            re.search(multi_dim_pattern, code_str),
+            f"Expected multi-dimensional indexing pattern {multi_dim_pattern} "
+            f"in generated code.\nExcerpt:\n{code_str[:2000]}",
+        )
+
+
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
