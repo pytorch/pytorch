@@ -261,6 +261,35 @@ void CUDAGraph::reset() {
   // and the allocator could end up in all kinds of weird states depending where failure occurred.
   // If the user catches the failure exception in a script, or is running in REPL or (god forbid)
   // a Jupyter notebook, I don't see an easy way for reset() to gracefully fix all such possible error states.
+
+  // If capture_begin() was called but capture_end() failed (e.g., due to
+  // sync operations like .item() during capture), the generator states
+  // will have capturing_ = true but no actual CUDA stream capture is active.
+  // This causes subsequent RNG operations to fail with:
+  // "Offset increment outside graph capture encountered unexpectedly."
+  // To recover gracefully, we call capture_epilogue() on all registered
+  // generator states.
+  if (!capture_ended_ && !captured_generator_states_.empty()) {
+    // capture_begin was called but capture_end was not successful.
+    // Clean up generator state by calling capture_epilogue.
+    for (auto& [generator_state, wholegraph_increments] :
+         captured_generator_states_) {
+      // Only call epilogue if the state is still in capturing mode
+      if (generator_state->capturing_) {
+        generator_state->capture_epilogue();
+      }
+    }
+    // Also end the allocator pool allocation if it was started.
+    // Use try-catch since reset() may be called from destructor and must not throw.
+    if (capture_dev_ != UNDEFINED_DEVICE && (mempool_id_.first != 0 || mempool_id_.second != 0)) {
+      try {
+        c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+      } catch (const std::exception& e) {
+        TORCH_WARN("Failed to end allocator pool during capture cleanup: ", e.what());
+      }
+    }
+  }
+
   if (capture_ended_) {
     // notifyCaptureDestroy may throw. How should we handle this?
     c10::cuda::CUDACachingAllocator::releasePool(capture_dev_, mempool_id_);
