@@ -51,7 +51,7 @@ void ProcessGroupUCCLogger::flushComms(int rank, int world_size) {
   _outfile.open(trace_filename, std::ofstream::out | std::ofstream::trunc);
   // flush the traced comms
   if (_outfile.is_open()) {
-    _outfile << "[" << c10::Join(",", trace_generator->getCommsTrace())
+    _outfile << '[' << c10::Join(",", trace_generator->getCommsTrace())
              << "\n]";
     _outfile.flush();
     _outfile.close();

@@ -38,9 +38,9 @@
 
 // The following files are implemented in a header-only way and are guarded by
 // test/cpp/aoti_abi_check
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
-#include <c10/util/complex.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/complex.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -202,16 +202,6 @@ aoti_torch_delete_c10_value_object(C10IValueHandle handle);
 AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_data_ptr(
     AtenTensorHandle tensor,
     void** ret_data_ptr // returns borrowed reference
-);
-
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_mutable_data_ptr(
-    AtenTensorHandle tensor,
-    void** ret_data_ptr // returns borrowed reference
-);
-
-AOTI_TORCH_EXPORT AOTITorchError aoti_torch_get_const_data_ptr(
-    AtenTensorHandle tensor,
-    const void** ret_data_ptr // returns borrowed reference
 );
 
 // Get the nbytes of the underlying storage

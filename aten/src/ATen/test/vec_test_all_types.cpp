@@ -1463,7 +1463,6 @@ namespace {
         CACHE_ALIGN underlying qint_vals[vec::size()];
         // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
         CACHE_ALIGN underlying qint_b[vec::size()];
-        typename vec::int_vec_return_type  expected_int_ret;
         auto seed = TestSeed();
         ValueGen<underlying> generator(min_val, max_val, seed);
         for ([[maybe_unused]] const auto i : c10::irange(trials)) {
@@ -1828,9 +1827,9 @@ namespace {
       #endif
 
         EXPECT_EQ(u16, c10::detail::fp16_ieee_from_fp32_value(f32s[i]))
-            << "Test failed for float to uint16 " << f32s[i] << "\n";
+            << "Test failed for float to uint16 " << f32s[i] << '\n';
         EXPECT_EQ(x, c10::detail::fp16_ieee_to_fp32_value(u16))
-            << "Test failed for uint16 to float " << u16 << "\n";
+            << "Test failed for uint16 to float " << u16 << '\n';
       }
     }
     TEST(FP8E4M3Test, FP8E4M3ConversionFloat) {
@@ -1848,10 +1847,10 @@ namespace {
           EXPECT_TRUE(std::isnan(f32));
         } else {
           EXPECT_EQ(f32, c10::detail::fp8e4m3fn_to_fp32_value(input))
-              << "Test failed for u8 to float " << input << "\n";
+              << "Test failed for u8 to float " << input << '\n';
         }
         EXPECT_EQ(u8, c10::detail::fp8e4m3fn_from_fp32_value(f32))
-            << "Test failed for float to u8 " << f32 << "\n";
+            << "Test failed for float to u8 " << f32 << '\n';
       }
     }
     TEST(FP8E4M3Test, FP8E4M3BinaryAdd) {
@@ -2015,10 +2014,10 @@ namespace {
           EXPECT_TRUE(std::isnan(f32));
         } else {
           EXPECT_EQ(f32, c10::detail::fp8e5m2_to_fp32_value(input))
-              << "Test failed for u8 to float " << input << "\n";
+              << "Test failed for u8 to float " << input << '\n';
         }
         EXPECT_EQ(u8, c10::detail::fp8e5m2_from_fp32_value(f32))
-            << "Test failed for float to u8 " << f32 << "\n";
+            << "Test failed for float to u8 " << f32 << '\n';
       }
     }
     TEST(FP8E5M2Test, FP8E5M2BinaryAdd) {

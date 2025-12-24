@@ -525,10 +525,10 @@ static Tensor get_mkldnn_serialized_md(const Tensor& self) {
   auto packed_w_desc = packed_w.get_desc();
   std::vector<uint8_t> serialized_wei_desc;
 
-#if IDEEP_PREREQ(3, 4, 1, 2)
+#if DNNL_PREREQ(3, 4, 1)
   serialized_wei_desc = packed_w_desc.get_blob();
 #else
-      TORCH_CHECK(false, "Unexpected IDeep version to do weight serialization.");
+      TORCH_CHECK(false, "Unexpected oneDNN version to do weight serialization.");
 #endif
   Tensor serialized_md = at::from_blob((void*)serialized_wei_desc.data(), {static_cast<int64_t>(serialized_wei_desc.size())}, at::TensorOptions(at::kByte));
   auto res = at::empty_like(serialized_md);

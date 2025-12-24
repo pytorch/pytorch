@@ -5,7 +5,7 @@ import enum
 import itertools as it
 import logging
 from collections.abc import Iterator
-from typing import Any, cast, Literal, Optional, Union
+from typing import Any, cast, Literal, Optional
 
 import torch
 from torch._C import FunctionSchema
@@ -110,9 +110,9 @@ class TensorKey(Key):
 
     @staticmethod
     def _make(
-        tensor_id: Optional[int],
-        storage_ptr: Optional[int],
-        allocation_id: Optional[int],
+        tensor_id: int | None,
+        storage_ptr: int | None,
+        allocation_id: int | None,
         device: torch.device,
     ) -> Optional["TensorKey"]:
         if (
@@ -128,7 +128,7 @@ class TensorKey(Key):
         return cls._make(alloc.id, alloc.ptr, alloc.allocation_id, alloc.device)
 
     @classmethod
-    def from_tensor(cls, t: Optional[_TensorMetadata]) -> Optional["TensorKey"]:
+    def from_tensor(cls, t: _TensorMetadata | None) -> Optional["TensorKey"]:
         if t is not None:
             return cls._make(t.id, t.storage_data_ptr, t.allocation_id, t.device)
         return None
@@ -140,7 +140,7 @@ class TensorKey(Key):
 
 def _extract_parameters_and_gradients(
     node: _ProfilerEvent,
-) -> Iterator[tuple[Optional[TensorKey], Optional[TensorKey]]]:
+) -> Iterator[tuple[TensorKey | None, TensorKey | None]]:
     children = node.children
 
     # AccumulateGrad is used in the Autograd engine to handle gradient updates.
@@ -170,7 +170,8 @@ def _extract_parameters_and_gradients(
     #       a particular time.
     elif node.typed[0] == _EventType.PyCall:
         typed_fields = node.typed[1]
-        assert typed_fields.module is None or typed_fields.optimizer is None
+        if typed_fields.module is not None and typed_fields.optimizer is not None:
+            raise AssertionError("module and optimizer cannot both be set")
         if typed_fields.module is not None:
             for _, p, p_grad in typed_fields.module.parameters:
                 yield TensorKey.from_tensor(p), TensorKey.from_tensor(p_grad)
@@ -188,13 +189,13 @@ def extract_parameters(node: _ProfilerEvent) -> Iterator[TensorKey]:
 
 def extract_gradients(
     node: _ProfilerEvent,
-) -> Iterator[tuple[Optional[TensorKey], TensorKey]]:
+) -> Iterator[tuple[TensorKey | None, TensorKey]]:
     for p, p_grad in _extract_parameters_and_gradients(node):
         if p_grad is not None:
             yield p, p_grad
 
 
-def get_scopes(event: Optional[_ProfilerEvent]) -> tuple[RecordScope, ...]:
+def get_scopes(event: _ProfilerEvent | None) -> tuple[RecordScope, ...]:
     scopes = []
     while event:
         if event.typed[0] == _EventType.TorchOp:
@@ -217,7 +218,7 @@ class SchemaMatcher:
     """
 
     @classmethod
-    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> tuple[Optional[bool], ...]:
+    def inputs_are_mutable(cls, t: _ExtraFields_TorchOp) -> tuple[bool | None, ...]:
         """Determine which inputs may have mutated based on function schema.
 
         Note that we don't need to resolve down to a single schema to perform
@@ -226,7 +227,7 @@ class SchemaMatcher:
         overload. If we cannot find any valid schema then we must be
         conservative and assume all inputs are mutable.
         """
-        mutable: Optional[list[bool]] = None
+        mutable: list[bool] | None = None
         for schema in cls.match_schemas(t):
             mutable = mutable or [False for _ in schema.arguments]
             for i, arg in enumerate(schema.arguments):
@@ -275,7 +276,7 @@ class SchemaMatcher:
                 isinstance(i, TensorKey) for i in observed
             )
 
-        type_map: tuple[tuple[Any, Union[type, tuple[type, ...]]], ...] = (
+        type_map: tuple[tuple[Any, type | tuple[type, ...]], ...] = (
             (torch._C.TensorType, TensorKey),
             (torch._C.NoneType, type(None)),
             (torch._C.BoolType, bool),
@@ -296,7 +297,7 @@ class SchemaMatcher:
         return observed is None
 
     @staticmethod
-    def lookup_schemas(name: str) -> Optional[tuple[FunctionSchema, ...]]:
+    def lookup_schemas(name: str) -> tuple[FunctionSchema, ...] | None:
         # TODO(robieta):
         #   _jit_get_schemas_for_operator is quite expensive. (~100us / call)
         #   Consider adding `functools.lru_cache` if that becomes an issue.
@@ -341,7 +342,11 @@ class SizeMap:
 
             elif node.typed[0] == _EventType.PyCall:
                 typed_fields = node.typed[1]
-                assert typed_fields.module is None or typed_fields.optimizer is None
+                if (
+                    typed_fields.module is not None
+                    and typed_fields.optimizer is not None
+                ):
+                    raise AssertionError("module and optimizer cannot both be set")
                 if typed_fields.module is not None:
                     for _, p, p_grad in typed_fields.module.parameters:
                         self._update_values(p)
@@ -375,7 +380,7 @@ class SizeMap:
 
         self._values.update(allocations)
 
-    def _update_values(self, t: Optional[_TensorMetadata]) -> None:
+    def _update_values(self, t: _TensorMetadata | None) -> None:
         key = TensorKey.from_tensor(t)
         if key is not None and t is not None and t.layout == torch.strided:
             # Scalars are represented as zero dim Tensors
@@ -384,7 +389,8 @@ class SizeMap:
             )
 
             num_bytes = n * _element_size(t.dtype)
-            assert num_bytes >= 0, f"{num_bytes}"
+            if num_bytes < 0:
+                raise AssertionError(f"num_bytes must be non-negative, got {num_bytes}")
             self._values[key] = max(self._values.get(key, 0), num_bytes)
 
     @staticmethod
@@ -401,8 +407,8 @@ class SizeMap:
 
 @dataclasses.dataclass()
 class DataFlowEdge:
-    input_version: Optional[int] = None
-    mutated: Optional[bool] = False
+    input_version: int | None = None
+    mutated: bool | None = False
 
     @property
     def is_allocation(self) -> bool:
@@ -425,13 +431,14 @@ class DataFlowNode:
 
         # Make sure the version bumping behavior matches what we expect.
         versions = {k: (v, self._graph.lookup(k)) for k, v in self.outputs.items()}
-        assert all(i == j for i, j in versions.values()), f"{versions}, {self._edges}"
+        if not all(i == j for i, j in versions.values()):
+            raise AssertionError(f"version mismatch: {versions}, {self._edges}")
 
     def _determine_edges(self) -> dict[TensorKey, DataFlowEdge]:
         subtree = tuple(_utils.traverse_dfs([self._event]))
 
         # Start by populating edges from op inputs and outputs.
-        mutable_by_key: dict[Optional[TensorKey], set[Optional[bool]]] = {}
+        mutable_by_key: dict[TensorKey | None, set[bool | None]] = {}
         for op in (i.typed[1] for i in subtree if i.typed[0] == _EventType.TorchOp):
             for op_input, mutable in zip(
                 op.inputs, SchemaMatcher.inputs_are_mutable(op), strict=True
@@ -447,7 +454,7 @@ class DataFlowNode:
                         key = TensorKey.from_tensor(op_input_i)
                         mutable_by_key.setdefault(key, set()).add(mutable)
 
-        edges: collections.defaultdict[Optional[TensorKey], DataFlowEdge]
+        edges: collections.defaultdict[TensorKey | None, DataFlowEdge]
         edges = collections.defaultdict(DataFlowEdge)
         for key, mutable_set in mutable_by_key.items():
             if key is not None:
@@ -465,7 +472,8 @@ class DataFlowNode:
             if i.typed[0] == _EventType.Allocation and i.typed[1].alloc_size < 0:
                 key = TensorKey.from_allocation(i.typed[1])
                 edge = edges[key]
-                assert key is None or edge.mutated is not None, f"Double delete: {key}"
+                if key is not None and edge.mutated is None:
+                    raise AssertionError(f"Double delete: {key}")
                 edge.mutated = None
                 edge.input_version = self._graph.lookup(key) if key else -1
 
@@ -511,7 +519,7 @@ class DataFlowGraph:
     def __init__(self, op_tree: OpTree) -> None:
         self._op_tree = op_tree
         self._leaf_events = self._extract_leaf_events(op_tree)
-        self._active_version: dict[TensorKey, Optional[int]] = {}
+        self._active_version: dict[TensorKey, int | None] = {}
         self._flow_nodes = [DataFlowNode(e, self) for e in self.leaf_events]
         self._flow_nodes.sort(key=lambda x: x.start_time)
         self.validate()
@@ -526,7 +534,10 @@ class DataFlowGraph:
         for node in self.flow_nodes:
             node_outputs = set(node.outputs.items())
             duplicates = outputs & node_outputs
-            assert not duplicates, f"{node._event.name} {node._edges} {duplicates}"
+            if duplicates:
+                raise AssertionError(
+                    f"duplicate outputs: {node._event.name} {node._edges} {duplicates}"
+                )
             outputs |= node_outputs
 
         # And check that `self._nodes` forms a valid topologically sorted DAG.
@@ -534,11 +545,17 @@ class DataFlowGraph:
         for node in self.flow_nodes:
             for key, (_, version) in node.inputs.items():
                 expected = tensor_versions.get(key, 0)
-                assert expected == version, (expected, version)
+                if expected != version:
+                    raise AssertionError(
+                        f"version mismatch for input: expected {expected}, got {version}"
+                    )
 
             for key, version in node.outputs.items():
                 prior_version = tensor_versions.get(key, version)
-                assert version >= prior_version, (version, prior_version)
+                if version < prior_version:
+                    raise AssertionError(
+                        f"version regression: {version} < {prior_version}"
+                    )
                 tensor_versions[key] = version
 
     @property
@@ -600,22 +617,25 @@ class DataFlowGraph:
 
     def lookup(self, key: TensorKey) -> int:
         version = self._active_version.setdefault(key, 0)
-        assert version is not None
+        if version is None:
+            raise AssertionError(f"version for key {key} is None")
         return version
 
     def bump(self, key: TensorKey) -> None:
         prior_version = self._active_version.get(key, None)
-        assert prior_version is not None
+        if prior_version is None:
+            raise AssertionError(f"prior_version for key {key} is None")
         self._active_version[key] = prior_version + 1
 
     def delete(self, key: TensorKey) -> None:
-        assert self._active_version.setdefault(key, 0) is not None
+        if self._active_version.setdefault(key, 0) is None:
+            raise AssertionError(f"cannot delete key {key}, already deleted")
         self._active_version[key] = None
 
 
 @dataclasses.dataclass
 class CategoryElement:
-    by_id: Optional[Category] = None
+    by_id: Category | None = None
     by_key: dict[TensorKey, Category] = dataclasses.field(default_factory=dict)
     by_version: dict[TensorAndID, Category] = dataclasses.field(default_factory=dict)
 
@@ -645,7 +665,7 @@ class CategoryDict:
     ) -> None:
         self._values[key.id].by_version.setdefault((key, version), category)
 
-    def get(self, key: Key, version: int) -> Optional[Category]:
+    def get(self, key: Key, version: int) -> Category | None:
         if isinstance(key, Key) and not isinstance(key, TensorKey):
             return None
         element = self._values[key.id]
@@ -724,7 +744,8 @@ class MemoryProfile:
                 elif edge.mutated:
                     t = node._event.start_time_ns
                     version = edge.input_version
-                    assert version is not None
+                    if version is None:
+                        raise AssertionError(f"input_version is None for key {key}")
                     events.append((t, Action.INCREMENT_VERSION, (key, version)))
 
                 if edge.is_deletion:
@@ -742,7 +763,7 @@ class MemoryProfile:
     def _is_gradient(self, *args, **kwargs) -> bool:
         return self._categories.get(*args, **kwargs) == Category.GRADIENT
 
-    def _category_snapshot(self) -> dict[TensorAndID, Optional[Category]]:
+    def _category_snapshot(self) -> dict[TensorAndID, Category | None]:
         all_tensor_versions: set[TensorAndID] = set()
 
         for node in self._data_flow_graph.flow_nodes:
@@ -1152,7 +1173,6 @@ class MemoryProfileTimeline:
             return
 
         from base64 import b64encode
-        from os import remove
         from tempfile import NamedTemporaryFile
 
         import matplotlib.pyplot as plt
@@ -1190,12 +1210,13 @@ class MemoryProfileTimeline:
         axes.set_title(title)
 
         # Embed the memory timeline image into the HTML file
-        tmpfile = NamedTemporaryFile("wb", suffix=".png", delete=False)
-        tmpfile.close()
-        fig.savefig(tmpfile.name, format="png")
+        with NamedTemporaryFile("wb", suffix=".png") as tmpfile:
+            fig.savefig(tmpfile, format="png")
 
-        with open(tmpfile.name, "rb") as tmp:
-            encoded = b64encode(tmp.read()).decode("utf-8")
+            tmpfile.seek(0, 0)
+            encoded = b64encode(tmpfile.read()).decode("utf-8")
+            if not encoded:
+                raise AssertionError("failed to encode image as base64")
             html = f"""<html>
 <head><meta charset="utf-8" /><title>GPU Memory Timeline HTML</title></head>
 <body>
@@ -1203,6 +1224,5 @@ class MemoryProfileTimeline:
 </body>
 </html>"""
 
-            with open(path, "w") as f:
+            with open(path, "w", encoding="utf-8") as f:
                 f.write(html)
-        remove(tmpfile.name)

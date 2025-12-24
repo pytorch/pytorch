@@ -634,17 +634,21 @@ def mirror_inductor_external_kernels() -> None:
     """
     Copy external kernels into Inductor so they are importable.
     """
+    cuda_is_disabled = not str2bool(os.getenv("USE_CUDA"))
     paths = [
         (
             CWD / "torch/_inductor/kernel/vendored_templates/cutedsl_grouped_gemm.py",
             CWD
             / "third_party/cutlass/examples/python/CuTeDSL/blackwell/grouped_gemm.py",
+            True,
         ),
     ]
-    for new_path, orig_path in paths:
+    for new_path, orig_path, allow_missing_if_cuda_is_disabled in paths:
         # Create the dirs involved in new_path if they don't exist
         if not new_path.exists():
             new_path.parent.mkdir(parents=True, exist_ok=True)
+            # Add `__init__.py` for find_packages to see `new_path.parent` as a submodule
+            (new_path.parent / "__init__.py").touch(exist_ok=True)
 
         # Copy the files from the orig location to the new location
         if orig_path.is_file():
@@ -655,6 +659,12 @@ def mirror_inductor_external_kernels() -> None:
                 # copytree fails if the tree exists already, so remove it.
                 shutil.rmtree(new_path)
             shutil.copytree(orig_path, new_path)
+            continue
+        if (
+            not orig_path.exists()
+            and allow_missing_if_cuda_is_disabled
+            and cuda_is_disabled
+        ):
             continue
         raise RuntimeError(
             "Check the file paths in `mirror_inductor_external_kernels()`"
@@ -1089,6 +1099,60 @@ def check_pydep(importname: str, module: str) -> None:
 
 
 class build_ext(setuptools.command.build_ext.build_ext):
+    def _wrap_headers_with_macro(self, include_dir: Path) -> None:
+        """Wrap all header files with #if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION).
+
+        Excludes:
+        - torch/headeronly/*
+        - torch/csrc/stable/*
+        - torch/csrc/inductor/aoti_torch/c/ (only shim headers)
+        - torch/csrc/inductor/aoti_torch/generated/
+
+        This method is idempotent - it will not wrap headers that are already wrapped.
+        """
+        header_extensions = (".h", ".hpp", ".cuh")
+        header_files = [
+            f for ext in header_extensions for f in include_dir.rglob(f"*{ext}")
+        ]
+
+        # Paths to exclude from wrapping (relative to include_dir)
+        exclude_dir_patterns = [
+            "torch/headeronly/",
+            "torch/csrc/stable/",
+            "torch/csrc/inductor/aoti_torch/c/",
+            "torch/csrc/inductor/aoti_torch/generated/",
+        ]
+
+        # Marker to detect if a header is already wrapped
+        wrap_start_marker = (
+            "#if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
+        )
+
+        for header_file in header_files:
+            rel_path = header_file.relative_to(include_dir).as_posix()
+
+            if any(rel_path.startswith(pattern) for pattern in exclude_dir_patterns):
+                report(f"Skipping header: {rel_path}")
+                continue
+
+            original_content = header_file.read_text(encoding="utf-8")
+
+            # Check if already wrapped (idempotency check)
+            if original_content.startswith(wrap_start_marker):
+                report(f"Already wrapped, skipping: {rel_path}")
+                continue
+
+            wrapped_content = (
+                wrap_start_marker
+                + f"{original_content}"
+                + "\n#else\n"
+                + '#error "This file should not be included when either TORCH_STABLE_ONLY or TORCH_TARGET_VERSION is defined."\n'
+                + "#endif  // !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)\n"
+            )
+
+            header_file.write_text(wrapped_content, encoding="utf-8")
+            report(f"Wrapped header: {rel_path}")
+
     def _embed_libomp(self) -> None:
         # Copy libiomp5.dylib/libomp.dylib inside the wheel package on MacOS
         build_lib = Path(self.build_lib)
@@ -1255,6 +1319,15 @@ class build_ext(setuptools.command.build_ext.build_ext):
             report("-- Not using ITT")
 
         super().run()
+
+        # Wrap headers with TORCH_STABLE_ONLY and TORCH_TARGET_VERSION guards
+        build_lib = Path(self.build_lib)
+        build_torch_include_dir = build_lib / "torch" / "include"
+        if build_torch_include_dir.exists():
+            report(
+                "-- Wrapping header files with if !defined(TORCH_STABLE_ONLY) && !defined(TORCH_TARGET_VERSION)"
+            )
+            self._wrap_headers_with_macro(build_torch_include_dir)
 
         if IS_DARWIN:
             self._embed_libomp()

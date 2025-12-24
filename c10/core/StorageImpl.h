@@ -105,11 +105,11 @@ struct C10_API StorageImpl : public c10::intrusive_ptr_target {
     data_ptr_.clear();
   }
 
-  void incref_pyobject() const override final;
+  void incref_pyobject() const noexcept final;
 
-  void decref_pyobject() const override final;
+  void decref_pyobject() const noexcept final;
 
-  bool try_incref_pyobject() const override final;
+  bool try_incref_pyobject() const noexcept final;
 
   size_t nbytes() const {
     // OK to do this instead of maybe_as_int as nbytes is guaranteed positive
