@@ -992,6 +992,131 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
+    def test_triton_op_local_variable_kernel_detection(self):
+        """
+        Test that triton kernels passed via local variables are properly detected.
+
+        This tests the pattern:
+            kernel_fn = _my_kernel  # global
+            wrapped = wrapper(kernel_fn)
+            capture_triton(wrapped)[grid](...)
+
+        The local variable tracing in get_inner_triton_kernels should trace
+        through the assignments to find the original JITFunction.
+        """
+        from torch._library import capture_triton
+        from torch._library.triton import triton_ops_to_kernels
+
+        @triton.jit
+        def inner_kernel(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(x_ptr + offsets, x + 42, mask=mask)
+
+        def identity_wrapper(kernel):
+            # simulate a wrapper function (like unroll_varargs in GDPA)
+            # that takes a kernel as argument and returns it
+            return kernel
+
+        @torch._library.triton_op("test::local_var_triton_op", mutates_args=())
+        def local_var_triton_op(x: torch.Tensor) -> torch.Tensor:
+            y = x.clone()
+            n_elements = y.numel()
+            # this is the GDPA pattern:
+            # 1. Assign global kernel to local variable
+            # 2. Pass it through wrapper functions
+            # 3. Use the wrapped result with capture_triton
+            kernel_fn = inner_kernel  # Direct assignment from global
+            wrapped_kernel = identity_wrapper(kernel_fn)  # Wrapper call
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            capture_triton(wrapped_kernel)[grid](y, n_elements, BLOCK_SIZE=256)
+            return y
+
+        kernels = triton_ops_to_kernels.get("test::local_var_triton_op", [])
+        self.assertGreater(
+            len(kernels),
+            0,
+            "Local variable tracing should detect the kernel",
+        )
+
+        kernel_names = [getattr(k, "__name__", str(k)) for k in kernels]
+        self.assertIn(
+            "inner_kernel",
+            kernel_names,
+            f"inner_kernel should be detected, got: {kernel_names}",
+        )
+
+        a = torch.randn(5, device=GPU_TYPE)
+        expected = a.clone() + 42
+        result = torch.ops.test.local_var_triton_op(a)
+        self.assertEqual(result, expected)
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_triton_op_local_variable_cache_invalidation(self):
+        """
+        Test that cache properly invalidates when a kernel passed via local
+        variable changes.
+        """
+        from torch._library import capture_triton
+
+        @triton.jit
+        def versioned_kernel(x):
+            arg_0 = tl.load(x)
+            tl.store(x, arg_0 + 1)
+
+        @torch._library.triton_op("test::local_var_cache_test", mutates_args=())
+        def local_var_cache_op(x: torch.Tensor) -> torch.Tensor:
+            y = x.clone().detach_().requires_grad_(True)
+            kernel = versioned_kernel  # local assignment
+            capture_triton(kernel)[1,](y)
+            return y
+
+        def fn(a):
+            return torch.ops.test.local_var_cache_test(a)
+
+        a = torch.randn(5, device=GPU_TYPE)
+        a2 = a.clone().detach_()
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(a)
+        self.assertEqual(fn(a), result)
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        self._clear_dynamo_and_codecache()
+
+        # redef the kernel with different behavior
+        @triton.jit
+        def versioned_kernel(x):  # noqa: F811
+            arg_0 = tl.load(x)
+            tl.store(x, arg_0 + 2)
+
+        @torch._library.triton_op("test::local_var_cache_test", mutates_args=())
+        def local_var_cache_op(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+            y = x.clone().detach_().requires_grad_(True)
+            kernel = versioned_kernel  # local assignment
+            capture_triton(kernel)[1,](y)
+            return y
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(a2)
+
+        # Should be a cache miss due to kernel source change
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        self.assertEqual(fn(a2), result)
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     @unittest.expectedFailure  # Currently ops that call other ops does not properly invalidate cache
     def test_triton_op_cache_multiple_ops_invalidation(self):
         @triton.jit
