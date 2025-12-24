@@ -6761,11 +6761,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         torch._dynamo.mark_dynamic(x, 0)
         torch._dynamo.mark_dynamic(x, 1)
         post_grad_graph = get_post_grad_graph(f, (x,))
+        device_str = "hip" if TEST_WITH_ROCM else "cuda"
+        if self.device == "cpu":
+            device_str = "cpu"
         expected_graph = f"""\
-def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27, 2][2*s27, 2, 1]{str(x.device)}"):
-        add: "f32[s77, s27, 2][2*s27, 2, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
-        slice_1: "f32[s77, s27, 1][2*s27, 2, 1]{str(x.device)}" = torch.ops.aten.slice.Tensor(add, -1, 0, -1);  add = None
-        add_9: "f32[s77, s27, 1][s27, 1, 1]{str(x.device)}" = torch.ops.aten.add.Tensor(slice_1, 1);  slice_1 = None
+def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "f32[s77, s27, 2][2*s27, 2, 1]{device_str}"):
+        add: "f32[s77, s27, 2][2*s27, 2, 1]{device_str}" = torch.ops.aten.add.Tensor(arg2_1, 1);  arg2_1 = None
+        slice_1: "f32[s77, s27, 1][2*s27, 2, 1]{device_str}" = torch.ops.aten.slice.Tensor(add, -1, 0, -1);  add = None
+        add_9: "f32[s77, s27, 1][s27, 1, 1]{device_str}" = torch.ops.aten.add.Tensor(slice_1, 1);  slice_1 = None
         return (add_9,)"""  # noqa: B950
         self.assertExpectedInline(
             post_grad_graph,
