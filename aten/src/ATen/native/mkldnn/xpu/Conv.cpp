@@ -614,9 +614,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
   auto mfmt = is_channels_last_suggested
       ? get_cl_tag_by_ndim(input_.ndimension())
       : at::MemoryFormat::Contiguous;
-
   grad_output_ = grad_output_.contiguous(mfmt);
-
   if (!is_stride_decrease_order(grad_output_))
     grad_output_ = grad_output_.to(mfmt);
 
