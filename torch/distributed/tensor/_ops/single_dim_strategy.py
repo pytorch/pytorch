@@ -1,6 +1,7 @@
 #  Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 from collections.abc import Callable, Sequence
+from functools import lru_cache
 from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
@@ -180,6 +181,7 @@ def _expand_single_dim_strategy_to_mesh(
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
+    @lru_cache
     def _create_expanded_strategy(
         op_schema: OpSchema,
         output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
@@ -299,7 +301,6 @@ def _expand_single_dim_strategy_to_mesh(
                 output_tensor_meta,  # type: ignore[arg-type]
                 tensorlist_i,
             )
-            # TODO: enrich OpSchema._comparison_key so we can lru_cache this (for starters, it doesn't include placements)
             per_index_strategy = _create_expanded_strategy(
                 per_index_schema, per_index_output_meta
             )
