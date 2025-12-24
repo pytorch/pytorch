@@ -92,9 +92,19 @@ def _compile_submod(gm, prefix):
                         f"Available config keys can be found in torch._inductor.config"
                     )
 
+            # Try to use the existing tracing context if available, otherwise
+            # fall back to extracting the FakeTensorMode from the graph itself.
+            # The latter is needed for cross-compilation flows that don't have
+            # an active TracingContext.
+            try:
+                torch._guards.TracingContext.get()
+                dynamic_shapes = "from_tracing_context"
+            except RuntimeError:
+                dynamic_shapes = "from_graph"
+
             with inductor_config.patch(inductor_options):
                 compiled_fn = torch._inductor.standalone_compile(
-                    submod, fake_inputs, dynamic_shapes="from_tracing_context", aot=True
+                    submod, fake_inputs, dynamic_shapes=dynamic_shapes, aot=True
                 )
             assert isinstance(compiled_fn, AOTCompiledArtifact)
             # _dummy_wrapper is to make call_function happy

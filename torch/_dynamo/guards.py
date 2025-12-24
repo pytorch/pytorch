@@ -2899,6 +2899,10 @@ class GuardBuilder(GuardBuilderBase):
             if isinstance(value, torch._subclasses.FakeTensor):
                 if value.pytype is not None:
                     pytype = value.pytype
+                elif torch._dynamo.config.enable_aot_compile:
+                    # Default to torch.Tensor when aot precompiling to add cross-compilation support.
+                    # When precompiling with fake tensors, we expect real tensors at runtime.
+                    pytype = torch.Tensor
                 if value.dispatch_keys is not None:
                     dispatch_keys = value.dispatch_keys
 
@@ -3471,7 +3475,11 @@ class GuardsStatePickler(pickle.Pickler):
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
-                type(obj),
+                # For FakeTensors, use the expected runtime type (torch.Tensor)
+                # rather than the compile-time type (FakeTensor) for cross-compilation support.
+                obj.pytype if isinstance(obj, torch._subclasses.FakeTensor) and obj.pytype is not None else (
+                    torch.Tensor if isinstance(obj, torch._subclasses.FakeTensor) else type(obj)
+                ),
                 torch._C._dispatch_keys(obj).raw_repr(),
                 obj.grad,
             )
