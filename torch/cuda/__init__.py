@@ -1000,6 +1000,7 @@ def _transform_uuid_to_ordinals(candidates: list[str], uuids: list[str]) -> list
             candidate = candidate.replace(
                 "GPU-", "", 1
             )  # Remove GPU-prefix to match amdsmi asic serial
+            candidate = candidate.lower()
         idx = uuid_to_ordinal(candidate, uuids)
         # First invalid ordinal stops parsing
         if idx < 0:

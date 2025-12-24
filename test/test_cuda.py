@@ -4995,10 +4995,18 @@ print(f"{torch.cuda.device_count()}")
         custom_envs = []
         for uuid in uuids:
             custom_envs.append(
-                {"CUDA_VISIBLE_DEVICES": f"{uuid}", "HIP_VISIBLE_DEVICES": None}
+                {
+                    "CUDA_VISIBLE_DEVICES": f"{uuid}",
+                    "HIP_VISIBLE_DEVICES": None,
+                    "ROCR_VISIBLE_DEVICES": None,
+                }
             )
             custom_envs.append(
-                {"HIP_VISIBLE_DEVICES": f"{uuid}", "CUDA_VISIBLE_DEVICES": None}
+                {
+                    "HIP_VISIBLE_DEVICES": f"{uuid}",
+                    "CUDA_VISIBLE_DEVICES": None,
+                    "ROCR_VISIBLE_DEVICES": None,
+                }
             )
 
         for env_config in custom_envs:
