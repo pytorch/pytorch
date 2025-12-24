@@ -48,7 +48,22 @@ flash_attention_backward_cutedsl_template = CuteDSLTemplate(
 
 
 class HierarchicalIndex(sympy.Function):
-    """Preserve multi-dimensional indices for CuteDSL indexing."""
+    """
+    Inert wrapper to carry an N-D index tuple through Inductor's SymPy-based IR.
+
+    Inductor generally represents a tensor index as a single `sympy.Expr` (often a
+    flattened linear offset in memory). CuteDSL, however, wants structured coordinates so it
+    can emit `tensor[i, j, ...]` and handle strides internally. We therefore wrap
+    the per-dimension indices in a `sympy.Function` node: this keeps the value a
+    `sympy.Expr` for existing substitution/CSE machinery, while letting CuteDSL
+    codegen pattern-match and unpack the coordinates via `index.args`.
+
+    `eval()` returns None to keep the node inert (no simplification/flattening).
+
+    These nodes are intended to be short-lived wrappers and are only interpreted by
+    CuteDSL codegen (see `ModificationWrapperCuteDSL.load` in
+    `torch/_inductor/codegen/cutedsl/cutedsl_kernel.py`).
+    """
 
     @classmethod
     def eval(cls, *args):
