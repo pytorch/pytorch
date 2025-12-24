@@ -65,6 +65,7 @@ void XPUGraph::capture_begin(MempoolId_t pool) {
   }
 
   c10::xpu::XPUCachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, [this](sycl::queue* queue) {
+    // Compare queue pointers rather than queue objects to avoid expensive queue comparison operations.
     return queue->ext_oneapi_get_state() == queue_state::recording && queue == &capture_stream_.queue();
   });
 
