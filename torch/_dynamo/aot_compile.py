@@ -60,34 +60,24 @@ class CompileArtifacts:
 
 
 class AOTCompilePickler(pickle.Pickler):
-    def __init__(self, *args: Any, **kwargs: Any) -> None:
+    def __init__(
+        self, external_data: dict[str, Any], *args: Any, **kwargs: Any
+    ) -> None:
         super().__init__(*args, **kwargs)
-        self.external_data = {}
-        self.key_map = {}
-        self.prefix_counters = {}
-
-    def generate_key(self, prefix: str) -> str:
-        ret = f"{prefix}:{self.prefix_counters.setdefault(prefix, 0)}"
-        self.prefix_counters[prefix] += 1
-        return ret
+        self.external_data = external_data
+        self.id_map: dict[int, str] = {
+            id(value): key for key, value in external_data.items()
+        }
+        self.errors = {}
 
     def persistent_id(self, obj):
-        key = None
-        if id(obj) in self.key_map:
-            return self.key_map[id(obj)]
-
-        if isinstance(obj, torch.nn.Module):
-            ty = type(obj)
-            key = self.generate_key(
-                f"torch_nn_module:{ty.__module__}.{ty.__qualname__}"
-            )
-        elif inspect.isfunction(obj) and obj.__name__ != obj.__qualname__:
-            key = self.generate_key(f"function:{obj.__qualname__}")
-
-        if key is not None:
-            self.external_data[key] = obj
-            self.key_map[id(obj)] = key
-        return key
+        if id(obj) in self.id_map:
+            return self.id_map[id(obj)]
+        elif isinstance(obj, torch.nn.Module):
+            self.errors[id(obj)] = obj
+            return id(obj)
+        else:
+            return None
 
     @classmethod
     def _unpickle_cell(cls, val: Any) -> Any:
@@ -105,10 +95,28 @@ class AOTCompilePickler(pickle.Pickler):
     def _unpickle_module(cls, name: str) -> Any:
         return importlib.import_module(name)
 
+    @classmethod
+    def _unpickle_code(cls, serialized_code):
+        from torch._dynamo.package import SerializedCode
+
+        return SerializedCode.to_code_object(serialized_code)
+
+    @classmethod
+    def _unpickle_nested_function(
+        cls, code, module: str, qualname: str, argdefs, closure
+    ) -> Any:
+        f_globals = importlib.import_module(module).__dict__
+        return types.FunctionType(code, f_globals, qualname, argdefs, closure)
+
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
         if isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
             return type(self)._unpickle_cell, (obj.cell_contents,)
+        elif inspect.iscode(obj):
+            from torch._dynamo.package import SerializedCode
+
+            return type(self)._unpickle_code, (SerializedCode.from_code_object(obj),)
+
         elif inspect.ismodule(obj):
             return type(self)._unpickle_module, (obj.__name__,)
         elif inspect.ismethod(obj):
@@ -125,6 +133,15 @@ class AOTCompilePickler(pickle.Pickler):
                 inner_func = inner_func.__func__
             if func is not inner_func:
                 return type(self)._unpickle_bound_method, (func, method_self)
+        elif inspect.isfunction(obj):
+            if obj.__code__.co_flags & inspect.CO_NESTED:
+                return type(self)._unpickle_nested_function, (
+                    obj.__code__,
+                    obj.__module__,
+                    obj.__qualname__,
+                    obj.__defaults__,
+                    obj.__closure__,
+                )
 
         return NotImplemented
 
@@ -148,7 +165,6 @@ class AOTCompileUnpickler(pickle.Unpickler):
 @dataclass
 class AOTCompileSaveResult:
     serialized_data: bytes
-    external_data: dict[str, Any]
 
 
 @dataclass
@@ -207,14 +223,18 @@ class AOTCompiledFunction:
     def source_info(self) -> "SourceInfo":
         return self._artifacts.source_info
 
-    def save_compiled_function(self, path: str) -> AOTCompileSaveResult:
+    def save_compiled_function(
+        self, path: str, external_data: dict[str, Any] | None = None
+    ) -> AOTCompileSaveResult:
         with open(path, "wb") as f:
-            result = type(self).serialize(self)
+            result = type(self).serialize(self, external_data)
             f.write(result.serialized_data)
             return result
 
     @classmethod
-    def serialize(cls, fn: "AOTCompiledFunction") -> AOTCompileSaveResult:
+    def serialize(
+        cls, fn: "AOTCompiledFunction", external_data: dict[str, Any] | None = None
+    ) -> AOTCompileSaveResult:
         from torch._dynamo.package import SerializedCode
 
         state = fn._artifacts.__dict__.copy()
@@ -230,12 +250,14 @@ class AOTCompiledFunction:
         )
         state["original_code"] = SerializedCode.from_code_object(state["original_code"])
         buf = io.BytesIO()
-        pickler = AOTCompilePickler(buf)
+        pickler = AOTCompilePickler(external_data or {}, buf)
         pickler.dump(state)
-        return AOTCompileSaveResult(
-            serialized_data=buf.getvalue(),
-            external_data=pickler.external_data,
-        )
+        if pickler.errors:
+            raise RuntimeError(
+                f"Failed to serialize the following objects: {list(pickler.errors.values())}\n"
+                "Please mark these as external data by using `external_data={'key': ...}`"
+            )
+        return AOTCompileSaveResult(serialized_data=buf.getvalue())
 
     @classmethod
     def deserialize(
