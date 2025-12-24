@@ -3434,7 +3434,10 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         has_read_deps = True
         if config.triton.skip_l1_cache:
             buffer_read_counts = self.features.buffer_read_counts()
-            has_read_deps = buffer_read_counts[name] > 1
+            # Graph inputs, primals_*, arg*_* would not be tracked by `buffer_read_counts`
+            # and it'd be fair to expect them to be reused.
+            if name in buffer_read_counts:
+                has_read_deps = buffer_read_counts[name] > 1
         """Skip L1 cache if we're (pretty?) sure the data is used only once
         """
         skip_l1_cache = (

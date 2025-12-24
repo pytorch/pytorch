@@ -15748,6 +15748,45 @@ if RUN_GPU:
     tmp1 = tl.load(in_ptr1 + (x0), xmask, cache_modifier='.cg')""",
             )
 
+        @config.patch("triton.skip_l1_cache", True)
+        def test_skip_l1_cache_buf_read_counts_guard(self):
+            from torch._inductor.codegen import simd_kernel_features
+
+            class M(nn.Module):
+                def __init__(self, n: int):
+                    super().__init__()
+                    # nn.Parameter ensures we exercise the primals_* path.
+                    # We move the module to GPU later, so we don't need to
+                    # specify the device here.
+                    self.weight = nn.Parameter(torch.randn(n))
+
+                def forward(self, x: torch.Tensor) -> torch.Tensor:
+                    return x * self.weight
+
+            N = 512
+            m = torch.compile(M(N).to(device=GPU_TYPE))
+            x = torch.randn(N, device=GPU_TYPE)
+
+            # Monkeypatch SIMDKernelFeatures.buffer_read_counts to
+            # simulate missing entries for all buffers (including primals_*).
+            orig = simd_kernel_features.SIMDKernelFeatures.buffer_read_counts
+
+            def fake_buffer_read_counts(self_inner):
+                return {}
+
+            simd_kernel_features.SIMDKernelFeatures.buffer_read_counts = (
+                fake_buffer_read_counts
+            )
+            try:
+                # This used to raise InductorError(KeyError('primals_X'))
+                # when load() unconditionally indexed buffer_read_counts[name].
+                # With the fix, we should successfully generate Triton code.
+                code = run_and_get_triton_code(m, x)
+                lines = [line for line in code.split("\n") if "tl.load" in line]
+                self.assertTrue(lines)
+            finally:
+                simd_kernel_features.SIMDKernelFeatures.buffer_read_counts = orig
+
         @config.patch("triton.use_block_ptr", True)
         @config.patch("triton.coalesce_tiling_analysis", False)
         def test_evict_last_non_coalesced_loads_block_ptr(self):
