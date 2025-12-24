@@ -102,7 +102,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
                 cond = cond and (torch.device(kwargs["device"]).type == "xpu")
             if "dtype" in kwargs:
                 cond = cond and (
-                    kwargs["dtype"] in {torch.float32}
+                    kwargs["dtype"] == torch.float32
                 )  # TODO: add complex64
             if cond:
                 with_tf32_disabled(kwargs["self"], lambda: f(**kwargs))
