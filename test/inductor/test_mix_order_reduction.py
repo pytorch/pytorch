@@ -1,5 +1,7 @@
 # Owner(s): ["module: inductor"]
 
+import unittest
+
 import torch
 import torch._inductor.config as inductor_config
 import torch.nn.functional as F
@@ -12,6 +14,7 @@ from torch.testing._internal.common_utils import (
     isRocmArchAnyOf,
     MI200_ARCH,
     parametrize,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
@@ -171,6 +174,9 @@ class MixOrderReductionTest(TestBase):
         self.check_numeric(f, (x,))
         self.assertEqual(metrics.codegen_mix_order_reduction, 1)
 
+    # TODO: Investigate numerical precision issues on ROCm for this test
+    # See https://github.com/pytorch/pytorch/issues/167324
+    @unittest.skipIf(TEST_WITH_ROCM, "Skipping due to numerical precision issues on ROCm")
     @inductor_config.patch(unroll_reductions_threshold=1)
     def test_3layer_split_reduction(self):
         """
