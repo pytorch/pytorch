@@ -40,6 +40,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -332,6 +333,9 @@ class TestPatternMatcher(TestCase):
                 "triton_tem" if not extern_mm else "extern_kernels.mm"
             ).run(code)
 
+    # ROCm: Skip due to mixed-precision int8/uint8 matmul differences
+    # See https://github.com/pytorch/pytorch/issues/145192
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm: mixed-precision int8 matmul not supported")
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
@@ -394,6 +398,9 @@ class TestPatternMatcher(TestCase):
             )
             self._test_mixed_impl(fn, args, True, False, rtol=0.16, atol=1e-4)
 
+    # ROCm: Skip due to mixed-precision int8/uint8 matmul differences
+    # See https://github.com/pytorch/pytorch/issues/128487
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm: mixed-precision int8 matmul not supported")
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
