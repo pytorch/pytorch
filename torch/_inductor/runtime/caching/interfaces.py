@@ -266,6 +266,8 @@ class Memoizer(_BaseMemoizer):
         # Register atexit handler to dump cache on program exit
         if config.IS_DUMP_MEMOIZER_CACHE_ENABLED():
             atexit.register(self._dump_to_disk)
+        # Pre-populate cache from dump file if configured (with sub_key now set)
+        self._maybe_prepopulate_from_dump()
 
     @functools.cached_property
     def _shared_cache_filepath(self) -> Path:
@@ -285,16 +287,21 @@ class Memoizer(_BaseMemoizer):
         """
         return Path(cache_dir()) / "memoizer_cache.lock"
 
-    def _read_dump_from_disk(self) -> CacheDump | None:
-        """Read the cache dump from disk.
+    def _read_dump_from_disk(self, filepath: Path | None = None) -> CacheDump | None:
+        """Read a cache dump from disk.
 
-        Attempts to read and parse the shared cache JSON file.
+        Attempts to read and parse a cache JSON file.
+
+        Args:
+            filepath: Path to the dump file to read. If None, uses the
+                     shared cache filepath (self._shared_cache_filepath).
 
         Returns:
             The cache dump if the file exists and is valid JSON, None otherwise.
         """
+        target_path = filepath if filepath is not None else self._shared_cache_filepath
         try:
-            with open(self._shared_cache_filepath) as f:
+            with open(target_path) as f:
                 data = json.load(f)
                 return cast(CacheDump, data)
         except FileNotFoundError:
@@ -421,6 +428,90 @@ class Memoizer(_BaseMemoizer):
             existing_dump = self._read_dump_from_disk()
             dump = self._prepare_dump(existing_dump)
             self._write_dump_to_disk(dump)
+
+    def _maybe_prepopulate_from_dump(self) -> None:
+        """Pre-populate cache entries from a dump file if configured.
+
+        Checks the CACHE_DUMP_FILE_PATH config option for a path to a JSON dump file
+        produced by IS_DUMP_MEMOIZER_CACHE_ENABLED. If a valid path is provided and
+        the file exists, loads cache entries from it into the in-memory cache.
+
+        For Memoizer instances without a sub_key, loads entries from the root cache_entries.
+        For Memoizer instances with a sub_key, loads entries from cache_entries[sub_key].
+
+        This method is called during __init__ to pre-populate the cache.
+        """
+        dump_file_path = config.CACHE_DUMP_FILE_PATH()
+
+        # Skip if no dump file configured
+        if not dump_file_path:
+            return
+
+        # Read the dump file using the helper method
+        dump = self._read_dump_from_disk(Path(dump_file_path))
+        if dump is None:
+            return
+
+        # Extract entries to load from the dump
+        entries_to_load = self._extract_entries_from_dump(dump)
+        if not entries_to_load:
+            return
+
+        # Populate the cache
+        self._populate_cache_from_entries(entries_to_load)
+
+        # Log the result
+        if self._sub_key:
+            logger.log(
+                logging.INFO,
+                "Loaded %d cache entries from %s (sub_key=%s)",
+                len(entries_to_load),
+                dump_file_path,
+                self._sub_key,
+            )
+        else:
+            logger.log(
+                logging.INFO,
+                "Loaded %d cache entries from %s",
+                len(entries_to_load),
+                dump_file_path,
+            )
+
+    def _extract_entries_from_dump(self, dump: CacheDump) -> dict[str, CacheDumpEntry]:
+        """Extract cache entries from a dump based on sub_key.
+
+        Args:
+            dump: The cache dump to extract entries from.
+
+        Returns:
+            Dictionary of cache entries to load.
+        """
+        cache_entries = dump.get("cache_entries", {})
+
+        if self._sub_key:
+            # Load from nested structure
+            entries = cache_entries.get(self._sub_key, {})
+            return cast(dict[str, CacheDumpEntry], entries)
+        else:
+            # Load from root level (but skip any nested structures)
+            return {
+                k: cast(CacheDumpEntry, v)
+                for k, v in cache_entries.items()
+                if isinstance(v, dict) and "params" in v and "result" in v
+            }
+
+    def _populate_cache_from_entries(self, entries: dict[str, CacheDumpEntry]) -> None:
+        """Populate the in-memory cache from dump entries.
+
+        Args:
+            entries: Dictionary of cache entries to load.
+        """
+        for key, entry in entries.items():
+            cache_entry = CacheEntry(
+                encoded_params=entry["params"],
+                encoded_result=entry["result"],
+            )
+            self._cache.insert(key, cache_entry)
 
     def record(
         self,
