@@ -5323,7 +5323,7 @@ def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
         mask = torch.empty_like(duplicate_mask)
         mask = mask.index_copy(0, sorted_order, duplicate_mask)
 
-        return mask[0 : elements.numel()]
+        return mask[0 : elements.numel()].reshape(elements.shape)
     else:
         sorted_test_elements, _ = torch.sort(test_elements_flat)
         idx = torch.searchsorted(sorted_test_elements, elements_flat)
@@ -5331,7 +5331,6 @@ def isin_sorting(elements, test_elements, *, assume_unique=False, invert=False):
         cmp = sorted_test_elements[test_idx] == elements_flat
         cmp = cmp.logical_not() if invert else cmp
         return cmp.reshape(elements.shape)
-
 
 @register_decomposition(aten.take)
 @out_wrapper()
