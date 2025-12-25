@@ -2805,6 +2805,7 @@ from torch import fx as fx
 torch.backends.mps._init()
 
 from torch import compiler as compiler
+from torch.precompile import Precompile as Precompile
 
 
 class _TritonLibrary:
