@@ -562,7 +562,7 @@ def _view_has_unbacked_input(a, shape):
     )
 
 
-def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
+def _view_unbacked_meta(a, shape, size_oblivious_enabled=True, allow_copy=False):
     from torch._prims import view_of
     from torch.fx.experimental.symbolic_shapes import guard_or_false, sym_eq
 
@@ -625,7 +625,15 @@ def _view_unbacked_meta(a, shape, size_oblivious_enabled=True):
         torch.fx.experimental._config.backed_size_oblivious
         or _view_has_unbacked_input(a, shape)
     ):
-        return _view_unbacked_meta(a, shape, size_oblivious_enabled=False)
+        return _view_unbacked_meta(
+            a, shape, size_oblivious_enabled=False, allow_copy=allow_copy
+        )
+
+    # When allow_copy=True (i.e., view_copy), define unbacked semantics
+    # as "materialize": clone the input to break aliasing, then reshape.
+    if allow_copy:
+        strides = make_contiguous_strides_for(shape)
+        return a.clone(memory_format=torch.contiguous_format).as_strided(shape, strides)
 
     msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
     raise ValueError(msg)
@@ -648,18 +656,21 @@ def _reshape_copy(fake_mode, func, a, *shape):
 
 @register_op_impl(aten.view.default)
 @register_op_impl(aten._unsafe_view.default)
-def _view_meta(fake_mode, func, a, *shape):
+def _view_meta(fake_mode, func, a, *shape, allow_copy=False):
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
     ):
-        return _view_unbacked_meta(a, shape)
+        return _view_unbacked_meta(a, shape, allow_copy=allow_copy)
     else:
-        return torch._refs._reshape_view_helper(a, *shape, allow_copy=False)
+        return torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy)
 
 
 @register_op_impl(aten.view_copy.default)
 def _view_meta_copy(fake_mode, func, a, *shape, out=None):
-    result = _view_meta(fake_mode, func, a, *shape)
+    # view_copy is the non-aliasing counterpart of view. Eager may succeed on
+    # cases where a pure view is impossible (e.g. expand -> flatten) by
+    # materializing the result. Match eager by allowing copy-if-needed in meta.
+    result = _view_meta(fake_mode, func, a, *shape, allow_copy=True)
     if out is not None:
         return result
 
