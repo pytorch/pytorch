@@ -1881,9 +1881,8 @@ def _get_overridable_functions() -> tuple[
                         "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
                         "but still has an explicit override"
                     )
-                    assert func.__get__ not in get_testing_overrides(), msg.format(
-                        namespace, func.__name__
-                    )
+                    if func.__get__ in get_testing_overrides():
+                        raise AssertionError(msg.format(namespace, func.__name__))
                     continue
                 else:
                     overridable_funcs[func].append(func.__get__)
@@ -1903,9 +1902,8 @@ def _get_overridable_functions() -> tuple[
                     "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
                     "but still has an explicit override"
                 )
-                assert func not in get_testing_overrides(), msg.format(
-                    namespace, func.__name__
-                )
+                if func in get_testing_overrides():
+                    raise AssertionError(msg.format(namespace, func.__name__))
                 continue
             overridable_funcs[namespace].append(func)
     return overridable_funcs, index

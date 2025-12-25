@@ -1018,7 +1018,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if inspect.isclass(fn) and (
-            issubclass(fn, Exception)
+            issubclass(fn, BaseException)
             # GeneratorExit doesn't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
@@ -1597,6 +1597,15 @@ class BuiltinVariable(VariableTracker):
     def call_bool(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
+        if arg.is_tensor():
+            item = arg.call_method(tx, "item", [], {})
+            if isinstance(item, SymNodeVariable) and isinstance(
+                item.sym_num, torch.SymBool
+            ):
+                return item
+            if isinstance(item, variables.ConstantVariable):
+                return variables.ConstantVariable.create(bool(item.value))
+            return SymNodeVariable.create(tx, item.as_proxy() != 0)
         # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.
         # https://github.com/python/cpython/blob/3.12/Objects/object.c#L1674-L1697
         if isinstance(arg, SymNodeVariable):
@@ -1780,6 +1789,7 @@ class BuiltinVariable(VariableTracker):
                 for i in [a, b]
             ):
                 if any(isinstance(val, FakeItemVariable) for val in [a, b]):
+                    # type: ignore[arg-type]
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
                 if b.is_python_constant():
@@ -1797,7 +1807,9 @@ class BuiltinVariable(VariableTracker):
                     if isinstance(x, variables.UnspecializedPythonVariable)
                 )
                 return variables.UnspecializedPythonVariable.from_tensor_variable(
-                    result, raw_res, need_unwrap
+                    result,  # type: ignore[arg-type]
+                    raw_res,
+                    need_unwrap,
                 )
             # otherwise return tensor
             else:
@@ -2654,6 +2666,7 @@ class BuiltinVariable(VariableTracker):
                     ],
                 )
             if obj.is_tensor():
+                # pyrefly: ignore[missing-attribute]
                 fake_val = obj.as_proxy().node.meta["example_value"]
                 if (
                     isinstance(fake_val, torch.Tensor)
@@ -2723,6 +2736,7 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
+                variables.TracebackVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
