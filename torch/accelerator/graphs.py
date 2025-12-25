@@ -7,7 +7,7 @@ from torch._C import _acceleratorGraph
 
 
 class Graph(_acceleratorGraph):
-    r"""Wrapper around an accelerator graph.
+    r"""Wrapper around an :ref:`accelerator<accelerators>` graph that supports capture and replay.
 
     Arguments:
         keep_graph (bool, optional): If ``False``, the underlying graph is destroyed and the
@@ -16,9 +16,6 @@ class Graph(_acceleratorGraph):
             the executable graph is not instantiated automatically; it must be explicitly created
             by calling ``instantiate``, or it will be instantiated on the first call to ``replay``.
             Defaults to ``False``.
-
-    .. warning::
-        This API is experimental and may change in future release.
 
     Example::
 
