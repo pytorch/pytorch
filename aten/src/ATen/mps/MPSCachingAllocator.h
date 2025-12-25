@@ -2,6 +2,7 @@
 
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <c10/core/CachingDeviceAllocator.h>
+#include <memory>
 
 namespace at::mps {
 
@@ -52,7 +53,7 @@ class MPSCachingAllocator final : public IMPSAllocator {
 
  private:
   MPSCachingAllocator() = default;
-  static MPSCachingAllocator* allocator;
+  static std::unique_ptr<MPSCachingAllocator> allocator;
 };
 
 } // namespace at::mps
