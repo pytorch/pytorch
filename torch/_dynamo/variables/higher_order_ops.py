@@ -985,7 +985,6 @@ def validate_args_and_maybe_create_graph_inputs(
     description: str,
     sub_args_names: Sequence[str] | None = None,
 ) -> list[Any]:
-    from . import AutogradFunctionContextVariable
     from .builder import wrap_fx_proxy_cls
 
     assert tracer.parent is not None
@@ -1076,17 +1075,6 @@ def validate_args_and_maybe_create_graph_inputs(
                 tracer.create_graph_input(
                     arg_name, a.python_type(), a.as_python_constant()
                 )
-                new_arg = a
-            # Weird special case, we probably want to delete it or fold it
-            # into the next case (of `a` being placeable into a graph)
-            elif isinstance(a, AutogradFunctionContextVariable):
-                example_value = a.as_proxy().node.meta["example_value"]
-                arg_name = (
-                    a.as_proxy().node.name
-                    if sub_args_names is None
-                    else sub_args_names[idx]
-                )
-                tracer.create_graph_input(arg_name, a.python_type(), example_value)
                 new_arg = a
             # If `a` can be put into a graph
             elif a.maybe_fx_node() is not None:
@@ -1484,7 +1472,6 @@ def speculate_subgraph_with_auto_output_flattening(
     set_subgraph_inputs: Literal[
         "automatic",
         "automatic_with_forced_inputs",
-        "semi_automatic",
         "flatten_manual",
         "manual",
         "flatten_automatic",
@@ -1844,9 +1831,7 @@ def speculate_subgraph(
     # 3. if your HOP must preserve inputs that are not tensor or symnode as placeholders e.g. AutogradFunctionContextVariable
     # use set_subgraph_inputs="manual" (not recommended). We do not recommend it in general because it has the
     # restriction that user need to manually control how to create placeholders and VariableTrackers for the args.
-    set_subgraph_inputs: Literal[
-        "automatic", "semi_automatic", "flatten_manual", "manual"
-    ] = "automatic",
+    set_subgraph_inputs: Literal["automatic", "flatten_manual", "manual"] = "automatic",
     restore_side_effects: bool = True,
     should_flatten_outputs: bool = False,
     # if should_flatten_outputs is True, `remove_consts_from_outputs` remove the
