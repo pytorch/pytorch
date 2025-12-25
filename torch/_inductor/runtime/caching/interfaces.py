@@ -11,6 +11,7 @@ import functools
 import json
 import logging
 import pickle
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass
 from hashlib import sha256
@@ -23,6 +24,7 @@ from filelock import FileLock
 
 import torch
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import clear_on_fresh_cache
 
 from . import config, implementations, locks
 
@@ -268,6 +270,16 @@ class Memoizer(_BaseMemoizer):
             atexit.register(self._dump_to_disk)
         # Pre-populate cache from dump file if configured (with sub_key now set)
         self._maybe_prepopulate_from_dump()
+        # Register with clear_on_fresh_cache for fresh_cache() integration
+        clear_on_fresh_cache(self)
+
+    def cache_clear(self) -> None:
+        """Clear the in-memory cache.
+
+        This method resets the in-memory cache to empty. It is called by
+        the fresh_cache() context manager via clear_on_fresh_cache registration.
+        """
+        self._cache._memory.clear()
 
     @functools.cached_property
     def _shared_cache_filepath(self) -> Path:
@@ -719,6 +731,23 @@ class PersistentMemoizer(_BaseMemoizer):
         self._disk_cache: implementations._OnDiskCacheImpl = (
             implementations._OnDiskCacheImpl(sub_dir=sub_dir)
         )
+        # Register with clear_on_fresh_cache for fresh_cache() integration
+        clear_on_fresh_cache(self)
+
+    def cache_clear(self) -> None:
+        """Clear the on-disk cache.
+
+        This method removes the on-disk cache directory. The in-memory cache
+        is cleared automatically by the underlying Memoizer instance, which
+        registers itself with clear_on_fresh_cache.
+
+        This is called by the fresh_cache() context manager via clear_on_fresh_cache
+        registration.
+        """
+        # Clear on-disk cache by removing the cache directory
+        # Note: in-memory cache is cleared by the Memoizer's own cache_clear
+        if self._disk_cache._cache_dir.exists():
+            shutil.rmtree(self._disk_cache._cache_dir, ignore_errors=True)
 
     def record(
         self,
