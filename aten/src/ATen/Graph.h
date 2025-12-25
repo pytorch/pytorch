@@ -2,7 +2,7 @@
 
 namespace at::accelerator {
 
-struct Graph {
+struct TORCH_API Graph {
   explicit Graph(bool keep_graph = false);
   ~Graph() = default;
 
