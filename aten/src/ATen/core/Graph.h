@@ -35,7 +35,7 @@ struct TORCH_API GraphImplArgs {
 // its implementation via GraphImplRegistry. While the concrete semantics and
 // detailed behavior of capture and replay may vary across backends, the API
 // contract exposed here is consistent.
-struct GraphImplInterface {
+struct TORCH_API GraphImplInterface {
   virtual ~GraphImplInterface() = default;
   // Begin graph capture on the current device and stream.
   // `pool` specifies the memory pool to be used during capture.
