@@ -1,0 +1,123 @@
+name: vLLM Benchmark
+
+on:
+  workflow_dispatch:
+    inputs:
+      pytorch_branch:
+        description: |
+          PyTorch branch (main or refs/pull/PR_NUMBER/head for pull request)
+        required: true
+        type: string
+        default: main
+      pytorch_commit:
+        description: |
+          PyTorch commit (optional, default to use the latest commit from the branch)
+        required: false
+        type: string
+      models:
+        description: |
+          A comma-separated list of models from pytorch-integration-testing repo (optional, default to run everything)
+        required: false
+        type: string
+        default: ''
+      runners:
+        description: |
+          A comma-separated list of runners from .github/scripts/generate_vllm_benchmark_matrix.py to run the benchmark (optional, default to run everything)
+        required: true
+        type: string
+        default: h100,b200
+  schedule:
+    # Run daily at 5:15 AM PST
+    - cron: '15 13 * * *'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+jobs:
+  set-parameters:
+    if: ${{ !github.event.pull_request.head.repo.fork && github.repository_owner == 'pytorch' }}
+    runs-on: linux.c7i.2xlarge
+    outputs:
+      benchmark_matrix: ${{ steps.set-parameters.outputs.benchmark_matrix }}
+      docker_image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+      torch_cuda_arch_list: '8.0 8.9 9.0 10.0'
+      build_environment: linux-jammy-cuda12.9-py3.12-gcc11
+    steps:
+      - uses: astral-sh/setup-uv@681c641aba71e4a1c380be3ab5e12ad51f415867 # v7.1.6
+        with:
+          python-version: 3.12
+          activate-environment: true
+          ignore-empty-workdir: true
+
+      - name: Checkout pytorch-integration-testing repository
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: pytorch/pytorch-integration-testing
+          path: pytorch/pytorch-integration-testing
+          ref: main
+
+      - name: Set parameters
+        working-directory: pytorch/pytorch-integration-testing
+        id: set-parameters
+        env:
+          MODELS: ${{ inputs.models || '' }}
+          # Only need CUDA for now, we can add ROCm later if needed
+          RUNNERS: ${{ inputs.runners || 'h100,b200' }}
+        run: |
+          set -eux
+
+          # The generated matrix is grouped by model and runner
+          python .github/scripts/generate_vllm_benchmark_matrix.py \
+            --benchmark-configs-dir vllm-benchmarks/benchmarks \
+            --models "${MODELS}" \
+            --runners "${RUNNERS}"
+
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          path: pytorch/pytorch
+          ref: ${{ inputs.pytorch_commit || inputs.pytorch_branch }}
+          show-progress: false
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          working-directory: pytorch/pytorch
+          docker-image-name: ci-image:pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm
+
+  build:
+    name: Build PyTorch and vLLM
+    needs:
+      - set-parameters
+    uses: ./.github/workflows/_vllm-build.yml
+    with:
+      runner: linux.24xlarge.memory
+      docker_image: ${{ needs.set-parameters.outputs.docker_image }}
+      build_environment: ${{ needs.set-parameters.outputs.build_environment }}
+      pytorch_branch: ${{ inputs.pytorch_branch }}
+      pytorch_commit: ${{ inputs.pytorch_commit }}
+      torch_cuda_arch_list: ${{ needs.set-parameters.outputs.torch_cuda_arch_list }}
+    secrets: inherit
+
+  benchmarks:
+    name: Run vLLM benchmarks
+    needs:
+      - set-parameters
+      - build
+    strategy:
+      matrix: ${{ fromJson(needs.set-parameters.outputs.benchmark_matrix) }}
+      fail-fast: false
+    uses: ./.github/workflows/_vllm-benchmark.yml
+    permissions:
+      id-token: write
+      contents: read
+    with:
+      runner: ${{ matrix.runner }}
+      docker_image: ${{ needs.set-parameters.outputs.docker_image }}
+      build_environment: ${{ needs.set-parameters.outputs.build_environment }}
+      pytorch_branch: ${{ inputs.pytorch_branch }}
+      pytorch_commit: ${{ inputs.pytorch_commit }}
+      models: ${{ matrix.models }}
+    secrets: inherit
