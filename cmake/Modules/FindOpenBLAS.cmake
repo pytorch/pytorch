@@ -31,7 +31,8 @@ SET(Open_BLAS_LIB_SEARCH_PATHS
         $ENV{OpenBLAS_HOME}/lib
 )
 
-SET(Open_BLAS_LIB_NAME openblas)
+# Fedora and RHEL-based system provide openblaso for openblas-openmp
+SET(Open_BLAS_LIB_NAME "openblaso;openblas")
 IF(DEFINED ENV{OpenBLAS_LIB_NAME})
   SET(Open_BLAS_LIB_NAME $ENV{OpenBLAS_LIB_NAME})
 ENDIF()
