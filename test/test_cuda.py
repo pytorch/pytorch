@@ -2446,7 +2446,7 @@ exit(2)
             1024 * 1024,  # 1MB tolerance
             f"Memory not properly released after failed capture: "
             f"before={mem_before}, after={mem_after_cleanup}, "
-            f"leaked={(mem_after_cleanup - mem_before) / (1024 * 1024):.1f} MB"
+            f"leaked={(mem_after_cleanup - mem_before) / (1024 * 1024):.1f} MB",
         )
 
         # Second capture - should succeed if generator state was properly cleaned up
