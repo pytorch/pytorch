@@ -4221,7 +4221,6 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(result, torch.sin(x))
 
-
 def udf_mul(x, y):
     return x * y
 
