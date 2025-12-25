@@ -80,6 +80,17 @@ class TestEmbeddingNN(NNTestCase):
         self.assertTrue(embedding.weight.grad.is_sparse)
         self.assertEqual(embedding.weight.grad.shape, embedding.weight.shape)
 
+    def test_embedding_uint8_indices(self):
+        # Test that uint8 indices work for embedding
+        embedding = nn.Embedding(10, 20)
+        input_uint8 = torch.tensor([[0, 2, 4, 5], [4, 3, 0, 9]], dtype=torch.uint8)
+        input_long = input_uint8.to(torch.long)
+
+        output_uint8 = embedding(input_uint8)
+        output_long = embedding(input_long)
+
+        self.assertEqual(output_uint8, output_long)
+
     def test_move_sparse_half_embedding(self):
         embedding = nn.Embedding(10, 3, sparse=True)
         self.assertEqual(embedding.weight.device.type, "cpu")

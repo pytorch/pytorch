@@ -780,6 +780,8 @@ TORCH_API void record_kernel_function_dtype(std::string name);
       TYPE,                                          \
       NAME,                                          \
       AT_PRIVATE_CASE_TYPE_USING_HINT(               \
-          at::ScalarType::Int, index_t, __VA_ARGS__) \
+          at::ScalarType::Byte, index_t, __VA_ARGS__) \
           AT_PRIVATE_CASE_TYPE_USING_HINT(           \
-              at::ScalarType::Long, index_t, __VA_ARGS__))
+              at::ScalarType::Int, index_t, __VA_ARGS__) \
+              AT_PRIVATE_CASE_TYPE_USING_HINT(       \
+                  at::ScalarType::Long, index_t, __VA_ARGS__))
