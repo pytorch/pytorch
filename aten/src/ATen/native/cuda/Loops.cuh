@@ -9,7 +9,7 @@
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
 #include <tuple>
-
+#include <thrust/tuple.h>
 
 
 namespace at::native {
