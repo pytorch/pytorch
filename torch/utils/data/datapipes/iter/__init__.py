@@ -34,6 +34,12 @@ from torch.utils.data.datapipes.iter.sharding import (
 from torch.utils.data.datapipes.iter.streamreader import (
     StreamReaderIterDataPipe as StreamReader,
 )
+from torch.utils.data.datapipes.iter.tiling import (
+    BoundaryMode,
+    TiledImageIterDataPipe as TiledImage,
+    TileInfo,
+    TileOrder,
+)
 from torch.utils.data.datapipes.iter.utils import (
     IterableWrapperIterDataPipe as IterableWrapper,
 )
@@ -41,6 +47,7 @@ from torch.utils.data.datapipes.iter.utils import (
 
 __all__ = [
     "Batcher",
+    "BoundaryMode",
     "Collator",
     "Concater",
     "Demultiplexer",
@@ -57,6 +64,9 @@ __all__ = [
     "ShardingFilter",
     "Shuffler",
     "StreamReader",
+    "TileInfo",
+    "TileOrder",
+    "TiledImage",
     "UnBatcher",
     "Zipper",
 ]
