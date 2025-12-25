@@ -40,7 +40,6 @@
     :nosignatures:
 
      empty_cache
-     empty_host_cache
      get_memory_info
      max_memory_allocated
      max_memory_reserved
@@ -49,4 +48,14 @@
      memory_stats
      reset_accumulated_memory_stats
      reset_peak_memory_stats
+```
+
+## Graphs (beta)
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Graph
 ```
