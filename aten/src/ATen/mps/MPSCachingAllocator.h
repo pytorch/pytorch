@@ -6,6 +6,9 @@
 
 namespace at::mps {
 
+// Forward declaration for friend
+struct MPSCachingAllocatorBuilder;
+
 class MPSCachingAllocator final : public IMPSAllocator {
  public:
   static MPSCachingAllocator* get();
@@ -53,7 +56,7 @@ class MPSCachingAllocator final : public IMPSAllocator {
 
  private:
   MPSCachingAllocator() = default;
-  static std::unique_ptr<MPSCachingAllocator> allocator;
+  friend struct MPSCachingAllocatorBuilder;
 };
 
 } // namespace at::mps
