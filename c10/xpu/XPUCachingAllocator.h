@@ -2,6 +2,7 @@
 
 #include <c10/core/AllocatorConfig.h>
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/util/ApproximateClock.h>
 #include <c10/xpu/XPUStream.h>
 
 namespace c10::xpu::XPUCachingAllocator {
@@ -14,6 +15,101 @@ class XPUAllocator : public DeviceAllocator {
 };
 
 C10_XPU_API extern std::atomic<XPUAllocator*> allocator;
+
+typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
+
+enum struct RecordContext {
+  NEVER = 0,
+  STATE = 1, // only keep stacks for active allocations
+  ALLOC = 2, // additionally keep stacks for allocations in the trace history
+  ALL = 3, // additionally record stacks for when something is freed
+};
+
+// Struct containing info of an allocation block
+struct BlockInfo {
+  size_t size = 0;
+  size_t requested_size = 0;
+  int32_t gc_counter = 0;
+  bool allocated = false;
+  bool active = false;
+  std::shared_ptr<GatheredContext> context_when_allocated;
+};
+
+// Struct containing info of a memory segment (i.e. one contiguous device memory
+// allocation).
+struct SegmentInfo {
+  c10::DeviceIndex device = 0;
+  size_t address = 0;
+  size_t total_size = 0;
+  size_t requested_size = 0; // unrounded, actually requested size
+  size_t allocated_size = 0;
+  size_t active_size = 0;
+  sycl::queue* queue = nullptr;
+  bool is_large = false;
+  bool is_expandable = false;
+  MempoolId_t owner_private_pool_id = {0, 0};
+  std::vector<BlockInfo> blocks;
+  std::shared_ptr<GatheredContext> context_when_allocated;
+};
+
+union trace_time_ {
+  time_t t_;
+  approx_time_t approx_t_;
+};
+
+struct TraceEntry {
+  enum Action {
+    ALLOC,
+    FREE_REQUESTED,
+    FREE_COMPLETED,
+    SEGMENT_ALLOC,
+    SEGMENT_FREE,
+    SEGMENT_MAP,
+    SEGMENT_UNMAP,
+    SNAPSHOT,
+    OOM
+  };
+  TraceEntry(
+      Action action,
+      c10::DeviceIndex device,
+      size_t addr,
+      size_t size,
+      sycl::queue* queue,
+      MempoolId_t mempool,
+      approx_time_t time,
+      std::shared_ptr<GatheredContext> context = nullptr)
+      : action_(action),
+        device_(device),
+        addr_(addr),
+        context_(std::move(context)),
+        queue_(queue),
+        size_(size),
+        mempool_(std::move(mempool)) {
+    time_.approx_t_ = time;
+  }
+  Action action_;
+  c10::DeviceIndex device_;
+  // For most actions, this is a memory address. For OOM, it represents the
+  // amount of free memory (in bytes). For SNAPSHOT, it is an unused parameter
+  // (just set to 0).
+  size_t addr_;
+  std::shared_ptr<GatheredContext> context_;
+  sycl::queue* queue_{};
+  size_t size_;
+  MempoolId_t mempool_;
+  trace_time_ time_{};
+};
+
+struct AllocatorConfigInfo {
+  bool expandable_segments;
+  std::string last_allocator_settings;
+};
+
+struct SnapshotInfo {
+  std::vector<SegmentInfo> segments;
+  std::vector<std::vector<TraceEntry>> device_traces;
+  AllocatorConfigInfo config_metadata;
+};
 
 inline XPUAllocator* get() {
   return allocator.load();
@@ -59,6 +155,16 @@ C10_XPU_API void enablePeerAccess(
 C10_XPU_API double getMemoryFraction(DeviceIndex device);
 
 C10_XPU_API void setMemoryFraction(double fraction, DeviceIndex device);
+
+C10_XPU_API void recordHistory(
+    bool enabled,
+    CreateContextFn context_recorder,
+    size_t alloc_trace_max_entries,
+    RecordContext when,
+    bool clearHistory,
+    const std::vector<std::string>& skip_actions);
+
+C10_XPU_API SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0});
 
 C10_XPU_API void createOrIncrefPool(
     c10::DeviceIndex device,
