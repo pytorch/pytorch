@@ -4,13 +4,13 @@
 
 namespace at::mps {
 
-MPSCachingAllocator* MPSCachingAllocator::allocator = nullptr;
+std::unique_ptr<MPSCachingAllocator> MPSCachingAllocator::allocator = nullptr;
 
 MPSCachingAllocator* MPSCachingAllocator::get() {
   if (!allocator) {
-    allocator = new MPSCachingAllocator();
+    allocator = std::make_unique<MPSCachingAllocator>();
   }
-  return allocator;
+  return allocator.get();
 }
 
 // c10::Allocator interface
