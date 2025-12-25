@@ -1,0 +1,178 @@
+name: Notify when docs preview is ready
+
+on:
+  # Trigger after the docs build workflow completes
+  workflow_run:
+    workflows: ["pull"]
+    types:
+      - completed
+
+permissions:
+  pull-requests: write
+  issues: write
+
+jobs:
+  notify-preview-ready:
+    # Only run for pull requests and successful builds
+    if: >
+      github.event.workflow_run.event == 'pull_request' &&
+      github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Get PR number
+        id: get-pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Get the PR number from the workflow run
+          PR_NUMBER=$(gh api \
+            "/repos/${{ github.repository }}/actions/runs/${{ github.event.workflow_run.id }}" \
+            --jq '.pull_requests[0].number')
+
+          if [ -z "$PR_NUMBER" ] || [ "$PR_NUMBER" = "null" ]; then
+            echo "No PR found for this workflow run"
+            exit 0
+          fi
+
+          echo "pr_number=$PR_NUMBER" >> $GITHUB_OUTPUT
+          echo "Found PR #$PR_NUMBER"
+
+      - name: Wait and check if Python docs preview is ready
+        id: check-preview
+        if: steps.get-pr.outputs.pr_number != ''
+        env:
+          PR_NUMBER: ${{ steps.get-pr.outputs.pr_number }}
+        run: |
+          # Construct the preview URL
+          PREVIEW_URL="https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUMBER}/index.html"
+
+          echo "Checking preview URL: $PREVIEW_URL"
+
+          # Wait up to 30 minutes for the preview to be ready
+          MAX_ATTEMPTS=80
+          SLEEP_TIME=30
+          attempt=0
+
+          while [ $attempt -lt $MAX_ATTEMPTS ]; do
+            echo "Attempt $((attempt + 1))/$MAX_ATTEMPTS: Checking if preview is ready..."
+
+            # Check if the URL returns 200 OK
+            HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$PREVIEW_URL" || echo "000")
+
+            if [ "$HTTP_CODE" = "200" ]; then
+              echo "✅ Preview is ready! HTTP $HTTP_CODE"
+              echo "preview_ready=true" >> $GITHUB_OUTPUT
+              echo "preview_url=$PREVIEW_URL" >> $GITHUB_OUTPUT
+              exit 0
+            else
+              echo "⏳ Preview not ready yet (HTTP $HTTP_CODE). Waiting $SLEEP_TIME seconds..."
+              sleep $SLEEP_TIME
+              attempt=$((attempt + 1))
+            fi
+          done
+
+          echo "❌ Preview did not become ready within the timeout period"
+          echo "preview_ready=false" >> $GITHUB_OUTPUT
+
+      - name: Check if C++ docs preview is ready
+        id: check-cpp-preview
+        if: steps.get-pr.outputs.pr_number != '' && steps.check-preview.outputs.preview_ready == 'true'
+        env:
+          PR_NUMBER: ${{ steps.get-pr.outputs.pr_number }}
+        run: |
+          # Construct the C++ preview URL
+          CPP_PREVIEW_URL="https://docs-preview.pytorch.org/pytorch/pytorch/${PR_NUMBER}/cppdocs/index.html"
+
+          echo "Checking C++ preview URL: $CPP_PREVIEW_URL"
+
+          # Quick check for C++ docs (don't wait as long)
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "$CPP_PREVIEW_URL" || echo "000")
+
+          if [ "$HTTP_CODE" = "200" ]; then
+            echo "✅ C++ Preview is also ready! HTTP $HTTP_CODE"
+            echo "cpp_preview_ready=true" >> $GITHUB_OUTPUT
+            echo "cpp_preview_url=$CPP_PREVIEW_URL" >> $GITHUB_OUTPUT
+          else
+            echo "C++ preview not ready (HTTP $HTTP_CODE)"
+            echo "cpp_preview_ready=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Comment on PR with preview link
+        if: steps.check-preview.outputs.preview_ready == 'true'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = ${{ steps.get-pr.outputs.pr_number }};
+            const pythonPreviewUrl = '${{ steps.check-preview.outputs.preview_url }}';
+            const cppPreviewReady = '${{ steps.check-cpp-preview.outputs.cpp_preview_ready }}' === 'true';
+            const cppPreviewUrl = '${{ steps.check-cpp-preview.outputs.cpp_preview_url }}';
+
+            // Check if we already commented
+            const { data: comments } = await github.rest.issues.listComments({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+            });
+
+            const botComment = comments.find(comment =>
+              comment.user.login === 'github-actions[bot]' &&
+              comment.body.includes('📄 Documentation preview is ready')
+            );
+
+            // Build comment body
+            let commentBody = `## 📄 Documentation preview is ready! 🎉\n\n`;
+            commentBody += `Your documentation changes have been built and are ready for review:\n\n`;
+            commentBody += `- **Python docs**: ${pythonPreviewUrl}\n`;
+
+            if (cppPreviewReady) {
+              commentBody += `- **C++ docs**: ${cppPreviewUrl}\n`;
+            }
+
+            commentBody += `\n---\n`;
+            commentBody += `<sub>This preview will be available for 14 days.</sub>`;
+
+            if (botComment) {
+              // Update existing comment
+              await github.rest.issues.updateComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                comment_id: botComment.id,
+                body: commentBody
+              });
+              console.log('Updated existing comment');
+            } else {
+              // Create new comment
+              await github.rest.issues.createComment({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: prNumber,
+                body: commentBody
+              });
+              console.log('Created new comment');
+            }
+
+      - name: Comment if preview failed
+        if: steps.get-pr.outputs.pr_number != '' && steps.check-preview.outputs.preview_ready == 'false'
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const prNumber = ${{ steps.get-pr.outputs.pr_number }};
+
+            const commentBody = `## ⚠️ Documentation preview timeout\n\n`;
+            commentBody += `The documentation preview did not become available within the expected time.\n`;
+            commentBody += `This could be due to:\n`;
+            commentBody += `- Longer than usual build times\n`;
+            commentBody += `- Build failures\n`;
+            commentBody += `- Infrastructure issues\n\n`;
+            commentBody += `Please check the [workflow runs](https://github.com/${context.repo.owner}/${context.repo.repo}/actions) for more details.`;
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: prNumber,
+              body: commentBody
+            });
+            console.log('Posted timeout notification');
