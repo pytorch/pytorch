@@ -10,6 +10,19 @@ from torch._environment import is_fbcode
 T = TypeVar("T")
 
 
+def _is_force_disable_caches() -> bool:
+    """Check if caching is force disabled via inductor config.
+
+    This defers importing torch._inductor.config to avoid circular imports.
+
+    Returns:
+        True if force_disable_caches is set in inductor config, False otherwise.
+    """
+    from torch._inductor import config as inductor_config
+
+    return inductor_config.force_disable_caches
+
+
 @cache
 def _env_var_val(env_var: str, default: T) -> str | T:
     """Get the value of an environment variable or return the default.
@@ -82,13 +95,33 @@ _CACHING_MODULE_VERSION: int = 0
 _CACHING_MODULE_VERSION_JK: str = "pytorch/inductor:caching_module_version"
 _CACHING_MODULE_OSS_DEFAULT: bool = False
 _CACHING_MODULE_ENV_VAR_OVERRIDE: str = "TORCHINDUCTOR_ENABLE_CACHING_MODULE"
-IS_CACHING_MODULE_ENABLED: Callable[[], bool] = partial(
-    _versioned_config,
-    _CACHING_MODULE_VERSION_JK,
-    _CACHING_MODULE_VERSION,
-    _CACHING_MODULE_OSS_DEFAULT,
-    _CACHING_MODULE_ENV_VAR_OVERRIDE,
-)
+
+
+def _is_caching_module_enabled_base() -> bool:
+    """Base check for caching module enablement via versioned config."""
+    return _versioned_config(
+        _CACHING_MODULE_VERSION_JK,
+        _CACHING_MODULE_VERSION,
+        _CACHING_MODULE_OSS_DEFAULT,
+        _CACHING_MODULE_ENV_VAR_OVERRIDE,
+    )
+
+
+def IS_CACHING_MODULE_ENABLED() -> bool:
+    """Check if the caching module is enabled.
+
+    Returns False if:
+    - The versioned config disables it
+    - force_disable_caches is set in inductor config
+
+    Returns:
+        True if caching module is enabled, False otherwise.
+    """
+    if not _is_caching_module_enabled_base():
+        return False
+    if _is_force_disable_caches():
+        return False
+    return True
 
 
 # Controls whether the Memoizer dumps its cache to a JSON file on destruction.
