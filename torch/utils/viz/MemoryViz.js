@@ -115,7 +115,35 @@ function formatSize(num) {
 function formatAxisSize(num) {
   // Compact format for y-axis labels, reusing formatSize logic
   // but without the parenthetical bytes suffix
+  // e.g., "1.5GiB (1610612736 bytes)" -> "1.5GiB"
   return formatSize(num).split(' ')[0];
+}
+
+function binaryTickValues(maxValue, numTicks = 6) {
+  // Generate tick values at "nice" binary-aligned positions
+  // e.g., 0, 256MiB, 512MiB, 1GiB, 2GiB, 4GiB, etc.
+  if (maxValue <= 0) return [0];
+
+  // Find the appropriate power of 2 for the step size
+  // We want roughly numTicks ticks
+  const rawStep = maxValue / numTicks;
+
+  // Find the nearest power of 2 that gives us a reasonable step
+  const log2Step = Math.log2(rawStep);
+  const powerOf2 = Math.pow(2, Math.round(log2Step));
+
+  // Generate tick values
+  const ticks = [0];
+  let tick = powerOf2;
+  while (tick < maxValue) {
+    ticks.push(tick);
+    tick += powerOf2;
+  }
+  // Always include a tick near or at the max
+  if (ticks[ticks.length - 1] < maxValue * 0.9) {
+    ticks.push(tick);
+  }
+  return ticks;
 }
 function formatAddr(event) {
   const prefix = event.action.startsWith('segment') ? 's\'' : 'b\'';
@@ -1092,7 +1120,9 @@ function MemoryPlot(
   const plot_height = height;
 
   const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-  const yaxis = axisLeft(yscale).tickFormat(formatAxisSize);
+  const yaxis = axisLeft(yscale)
+    .tickValues(binaryTickValues(max_size))
+    .tickFormat(formatAxisSize);
   const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
   const plot_coordinate_space = svg
     .append('g')
@@ -1131,7 +1161,13 @@ function MemoryPlot(
   function handleZoom() {
     const t = d3.event.transform;
     zoom_group.attr('transform', t);
-    axis.call(yaxis.scale(d3.event.transform.rescaleY(yscale)));
+    const rescaledY = d3.event.transform.rescaleY(yscale);
+    // Regenerate binary-aligned tick values for the new visible range
+    const [minY, maxY] = rescaledY.domain();
+    const visibleRange = maxY - minY;
+    yaxis.scale(rescaledY)
+      .tickValues(binaryTickValues(visibleRange).map(v => v + minY));
+    axis.call(yaxis);
   }
 
   const thezoom = zoom().on('zoom', handleZoom);
