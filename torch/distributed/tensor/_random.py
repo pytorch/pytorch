@@ -18,6 +18,7 @@ __all__ = [
     "is_rng_supported_mesh",
     "manual_seed",
     "OffsetBasedRNGTracker",
+    "ThreadBasedRNGTracker",
 ]
 
 _rng_tracker: Optional["_RNGStateTracker"] = None
@@ -125,7 +126,7 @@ class _PhiloxState:
 
     @property
     def offset(self) -> int:
-        return int(self._state[8:].view(dtype=torch.int64).item())
+        return int(self._state[8:16].view(dtype=torch.int64).item())
 
     @offset.setter
     def offset(self, offset: int) -> None:
@@ -463,6 +464,280 @@ def _calc_shard_linear_idx(shard_coord: list[int], shard_size: list[int]) -> int
         shard_coord_stride *= size
 
     return shard_linear_idx
+
+
+class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
+    """
+    This subclass of `RNGStateTracker` defines how RNG states should be distributed and
+    synchronized among ranks while emulating the outcome of single GPUs. In particular,
+    whenever invoking a randomized operation on a DTensor, its sharding spec is passed to
+    the C++/Cuda side of pytorch through the RNG state. This resolves the issue that
+    OffsetBasedRNGTracker does not produce the output identical to single GPU executions.
+
+    For example, consider generating x = torch.rand(4) given the current random seed and
+    a global offset. In Cuda's RNG implementation, random numbers are accessed via a triple
+    (seed, thread id, offset).
+
+    On a single GPU, 4 GPU threads is created and the i-th thread fills the entry x[i]
+    with rand(seed, i, offset). That is, we have
+        | Thread 0        | Thread 1        | Thread 2        | Thread 3        |
+    x = | rand(0, offset) | rand(1, offset) | rand(2, offset) | rand(3, offset) |
+    After the execution of torch.rand(4), the global offset increments by 4, which is the
+    granularity of cuda's RNG offsets.
+
+    The global offset increments by the size of the randomness used in each thread, rounded
+    up to the nearest multiple of 4. For instance, if 1000 GPU threads is used to generate
+    7000 random numbers, each thread takes 7 random numbers from Cuda RNG and the global offset
+    increases by 8 afterward.
+
+    However, using OffsetBasedRNGTracker along with an un-patched pytorch, it outputs a
+    different tensor given 2 GPUs.
+        | GPU 0                                 | GPU 1                                     |
+        | Thread 0 of GPU 0 | Thread 1 of GPU 0 | Thread 0 of GPU 1   | Thread 1 of GPU 1   |
+    x = | rand(0, offset)   | rand(1, offset)   | rand(0, offset + 4) | rand(1, offset + 4) |
+    Furthermore, after the execution, the global offset increments by 8 instead of 4.
+
+    To resolve the issue, each physical thread of each GPU should fill the entry using the
+    thread id as if there is only one GPU. In the previous example, the output should be
+        | GPU 0                                         | GPU 1                                         |
+        | Thread 0 of GPU 0     | Thread 1 of GPU 0     | Thread 0 of GPU 1     | Thread 1 of GPU 1     |
+    x = | rand(seed, 0, offset) | rand(seed, 1, offset) | rand(seed, 2, offset) | rand(seed, 3, offset) |
+    And after the execution, the global offset should increment by 4.
+    This can be done if we pass the sharding info into Cuda functions that generate these
+    outputs.
+
+    To use the feature, set the environment variable VESCALE_SINGLE_DEVICE_RAND=1 before
+    running your veScale code.
+
+    .. warning::
+        This feature suffers an overhead on the Cuda side as each GPU thread calls one
+        `curand_init` and `curand` per entry. In contrast, without the sharding info, each
+        thread calls one `curand_init` per tensor and one `curand` every 4 entries.
+
+        This feature requires a patched pytorch. The patch is in ......
+    """
+
+    def __init__(self, device_type: str = "cuda"):
+        super().__init__(device_type)
+        # source: aten/src/ATen/native/cuda/DistributionTemplates.h
+        self.block_size = 256
+        self.unroll = 4
+        props = torch.cuda.get_device_properties(torch.cuda.current_device())
+        # For example, in an A100: props.max_threads_per_multi_processor = 2048, props.multi_processor_count = 108
+        self.max_threads_per_multi_processor = props.max_threads_per_multi_processor
+        self.blocks_per_sm = self.max_threads_per_multi_processor // self.block_size
+        self.max_grid = props.multi_processor_count * self.blocks_per_sm
+
+    def get_offset(self, name: str) -> int:
+        if name not in self.rng_states:
+            raise RuntimeError(
+                f"{self.__class__.__name__} does not have random state for {name}"
+            )
+
+        offset_tensor = (self.rng_states[name])[8:16].view(dtype=torch.int64)
+        return int(offset_tensor.item())
+
+    def set_offset(self, name: str, offset: int) -> None:
+        if name not in self.rng_states:
+            raise RuntimeError(
+                f"{self.__class__.__name__} does not have random state for {name}"
+            )
+
+        seed_tensor = (self.rng_states[name])[0:8]
+        offset_tensor = torch.tensor([offset]).view(torch.uint8)
+        sharding_spec_tensor = (self.rng_states[name])[16:]
+        self.rng_states[name] = torch.cat(
+            [seed_tensor, offset_tensor, sharding_spec_tensor]
+        )
+
+    def get_sharding_spec(
+        self, name: str
+    ) -> tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]]:
+        if name not in self.rng_states:
+            raise RuntimeError(
+                f"{self.__class__.__name__} does not have random state for {name}"
+            )
+
+        sharding_spec_tensor = (self.rng_states[name])[16:].view(dtype=torch.int64)
+        local_shape, global_offset, global_shape, global_strides = torch.split(
+            sharding_spec_tensor, sharding_spec_tensor.size(0) // 4
+        )
+        return (
+            tuple(local_shape.tolist()),
+            tuple(global_offset.tolist()),
+            tuple(global_shape.tolist()),
+            tuple(global_strides.tolist()),
+        )
+
+    def set_sharding_spec(
+        self,
+        name: str,
+        sharding_spec: tuple[
+            tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...]
+        ],
+        offset: int,
+    ) -> None:
+        if name not in self.rng_states:
+            raise RuntimeError(
+                f"{self.__class__.__name__} does not have random state for {name}"
+            )
+
+        seed_tensor = (self.rng_states[name])[0:8]
+        spec_tensor = torch.tensor(sum(sharding_spec, start=(offset,))).view(
+            torch.uint8
+        )
+        self.rng_states[name] = torch.cat([seed_tensor, spec_tensor])
+
+    @contextlib.contextmanager
+    def _distribute_region(
+        self, spec: DTensorSpec, generator: Optional[torch.Generator] = None
+    ):
+        if generator is not None:
+            # This is a little hacky, but for any user-passed generator, we store its state under a unique key,
+            # not because we need to keep a copy of it but because its the easiest way to make it work with the
+            # existing set/get APIs. We also ensure we remove it from rng_states after each _distribute_region.
+            state = _PhiloxState(generator.get_state())
+        else:
+            state = _PhiloxState(self._get_device_state())
+
+        if self.distribute_region_enabled:
+            old_offset = state.offset
+            self._set_pre_op_sharding_spec(state, spec)
+            with torch.random.fork_rng(
+                devices=[self._device], device_type=self._device.type
+            ):
+                self._device_handle.set_rng_state(state.state)
+                try:
+                    yield  # execute the region code
+                finally:
+                    # update offset to synchronize among ranks
+                    self._set_post_op_offset(state, spec, old_offset)
+        else:
+            yield
+
+        if generator is not None:
+            # ensure we (a) propagate the state advancement back to the user's RNG so its visible and impacts any future
+            # usage of that RNG (dtensor or non-dtensor), (b) drop it from our own cache so that if the user updates
+            # the seed value in their rng and uses it with DTensor again, we always use the latest value
+            generator.set_state(state.state)
+        else:
+            self._set_device_state(state.state)
+
+    def _set_pre_op_sharding_spec(self, state: _PhiloxState, spec: DTensorSpec) -> None:
+        """Passing the DTensor sharding info via Cuda RNG State. Later on,
+        each GPU thread can use the info to deduce the correct thread id and
+        offset when generating an entry of a DTensor.
+
+        Args:
+            spec (:class:`DTensorSpec`): the spec of the DTensor object on which
+                we prepare the offset for running random ops.
+
+        Returns:
+            None
+
+        .. warning::
+            Note that, current implementation does not consider DTensor's continguity.
+        """
+        if spec.num_shards > 0:
+            global_shape = spec.shape
+            mesh = spec.mesh
+            placements = spec.placements
+            my_coordinate = mesh.get_coordinate()
+
+            if my_coordinate is None:
+                # if rank not in the mesh, return empty offset
+                local_shape, global_offset = (), ()
+                local_shape = tuple([0] * len(global_shape))
+                global_offset = tuple([0] * len(global_shape))
+            else:
+                local_shape = list(global_shape)
+                global_offset = [0] * len(global_shape)
+
+                for idx, placement in enumerate(placements):
+                    mesh_dim_size = mesh.size(idx)
+                    if isinstance(placement, Shard):
+                        shard_dim = placement.dim
+                        local_offset = [0] * len(global_shape)
+                        size_on_dim = local_shape[shard_dim]
+                        num_chunks = mesh_dim_size
+                        rank = my_coordinate[idx]
+                        # TODO: what if placement is InterleavedShard
+                        # Compute the chunk size inline with ``torch.chunk``
+                        full_chunk_size = (size_on_dim + num_chunks - 1) // num_chunks
+
+                        # Compute chunk size for each chunk on the dimension.
+                        chunk_sizes = [
+                            max(
+                                min(size_on_dim, full_chunk_size * (idx + 1))
+                                - full_chunk_size * idx,
+                                0,
+                            )
+                            for idx in range(num_chunks)
+                        ]
+                        local_shard_size = chunk_sizes[rank]
+
+                        local_offset_on_dim = sum(chunk_sizes[:rank])
+
+                        shard_size, shard_offset = local_shard_size, local_offset_on_dim
+
+                        local_shape[shard_dim] = shard_size
+                        local_offset[shard_dim] = shard_offset
+
+                        # On a given dimension, if the local_offset[shard_dim] is smaller than global_offset[shard_dim],
+                        # it means that this dimension has been already sharded in previous placement.
+                        # Therefore, we cannot simply replace the global_offset[shard_dim] with local_offset[shard_dim].
+                        # Instead, for the given shard_dim, we need to add local_offset[shard_dim] to existing global_offset[shard_dim].
+                        if global_offset[shard_dim] <= local_offset[shard_dim]:
+                            global_offset[shard_dim] = local_offset[shard_dim]
+                        else:
+                            global_offset[shard_dim] += local_offset[shard_dim]
+
+                local_shape, global_offset = tuple(local_shape), tuple(global_offset)
+
+            # spec.mesh._layout and spec.tensor_meta have different stride, spec.tensor_meta.stride as hardcode value 0
+            global_strides = spec.tensor_meta.stride
+
+            if (local_shape, global_offset) == ((), ()):  # a out-of-mesh rank
+                local_shape = tuple([0] * len(global_shape))
+                global_offset = tuple([0] * len(global_shape))
+
+            sharding_spec = (local_shape, global_offset, global_shape, global_strides)
+            offset = state.offset
+            seed_tensor = (state.state)[0:8]
+            spec_tensor = torch.tensor(sum(sharding_spec, start=(offset,))).view(
+                torch.uint8
+            )
+            state._state = torch.cat([seed_tensor, spec_tensor])
+
+    def _set_post_op_offset(
+        self, state: _PhiloxState, spec: DTensorSpec, old_offset: int
+    ) -> None:
+        """Set the RNG state as the DTensor operation is executed on a single GPU. This
+        includes (1) removing the sharding info and (2) incrementing the global offset by
+        the number of randomness used in each thread as if there is only one GPU.
+
+        Args:
+            spec (:class:`DTensorSpec`): the spec of the DTensor object on which
+                we post-process the offset for running random ops.
+
+        Returns:
+            None
+        """
+        dtensor_shape = spec.shape
+        from torch.distributed.tensor._ops.utils import prod
+
+        numel = prod(dtensor_shape)
+        grid_x = min(self.max_grid, (numel + self.block_size - 1) // self.block_size)
+        offset_incr = (
+            (numel - 1) // (self.block_size * grid_x * self.unroll) + 1
+        ) * self.unroll
+        new_offset = old_offset + offset_incr
+        sharding_spec = ((), (), (), ())
+        seed_tensor = (state.state)[0:8]
+        spec_tensor = torch.tensor(sum(sharding_spec, start=(new_offset,))).view(
+            torch.uint8
+        )
+        state._state = torch.cat([seed_tensor, spec_tensor])
 
 
 def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
