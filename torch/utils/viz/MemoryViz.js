@@ -112,6 +112,11 @@ function formatSize(num) {
   }
   return `${num.toFixed(1)}YiB`;
 }
+function formatAxisSize(num) {
+  // Compact format for y-axis labels, reusing formatSize logic
+  // but without the parenthetical bytes suffix
+  return formatSize(num).split(' ')[0];
+}
 function formatAddr(event) {
   const prefix = event.action.startsWith('segment') ? 's\'' : 'b\'';
   return `${prefix}${event.addr.toString(16)}_${event.version}`;
@@ -1087,7 +1092,7 @@ function MemoryPlot(
   const plot_height = height;
 
   const yscale = scaleLinear().domain([0, max_size]).range([plot_height, 0]);
-  const yaxis = axisLeft(yscale).tickFormat(d3.format('.3s'));
+  const yaxis = axisLeft(yscale).tickFormat(formatAxisSize);
   const xscale = scaleLinear().domain([0, max_timestep]).range([0, plot_width]);
   const plot_coordinate_space = svg
     .append('g')
