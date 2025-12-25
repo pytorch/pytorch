@@ -1,4 +1,5 @@
-#include <ATen/core/Graph.h>
+#pragma once
+#include <ATen/core/GraphImplInterface.h>
 
 namespace at::accelerator {
 
