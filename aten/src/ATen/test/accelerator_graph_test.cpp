@@ -6,7 +6,7 @@ static bool is_capture_begin_called = false;
 static bool is_capture_end_called = false;
 static bool keep_raw_graph = false;
 
-struct DummyGraphImpl : at::GraphImplInterface {
+struct DummyGraphImpl : public at::GraphImplInterface {
   DummyGraphImpl(const at::GraphImplArgs& args) {
     keep_raw_graph = args.keep_graph;
   }
