@@ -1065,6 +1065,7 @@ exclusions = {
     "compute_dependencies",
     "annotation",
     "node_runtime_estimation",
+    "caching",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:
