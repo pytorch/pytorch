@@ -4,8 +4,8 @@
 
 #include <ATen/core/ATen_fwd.h>
 #include <c10/core/Allocator.h>
-#include <c10/util/Registry.h>
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/util/Registry.h>
 
 #define MB(x) (x * 1048576UL)
 
@@ -42,7 +42,8 @@ class IMPSAllocator : public c10::DeviceAllocator {
   virtual bool recordEvents(c10::ArrayRef<const void*> buffers) const = 0;
   virtual bool waitForEvents(c10::ArrayRef<const void*> buffers) const = 0;
 
-  // Required by c10::DeviceAllocator interface (must match base class signatures - NO const)
+  // Required by c10::DeviceAllocator interface (must match base class
+  // signatures - NO const)
   virtual bool initialized() override = 0;
 
   // Override emptyCache to match DeviceAllocator signature
@@ -59,7 +60,8 @@ class IMPSAllocator : public c10::DeviceAllocator {
       c10::DeviceIndex device) override = 0;
 
   // Required by base Allocator (from c10::Allocator)
-  virtual void recordStream(const c10::DataPtr& ptr, c10::Stream stream) override = 0;
+  virtual void recordStream(const c10::DataPtr& ptr, c10::Stream stream)
+      override = 0;
 };
 
 class IMpsAllocatorCallback {

@@ -1,5 +1,5 @@
-#include <ATen/mps/MPSCachingAllocator.h>
 #include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSCachingAllocator.h>
 #include <c10/util/ArrayRef.h>
 
 namespace at::mps {
@@ -144,4 +144,4 @@ bool MPSCachingAllocator::waitForEvents(c10::ArrayRef<const void*> buffers) cons
   return getIMPSAllocator()->waitForEvents(buffers);
 }
 
-}//namespace at::mps
+} // namespace at::mps
