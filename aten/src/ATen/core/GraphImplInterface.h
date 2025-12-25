@@ -32,9 +32,10 @@ struct TORCH_API GraphImplArgs {
 // graph capture and replay.
 //
 // Each backend (e.g. CUDA, XPU, etc.) implements this interface and registers
-// its implementation via GraphImplRegistry. While the concrete semantics and
-// detailed behavior of capture and replay may vary across backends, the API
-// contract exposed here is consistent.
+// its implementation via GraphImplRegistry. Implementations are required to
+// provide a constructor that accepts `GraphImplArgs`.
+// While the concrete semantics and detailed behavior of capture and replay may
+// vary across backends, the API contract exposed here is consistent.
 struct TORCH_API GraphImplInterface {
   virtual ~GraphImplInterface() = default;
   // Begin graph capture on the current device and stream.
@@ -69,7 +70,7 @@ TORCH_DECLARE_REGISTRY(GraphImplRegistry, GraphImplInterface, GraphImplArgs);
 // Registry mapping DeviceType -> GraphImplInterface implementation.
 // The key is the string returned by c10::DeviceTypeName(device_type, false).
 #define REGISTER_GRAPH_IMPL(key, impl) \
-C10_REGISTER_CLASS(GraphImplRegistry, #key, impl)
+C10_REGISTER_CLASS(GraphImplRegistry, key, impl)
 
 // Check whether a graph implementation is registered for the given device type.
 inline bool has_graph_impl(const c10::DeviceType device_type) {
