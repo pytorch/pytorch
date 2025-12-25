@@ -9,7 +9,6 @@ from typing_extensions import deprecated
 import torch
 
 from ._utils import _device_t, _get_device_index
-from .graphs import Graph
 from .memory import (
     empty_cache,
     empty_host_cache,
@@ -25,7 +24,6 @@ from .memory import (
 
 
 __all__ = [
-    "Graph",
     "current_accelerator",
     "current_device_idx",  # deprecated
     "current_device_index",
