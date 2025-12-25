@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import functools
 import sys
 from typing import Optional
 
@@ -65,3 +66,14 @@ def get_node_context(node, num_nodes=2) -> str:
             break
         cur = cur.prev
     return "\n".join(node_contexts[::-1])
+
+
+# standalone_inductor returns a callable class object - this does not sit well
+# with Fx graph node op call_function which expects a function. So this is just
+# a wrapper function to make Fx graph codegen happy.
+def _dummy_wrapper(fn):
+    @functools.wraps(fn)
+    def inner(*args, **kwargs):
+        return fn(*args, **kwargs)
+
+    return inner

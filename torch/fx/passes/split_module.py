@@ -54,7 +54,7 @@ def _get_attr_from_qualname(mod: torch.nn.Module, qualname: str) -> Any:
 @compatibility(is_backward_compatible=True)
 def split_module(
     m: GraphModule,
-    root_m: torch.nn.Module,
+    root_m: Optional[torch.nn.Module],
     split_callback: Callable[[Node], int],
     qualname_map: Optional[dict[str, str]] = None,
     keep_original_order: Optional[bool] = False,
