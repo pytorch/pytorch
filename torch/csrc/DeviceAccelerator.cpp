@@ -1,7 +1,4 @@
 #include <c10/core/AllocatorConfig.h>
-
-#include <ATen/Graph.h>
-
 #include <torch/csrc/DeviceAccelerator.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/device_lazy_init.h>
