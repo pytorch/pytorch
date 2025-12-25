@@ -268,7 +268,8 @@ void CUDAGraph::reset() {
   // This causes subsequent RNG operations to fail with:
   // "Offset increment outside graph capture encountered unexpectedly."
   // To recover gracefully, we call capture_epilogue() on all registered
-  // generator states.
+  // generator states, and set capture_ended_ = true so that the pool cleanup
+  // below will release any memory allocated during the failed capture.
   if (!capture_ended_ && !captured_generator_states_.empty()) {
     // capture_begin was called but capture_end was not successful.
     // Clean up generator state by calling capture_epilogue.
@@ -280,13 +281,22 @@ void CUDAGraph::reset() {
       }
     }
     // Also end the allocator pool allocation if it was started.
-    // Use try-catch since reset() may be called from destructor and must not throw.
-    if (capture_dev_ != UNDEFINED_DEVICE && (mempool_id_.first != 0 || mempool_id_.second != 0)) {
+    // We check capture_dev_ != UNDEFINED_DEVICE as a proxy for whether
+    // capture_begin() progressed far enough to potentially call beginAllocateToPool().
+    // Use try-catch since reset() may be called from destructor and must not throw,
+    // and endAllocateToPool throws if the mempool_id is not in captures_underway
+    // (e.g., if beginAllocateToPool wasn't called, or was already ended by a
+    // partially successful capture_end()).
+    if (capture_dev_ != UNDEFINED_DEVICE) {
       try {
         c10::cuda::CUDACachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+        at::getHostAllocator(at::kCUDA)->end_allocate_to_pool(mempool_id_);
       } catch (const std::exception& e) {
         TORCH_WARN("Failed to end allocator pool during capture cleanup: ", e.what());
       }
+      // Set capture_ended_ so the pool cleanup below releases any memory
+      // that was allocated during the failed capture.
+      capture_ended_ = true;
     }
   }
 
