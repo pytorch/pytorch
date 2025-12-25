@@ -238,7 +238,12 @@ allow_buffer_reuse = True
 memory_planning = os.environ.get("TORCHINDUCTOR_MEMORY_PLANNING", "0") == "1"
 
 # Enable to allow using ftz variant of exponenet instruction in triton codegen.
-use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
+use_fast_math = (
+    os.environ.get(
+        "TORCHINDUCTOR_USE_FAST_MATH", "1" if torch.xpu.is_available() else "0"
+    )
+    == "1"
+)
 
 # How to organize memory under memory_planning=True:
 # - "none": do not try to pool storage, just reuse
