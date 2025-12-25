@@ -110,7 +110,7 @@ unsigned MPSDevice::getCoreCount() const {
 
 at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
   // Return the c10-registered allocator
-    return c10::GetAllocator(c10::DeviceType::MPS);
+  return c10::GetAllocator(c10::DeviceType::MPS);
 }
 bool is_available() {
   return MPSDevice::getInstance()->device() != nil;

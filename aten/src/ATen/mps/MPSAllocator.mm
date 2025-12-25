@@ -3,12 +3,11 @@
 #include <ATen/CPUFunctions.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/mps/MPSAllocator.h>
+#include <ATen/mps/MPSAllocatorInterface.h>
+#include <ATen/mps/MPSCachingAllocator.h>
 #include <c10/core/Allocator.h>
 #include <c10/core/Storage.h>
 #include <c10/util/env.h>
-#include <c10/core/Allocator.h>
-#include <ATen/mps/MPSCachingAllocator.h>
-#include <ATen/mps/MPSAllocatorInterface.h>
 
 #include <iostream>
 
@@ -17,10 +16,7 @@ namespace at::mps {
 C10_DEFINE_REGISTRY(MPSAllocatorCallbacksRegistry, IMpsAllocatorCallback)
 // Register allocator on module initialization
 static void initMPSAllocator() {
-  c10::SetAllocator(
-      c10::DeviceType::MPS,
-      at::mps::MPSCachingAllocator::get()
-  );
+  c10::SetAllocator(c10::DeviceType::MPS, at::mps::MPSCachingAllocator::get());
 }
 
 // Use static initialization to register
@@ -35,84 +31,74 @@ uint64_t BufferBlock::buffer_counter = 0;
 uint64_t HeapBlock::heap_counter = 0;
 
 bool MPSHeapAllocatorImpl::initialized() {
-    return m_initialized;
-  }
+  return m_initialized;
+}
 
 void MPSHeapAllocatorImpl::emptyCache(c10::MempoolId_t mempool_id) {
-    emptyCache();
-  }
+  emptyCache();
+}
 
-c10::CachingDeviceAllocator::DeviceStats MPSHeapAllocatorImpl::getDeviceStats(
-      c10::DeviceIndex device) {
+c10::CachingDeviceAllocator::DeviceStats MPSHeapAllocatorImpl::getDeviceStats(c10::DeviceIndex device) {
+  TORCH_CHECK(device == 0, "MPS only supports device 0");
 
-    TORCH_CHECK(device == 0, "MPS only supports device 0");
+  c10::CachingDeviceAllocator::DeviceStats stats;
 
-    c10::CachingDeviceAllocator::DeviceStats stats;
+  // Current allocated bytes (active tensors)
+  stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current =
+      m_current_allocated_memory;
 
-    // Current allocated bytes (active tensors)
-    stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current =
-        m_current_allocated_memory;
+  // Peak allocated bytes
+  stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].peak = m_peak_allocated_memory;
 
-    // Peak allocated bytes
-    stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].peak =
-        m_peak_allocated_memory;
+  // Total allocated (cumulative)
+  stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].allocated =
+      m_total_allocated_bytes;
 
-    // Total allocated (cumulative)
-    stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].allocated =
-        m_total_allocated_bytes;
+  // Total freed (cumulative)
+  stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].freed = m_total_freed_bytes;
 
-    // Total freed (cumulative)
-    stats.allocated_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].freed =
-        m_total_freed_bytes;
+  // Reserved bytes (includes cached memory)
+  stats.reserved_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current =
+      m_total_allocated_memory;
 
-    // Reserved bytes (includes cached memory)
-    stats.reserved_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].current =
-        m_total_allocated_memory;
+  stats.reserved_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].peak = m_peak_reserved_memory;
 
-    stats.reserved_bytes[static_cast<size_t>(c10::CachingAllocator::StatType::AGGREGATE)].peak =
-        m_peak_reserved_memory;
-
-    return stats;
-  }
+  return stats;
+}
 
 void MPSHeapAllocatorImpl::resetAccumulatedStats(c10::DeviceIndex device) {
-    TORCH_CHECK(device == 0, "MPS only supports device 0");
+  TORCH_CHECK(device == 0, "MPS only supports device 0");
 
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-    m_total_allocated_bytes = 0;
-    m_total_freed_bytes = 0;
-  }
+  m_total_allocated_bytes = 0;
+  m_total_freed_bytes = 0;
+}
 
 void MPSHeapAllocatorImpl::resetPeakStats(c10::DeviceIndex device) {
-    TORCH_CHECK(device == 0, "MPS only supports device 0");
+  TORCH_CHECK(device == 0, "MPS only supports device 0");
 
-    std::lock_guard<std::recursive_mutex> lock(m_mutex);
+  std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
-    // Reset peak to current values
-    m_peak_allocated_memory = m_current_allocated_memory;
-    m_peak_reserved_memory = m_total_allocated_memory;
-  }
+  // Reset peak to current values
+  m_peak_allocated_memory = m_current_allocated_memory;
+  m_peak_reserved_memory = m_total_allocated_memory;
+}
 
-std::pair<size_t, size_t> MPSHeapAllocatorImpl::getMemoryInfo(
-      c10::DeviceIndex device) {
+std::pair<size_t, size_t> MPSHeapAllocatorImpl::getMemoryInfo(c10::DeviceIndex device) {
+  TORCH_CHECK(device == 0, "MPS only supports device 0");
 
-    TORCH_CHECK(device == 0, "MPS only supports device 0");
+  size_t total = max_device_size();
+  size_t used = current_allocated_size();
+  size_t free = (total > used) ? (total - used) : 0;
 
-    size_t total = max_device_size();
-    size_t used = current_allocated_size();
-    size_t free = (total > used) ? (total - used) : 0;
+  return {free, total};
+}
 
-    return {free, total};
-  }
-
-void MPSHeapAllocatorImpl::recordStream(
-      const c10::DataPtr& ptr,
-      c10::Stream stream) {
-
-    void* buffer_ptr = ptr.get();
-    recordEvents({buffer_ptr});
-  }
+void MPSHeapAllocatorImpl::recordStream(const c10::DataPtr& ptr, c10::Stream stream) {
+  void* buffer_ptr = ptr.get();
+  recordEvents({buffer_ptr});
+}
 
 void MPSHeapAllocatorImpl::init_allocator() {
   init_buffer_pools();
@@ -394,17 +380,17 @@ BufferBlock* MPSHeapAllocatorImpl::alloc_buffer_block(size_t size, uint32_t usag
   buffer_block->in_use = true;
   buffer_block->use_count++;
   m_current_allocated_memory += buffer_block->size;
-  
+
   // Track cumulative allocations (for getDeviceStats)
 
-    m_total_allocated_bytes += buffer_block->size;
-    if (m_current_allocated_memory > m_peak_allocated_memory) {
-      m_peak_allocated_memory = m_current_allocated_memory;
-    }
+  m_total_allocated_bytes += buffer_block->size;
+  if (m_current_allocated_memory > m_peak_allocated_memory) {
+    m_peak_allocated_memory = m_current_allocated_memory;
+  }
 
-    if (m_total_allocated_memory > m_peak_reserved_memory) {
-      m_peak_reserved_memory = m_total_allocated_memory;
-    }
+  if (m_total_allocated_memory > m_peak_reserved_memory) {
+    m_peak_reserved_memory = m_total_allocated_memory;
+  }
 
   return buffer_block;
 }
@@ -922,38 +908,38 @@ struct TORCH_API MPSAllocator final : public IMPSAllocator {
   }
 
   bool initialized() override {
-      return _getAllocImpl().initialized();
-    }
+    return _getAllocImpl().initialized();
+  }
 
-    void emptyCache(c10::MempoolId_t mempool_id) override {
-      _getAllocImpl().emptyCache(mempool_id);
-    }
+  void emptyCache(c10::MempoolId_t mempool_id) override {
+    _getAllocImpl().emptyCache(mempool_id);
+  }
 
-    void recordStream(const c10::DataPtr& ptr, c10::Stream stream) override {
-      // Record the stream for this buffer
-      void* buffer_ptr = ptr.get();
-      _getAllocImpl().recordEvents({buffer_ptr});
-    }
+  void recordStream(const c10::DataPtr& ptr, c10::Stream stream) override {
+    // Record the stream for this buffer
+    void* buffer_ptr = ptr.get();
+    _getAllocImpl().recordEvents({buffer_ptr});
+  }
 
-    c10::CachingDeviceAllocator::DeviceStats getDeviceStats(c10::DeviceIndex device) override {
-      TORCH_CHECK(device == 0, "MPS only supports device 0");
-      return _getAllocImpl().getDeviceStats(device);
-    }
+  c10::CachingDeviceAllocator::DeviceStats getDeviceStats(c10::DeviceIndex device) override {
+    TORCH_CHECK(device == 0, "MPS only supports device 0");
+    return _getAllocImpl().getDeviceStats(device);
+  }
 
-    void resetAccumulatedStats(c10::DeviceIndex device) override {
-      TORCH_CHECK(device == 0, "MPS only supports device 0");
-      _getAllocImpl().resetAccumulatedStats(device);
-    }
+  void resetAccumulatedStats(c10::DeviceIndex device) override {
+    TORCH_CHECK(device == 0, "MPS only supports device 0");
+    _getAllocImpl().resetAccumulatedStats(device);
+  }
 
-    void resetPeakStats(c10::DeviceIndex device) override {
-      TORCH_CHECK(device == 0, "MPS only supports device 0");
-      _getAllocImpl().resetPeakStats(device);
-    }
+  void resetPeakStats(c10::DeviceIndex device) override {
+    TORCH_CHECK(device == 0, "MPS only supports device 0");
+    _getAllocImpl().resetPeakStats(device);
+  }
 
-    std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) override {
-      TORCH_CHECK(device == 0, "MPS only supports device 0");
-      return _getAllocImpl().getMemoryInfo(device);
-    }
+  std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device) override {
+    TORCH_CHECK(device == 0, "MPS only supports device 0");
+    return _getAllocImpl().getMemoryInfo(device);
+  }
 
  private:
   bool m_has_unified_memory;
@@ -989,18 +975,15 @@ IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
   return nullptr;
 }
 // Register MPS allocator with c10
-  static void registerMPSAllocator() {
-    c10::SetAllocator(
-        c10::DeviceType::MPS,
-        &_getPrivateAllocator()
-    );
-  }
+static void registerMPSAllocator() {
+  c10::SetAllocator(c10::DeviceType::MPS, &_getPrivateAllocator());
+}
 
-  // Auto-register on static initialization
-  static bool mps_allocator_registered = []() {
-    registerMPSAllocator();
-    return true;
-  }();
+// Auto-register on static initialization
+static bool mps_allocator_registered = []() {
+  registerMPSAllocator();
+  return true;
+}();
 // torch.is_pinned() implementation
 // Pinned memory will be helpful on Apple Silicon Macs with Unified memory as we
 // will be able to use SharedStorageMode for MTLBuffer allocations. This will
