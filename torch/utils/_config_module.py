@@ -375,29 +375,34 @@ class ConfigModule(ModuleType):
             f"use {__name__}.install_config_module(sys.modules[__name__])"
         )
 
+    def _warn_if_deprecated(self, name: str, config: _ConfigEntry) -> None:
+        """Issue deprecation warning for config if not already warned."""
+        if config.deprecated and not config._deprecation_warned:
+            import warnings
+
+            msg = f"{self.__name__}.{name} is deprecated"
+            if config.deprecation_message:
+                msg += f" and {config.deprecation_message}"
+            msg += ". It will be removed in a future version of PyTorch."
+            warnings.warn(msg, FutureWarning, stacklevel=3)
+            config._deprecation_warned = True
+
     def __setattr__(self, name: str, value: object) -> None:
         if name in self._bypass_keys:
             super().__setattr__(name, value)
         elif name not in self._config:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
-        elif self._config[name].alias is not None:
-            self._set_alias_val(self._config[name], value)
         else:
             # Issue deprecation warning on write (once per config)
             config = self._config[name]
-            if config.deprecated and not config._deprecation_warned:
-                import warnings
+            self._warn_if_deprecated(name, config)
 
-                msg = f"{self.__name__}.{name} is deprecated"
-                if config.deprecation_message:
-                    msg += f" and {config.deprecation_message}"
-                msg += ". It will be removed in a future version of PyTorch."
-                warnings.warn(msg, FutureWarning, stacklevel=2)
-                config._deprecation_warned = True
-
-            config.user_override = value
-            self._is_dirty = True
-            config.hide = False
+            if config.alias is not None:
+                self._set_alias_val(config, value)
+            else:
+                config.user_override = value
+                self._is_dirty = True
+                config.hide = False
 
     def __getattr__(self, name: str) -> Any:
         try:
@@ -407,15 +412,7 @@ class ConfigModule(ModuleType):
                 raise AttributeError(f"{self.__name__}.{name} does not exist")
 
             # Issue deprecation warning on read (once per config)
-            if config.deprecated and not config._deprecation_warned:
-                import warnings
-
-                msg = f"{self.__name__}.{name} is deprecated"
-                if config.deprecation_message:
-                    msg += f" and {config.deprecation_message}"
-                msg += ". It will be removed in a future version of PyTorch."
-                warnings.warn(msg, FutureWarning, stacklevel=2)
-                config._deprecation_warned = True
+            self._warn_if_deprecated(name, config)
 
             alias_val = self._get_alias_val(config)
             if alias_val is not _UNSET_SENTINEL:
