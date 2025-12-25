@@ -4,12 +4,15 @@
 
 namespace at::mps {
 
-std::unique_ptr<MPSCachingAllocator> MPSCachingAllocator::allocator = nullptr;
+// Helper struct implementation (friend of MPSCachingAllocator)
+struct MPSCachingAllocatorBuilder {
+  static std::unique_ptr<MPSCachingAllocator> build() {
+    return std::unique_ptr<MPSCachingAllocator>(new MPSCachingAllocator());
+  }
+};
 
 MPSCachingAllocator* MPSCachingAllocator::get() {
-  if (!allocator) {
-    allocator = std::make_unique<MPSCachingAllocator>();
-  }
+  static std::unique_ptr<MPSCachingAllocator> allocator = MPSCachingAllocatorBuilder::build();
   return allocator.get();
 }
 

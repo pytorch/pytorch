@@ -974,16 +974,6 @@ IMPSAllocator* getIMPSAllocator(bool sharedAllocator) {
   }
   return nullptr;
 }
-// Register MPS allocator with c10
-static void registerMPSAllocator() {
-  c10::SetAllocator(c10::DeviceType::MPS, &_getPrivateAllocator());
-}
-
-// Auto-register on static initialization
-static bool mps_allocator_registered = []() {
-  registerMPSAllocator();
-  return true;
-}();
 // torch.is_pinned() implementation
 // Pinned memory will be helpful on Apple Silicon Macs with Unified memory as we
 // will be able to use SharedStorageMode for MTLBuffer allocations. This will
