@@ -82,7 +82,7 @@ inline bool has_graph_impl(const c10::DeviceType device_type) {
 // Returns nullptr if no implementation is registered for the device.
 inline std::unique_ptr<GraphImplInterface> create_graph_impl(
     const c10::DeviceType device_type,
-    const GraphImplArgs& args = GraphImplArgs()) {
+    const GraphImplArgs& args = {}) {
   auto key = c10::DeviceTypeName(device_type, /*lowercase=*/false);
   return GraphImplRegistry()->Create(key, args);
 }
