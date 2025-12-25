@@ -64,7 +64,7 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
 #if defined(__HIP__)
       results[i] = c10::guts::apply(f, args[i]);
 #else
-      results[i] = std::apply(f, args[i]);
+      results[i] = std::apply(f, std::move(args[i]));
 #endif
     }
   }
@@ -256,10 +256,9 @@ void gpu_kernel_with_scalars(TensorIteratorBase& iter, const func_t& f) {
 
 namespace { // functions for `gpu_kernel_multiple_outputs`.
 
-// check the return type is `thrust::tuple`, not `std::tuple`.
 template <typename T> struct is_tuple: std::false_type {};
 
-template <typename ...T> struct is_tuple<thrust::tuple<T...>>: std::true_type {};
+template <typename ...T> struct is_tuple<std::tuple<T...>>: std::true_type {};
 
 template <int num_outputs, typename func_t, typename array_t, typename inp_calc_t, typename out_calc_t>
 C10_LAUNCH_BOUNDS_1(num_threads())
