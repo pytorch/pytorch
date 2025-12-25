@@ -1,4 +1,4 @@
-#include <ATen/core/Graph.h>
+#include <ATen/core/GraphImplInterface.h>
 
 namespace at {
 
