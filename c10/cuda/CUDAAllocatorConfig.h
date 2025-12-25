@@ -65,6 +65,14 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_per_process_memory_fraction;
   }
 
+  static int memset_value() {
+    return instance().m_memset_value;
+  }
+
+  static bool has_memset_value() {
+    return memset_value() != std::numeric_limits<int>::max();
+  }
+
   /** Pinned memory allocator settings */
   static bool pinned_use_cuda_host_register() {
     return instance().m_pinned_use_cuda_host_register;
@@ -157,7 +165,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
         "graph_capture_record_stream_reuse",
         "pinned_reserve_segment_size_mb",
         "pinned_num_register_threads",
-        "per_process_memory_fraction"};
+        "per_process_memory_fraction"
+        "memset_value"};
     return keys;
   }
 
@@ -185,6 +194,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   double parsePerProcessMemoryFraction(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
+  int parseMemsetValue(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
 
   std::atomic<size_t> m_pinned_num_register_threads{1};
   std::atomic<size_t> m_pinned_reserve_segment_size_mb{0};
@@ -198,6 +210,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
   std::atomic<bool> m_pinned_use_cuda_host_register{false};
   std::atomic<bool> m_graph_capture_record_stream_reuse{false};
   std::atomic<double> m_per_process_memory_fraction{1.0};
+  std::atomic<int> m_memset_value{std::numeric_limits<int>::max()};
 };
 
 // Keep this for backwards compatibility
