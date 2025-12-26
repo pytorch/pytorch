@@ -138,12 +138,16 @@ void normal_fill_AVX2(const TensorBase &self, const float mean, const float std,
 template <typename scalar_t>
 void normal_fill_16(scalar_t *data, const double mean, const double std) {
   for (const auto j : c10::irange(8)) {
-    const double u1 = 1 - data[j]; // [0, 1) -> (0, 1] for log.
-    const double u2 = data[j + 8];
-    const double radius = std::sqrt(-2 * std::log(u1));
-    const double theta = 2.0f * c10::pi<double> * u2;
-    data[j] = radius * std::cos(theta) * std + mean;
-    data[j + 8] = radius * std::sin(theta) * std + mean;
+    // `math_type` to store intermediate values, will be float for half precision types.
+    using math_type = op_math_t<scalar_t>>;
+    math_type math_mean = mean;
+    math_type math_std = std;
+    const auto u1 = 1 - static_cast<math_type>(data[j]); // [0, 1) -> (0, 1] for log.
+    const auto u2 = static_cast<math_type>(data[j + 8]);
+    const auto radius = std::sqrt(-2 * std::log(u1));
+    const auto theta = 2.0f * c10::pi<double> * u2;
+    data[j] = radius * std::cos(theta) * math_std + math_mean;
+    data[j + 8] = radius * std::sin(theta) * math_std + math_mean;
   }
 }
 
