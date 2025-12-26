@@ -8394,6 +8394,56 @@ Example::
 )
 
 add_docstr(
+    torch.nonzero_static,
+    r"""
+nonzero_static(input, *, size, fill_value=-1) -> LongTensor
+
+Returns a 2-D tensor where each row is the index for a non-zero value.
+The returned tensor has the same dtype and semantics as :func:`torch.nonzero` (indices of type ``torch.int64``).
+
+Args:
+    input (Tensor): the input tensor.
+
+Keyword args:
+    size (int): the number of non-zero elements to include in the output. If :attr:`size` is larger than
+        the number of non-zero elements, pads extra rows with :attr:`fill_value`. If smaller, truncates the result.
+        Must be a non-negative integer.
+    fill_value (int, optional): the value used to pad rows when :attr:`size` exceeds the number of non-zero elements.
+        The default is ``-1`` to represent an invalid index.
+
+Example::
+
+    # Example 1: Padding
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 4
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[ 0,  0],
+            [ 1,  0],
+            [ 1,  1],
+            [-1, -1]])
+
+    # Example 2: Truncating
+    >>> input_tensor = torch.tensor([[1, 0], [3, 2]])
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([[0, 0],
+            [1, 0]])
+
+    # Example 3: Zero size
+    >>> input_tensor = torch.tensor([10])
+    >>> static_size = 0
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(0, 1), dtype=torch.int64)
+
+    # Example 4: Zero-rank input
+    >>> input_tensor = torch.tensor(10)
+    >>> static_size = 2
+    >>> t = torch.nonzero_static(input_tensor, size=static_size)
+    tensor([], size=(2, 0), dtype=torch.int64)
+""",
+)
+
+add_docstr(
     torch.numel,
     r"""
 numel(input: Tensor) -> int
