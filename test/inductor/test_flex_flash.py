@@ -18,6 +18,7 @@ from torch.profiler import profile, ProfilerActivity
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
+    e4m3_type,
 )
 from torch.testing._internal.common_utils import parametrize
 
@@ -681,12 +682,8 @@ class TestFlexFlash(InductorTestCase):
         B, H, S, D = 2, 8, 512, 64
 
         query = torch.randn(B, H, S, D, dtype=torch.bfloat16, device=device)
-        key = torch.randn(B, H, S, D, dtype=dtype, device=device).to(
-            torch.float8_e4m3fn
-        )
-        value = torch.randn(B, H, S, D, dtype=dtype, device=device).to(
-            torch.float8_e4m3fn
-        )
+        key = torch.randn(B, H, S, D, dtype=dtype, device=device).to(e4m3_type)
+        value = torch.randn(B, H, S, D, dtype=dtype, device=device).to(e4m3_type)
 
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
 
