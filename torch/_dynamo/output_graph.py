@@ -238,7 +238,8 @@ def collect_reachable_grad_fns(
     """Collect all grad_fns reachable from tensors' autograd graphs.
 
     Performs a DFS traversal and collects all visited grad_fns.
-    Optionally stops traversal (but still includes) nodes in stop_at set.
+    Optionally stops traversal nodes in stop_at set. This signals the
+    autograd.grad boundary.
 
     Args:
         tensors_with_sources: List of (tensor, source_name) tuples to start search from.
@@ -263,14 +264,14 @@ def collect_reachable_grad_fns(
         node = stack.pop()
         if node in visited:
             continue
-        visited.add(node)
-        # Stop traversal at stop_at nodes (but still include them in visited)
+        # Stop traversal at stop_at nodes and don't include them
+        # in consumed grad_fn list.
         if node in stop_at:
             continue
+        visited.add(node)
         for next_fn, _ in node.next_functions:
             if next_fn is not None:
                 stack.append(next_fn)
-
     return visited
 
 
