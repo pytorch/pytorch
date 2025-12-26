@@ -436,6 +436,12 @@ class ViewAndMutationMeta:
 
     num_symints_saved_for_bw: Optional[int] = None
 
+    # Number of tensors saved for backward that were stashed on ctx (e.g., ctx.x = x)
+    # rather than via save_for_backward in an autograd.Function.
+    # These tensors are placed at the end of the saved tensors and should skip
+    # version counter checks at runtime.
+    num_tensors_saved_with_no_vc_check: Optional[int] = None
+
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
@@ -669,6 +675,41 @@ class ViewAndMutationMeta:
             return slice(self.num_forward, -self.num_symints_saved_for_bw)
         else:
             return slice(self.num_forward, None)
+
+    @property
+    def tensors_saved_for_backwards_with_vc_check_slice(self):
+        """
+        Slice of forward outputs that are tensors saved for backward that
+        require version counter checks (i.e., were saved via save_for_backward).
+        """
+        assert self.num_symints_saved_for_bw is not None
+        assert self.num_tensors_saved_with_no_vc_check is not None
+        # The tensors with VC check come first, followed by tensors without VC check
+        num_no_vc_check = self.num_tensors_saved_with_no_vc_check
+        num_symints = self.num_symints_saved_for_bw
+        if num_no_vc_check > 0 or num_symints > 0:
+            end = -(num_no_vc_check + num_symints)
+            return slice(self.num_forward, end if end != 0 else None)
+        else:
+            return slice(self.num_forward, None)
+
+    @property
+    def tensors_saved_for_backwards_no_vc_check_slice(self):
+        """
+        Slice of forward outputs that are tensors saved for backward that
+        do NOT require version counter checks (i.e., were stashed on ctx
+        rather than via save_for_backward in an autograd.Function).
+        """
+        assert self.num_symints_saved_for_bw is not None
+        assert self.num_tensors_saved_with_no_vc_check is not None
+        num_no_vc_check = self.num_tensors_saved_with_no_vc_check
+        num_symints = self.num_symints_saved_for_bw
+        if num_no_vc_check == 0:
+            return slice(0, 0)  # empty slice
+        if num_symints > 0:
+            return slice(-num_no_vc_check - num_symints, -num_symints)
+        else:
+            return slice(-num_no_vc_check, None)
 
     @property
     def symints_saved_for_backwards_slice(self):

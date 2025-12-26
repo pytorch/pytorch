@@ -53,7 +53,11 @@ from ._activation_checkpointing.knapsack import (
     ilp_knapsack,
 )
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
-from ._aot_autograd.descriptors import AOTOutput, SavedForBackwardsAOTOutput
+from ._aot_autograd.descriptors import (
+    AOTOutput,
+    SavedForBackwardsAOTOutput,
+    SavedForBackwardsNoVcCheckAOTOutput,
+)
 from ._aot_autograd.functional_utils import _is_functional_graph
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
@@ -894,6 +898,7 @@ def _extract_fwd_bwd_modules(
     *,
     num_fwd_outputs: int,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
+    num_saved_values_with_no_vc_check: int = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
@@ -985,7 +990,9 @@ def _extract_fwd_bwd_modules(
         fwd_outputs + saved_values + saved_sym_nodes,
         fwd_outputs_descs
         + [
-            SavedForBackwardsAOTOutput(i)
+            SavedForBackwardsNoVcCheckAOTOutput(i)
+            if num_saved_values_with_no_vc_check <= i < len(saved_values)
+            else SavedForBackwardsAOTOutput(i)
             for i in range(len(saved_values) + len(saved_sym_nodes))
         ],
         "forward",
@@ -1172,6 +1179,21 @@ def default_partition(
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_module.graph, saved_values)
 
+    # Sort saved_values so that tensors with saved_tensor_with_no_vc_check=True
+    # are at the end. This allows us to have two consecutive slices:
+    # 1. tensors_saved_for_backwards_slice - tensors saved via save_for_backward
+    # 2. tensors_saved_with_no_vc_check_slice - tensors stashed on ctx without save_for_backward
+    # The sort is stable, so the relative order within each group is preserved.
+    saved_values_with_vc_check = []
+    saved_values_no_vc_check = []
+    for node in saved_values:
+        if node.meta.get("saved_tensor_with_no_vc_check", False):
+            saved_values_no_vc_check.append(node)
+        else:
+            saved_values_with_vc_check.append(node)
+    num_saved_with_no_vc_check = len(saved_values_no_vc_check)
+    saved_values = saved_values_with_vc_check + saved_values_no_vc_check
+
     if static_lifetime_input_nodes is None:
         static_lifetime_input_nodes = node_info.static_lifetime_input_nodes
     fw_module, bw_module = _extract_fwd_bwd_modules(
@@ -1180,6 +1202,7 @@ def default_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=static_lifetime_input_nodes,
+        num_saved_values_with_no_vc_check=num_saved_with_no_vc_check,
     )
 
     # Run DCE while overriding the definition of is_impure_node
@@ -3025,6 +3048,21 @@ def min_cut_rematerialization_partition(
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
 
+    # Sort saved_values so that tensors with saved_tensor_with_no_vc_check=True
+    # are at the end. This allows us to have two consecutive slices:
+    # 1. tensors_saved_for_backwards_slice - tensors saved via save_for_backward
+    # 2. tensors_saved_with_no_vc_check_slice - tensors stashed on ctx without save_for_backward
+    # The sort is stable, so the relative order within each group is preserved.
+    saved_values_with_vc_check = []
+    saved_values_no_vc_check = []
+    for node in saved_values:
+        if node.meta.get("saved_tensor_with_no_vc_check", False):
+            saved_values_no_vc_check.append(node)
+        else:
+            saved_values_with_vc_check.append(node)
+    num_saved_with_no_vc_check = len(saved_values_no_vc_check)
+    saved_values = saved_values_with_vc_check + saved_values_no_vc_check
+
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
     fw_module, bw_module = _extract_fwd_bwd_modules(
         joint_module,
@@ -3033,6 +3071,7 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,
+        num_saved_values_with_no_vc_check=num_saved_with_no_vc_check,
     )
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:
