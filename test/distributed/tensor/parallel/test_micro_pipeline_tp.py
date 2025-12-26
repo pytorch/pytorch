@@ -70,6 +70,7 @@ class MicroPipelineTPTest(TestCase):
             reorder_for_compute_comm_overlap=False,
         )
         self._inductor_config_patch.__enter__()
+        self.addCleanup(self._inductor_config_patch.__exit__, None, None, None)
 
         self.rank = 0
         self.world_size = 2
@@ -85,7 +86,6 @@ class MicroPipelineTPTest(TestCase):
 
     def tearDown(self):
         dist.destroy_process_group()
-        self._inductor_config_patch.__exit__(None, None, None)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -519,6 +519,7 @@ class MicroPipelineTP4GPUTest(TestCase):
             reorder_for_compute_comm_overlap=False,
         )
         self._inductor_config_patch.__enter__()
+        self.addCleanup(self._inductor_config_patch.__exit__, None, None, None)
 
         self.rank = 0
         self.world_size = 4
@@ -534,7 +535,6 @@ class MicroPipelineTP4GPUTest(TestCase):
 
     def tearDown(self):
         dist.destroy_process_group()
-        self._inductor_config_patch.__exit__(None, None, None)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
