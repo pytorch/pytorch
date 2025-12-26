@@ -145,7 +145,7 @@ void normal_fill_16(scalar_t *data, const double mean, const double std) {
     const auto u1 = 1 - static_cast<math_type>(data[j]); // [0, 1) -> (0, 1] for log.
     const auto u2 = static_cast<math_type>(data[j + 8]);
     const auto radius = std::sqrt(-2 * std::log(u1));
-    const auto theta = 2.0f * c10::pi<double> * u2;
+    const auto theta = 2.0f * c10::pi<math_type> * u2;
     data[j] = radius * std::cos(theta) * math_std + math_mean;
     data[j + 8] = radius * std::sin(theta) * math_std + math_mean;
   }
