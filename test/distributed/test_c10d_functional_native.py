@@ -721,6 +721,43 @@ def find_buffer_assignments(code):
     return tuple(f"buf{match.group(1)}" for match in matches)
 
 
+def find_c10d_functional_list_collective_outputs(
+    code: str, op_name: str, num_outputs: int
+) -> tuple[str, tuple[str, ...]]:
+    """
+    Returns the buffer name assigned from a c10d functional list-producing op call
+    (e.g. all_gather_into_tensor_coalesced) and the output buffers extracted via
+    indexing (bufX[i]).
+
+    This is intentionally robust to:
+    - buffer numbering differences (buf0/buf5/...)
+    - argument ordering differences in the generated code
+    """
+    m = re.search(
+        rf"(buf\d+) = torch\.ops\._c10d_functional\.{re.escape(op_name)}\.default\(",
+        code,
+    )
+    if not m:
+        raise AssertionError(
+            f"Expected to find a call to torch.ops._c10d_functional.{op_name}.default(...)"
+        )
+    list_buf = m.group(1)
+
+    out_bufs: list[Optional[str]] = [None] * num_outputs
+    for m_idx in re.finditer(
+        rf"(buf\d+) = {re.escape(list_buf)}\[(\d+)\]", code
+    ):
+        idx = int(m_idx.group(2))
+        if 0 <= idx < num_outputs and out_bufs[idx] is None:
+            out_bufs[idx] = m_idx.group(1)
+
+    if any(b is None for b in out_bufs):
+        raise AssertionError(
+            f"Expected to find {num_outputs} indexed outputs from {list_buf} (0..{num_outputs - 1})"
+        )
+    return list_buf, tuple(out_bufs)  # type: ignore[return-value]
+
+
 class CompileTestCPU(TestCase):
     def setUp(self):
         super().setUp()
@@ -1017,22 +1054,25 @@ class CompileTest(TestCase):
         args = [torch.rand(4, 4, device=self.device.type) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
+        list_buf, (buf1, buf2, buf3, buf4) = find_c10d_functional_list_collective_outputs(
+            code, "all_gather_into_tensor_coalesced", 4
+        )
         (
             FileCheck()
             .check(
-                "buf0 = torch.ops._c10d_functional.all_gather_into_tensor_coalesced"
-                ".default([arg3_1, arg2_1, arg1_1, arg0_1]"
+                f"{list_buf} = torch.ops._c10d_functional.all_gather_into_tensor_coalesced"
+                ".default("
             )
-            .check("buf1 = buf0[0]")
-            .check("buf2 = buf0[1]")
-            .check("buf3 = buf0[2]")
-            .check("buf4 = buf0[3]")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf2")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf3")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf4")
+            .check(f"{buf1} = {list_buf}[0]")
+            .check(f"{buf2} = {list_buf}[1]")
+            .check(f"{buf3} = {list_buf}[2]")
+            .check(f"{buf4} = {list_buf}[3]")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf1}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf2}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf3}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf4}")
             # Expect no extra copy on return
-            .check("return (buf1, buf2, buf3, buf4, )")
+            .check(f"return ({buf1}, {buf2}, {buf3}, {buf4}, )")
             .run(code)
         )
 
