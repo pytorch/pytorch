@@ -23,6 +23,7 @@ from ..utils import (
     istype,
     np,
     raise_args_mismatch,
+    raise_on_overridden_hash,
 )
 from .base import ValueMutationNew, VariableTracker
 
@@ -46,6 +47,7 @@ class ConstantVariable(VariableTracker):
     @staticmethod
     def create(value: bool) -> "ConstantVariable": ...
 
+    # TODO: Refactor to make these return ConstantVariable
     @overload
     @staticmethod
     def create(value: Any, **kwargs: Any) -> VariableTracker: ...
@@ -114,6 +116,15 @@ its type to `common_constant_types`.
 
     def is_python_constant(self) -> Literal[True]:
         return True
+
+    def is_symnode_like(self) -> bool:
+        return isinstance(self.value, (int, bool))
+
+    def is_constant_match(self, *values: Any) -> bool:
+        return self.value in values
+
+    def is_constant_none(self) -> bool:
+        return self.value is None
 
     @property
     def items(self) -> list[VariableTracker]:
@@ -269,7 +280,7 @@ its type to `common_constant_types`.
             assert not kwargs
             search = args[0].as_python_constant()
             try:
-                # pyrefly: ignore [unsupported-operation]
+                # pyrefly: ignore [not-iterable, unsupported-operation]
                 result = search in self.value
                 return ConstantVariable.create(result)
             except TypeError as e:
@@ -311,10 +322,7 @@ its type to `common_constant_types`.
                 return map_fn.call_function(tx, [self, *rest], {})
             else:
                 for other in rest:
-                    if not (
-                        other.is_python_constant()
-                        and other.as_python_constant() is None
-                    ):
+                    if not other.is_constant_none():
                         return self._tree_map_fallback(
                             tx,
                             tree_map_fn,
@@ -340,6 +348,20 @@ its type to `common_constant_types`.
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.value)
+
+    def is_python_equal(self, other):
+        # Could be an EnumVariable as well
+        from .tensor import SymNodeVariable
+
+        if isinstance(other, SymNodeVariable):
+            return self.as_python_constant() == other.evaluate_expr()
+        return self.as_python_constant() == other.as_python_constant()
+
 
 class EnumVariable(VariableTracker):
     """VariableTracker for enum.Enum and enum.IntEnum instances
@@ -356,7 +378,7 @@ class EnumVariable(VariableTracker):
     def create(
         cls, cls_type: Any, value_vt: VariableTracker, options: Any
     ) -> "EnumVariable":
-        if isinstance(value_vt, variables.ConstantVariable):
+        if value_vt.is_python_constant():
             for member in list(cls_type):
                 if member.value == value_vt.as_python_constant():
                     return cls(member, **options)
@@ -388,3 +410,13 @@ class EnumVariable(VariableTracker):
         member = getattr(self.value, name)
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, member, source=source)
+
+    def is_python_hashable(self):
+        raise_on_overridden_hash(self.value, self)
+        return True
+
+    def get_python_hash(self):
+        return hash(self.as_python_constant())
+
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()
