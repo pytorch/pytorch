@@ -4,7 +4,7 @@
 namespace at::accelerator {
 
 struct TORCH_API Graph {
-  explicit Graph(bool keep_graph = false);
+  Graph(bool keep_graph = false);
   ~Graph() = default;
 
   C10_DISABLE_COPY_AND_ASSIGN(Graph);
