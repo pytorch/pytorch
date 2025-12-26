@@ -47,9 +47,11 @@ from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
+    get_plain_tensors,
     is_fake,
     unset_fake_temporarily,
 )
+from torch._subclasses.functional_tensor import FunctionalTensor
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx import GraphModule, Proxy, Tracer
 from torch.fx.graph_module import _assign_attr
@@ -441,6 +443,21 @@ def get_proxy_slot(
 
     res = transform(value)
     return res
+
+
+def _get_proxies(t: torch.Tensor) -> list[Proxy]:
+    proxies = []
+    mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
+    if mode is None:
+        return proxies
+    tracer = mode.tracer
+    for t_inner in get_plain_tensors(t, out=[]):
+        if isinstance(t_inner, FunctionalTensor):
+            t_inner = torch._from_functional_tensor(t_inner.elem)
+        proxy_tensor = get_proxy_slot(t_inner, tracer, None)
+        if proxy_tensor is not None:
+            proxies.append(proxy_tensor.proxy)
+    return proxies
 
 
 @functools.cache

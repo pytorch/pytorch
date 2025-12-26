@@ -669,7 +669,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         return tensors_to_clone
 
     for node in graph.nodes:
-        if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
+        if (inplaceable_op := inplaceable_ops.get(node.target)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
             if can_inplace(node, mutated_arg) and inplaceable_op.extra_check(node):
                 # TODO(yifu): this doesn't properly remove copy epilogues for
@@ -758,9 +758,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 new_kwargs["tensors_to_clone"] = immutable_list(tensors_to_clone)
                 new_kwargs = immutable_dict(new_kwargs)
                 node.meta["eager_input_vals"] = (args, new_kwargs)
-        elif (
-            inplaceable_op := inplaceable_foreach_ops.get(node.target, None)
-        ) is not None:
+        elif (inplaceable_op := inplaceable_foreach_ops.get(node.target)) is not None:
             mutated_args = node.args[inplaceable_op.mutated_arg]
 
             if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):

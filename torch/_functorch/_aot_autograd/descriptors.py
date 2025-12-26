@@ -747,3 +747,11 @@ class SavedForBackwardsAOTOutput(AOTOutput):
 
     def expr(self) -> str:
         return f"__saved_for_backwards_{self.idx}"
+
+
+@dataclasses.dataclass(frozen=True)
+class SavedForBackwardsNoVcCheckAOTOutput(AOTOutput):
+    idx: int
+
+    def expr(self) -> str:
+        return f"__saved_for_backwards_no_vc_check_{self.idx}"

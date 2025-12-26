@@ -13,16 +13,14 @@ import contextlib
 import copy
 import functools
 import itertools
+import logging
 import pprint
-from collections.abc import Callable
+import typing
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Optional, TYPE_CHECKING, Union
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch.fx as fx
@@ -39,6 +37,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
@@ -96,6 +95,53 @@ from .utils import (
 
 
 zip = strict_zip
+
+aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
+
+
+def _describe_arg_for_logging(arg: object) -> str:
+    from torch._library import opaque_object
+
+    try:
+        is_dtensor = isinstance(arg, torch.distributed._tensor.DTensor)
+    except AttributeError:
+        is_dtensor = False
+
+    if is_dtensor:
+        arg = typing.cast(torch.distributed._tensor.DTensor, arg)
+        mesh = arg.device_mesh
+        return (
+            f"DTensor(shape={arg.shape}, dtype={arg.dtype}, "
+            f"device={arg.device}, mesh_shape={mesh.shape}, "
+            f"placements={arg.placements})"
+        )
+    elif isinstance(arg, torch.Tensor):
+        return f"Tensor(shape={arg.shape}, dtype={arg.dtype}, device={arg.device})"
+    elif opaque_object.is_opaque_type(type(arg)):
+        return f"Opaque: {type(arg).__name__}"
+    else:
+        return f"{type(arg).__name__}: {arg}"
+
+
+def _log_input_metadata(runtime_metadata: ViewAndMutationMeta) -> None:
+    aot_graphs_log.debug(
+        "Expected input metadata (count=%s):", len(runtime_metadata.subclass_inp_meta)
+    )
+    for i, meta in enumerate(runtime_metadata.subclass_inp_meta):
+        aot_graphs_log.debug("  [%s] %s", i, meta)
+
+
+def _log_args_list(args: Sequence[object], label: str) -> None:
+    aot_graphs_log.debug("%s (count=%s):", label, len(args))
+    for i, arg in enumerate(args):
+        aot_graphs_log.debug("  [%s] %s", i, _describe_arg_for_logging(arg))
+
+
+def _log_args_maybe_list(arg: object, label: str) -> None:
+    if isinstance(arg, (list, tuple)):
+        _log_args_list(arg, label)
+    else:
+        aot_graphs_log.debug("%s: %s", label, _describe_arg_for_logging(arg))
 
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
@@ -373,10 +419,9 @@ def _create_runtime_wrapper(
         )
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
-        num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices
-        if num_mutations_to_apply > 0:
-            updated_inputs = all_outs[:num_mutations_to_apply]
-            fw_outs = all_outs[num_mutations_to_apply:]
+        if num_mutated_runtime_inps > 0:
+            updated_inputs = all_outs[:num_mutated_runtime_inps]
+            fw_outs = all_outs[num_mutated_runtime_inps:]
 
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
                 meta = runtime_metadata.input_info[inpt_idx]
@@ -685,14 +730,31 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: list[Any]):
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                aot_graphs_log.debug(
+                    "=== AOTDispatchSubclassWrapper.inner_fn START ==="
+                )
+                _log_input_metadata(runtime_metadata)
+                _log_args_list(args, "Incoming args")
+
             unwrapped_args = runtime_unwrap_tensor_subclasses(
                 args,
                 subclass_metas=runtime_metadata.subclass_inp_meta,
                 append_symints=True,
             )
+
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                _log_args_list(unwrapped_args, "After unwrapping, unwrapped_args")
+
             args.clear()
             # expectation: runtime_fn is a boxed fn
             unwrapped_outs = compiled_fn(unwrapped_args)
+
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                _log_args_maybe_list(
+                    unwrapped_outs, "After compiled_fn, unwrapped_outs"
+                )
+
             wrapped_outs = wrap_tensor_subclasses(
                 unwrapped_outs,
                 subclass_metas=subclass_metas,
@@ -700,6 +762,11 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 is_runtime=True,
                 included_subclass_symints=True,
             )
+
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                _log_args_maybe_list(wrapped_outs, "After wrapping, wrapped_outs")
+                aot_graphs_log.debug("=== AOTDispatchSubclassWrapper.inner_fn END ===")
+
             return wrapped_outs
 
         # box it
@@ -2164,11 +2231,20 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 num_forward_returns = CompiledFunction.metadata.num_forward_returns
 
                 # Partitioners must put symint arguments at the end separate from tensor arguments
-                tensors_saved_for_backwards = fw_outs[
-                    CompiledFunction.metadata.tensors_saved_for_backwards_slice
+                # Split tensors into those that need VC checks (via save_for_backward)
+                # and those that don't (stashed directly on ctx).
+                # The partitioner sorts tensors so that no-VC-check tensors are at the end.
+                tensors_saved_with_vc_check = fw_outs[
+                    CompiledFunction.metadata.tensors_saved_for_backwards_with_vc_check_slice
+                ]
+                tensors_saved_no_vc_check = fw_outs[
+                    CompiledFunction.metadata.tensors_saved_for_backwards_no_vc_check_slice
                 ]
                 assert all(
-                    isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
+                    isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check
+                )
+                assert all(
+                    isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check
                 )
 
                 def mark_dynamic_activations(activations: list[torch.Tensor]):
@@ -2180,14 +2256,22 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     return activations
 
                 # See Note [Detaching saved tensors in AOTAutograd]
+                # Only save tensors that need VC checks via save_for_backward
                 ctx.save_for_backward(
                     *mark_dynamic_activations(
                         [
                             x.detach() if x._is_view() else x
-                            for x in tensors_saved_for_backwards
+                            for x in tensors_saved_with_vc_check
                         ]
                     )
                 )
+                # Stash tensors that don't need VC checks directly on ctx
+                # These are tensors from autograd.Function that were saved via ctx.x = x
+                # rather than ctx.save_for_backward(x)
+                ctx._tensors_no_vc_check = [
+                    x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
+                ]
+
                 symint_outs = fw_outs[
                     CompiledFunction.metadata.symints_saved_for_backwards_slice
                 ]
@@ -2273,8 +2357,15 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def backward(ctx, *flat_args):
+                # Combine tensors from both sources:
+                # 1. ctx.saved_tensors - tensors that went through save_for_backward (with VC check)
+                # 2. ctx._tensors_no_vc_check - tensors stashed directly on ctx (no VC check)
+                # The order matches the partitioner's output: VC-check tensors first, then no-VC-check tensors
+                all_saved_tensors = list(ctx.saved_tensors) + getattr(
+                    ctx, "_tensors_no_vc_check", []
+                )
                 all_args = _backward_prologue_functional(
-                    ctx.saved_tensors,
+                    all_saved_tensors,
                     ctx.symints,
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
