@@ -1080,7 +1080,6 @@ class TestFakeQuantizeOps(TestCase):
                 )
 
     @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    @unittest.skipIf(TEST_WITH_ROCM, "Not a suitable test for ROCM")
     @given(dtype=st.sampled_from([torch.float, torch.float64, torch.half, torch.bfloat16]),
            device=st.sampled_from(['cpu', 'cuda'] if torch.cuda.is_available() else ['cpu']))
     def test_fake_quantize_per_tensor_affine_inf(self, dtype, device) -> None:
