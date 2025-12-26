@@ -11,9 +11,11 @@ struct OpenRegEvent {
   OpenRegEvent(bool enable_timing) noexcept : enable_timing_{enable_timing} {}
 
   ~OpenRegEvent() {
-    if (is_created_) {
-      OPENREG_CHECK(orEventDestroy(event_));
-    }
+    try {
+      if (is_created_) {
+        OPENREG_CHECK(orEventDestroy(event_));
+      }
+    } catch (...) { /* No throw */ }
   }
 
   OpenRegEvent(const OpenRegEvent&) = delete;
@@ -66,15 +68,18 @@ struct OpenRegEvent {
     return false;
   }
 
+  // LITERALINCLUDE START: OPENREG EVENT RECORD DEFAULT
   void record() {
     record(getCurrentOpenRegStream());
   }
+  // LITERALINCLUDE END: OPENREG EVENT RECORD DEFAULT
 
   void recordOnce(const OpenRegStream& stream) {
     if (!was_recorded_)
       record(stream);
   }
 
+  // LITERALINCLUDE START: OPENREG EVENT RECORD
   void record(const OpenRegStream& stream) {
     if (!is_created_) {
       createEvent(stream.device_index());
@@ -91,6 +96,7 @@ struct OpenRegEvent {
     OPENREG_CHECK(orEventRecord(event_, stream));
     was_recorded_ = true;
   }
+  // LITERALINCLUDE END: OPENREG EVENT RECORD
 
   void block(const OpenRegStream& stream) {
     if (is_created_) {
