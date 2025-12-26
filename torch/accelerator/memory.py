@@ -8,6 +8,7 @@ from ._utils import _device_t, _get_device_index
 
 __all__ = [
     "empty_cache",
+    "empty_host_cache",
     "get_memory_info",
     "max_memory_allocated",
     "max_memory_reserved",
@@ -29,6 +30,15 @@ def empty_cache() -> None:
     if not torch._C._accelerator_isAllocatorInitialized():
         return
     torch._C._accelerator_emptyCache()
+
+
+def empty_host_cache() -> None:
+    r"""Release all unoccupied cached host memory currently held by the host caching
+    allocator so that those can be used in other application.
+
+    .. note:: This function is a no-op if current :ref:`accelerator<accelerators>` is not initialized.
+    """
+    torch._C._accelerator_emptyHostCache()
 
 
 def memory_stats(device_index: _device_t = None, /) -> OrderedDict[str, Any]:

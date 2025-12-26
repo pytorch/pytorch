@@ -5,7 +5,8 @@
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 
-#include <ATen/detail/MTIAHooksInterface.h>
+#include <ATen/accelerator/Graph.h>
+#include <ATen/core/CachingHostAllocator.h>
 #include <optional>
 
 namespace at::accelerator {
@@ -78,29 +79,33 @@ TORCH_API c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index);
 TORCH_API c10::DeviceCapability getDeviceCapability(
     c10::DeviceIndex device_index);
 
-TORCH_API inline void emptyCache() {
+inline void emptyCache() {
   const auto device_type = getAccelerator(true).value();
   at::getDeviceAllocator(device_type)->emptyCache();
 }
 
-TORCH_API inline at::CachingDeviceAllocator::DeviceStats getDeviceStats(
+inline void emptyHostCache() {
+  const auto device_type = getAccelerator(true).value();
+  at::getHostAllocator(device_type)->empty_cache();
+}
+
+inline at::CachingDeviceAllocator::DeviceStats getDeviceStats(
     c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
   return at::getDeviceAllocator(device_type)->getDeviceStats(device_index);
 }
 
-TORCH_API inline void resetAccumulatedStats(c10::DeviceIndex device_index) {
+inline void resetAccumulatedStats(c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
   at::getDeviceAllocator(device_type)->resetAccumulatedStats(device_index);
 }
 
-TORCH_API inline void resetPeakStats(c10::DeviceIndex device_index) {
+inline void resetPeakStats(c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
   at::getDeviceAllocator(device_type)->resetPeakStats(device_index);
 }
 
-TORCH_API inline std::pair<size_t, size_t> getMemoryInfo(
-    c10::DeviceIndex device_index) {
+inline std::pair<size_t, size_t> getMemoryInfo(c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
   return at::getDeviceAllocator(device_type)->getMemoryInfo(device_index);
 }
