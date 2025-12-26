@@ -14,6 +14,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM100,
     IS_SM90,
     PLATFORM_SUPPORTS_FP8_GROUPED_GEMM,
+    PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM,
 )
 from torch.torch_version import TorchVersion
 
@@ -240,19 +241,20 @@ if _should_generate_scaled_grouped_mm_configs():
         )
 
     # MX supports both CUDA (with swizzle) and HIP (with NO_SWIZZLE).
-    scaled_grouped_mm_configs_long += op_bench.config_list(
-        attr_names=["M", "N", "K", "G"],
-        attrs=[[m, n, k, g] for (m, n, k, g) in MNKG_list],
-        cross_product_configs={
-            "device": ["cuda"],
-            "scaling": ["mxfp4", "mxfp8"],
-            "output_dtype": ["bfloat16"],
-        },
-        tags=["long"],
-    )
+    if PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM:
+        scaled_grouped_mm_configs_long += op_bench.config_list(
+            attr_names=["M", "N", "K", "G"],
+            attrs=[[m, n, k, g] for (m, n, k, g) in MNKG_list],
+            cross_product_configs={
+                "device": ["cuda"],
+                "scaling": ["mxfp4", "mxfp8"],
+                "output_dtype": ["bfloat16"],
+            },
+            tags=["long"],
+        )
 
     # NVFP4 is CUDA-only (non-HIP) due to swizzled scale requirements.
-    if torch.version.hip is None:
+    if torch.version.hip is None and PLATFORM_SUPPORTS_MXFP8_GROUPED_GEMM:
         scaled_grouped_mm_configs_long += op_bench.config_list(
             attr_names=["M", "N", "K", "G"],
             attrs=[[m, n, k, g] for (m, n, k, g) in MNKG_list],

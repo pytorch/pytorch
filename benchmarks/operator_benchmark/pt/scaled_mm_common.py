@@ -118,4 +118,9 @@ def supports_fp8_deepseek_blockwise_scaling() -> bool:
     # These scaling modes require CUDA 12.9+ (see `aten/src/ATen/cuda/CUDABlas.cpp:get_scale_mode`).
     if torch.version.hip is None and TorchVersion(torch.version.cuda) < "12.9":
         return False
+    if (
+        torch.version.hip is not None
+        and "gfx950" not in torch.cuda.get_device_properties(0).gcnArchName
+    ):  # Blockwise scaling is not supported on ROCm
+        return False
     return torch.cuda.get_device_capability(0) == (9, 0)

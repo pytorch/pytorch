@@ -11,7 +11,11 @@ import operator_benchmark as op_bench
 
 import torch
 from torch.nn.functional import ScalingType, SwizzleType
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_FP8,
+    PLATFORM_SUPPORTS_MX_GEMM,
+    SM90OrLater,
+)
 from torch.torch_version import TorchVersion
 
 
@@ -46,7 +50,7 @@ def _supports_fp8_rowwise_fp32_output() -> bool:
         return False
     if TorchVersion(torch.version.cuda) < "12.9":
         return False
-    return torch.cuda.get_device_capability(0) == (9, 0)
+    return torch.cuda.get_device_capability(0) >= (9, 0)
 
 
 def _supports_scaled_mm_benchmark() -> tuple[bool, str]:
@@ -518,20 +522,21 @@ if _should_generate_scaled_mm_configs():
 
     # MX supports both CUDA (with swizzle) and HIP (with NO_SWIZZLE).
     # NVFP4 is CUDA-only (non-HIP) due to swizzled scale requirements.
-    scaled_mm_configs_long += op_bench.config_list(
-        attr_names=["M", "N", "K"],
-        attrs=_scaled_mm_long_shapes,
-        cross_product_configs={
-            "device": ["cuda"],
-            "float8_dtype": ["e4m3fn"],
-            "output_dtype": ["bfloat16"],
-            "scaling": ["mxfp8", "mxfp4"],
-        },
-        tags=["long"],
-    )
+    if PLATFORM_SUPPORTS_MX_GEMM:
+        scaled_mm_configs_long += op_bench.config_list(
+            attr_names=["M", "N", "K"],
+            attrs=_scaled_mm_long_shapes,
+            cross_product_configs={
+                "device": ["cuda"],
+                "float8_dtype": ["e4m3fn"],
+                "output_dtype": ["bfloat16"],
+                "scaling": ["mxfp8", "mxfp4"],
+            },
+            tags=["long"],
+        )
 
     # NVFP4 is CUDA-only (non-HIP)
-    if torch.version.hip is None:
+    if torch.version.hip is None and PLATFORM_SUPPORTS_MX_GEMM:
         scaled_mm_configs_long += op_bench.config_list(
             attr_names=["M", "N", "K"],
             attrs=_scaled_mm_long_shapes,
