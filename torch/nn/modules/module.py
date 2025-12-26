@@ -2897,9 +2897,21 @@ class Module:
         """
         if not isinstance(mode, bool):
             raise ValueError("training mode is expected to be boolean")
-        self.training = mode
-        for module in self.children():
-            module.train(mode)
+
+        # Calls super().__setattr__ instead of the typical self.a = a to avoid Module.__setattr__ overhead
+        super().__setattr__("training", mode)
+
+        # Following code is equivalent to:
+        #
+        # for module in self.children():
+        #     module.train(mode)
+        #
+        # children() is inlined for better performance.
+        memo = set()
+        for module in self._modules.values():
+            if module is not None and module not in memo:
+                memo.add(module)
+                module.train(mode)
         return self
 
     def eval(self) -> Self:
