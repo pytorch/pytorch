@@ -180,7 +180,9 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
         c10::cuda::DriverAPI::get()->cuCtxPopCurrent_(&popped));
     TORCH_INTERNAL_ASSERT(
         popped == context_, "expected popped context to be the current ctx");
-    ev.block(c10::cuda::getStreamFromExternal(parent_stream_, device_id_));
+    auto parent_stream = c10::cuda::getStreamFromExternal(parent_stream_, device_id_);
+    ev.block(parent_stream);
+    c10::cuda::setCurrentCUDAStream(parent_stream);
 #else
     TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
 #endif
