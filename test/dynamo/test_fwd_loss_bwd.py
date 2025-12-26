@@ -689,6 +689,27 @@ autograd.grad with external GradientEdge
             fn(edges, x)
 
     @skipIfCrossRef
+    def test_autograd_grad_returning_input_tensor(self):
+        torch._dynamo.reset()
+
+        def fn(x):
+            y = x * 2  # y.grad_fn = MulBackward
+            z = y * 3  # z.grad_fn = MulBackward2 -> MulBackward
+            # autograd.grad stops AT y, so y.grad_fn should NOT be consumed
+            grad = torch.autograd.grad(z.sum(), y)
+            return y, grad[0]  # Returning y should be SAFE
+
+        x_eager = torch.randn(4, requires_grad=True)
+        y_eager, grad_eager = fn(x_eager)
+        y_eager.sum().backward()
+        self.assertEqual(x_eager.grad, torch.full((4,), 2.0))
+
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        x_compiled = torch.randn(4, requires_grad=True)
+
+        y_compiled, grad_compiled = compiled_fn(x_compiled)
+
+    @skipIfCrossRef
     def test_autograd_grad_gradient_penalty(self):
         torch._dynamo.reset()
 
