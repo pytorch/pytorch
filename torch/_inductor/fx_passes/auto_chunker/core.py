@@ -125,19 +125,24 @@ def find_amplifier_node(graph: Graph) -> Optional[Node]:
 
     amplifier_nodes_ratio = []
 
+    import torch.distributed as dist
+    # dist.breakpoint() # TODO
     for node in graph.nodes:
         if use_tangent(node):
             # enter backward part of the graph
+            log.debug("Node %s uses tangent", node.format_node())
             break
 
         # Only trigger chunking for a small set of nodes like matmul for now
         if node.op != "call_function" or node.target not in eligible_amplifier_node:
+            log.debug("Node %s not calling eligible function", node.format_node())
             continue
 
         input_size = compute_tensor_size(node.args, node.kwargs)
         output_size = compute_tensor_size(node)
 
         if input_size == 0:
+            log.debug("Node %s has 0 input", node.format_node())
             continue
 
         ratio = output_size / input_size
@@ -148,6 +153,7 @@ def find_amplifier_node(graph: Graph) -> Optional[Node]:
             amplifier_nodes_ratio.append((node, ratio))
         elif ratio >= 4 and output_size >= 64_000:
             log.debug("Node '%s' get skipped as amplifier_node due to small amplification ratio or size. ratio %s, size %s", node.format_node(), ratio, output_size)
+        log.debug("Node '%s' get skipped as amplifier_node due to small amplification ratio or size. ratio %s, size %s", node.format_node(), ratio, output_size)
 
     amplifier_nodes_ratio = sorted(
         amplifier_nodes_ratio, key=lambda x: x[1], reverse=True
