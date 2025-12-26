@@ -898,7 +898,7 @@ def _extract_fwd_bwd_modules(
     *,
     num_fwd_outputs: int,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
-    num_saved_values_with_no_vc_check: int = None,
+    num_saved_values_with_no_vc_check: Optional[int] = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
@@ -991,7 +991,8 @@ def _extract_fwd_bwd_modules(
         fwd_outputs_descs
         + [
             SavedForBackwardsNoVcCheckAOTOutput(i)
-            if num_saved_values_with_no_vc_check <= i < len(saved_values)
+            if num_saved_values_with_no_vc_check is not None
+            and num_saved_values_with_no_vc_check <= i < len(saved_values)
             else SavedForBackwardsAOTOutput(i)
             for i in range(len(saved_values) + len(saved_sym_nodes))
         ],
