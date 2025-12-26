@@ -4,6 +4,7 @@ import io
 import logging
 import pickle
 import types
+import warnings
 from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
@@ -127,6 +128,12 @@ class AOTCompiledFunction:
         return self._artifacts.source_info
 
     def save_compiled_function(self, path: str) -> None:
+        warnings.warn(
+            "save_compiled_function() is deprecated and will be removed in a future version. "
+            "Use torch.Precompile.dynamo() and torch.Precompile.aot_autograd() instead.",
+            FutureWarning,
+            stacklevel=2,
+        )
         with open(path, "wb") as f:
             f.write(type(self).serialize(self))
 

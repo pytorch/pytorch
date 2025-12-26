@@ -76,6 +76,7 @@ __all__ = [
     "IntTensor",
     "LongStorage",
     "LongTensor",
+    "Precompile",
     "ShortStorage",
     "ShortTensor",
     "SymBool",
@@ -2349,6 +2350,9 @@ del register_after_fork
 # Import tools that require fully imported torch (for applying
 # torch.jit.script as a decorator, for instance):
 from torch._lobpcg import lobpcg as lobpcg
+
+# Import the Precompile API for composable ahead-of-time compilation
+from torch._precompile import Precompile as Precompile
 
 
 # These were previously defined in native_functions.yaml and appeared on the

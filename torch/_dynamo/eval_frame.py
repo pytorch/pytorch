@@ -814,6 +814,12 @@ class _TorchDynamoContext:
         fn = innermost_fn(fn)
 
         def aot_compile(example_inputs: tuple[tuple[Any, ...], dict[str, Any]]) -> Any:
+            warnings.warn(
+                "aot_compile() is deprecated and will be removed in a future version. "
+                "Use torch.Precompile.dynamo() and torch.Precompile.aot_autograd() instead.",
+                FutureWarning,
+                stacklevel=2,
+            )
             from torch._dynamo.aot_compile import aot_compile_fullgraph
 
             if torch._inductor.config.force_disable_caches:

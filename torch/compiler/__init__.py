@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import io
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
@@ -721,6 +722,10 @@ def load_compiled_function(
 
         This API is currently experimental and subject to change.
 
+    .. deprecated::
+        This function is deprecated. Use torch.Precompile.dynamo() and
+        torch.Precompile.aot_autograd() instead.
+
     Args:
         file: A file-like object containing the serialized compiled function.
         f_globals: Optional globals to be loaded into the compiled function.
@@ -728,6 +733,12 @@ def load_compiled_function(
     Returns:
         A torch-compiled function with compilation preloaded from disk.
     """
+    warnings.warn(
+        "load_compiled_function() is deprecated and will be removed in a future version. "
+        "Use torch.Precompile.dynamo() and torch.Precompile.aot_autograd() instead.",
+        FutureWarning,
+        stacklevel=2,
+    )
     from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
