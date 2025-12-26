@@ -7710,7 +7710,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
     def test_select_scatter_mixed_dtype(self):
         class Model(torch.nn.Module):
             def __init__(self):
-                super(Model, self).__init__()
+                super().__init__()
 
             def forward(self, x):
                 src = torch.tensor([0])
