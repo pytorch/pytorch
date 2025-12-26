@@ -9,7 +9,7 @@ for user-facing errors that also inherit from TypeError for compatibility.
 
 from threading import Lock
 
-from filelock import FileLock
+from filelock import BaseFileLock
 
 
 class CacheError(Exception):
@@ -53,7 +53,7 @@ class FileLockTimeoutError(SystemError):
     limit, indicating that the lock could not be acquired within the allotted time.
     """
 
-    def __init__(self, flock: FileLock, timeout: float) -> None:
+    def __init__(self, flock: BaseFileLock, timeout: float) -> None:
         """Initialize the file lock timeout error with detailed lock information.
 
         Args:

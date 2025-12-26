@@ -142,6 +142,15 @@
       "Context": "str(value)",
       "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
       "Hints": [
+        "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Attempted to wrap RNN, GRU, or LSTM",
+      "Context": "str(value)",
+      "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -820,6 +829,16 @@
       ]
     }
   ],
+  "GB7596": [
+    {
+      "Gb_type": "Indexing torch.Size with non-scalar tensor",
+      "Context": "get_item_dyn {self} {arg}",
+      "Explanation": "Attempted to index torch.Size with a tensor that is not a scalar constant.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
   "GB0080": [
     {
       "Gb_type": "Missing FakeTensor example value",
@@ -1179,6 +1198,15 @@
     }
   ],
   "GB4778": [
+    {
+      "Gb_type": "nested function with non-constructible closure in output",
+      "Context": "as_python_constant for out_spec {out_spec}",
+      "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo failed to construct the function defined in the compiled region with closure objects.",
+      "Hints": [
+        "Define the function at module scope instead of inside another function ",
+        "Ensure that all closure variables are constants."
+      ]
+    },
     {
       "Gb_type": "nested function with closure in output",
       "Context": "as_python_constant for out_spec",
@@ -3305,6 +3333,16 @@
       ]
     }
   ],
+  "GB9625": [
+    {
+      "Gb_type": "traceback.tb_lasti not supported",
+      "Context": "{self} accessing 'tb_lasti'",
+      "Explanation": "Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0316": [
     {
       "Gb_type": "torch.associative_scan: improper additional_inputs",
@@ -3845,6 +3883,16 @@
       "Gb_type": "Frozen dataclass with missing field",
       "Context": "dataclass={dataclass_cls.__name__}, field={field.name}",
       "Explanation": "Cannot reconstruct frozen dataclass: field '{field.name}' was not tracked during tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0370": [
+    {
+      "Gb_type": "record_function escaped from compiled region",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph break inside record_function region.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
