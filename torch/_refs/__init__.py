@@ -4028,7 +4028,7 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLike
     # pyrefly: ignore [bad-argument-type]
     if a.dim() == 0 and len(dims) > 0:
         raise IndexError(
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             f"Dimension specified as {dims[0]} but tensor has no dimensions"
         )
 
@@ -4049,20 +4049,21 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLike
                 f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
             )
         assert len_dims > 1
-        # pyrefly: ignore [index-error]
+        # pyrefly: ignore [bad-index]
         tail_shifts = shifts[1:]
-        # pyrefly: ignore [index-error]
+        # pyrefly: ignore [bad-index, index-error]
         tail_dims = dims[1:]
-        # pyrefly: ignore [index-error]
+        # pyrefly: ignore [bad-index, index-error]
+        # pyrefly: ignore [bad-index, index-error]
         first_dim_rolled = torch.roll(a, (shifts[0],), dims[0])
         return torch.roll(first_dim_rolled, tail_shifts, tail_dims)
 
     # This path is taken when only one dimension is rolled
     # For example to get `first_dim_rolled` above
-    # pyrefly: ignore [index-error]
+    # pyrefly: ignore [bad-index, index-error]
     dim = dims[0]
     size = a.shape[dim]
-    # pyrefly: ignore [index-error]
+    # pyrefly: ignore [bad-index, index-error]
     start = (size - shifts[0]) % size
     idx = torch.arange(size, device=a.device)
     return a.index_select(dim, torch.fmod(start + idx, size))
@@ -4311,7 +4312,7 @@ def index_select(x: TensorLike, dim: int, index: TensorLike):
         return torch.empty_like(x).index_copy(0, index, x.expand_as(index))
 
     idx = (slice(None),) * dim + (index,)
-    return x[idx]
+    return x[idx].contiguous()
 
 
 @register_decomposition(aten.squeeze.dims)
@@ -5431,6 +5432,7 @@ def linspace(
     # We implement torch.lerp without performing rg / (steps - 1) explicitly
     # With this we get out[0] == start, out[-1] == end
     step = (end - start) / (steps - 1)
+    # pyrefly: ignore [no-matching-overload]
     out = torch.where(
         rg < steps / 2,
         start + step * cast_rg(rg),  # type: ignore[arg-type,operator]

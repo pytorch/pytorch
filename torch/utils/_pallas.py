@@ -73,15 +73,21 @@ def has_jax_tpu_backend() -> bool:
 
 
 @functools.cache
-def has_tpu_pallas() -> bool:
-    """Checks for a full Pallas-on-TPU environment."""
-    return has_pallas_package() and has_jax_tpu_backend()
+def has_cpu_pallas() -> bool:
+    """Checks for a full Pallas-on-CPU environment."""
+    return has_pallas_package()
 
 
 @functools.cache
 def has_cuda_pallas() -> bool:
     """Checks for a full Pallas-on-CUDA environment."""
     return has_pallas_package() and torch.cuda.is_available() and has_jax_cuda_backend()
+
+
+@functools.cache
+def has_tpu_pallas() -> bool:
+    """Checks for a full Pallas-on-TPU environment."""
+    return has_pallas_package() and has_jax_tpu_backend()
 
 
 @functools.cache
@@ -94,4 +100,4 @@ def has_pallas() -> bool:
     - Pallas (jax.experimental.pallas) available
     - A compatible backend (CUDA or TPU) is available in both PyTorch and JAX.
     """
-    return has_cuda_pallas() or has_tpu_pallas()
+    return has_cpu_pallas() or has_cuda_pallas() or has_tpu_pallas()
