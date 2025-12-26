@@ -53,14 +53,14 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
+    E4M3_MAX_POS,
+    e4m3_type,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
     largeTensorTest,
     skipCPUIf,
     skipCUDAIf,
     skipXPUIf,
-    e4m3_type,
-    E4M3_MAX_POS,
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.inductor_utils import HAS_GPU

@@ -22,7 +22,7 @@ from typing import Any, Literal, NamedTuple, Optional, TYPE_CHECKING
 
 import torch
 import torch.utils._pytree as pytree
-from torch._C import _fx_map_arg as map_arg, _NodeIter
+from torch._C import _fx_map_arg as map_arg, _NamespaceBase, _NodeIter
 from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch.utils._dtype_abbrs import dtype_abbrs
 
@@ -146,77 +146,22 @@ def _is_from_torch(obj: Any) -> bool:
     return False
 
 
-class _Namespace:
+class _Namespace(_NamespaceBase):
     """A context for associating names uniquely with objects.
 
     The following invariants are enforced:
     - Each object gets a single name.
     - Each name is unique within a given namespace.
     - Names generated do not shadow builtins, unless the object is indeed that builtin.
+
+    This class is now implemented in C++ (_NamespaceBase) for performance.
+    See torch/csrc/fx/node.cpp for the implementation.
     """
 
-    def __init__(self):
-        self._obj_to_name: dict[Any, str] = {}
-        self._used_names: set[str] = set()
-        self._base_count: dict[str, int] = {}
-
-    def create_name(self, candidate: str, obj: Optional[Any]) -> str:
-        """Create a unique name.
-
-        Arguments:
-            candidate: used as the basis for the unique name, relevant to the user.
-            obj: If not None, an object that will be associated with the unique name.
-        """
-        if obj is not None and obj in self._obj_to_name:
-            return self._obj_to_name[obj]
-
-        # optimistically check if candidate is already a valid name
-        match = _name_regex.match(candidate)
-        if match is None:
-            # delete all characters that are illegal in a Python identifier
-            candidate = _illegal_char_regex.sub("_", candidate)
-
-            if not candidate:
-                candidate = "_unnamed"
-
-            if candidate[0].isdigit():
-                candidate = f"_{candidate}"
-
-            match = _name_regex.match(candidate)
-            assert match is not None
-
-        base, num = match.group(1, 2)
-        if num is None or candidate in self._used_names:
-            num = self._base_count.get(candidate, 0)
-            if _illegal_names.get(candidate, obj) is not obj:
-                num += 1
-                candidate = f"{base}_{num}"
-                # assume illegal names don't end in _\d so no need to check again
-        else:
-            num = int(num)
-
-        while candidate in self._used_names:
-            num += 1
-            candidate = f"{base}_{num}"
-
-        self._used_names.add(candidate)
-        self._base_count[base] = num
-        if obj is not None:
-            self._obj_to_name[obj] = candidate
-        return candidate
-
-    def associate_name_with_obj(self, name: str, obj: Any):
-        """Associate a unique name with an object.
-
-        Neither `name` nor `obj` should be associated already.
-        """
-        maybe_existing = self._obj_to_name.setdefault(obj, name)
-        assert maybe_existing is name, "obj is already associated"
-
-    def _rename_object(self, obj: Any, name: str):
-        assert obj in self._obj_to_name
-        self._obj_to_name[obj] = name
-        self._used_names.add(name)
+    # Type annotations for the members (implemented in C++)
+    _obj_to_name: dict[Any, str]
+    _used_names: set[str]
+    _base_count: dict[str, int]
 
 
 @compatibility(is_backward_compatible=True)
