@@ -6,9 +6,14 @@ import torch._dynamo.test_case
 import torch.nn as nn
 from torch._dynamo.source import (
     AttrSource,
+    GetItemSource,
     GlobalSource,
     is_from_local_source,
     LocalSource,
+    NegateSource,
+    TensorPropertySource,
+    TensorProperty,
+    TypeSource,
 )
 
 
@@ -26,6 +31,42 @@ class SourceTests(torch._dynamo.test_case.TestCase):
 
         self.assertTrue(is_from_local_source(attr_x_a))
         self.assertEqual(is_from_local_source(attr_y_b), False)
+
+    def test_source_name_is_cached(self):
+        """Verify that .name property is cached as an instance attribute."""
+        # Test base Source subclass (LocalSource)
+        local_src = LocalSource("x")
+        name1 = local_src.name
+        name2 = local_src.name
+        # Verify it's cached in __dict__
+        self.assertIn("name", local_src.__dict__)
+        # Verify subsequent accesses return the same cached string object
+        self.assertIs(name1, name2)
+        self.assertEqual(name1, "L['x']")
+
+        # Test ChainedSource subclass with @functools.cached_property _name_template (AttrSource)
+        attr_src = AttrSource(local_src, "foo")
+        attr_name1 = attr_src.name
+        attr_name2 = attr_src.name
+        self.assertIn("name", attr_src.__dict__)
+        self.assertIs(attr_name1, attr_name2)
+        self.assertEqual(attr_name1, "L['x'].foo")
+
+        # Test ChainedSource subclass with @property _name_template (TypeSource)
+        type_src = TypeSource(base=local_src)
+        type_name1 = type_src.name
+        type_name2 = type_src.name
+        self.assertIn("name", type_src.__dict__)
+        self.assertIs(type_name1, type_name2)
+        self.assertEqual(type_name1, "type(L['x'])")
+
+        # Test deeply nested ChainedSource
+        nested_src = GetItemSource(AttrSource(AttrSource(local_src, "a"), "b"), 0)
+        nested_name1 = nested_src.name
+        nested_name2 = nested_src.name
+        self.assertIn("name", nested_src.__dict__)
+        self.assertIs(nested_name1, nested_name2)
+        self.assertEqual(nested_name1, "L['x'].a.b[0]")
 
     def test_property_closure(self):
         def external_property():

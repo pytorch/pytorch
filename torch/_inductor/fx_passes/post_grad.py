@@ -1456,17 +1456,23 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
-    subgraph_names: OrderedSet[str] = OrderedSet(
-        x.target for x in gm.graph.find_nodes(op="get_attr")
-    )
+    # Single pass to collect both get_attr targets and view nodes
+    subgraph_names: OrderedSet[str] = OrderedSet()
+    view_nodes = []
+    for node in gm.graph.nodes:
+        if node.op == "get_attr":
+            subgraph_names.add(node.target)
+        elif (
+            node.op == "call_function"
+            and node.target is torch.ops.aten.view.default
+        ):
+            view_nodes.append(node)
 
     for child_name, child_mod in gm.named_children():
         if child_name in subgraph_names and isinstance(child_mod, torch.fx.GraphModule):
             view_to_reshape(child_mod)
 
-    for nd in gm.graph.find_nodes(
-        op="call_function", target=torch.ops.aten.view.default
-    ):
+    for nd in view_nodes:
         nd.target = torch.ops.aten.reshape.default
 
 

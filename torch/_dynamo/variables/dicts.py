@@ -244,11 +244,11 @@ class ConstDictVariable(VariableTracker):
 
     def __contains__(self, vt: VariableTracker) -> bool:
         assert isinstance(vt, VariableTracker)
-        Hashable = ConstDictVariable._HashableTracker
-        return (
-            vt.is_python_hashable()
-            and Hashable(vt) in self.items
-            and not isinstance(self.items[Hashable(vt)], variables.DeletedVariable)
+        if not vt.is_python_hashable():
+            return False
+        key = ConstDictVariable._HashableTracker(vt)
+        return key in self.items and not isinstance(
+            self.items[key], variables.DeletedVariable
         )
 
     def call_tree_map_branch(

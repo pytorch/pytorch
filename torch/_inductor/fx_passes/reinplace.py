@@ -431,9 +431,20 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
     node_order: dict[Any, int] = {}
+    # Collect inplaceable ops during the first pass to avoid a second iteration
+    inplaceable_op_nodes: list[torch.fx.Node] = []
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
+        # Collect nodes that may be inplaceable for later processing
+        if (
+            node.target in inplaceable_ops
+            or node.target is torch.ops.higher_order.auto_functionalized_v2
+            or node.target is torch.ops.higher_order.auto_functionalized
+            or node.target in inplaceable_triton_ops
+            or node.target in inplaceable_foreach_ops
+        ):
+            inplaceable_op_nodes.append(node)
         if node.target is aten.copy_.default and node.args[0].op in (
             "placeholder",
             "get_attr",
@@ -511,10 +522,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return False
             return all(can_inplace(node, arg) for arg in mutated_arg)
 
-        if get_node_storage(mutated_arg) is None:
+        storage = get_node_storage(mutated_arg)
+        if storage is None:
             return False
 
-        shared_view_nodes = storage_to_nodes[get_node_storage(mutated_arg)]
+        shared_view_nodes = storage_to_nodes[storage]
 
         # Only keep tensor that might overlap with mutated_arg.
         shared_view_nodes = [
@@ -668,7 +680,11 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         )
         return tensors_to_clone
 
-    for node in graph.nodes:
+    # Reverse to process in forward order (nodes were collected in reverse order)
+    inplaceable_op_nodes.reverse()
+
+    # Process inplaceable ops collected from the first pass, maintaining original order
+    for node in inplaceable_op_nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]
             if can_inplace(node, mutated_arg) and inplaceable_op.extra_check(node):

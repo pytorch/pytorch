@@ -8,6 +8,7 @@ Python polyfills for common builtins.
 
 # mypy: allow-untyped-defs
 
+import importlib
 import types
 from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
@@ -28,6 +29,7 @@ if TYPE_CHECKING:
         _collections as _collections,
         builtins as builtins,
         functools as functools,
+        heapq as heapq,
         itertools as itertools,
         operator as operator,
         os as os,
@@ -37,6 +39,16 @@ if TYPE_CHECKING:
         torch_c_nn as torch_c_nn,
         traceback as traceback,
     )
+
+
+# Lazy loading of submodules to support polyfills.<submodule> access
+def __getattr__(name: str) -> types.ModuleType:
+    """Lazily load polyfill submodules."""
+    from .loader import POLYFILLED_MODULE_NAMES, _load_polyfill_module
+
+    if name in POLYFILLED_MODULE_NAMES:
+        return _load_polyfill_module(name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 from torch.overrides import BaseTorchFunctionMode
 

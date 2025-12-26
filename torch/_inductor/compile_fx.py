@@ -306,6 +306,42 @@ def _recursive_record_user_visible_output_idxs(gm: GraphModule) -> None:
         _recursive_record_user_visible_output_idxs(subgraph)
 
 
+class _CachedGraphReadable:
+    """
+    Cache graph module's print_readable output to avoid redundant calls.
+
+    This is useful when the same graph module is printed multiple times
+    with the same parameters during compilation (e.g., for both tracing
+    artifacts and cache keys).
+    """
+
+    __slots__ = ("_gm", "_cache")
+
+    def __init__(self, gm: GraphModule) -> None:
+        self._gm = gm
+        self._cache: dict[tuple[bool, bool, bool, bool], str] = {}
+
+    def get(
+        self,
+        *,
+        include_stride: bool = False,
+        include_device: bool = False,
+        colored: bool = False,
+        fast_sympy_print: bool = False,
+    ) -> str:
+        """Get the print_readable output, using cache if available."""
+        key = (include_stride, include_device, colored, fast_sympy_print)
+        if key not in self._cache:
+            self._cache[key] = self._gm.print_readable(
+                print_output=False,
+                include_stride=include_stride,
+                include_device=include_device,
+                colored=colored,
+                fast_sympy_print=fast_sympy_print,
+            )
+        return self._cache[key]
+
+
 @functools.lru_cache(None)
 def _step_logger() -> Callable[..., None]:
     return dynamo_logging.get_step_logger(log)
@@ -1328,11 +1364,15 @@ class _InProcessFxCompile(FxCompile):
                     ),
                 )
 
+                # Cache the graph's print_readable output to avoid redundant calls
+                # when the same representation is needed multiple times.
+                cached_readable = _CachedGraphReadable(gm)
+
                 # We're printing the graph to be used as a cache key - so a
                 # printer which is a little less readable but faster is
-                # appropriate.
-                inductor_post_grad_graph_str = gm.print_readable(
-                    print_output=False,
+                # appropriate. This string is stored in CompiledFxGraph for
+                # later trace_structured calls (which use lazy lambdas).
+                inductor_post_grad_graph_str = cached_readable.get(
                     include_stride=True,
                     include_device=True,
                     fast_sympy_print=True,
@@ -1489,10 +1529,11 @@ class _InProcessFxCompile(FxCompile):
                         if graph.aot_mode and graph.fx_wrapper:
                             assert not graph.cpp_wrapper
                             compiled_fn = graph.codegen()[0].gm  # type: ignore[attr-defined]
-                            output_code_log.debug(
-                                "Output graph module: \n%s",
-                                compiled_fn.print_readable(print_output=False),
-                            )
+                            if output_code_log.isEnabledFor(logging.DEBUG):
+                                output_code_log.debug(
+                                    "Output graph module: \n%s",
+                                    compiled_fn.print_readable(print_output=False),
+                                )
 
                         elif graph.aot_mode:
                             from .codecache import AotCodeCompiler

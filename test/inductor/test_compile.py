@@ -231,6 +231,94 @@ class TestStandaloneInductor(TestCase):
             check_linux_debug_section(binary_path)
 
 
+class TestCachedGraphReadable(TestCase):
+    """Test the _CachedGraphReadable caching helper for graph printing."""
+
+    def test_cached_readable_returns_same_result(self):
+        """Test that cached readable returns the same result as direct print_readable."""
+        from torch._inductor.compile_fx import _CachedGraphReadable
+        from torch.fx import GraphModule
+
+        mod = MyModule().eval()
+        inp = torch.randn(10)
+        gm = symbolic_trace(mod)
+
+        cached = _CachedGraphReadable(gm)
+
+        # Test with various parameter combinations
+        direct_result = gm.print_readable(
+            print_output=False,
+            include_stride=True,
+            include_device=True,
+            fast_sympy_print=True,
+        )
+        cached_result = cached.get(
+            include_stride=True,
+            include_device=True,
+            fast_sympy_print=True,
+        )
+        self.assertEqual(direct_result, cached_result)
+
+        # Test different parameters
+        direct_result2 = gm.print_readable(
+            print_output=False,
+            include_stride=False,
+            include_device=False,
+        )
+        cached_result2 = cached.get(
+            include_stride=False,
+            include_device=False,
+        )
+        self.assertEqual(direct_result2, cached_result2)
+
+    def test_cached_readable_caches_results(self):
+        """Test that calling get() multiple times with same params returns cached result."""
+        from torch._inductor.compile_fx import _CachedGraphReadable
+        from unittest.mock import patch
+
+        mod = MyModule().eval()
+        gm = symbolic_trace(mod)
+
+        cached = _CachedGraphReadable(gm)
+
+        # First call should populate the cache
+        result1 = cached.get(include_stride=True, include_device=True)
+
+        # Verify the cache was populated
+        cache_key = (True, True, False, False)  # (stride, device, colored, fast_sympy)
+        self.assertIn(cache_key, cached._cache)
+
+        # Second call should return the cached result without calling print_readable again
+        result2 = cached.get(include_stride=True, include_device=True)
+        self.assertEqual(result1, result2)
+
+        # The cache should still have exactly one entry for this key
+        self.assertEqual(len([k for k in cached._cache if k == cache_key]), 1)
+
+    def test_cached_readable_different_params_different_entries(self):
+        """Test that different parameters create different cache entries."""
+        from torch._inductor.compile_fx import _CachedGraphReadable
+
+        mod = MyModule().eval()
+        gm = symbolic_trace(mod)
+
+        cached = _CachedGraphReadable(gm)
+
+        # Call with two different parameter sets
+        result1 = cached.get(include_stride=True, include_device=True)
+        result2 = cached.get(include_stride=True, include_device=True, fast_sympy_print=True)
+
+        # Both should be cached but may be different
+        self.assertEqual(len(cached._cache), 2)
+
+        # Calling again should return the same cached results
+        result1_again = cached.get(include_stride=True, include_device=True)
+        result2_again = cached.get(include_stride=True, include_device=True, fast_sympy_print=True)
+
+        self.assertEqual(result1, result1_again)
+        self.assertEqual(result2, result2_again)
+
+
 if __name__ == "__main__":
     if HAS_CPU:
         run_tests()

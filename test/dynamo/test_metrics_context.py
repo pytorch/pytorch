@@ -1,6 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
-from torch._dynamo.metrics_context import MetricsContext, TopN
+from torch._dynamo.metrics_context import MetricsContext, RuntimeMetricsContext, TopN
 from torch._dynamo.test_case import run_tests, TestCase
 
 
@@ -112,6 +112,32 @@ class TestMetricsContext(TestCase):
         self.assertEqual(len(top_n), 3)
         print(list(top_n))
         self.assertEqual(list(top_n), [("eight", 8), ("seven", 7), ("six", 6)])
+
+    def test_slots_reduce_allocation(self):
+        """Verify timing context classes use __slots__ to reduce allocation overhead."""
+        # TopN should have __slots__
+        self.assertEqual(TopN.__slots__, ("at_most", "heap"))
+        top_n = TopN()
+        with self.assertRaises(AttributeError):
+            top_n.undefined_attr = "should fail"
+
+        # MetricsContext should have __slots__
+        self.assertEqual(
+            MetricsContext.__slots__,
+            ("_on_exit", "_metrics", "_start_time_ns", "_level", "_edits"),
+        )
+        context = MetricsContext(lambda *args: None)
+        with self.assertRaises(AttributeError):
+            context.undefined_attr = "should fail"
+
+        # RuntimeMetricsContext should have __slots__
+        self.assertEqual(
+            RuntimeMetricsContext.__slots__,
+            ("_on_exit", "_metrics", "_start_time_ns"),
+        )
+        runtime_context = RuntimeMetricsContext(lambda *args: None)
+        with self.assertRaises(AttributeError):
+            runtime_context.undefined_attr = "should fail"
 
 
 if __name__ == "__main__":

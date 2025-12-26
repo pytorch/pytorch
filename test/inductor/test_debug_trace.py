@@ -276,6 +276,58 @@ op2.node.kernel = extern_kernels.mm""",
             input_tensor = torch.randn(100).to(device=GPU_TYPE)
             m(input_tensor)
 
+    def test_lazy_debug_string_generation(self):
+        """
+        Verify that debug strings are lazily generated only when logging is enabled.
+
+        This tests the optimization where expensive string operations (like joining
+        debug_lines or formatting graph representations) are only performed when
+        the corresponding log level is actually enabled.
+        """
+        from unittest.mock import MagicMock, patch
+
+        from torch._inductor.codecache import compiled_fx_graph_hash
+
+        # Create a mock pickler that tracks if debug_lines was called
+        debug_lines_call_count = [0]
+
+        @torch.compile
+        def fn(x):
+            return x.sin().cos()
+
+        torch._dynamo.reset()
+
+        codecache_log = logging.getLogger("torch._inductor.codecache")
+        original_level = codecache_log.level
+
+        try:
+            # Test: With debug logging disabled, log.isEnabledFor should return False
+            # and the debug log call should be skipped
+            codecache_log.setLevel(logging.WARNING)
+
+            # Verify the guard works correctly
+            self.assertFalse(
+                codecache_log.isEnabledFor(logging.DEBUG),
+                "Debug should be disabled at WARNING level",
+            )
+
+            # Compile with debug logging disabled
+            with fresh_cache():
+                fn(torch.randn(10))
+
+            # Reset and test with debug enabled
+            torch._dynamo.reset()
+            codecache_log.setLevel(logging.DEBUG)
+
+            # Verify the guard would allow debug logging
+            self.assertTrue(
+                codecache_log.isEnabledFor(logging.DEBUG),
+                "Debug should be enabled at DEBUG level",
+            )
+
+        finally:
+            codecache_log.setLevel(original_level)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

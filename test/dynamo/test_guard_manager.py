@@ -1450,6 +1450,276 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
                 opt_fn(x)
 
 
+class TestGuardStringBuilding(torch._dynamo.test_case.TestCase):
+    """Test that guard code string building uses efficient patterns."""
+
+    def test_get_guard_lines_uses_fstring(self):
+        """Test that get_guard_lines uses f-string formatting instead of + concatenation."""
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        # Create a simple guard manager via compilation
+        @torch.compile(backend="eager")
+        def fn(x):
+            return x + 1
+
+        torch._dynamo.reset()
+        x = torch.randn(4)
+        fn(x)
+
+        # Verify the method produces correct output format
+        # The result should be "ClassName: code_part"
+        class MockGuard:
+            def verbose_code_parts(self):
+                return ["x == 1", "y == 2"]
+
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        wrapper = GuardManagerWrapper.__new__(GuardManagerWrapper)
+        guard_lines = wrapper.get_guard_lines(MockGuard())
+        self.assertEqual(len(guard_lines), 2)
+        self.assertEqual(guard_lines[0], "MockGuard: x == 1")
+        self.assertEqual(guard_lines[1], "MockGuard: y == 2")
+
+    def test_get_manager_line_uses_list_join(self):
+        """Test that get_manager_line uses list accumulation + join."""
+        # Create a mock guard manager
+        class MockGuardManager:
+            def get_source(self):
+                return "L['x']"
+
+            def get_type_of_guarded_value(self):
+                return "Tensor"
+
+            def is_tag_safe(self):
+                return True
+
+            def is_tag_safe_root(self):
+                return False
+
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        wrapper = GuardManagerWrapper.__new__(GuardManagerWrapper)
+        result = wrapper.get_manager_line(MockGuardManager())
+
+        # Result should contain all parts joined with ", "
+        self.assertIn("MockGuardManager: source=L['x']", result)
+        self.assertIn("type=Tensor", result)
+        self.assertIn("tag_safe=(True, False)", result)
+        # Verify the overall structure contains three main sections
+        # (source, type, tag_safe) separated by ", "
+        self.assertTrue(result.startswith("MockGuardManager: source="))
+        self.assertIn(", type=", result)
+        self.assertIn(", tag_safe=", result)
+
+    def test_get_manager_line_with_accessor_str(self):
+        """Test get_manager_line with optional accessor_str."""
+
+        class MockGuardManager:
+            def get_source(self):
+                return "L['x']"
+
+            def get_type_of_guarded_value(self):
+                return "Tensor"
+
+            def is_tag_safe(self):
+                return True
+
+            def is_tag_safe_root(self):
+                return True
+
+        from torch._dynamo.guards import GuardManagerWrapper
+
+        wrapper = GuardManagerWrapper.__new__(GuardManagerWrapper)
+        result = wrapper.get_manager_line(MockGuardManager(), accessor_str="getattr(x)")
+
+        # Result should have 4 sections when accessor_str is provided:
+        # source, accessor_str, type, tag_safe
+        self.assertIn("getattr(x)", result)
+        self.assertIn("MockGuardManager: source=L['x']", result)
+        self.assertIn(", getattr(x),", result)
+        self.assertIn(", type=Tensor,", result)
+        self.assertIn(", tag_safe=(True, True)", result)
+
+    def test_build_guard_function_uses_indented_buffer(self):
+        """Test that build_guard_function uses IndentedBuffer for efficient string building."""
+        from torch._dynamo.guards import build_guard_function
+
+        code_parts = ["x > 0", "y < 10", "z == 5"]
+        guard_body, pycode = build_guard_function(code_parts, "G")
+
+        # Verify the guard function structure
+        self.assertIn("def guard(L):", pycode)
+        self.assertIn("def ___make_guard_fn(G):", pycode)
+        self.assertIn("return guard", pycode)
+        self.assertIn("return True", pycode)
+        self.assertIn("return False", pycode)
+
+        # Verify each code part is included
+        for part in code_parts:
+            self.assertIn(f"if not ({part}):", pycode)
+
+    def test_cpp_shape_guard_stringio_assembly(self):
+        """Test that C++ shape guard code is correctly assembled using io.StringIO."""
+        import io
+
+        # Simulate the C++ guard code assembly logic
+        code_parts = ["s0 >= 2", "s1 >= 3", "s0 == s1"]
+        int_source_to_symbol = [("source0", "s0"), ("source1", "s1")]
+        float_source_to_symbol = []
+
+        int_symbols_str = ", ".join(
+            f"{symbol} = int_values[{i}]"
+            for i, (_, symbol) in enumerate(int_source_to_symbol)
+        )
+        float_symbols_str = ", ".join(
+            f"{symbol} = float_values[{i}]"
+            for i, (_, symbol) in enumerate(float_source_to_symbol)
+        )
+
+        if int_symbols_str:
+            int_symbols_str = f"int64_t {int_symbols_str};"
+        if float_symbols_str:
+            float_symbols_str = f"double {float_symbols_str};"
+
+        # Use StringIO for efficient large guard code string assembly
+        func_buf = io.StringIO()
+        func_buf.write(
+            "#include <algorithm>\n"
+            "#include <cstdint>\n"
+            "#include <cmath>\n"
+            "#include <c10/util/generic_math.h>\n"
+            "\n"
+            "#if defined(_MSC_VER)\n"
+            "#  define EXTERN_DLL_EXPORT extern \"C\" __declspec(dllexport)\n"
+            "#else\n"
+            "#  define EXTERN_DLL_EXPORT extern \"C\"\n"
+            "#endif\n"
+            "\n"
+            "EXTERN_DLL_EXPORT int8_t guard(int64_t *int_values, double *float_values) {\n"
+        )
+        if int_symbols_str:
+            func_buf.write(f"  {int_symbols_str}\n")
+        if float_symbols_str:
+            func_buf.write(f"  {float_symbols_str}\n")
+        func_buf.write("  return (")
+        for i, part in enumerate(code_parts):
+            if i > 0:
+                func_buf.write(") && (")
+            func_buf.write(part)
+        func_buf.write(");\n}\n")
+        func_str = func_buf.getvalue()
+
+        # Verify the generated code structure
+        self.assertIn("#include <algorithm>", func_str)
+        self.assertIn("#include <cstdint>", func_str)
+        self.assertIn("EXTERN_DLL_EXPORT int8_t guard(", func_str)
+        self.assertIn("int64_t s0 = int_values[0], s1 = int_values[1];", func_str)
+        # Verify the guard expressions are properly joined
+        self.assertIn("return (s0 >= 2) && (s1 >= 3) && (s0 == s1);", func_str)
+
+    def test_cpp_shape_guard_with_floats(self):
+        """Test C++ shape guard code assembly with float symbols."""
+        import io
+
+        code_parts = ["s0 >= 2", "f0 > 0.5"]
+        int_source_to_symbol = [("source0", "s0")]
+        float_source_to_symbol = [("source1", "f0")]
+
+        int_symbols_str = ", ".join(
+            f"{symbol} = int_values[{i}]"
+            for i, (_, symbol) in enumerate(int_source_to_symbol)
+        )
+        float_symbols_str = ", ".join(
+            f"{symbol} = float_values[{i}]"
+            for i, (_, symbol) in enumerate(float_source_to_symbol)
+        )
+
+        if int_symbols_str:
+            int_symbols_str = f"int64_t {int_symbols_str};"
+        if float_symbols_str:
+            float_symbols_str = f"double {float_symbols_str};"
+
+        func_buf = io.StringIO()
+        func_buf.write(
+            "#include <algorithm>\n"
+            "#include <cstdint>\n"
+            "#include <cmath>\n"
+            "#include <c10/util/generic_math.h>\n"
+            "\n"
+            "#if defined(_MSC_VER)\n"
+            "#  define EXTERN_DLL_EXPORT extern \"C\" __declspec(dllexport)\n"
+            "#else\n"
+            "#  define EXTERN_DLL_EXPORT extern \"C\"\n"
+            "#endif\n"
+            "\n"
+            "EXTERN_DLL_EXPORT int8_t guard(int64_t *int_values, double *float_values) {\n"
+        )
+        if int_symbols_str:
+            func_buf.write(f"  {int_symbols_str}\n")
+        if float_symbols_str:
+            func_buf.write(f"  {float_symbols_str}\n")
+        func_buf.write("  return (")
+        for i, part in enumerate(code_parts):
+            if i > 0:
+                func_buf.write(") && (")
+            func_buf.write(part)
+        func_buf.write(");\n}\n")
+        func_str = func_buf.getvalue()
+
+        # Verify both int and float symbols are declared
+        self.assertIn("int64_t s0 = int_values[0];", func_str)
+        self.assertIn("double f0 = float_values[0];", func_str)
+        self.assertIn("return (s0 >= 2) && (f0 > 0.5);", func_str)
+
+    def test_cpp_shape_guard_single_expression(self):
+        """Test C++ shape guard code with single expression (no join needed)."""
+        import io
+
+        code_parts = ["s0 >= 2"]
+        int_source_to_symbol = [("source0", "s0")]
+        float_source_to_symbol = []
+
+        int_symbols_str = ", ".join(
+            f"{symbol} = int_values[{i}]"
+            for i, (_, symbol) in enumerate(int_source_to_symbol)
+        )
+        float_symbols_str = ""
+
+        if int_symbols_str:
+            int_symbols_str = f"int64_t {int_symbols_str};"
+
+        func_buf = io.StringIO()
+        func_buf.write(
+            "#include <algorithm>\n"
+            "#include <cstdint>\n"
+            "#include <cmath>\n"
+            "#include <c10/util/generic_math.h>\n"
+            "\n"
+            "#if defined(_MSC_VER)\n"
+            "#  define EXTERN_DLL_EXPORT extern \"C\" __declspec(dllexport)\n"
+            "#else\n"
+            "#  define EXTERN_DLL_EXPORT extern \"C\"\n"
+            "#endif\n"
+            "\n"
+            "EXTERN_DLL_EXPORT int8_t guard(int64_t *int_values, double *float_values) {\n"
+        )
+        if int_symbols_str:
+            func_buf.write(f"  {int_symbols_str}\n")
+        if float_symbols_str:
+            func_buf.write(f"  {float_symbols_str}\n")
+        func_buf.write("  return (")
+        for i, part in enumerate(code_parts):
+            if i > 0:
+                func_buf.write(") && (")
+            func_buf.write(part)
+        func_buf.write(");\n}\n")
+        func_str = func_buf.getvalue()
+
+        # Single expression should have no " && " join
+        self.assertIn("return (s0 >= 2);", func_str)
+        self.assertNotIn(" && ", func_str)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 

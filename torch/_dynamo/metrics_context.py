@@ -37,6 +37,8 @@ class TopN:
     Helper to record a list of metrics, keeping only the top N "most expensive" elements.
     """
 
+    __slots__ = ("at_most", "heap")
+
     def __init__(self, at_most: int = 25):
         self.at_most = at_most
         self.heap: list[tuple[int, Any]] = []
@@ -60,6 +62,8 @@ OnExitType: TypeAlias = Callable[
 
 
 class MetricsContext:
+    __slots__ = ("_on_exit", "_metrics", "_start_time_ns", "_level", "_edits")
+
     def __init__(self, on_exit: OnExitType):
         """
         Use this class as a contextmanager to create a context under which to accumulate
@@ -207,6 +211,8 @@ class MetricsContext:
 
 
 class RuntimeMetricsContext:
+    __slots__ = ("_on_exit", "_metrics", "_start_time_ns")
+
     def __init__(self, on_exit: OnExitType):
         """
         Similar to MetricsContext, but used to gather the runtime metrics that are

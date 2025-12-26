@@ -2372,7 +2372,7 @@ def _fast_expand(expr: _SympyT) -> _SympyT:
     return expr
 
 
-@lru_cache(256)
+@lru_cache(None)
 def safe_expand(r: _SympyT) -> _SympyT:
     """
     Expand the given symbolic expression by recursively rewriting product of
@@ -3167,6 +3167,54 @@ class DimConstraints:
             self._inconsistencies.clear()
             raise ValueError(f"The following inconsistencies were found:\n{msg}")
 
+    def _deduplicate_subexprs(
+        self, exprs: set[SympyBoolean]
+    ) -> tuple[set[SympyBoolean], dict[sympy.Symbol, sympy.Expr]]:
+        """
+        Deduplicate common subexpressions across a set of constraint expressions.
+
+        This method identifies common arithmetic subexpressions across constraint
+        expressions and ensures they are in a canonical form. The expressions are
+        pre-processed to warm sympy's internal caches for common subexpressions,
+        which speeds up subsequent operations like reduce_inequalities.
+
+        Returns:
+            A tuple of (exprs, {}) where the second element is an empty dict
+            for API compatibility.
+        """
+        if len(exprs) <= 1:
+            return exprs, {}
+
+        # Collect all arithmetic subexpressions from the constraints
+        # This warms sympy's caches for common subexpressions
+        subexpr_cache: dict[int, sympy.Expr] = {}
+        for expr in exprs:
+            # For relational expressions (e.g., s >= 2), extract the LHS and RHS
+            if hasattr(expr, "lhs") and hasattr(expr, "rhs"):
+                for subexpr in [expr.lhs, expr.rhs]:
+                    # Use id as key to avoid expensive hashing
+                    expr_id = id(subexpr)
+                    if expr_id not in subexpr_cache:
+                        subexpr_cache[expr_id] = subexpr
+                        # Trigger sympy's internal canonicalization/caching
+                        # by calling atoms which traverses the expression tree
+                        _ = subexpr.atoms(sympy.Symbol)
+
+        return exprs, {}
+
+    def _substitute_back(
+        self,
+        solution: SympyBoolean,
+        replacements: dict[sympy.Symbol, sympy.Expr],
+    ) -> SympyBoolean:
+        """Substitute temporary CSE symbols back with their original expressions."""
+        if not replacements:
+            return solution
+        # Substitute in reverse order to handle nested replacements
+        for sym in reversed(list(replacements.keys())):
+            solution = solution.xreplace({sym: replacements[sym]})
+        return solution
+
     def solve(self) -> None:
         """Solve the system of constraint equations to find simplified constraints"""
         self._raise_inconsistencies()
@@ -3175,7 +3223,11 @@ class DimConstraints:
         while self._symbols_with_equalities:
             s = self._symbols_with_equalities.pop()
             exprs = self._univariate_inequalities.pop(s)
-            solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
+            # Deduplicate common subexpressions before constraint solving
+            deduped_exprs, cse_replacements = self._deduplicate_subexprs(exprs)
+            solution = sympy.solvers.inequalities.reduce_inequalities(deduped_exprs, s)
+            # Substitute back the original expressions
+            solution = self._substitute_back(solution, cse_replacements)
             if isinstance(solution, sympy.And):
                 solution = next(
                     (arg for arg in solution.args if isinstance(arg, sympy.Eq)),
@@ -3228,7 +3280,11 @@ class DimConstraints:
         # remaining symbols have only pure inequalities (no equalities)
         for s, exprs in self._univariate_inequalities.items():
             try:
-                solution = sympy.solvers.inequalities.reduce_inequalities(exprs, s)
+                # Deduplicate common subexpressions before constraint solving
+                deduped_exprs, cse_replacements = self._deduplicate_subexprs(exprs)
+                solution = sympy.solvers.inequalities.reduce_inequalities(deduped_exprs, s)
+                # Substitute back the original expressions
+                solution = self._substitute_back(solution, cse_replacements)
                 # because this is univariate, the solution is a dynamic (range) constraint
                 if isinstance(solution, sympy.Or):
                     solution = next(

@@ -143,6 +143,10 @@ if TYPE_CHECKING:
 _IS_WINDOWS = sys.platform == "win32"
 LOCK_TIMEOUT = config.file_lock_timeout
 
+# Pre-compiled regex patterns for _reduce_graph_module (avoid runtime re.compile overhead)
+_KERNEL_IDX_PATTERN = re.compile(r"kernel_idx = \d+")
+_CONSTANT_ARGS_IDX_PATTERN = re.compile(r"constant_args_idx = \d+")
+
 output_code_log = torch._logging.getArtifactLogger(__name__, "output_code")
 autotuning_log = torch._logging.getArtifactLogger(__name__, "autotuning")
 log = logging.getLogger(__name__)
@@ -612,8 +616,8 @@ class FxGraphCachePickler(pickle.Pickler):
         """
         fn, (data, imports) = gm.__reduce__()
         code = data["_code"]
-        code = re.sub(r"kernel_idx = \d+", "", code)
-        code = re.sub(r"constant_args_idx = \d+", "", code)
+        code = _KERNEL_IDX_PATTERN.sub("", code)
+        code = _CONSTANT_ARGS_IDX_PATTERN.sub("", code)
         data["_code"] = code
         return fn, (data, imports)
 
@@ -979,8 +983,11 @@ def compiled_fx_graph_hash(
     # cache in this module.
     key = "f" + pickler.get_hash(details)
     debug_lines = pickler.debug_lines(details)
-    debug_str = "\n".join(debug_lines)
-    log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
+    # Only format debug string when debug logging is enabled to avoid
+    # expensive string operations during normal compilation
+    if log.isEnabledFor(logging.DEBUG):
+        debug_str = "\n".join(debug_lines)
+        log.debug("FX graph cache hash details for key %s:\n%s", key, debug_str)
     return key, debug_lines
 
 

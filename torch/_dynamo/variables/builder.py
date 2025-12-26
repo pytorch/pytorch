@@ -705,6 +705,15 @@ class VariableBuilder:
         if id_dispatch is not None:
             return id_dispatch(self, value)
 
+        # Try lazy loading polyfills if this function has one
+        from ..polyfills.loader import _ensure_polyfill_loaded
+
+        if _ensure_polyfill_loaded(value):
+            # Polyfill was loaded, retry the id dispatch
+            id_dispatch = self._id_dispatch().get(id(value))
+            if id_dispatch is not None:
+                return id_dispatch(self, value)
+
         # Everything else (NB: order matters!)
         if (
             isinstance(value, torch.Tensor)

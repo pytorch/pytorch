@@ -2887,6 +2887,31 @@ class TestFxGraphCacheHashing(TestCase):
                 temp.close()
                 os.unlink(temp.name)
 
+    def test_precompiled_regex_patterns(self):
+        """
+        Test that regex patterns for kernel_idx and constant_args_idx are pre-compiled at module level.
+        """
+        import re
+
+        from torch._inductor import codecache
+
+        # Verify patterns exist at module level
+        self.assertTrue(hasattr(codecache, "_KERNEL_IDX_PATTERN"))
+        self.assertTrue(hasattr(codecache, "_CONSTANT_ARGS_IDX_PATTERN"))
+
+        # Verify they are compiled Pattern objects
+        self.assertIsInstance(codecache._KERNEL_IDX_PATTERN, re.Pattern)
+        self.assertIsInstance(codecache._CONSTANT_ARGS_IDX_PATTERN, re.Pattern)
+
+        # Verify the patterns work correctly
+        test_code = "kernel_idx = 123\nconstant_args_idx = 456\nother_code = 789"
+        result = codecache._KERNEL_IDX_PATTERN.sub("", test_code)
+        result = codecache._CONSTANT_ARGS_IDX_PATTERN.sub("", result)
+
+        self.assertNotIn("kernel_idx = 123", result)
+        self.assertNotIn("constant_args_idx = 456", result)
+        self.assertIn("other_code = 789", result)
+
 
 class TestCudaCompileCommand(TestCase):
     @requires_cuda_and_triton

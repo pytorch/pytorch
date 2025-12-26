@@ -100,6 +100,9 @@ if TYPE_CHECKING:
 GPU_TYPES = ["cuda", "mps", "xpu", "mtia"]
 T = TypeVar("T")
 
+# Pre-compiled regex pattern for profiling (avoid runtime re.compile overhead)
+_FUSED_ABS_MAX_PATTERN = re.compile(r"fused_abs_max_\d")
+
 
 # defines here before import torch._dynamo is for avoiding circular import
 # when get_gpu_type is imported from dynamo
@@ -257,7 +260,7 @@ def fp8_bench(fn: Callable[[], Any], warmup: int = 25, rep: int = 100) -> float:
             for event in p.events()
             if (
                 event.device_type == DeviceType.CUDA
-                and re.match(r"fused_abs_max_\d", event.name) is not None
+                and _FUSED_ABS_MAX_PATTERN.match(event.name) is not None
             )
         ]
     )

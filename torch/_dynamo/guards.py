@@ -609,7 +609,7 @@ class GuardManagerWrapper:
     def get_guard_lines(self, guard: LeafGuard) -> list[str]:
         guard_name = guard.__class__.__name__
         parts = guard.verbose_code_parts()
-        parts = [guard_name + ": " + part for part in parts]
+        parts = [f"{guard_name}: {part}" for part in parts]
         return parts
 
     def get_manager_line(
@@ -617,12 +617,12 @@ class GuardManagerWrapper:
     ) -> str:
         source = guard_manager.get_source()
         t = guard_manager.__class__.__name__
-        s = t + ": source=" + source
+        parts = [f"{t}: source={source}"]
         if accessor_str:
-            s += ", " + accessor_str
-        s += f", type={guard_manager.get_type_of_guarded_value()}"
-        s += f", tag_safe=({guard_manager.is_tag_safe()}, {guard_manager.is_tag_safe_root()})"
-        return s
+            parts.append(accessor_str)
+        parts.append(f"type={guard_manager.get_type_of_guarded_value()}")
+        parts.append(f"tag_safe=({guard_manager.is_tag_safe()}, {guard_manager.is_tag_safe_root()})")
+        return ", ".join(parts)
 
     def construct_dict_manager_string(
         self, mgr: DictGuardManager, body: IndentedBufferWithPrefix
@@ -878,8 +878,8 @@ def get_key_index_source(source: Any, index: Any) -> str:
 def raise_local_type_error(obj: Any) -> NoReturn:
     raise TypeError(
         f"Type {type(obj)} for object {obj} cannot be saved "
-        + "into torch.compile() package since it's defined in local scope. "
-        + "Please define the class at global scope (top level of a module)."
+        "into torch.compile() package since it's defined in local scope. "
+        "Please define the class at global scope (top level of a module)."
     )
 
 
@@ -1612,7 +1612,7 @@ class GuardBuilder(GuardBuilderBase):
                 # kwdefauts is a dict, so use a DictGuardManager
                 kwdefaults = base_example_value.__kwdefaults__
                 assert base_source_name is not None
-                kw_source = base_source_name + ".__kwdefaults__"
+                kw_source = f"{base_source_name}.__kwdefaults__"
 
                 # kwdefaults is a dict. No need to guard on dict order.
                 dict_mgr = base_guard_manager.func_kwdefaults_manager(
@@ -2830,26 +2830,33 @@ class GuardBuilder(GuardBuilderBase):
                 if float_symbols_str:
                     float_symbols_str = f"double {float_symbols_str};"
 
-                func_str = textwrap.dedent(
-                    f"""
-                #include <algorithm>
-                #include <cstdint>
-                #include <cmath>
-                #include <c10/util/generic_math.h>
-
-                #if defined(_MSC_VER)
-                #  define EXTERN_DLL_EXPORT extern "C" __declspec(dllexport)
-                #else
-                #  define EXTERN_DLL_EXPORT extern "C"
-                #endif
-
-                EXTERN_DLL_EXPORT int8_t guard(int64_t *int_values, double *float_values) {{
-                  {int_symbols_str}
-                  {float_symbols_str}
-                  return ({") && (".join(code_parts)});
-                }}
-                """
+                # Use StringIO for efficient large guard code string assembly
+                func_buf = io.StringIO()
+                func_buf.write(
+                    "#include <algorithm>\n"
+                    "#include <cstdint>\n"
+                    "#include <cmath>\n"
+                    "#include <c10/util/generic_math.h>\n"
+                    "\n"
+                    "#if defined(_MSC_VER)\n"
+                    "#  define EXTERN_DLL_EXPORT extern \"C\" __declspec(dllexport)\n"
+                    "#else\n"
+                    "#  define EXTERN_DLL_EXPORT extern \"C\"\n"
+                    "#endif\n"
+                    "\n"
+                    "EXTERN_DLL_EXPORT int8_t guard(int64_t *int_values, double *float_values) {\n"
                 )
+                if int_symbols_str:
+                    func_buf.write(f"  {int_symbols_str}\n")
+                if float_symbols_str:
+                    func_buf.write(f"  {float_symbols_str}\n")
+                func_buf.write("  return (")
+                for i, part in enumerate(code_parts):
+                    if i > 0:
+                        func_buf.write(") && (")
+                    func_buf.write(part)
+                func_buf.write(");\n}\n")
+                func_str = func_buf.getvalue()
                 guards_log.debug(
                     "C++ shape guard function: %s %s",
                     func_str,
@@ -3583,8 +3590,8 @@ class GuardsStatePickler(pickle.Pickler):
         if type(obj).__qualname__ != type(obj).__name__ and not isinstance(obj, tuple):
             raise torch._dynamo.exc.PackageError(
                 f"Type {type(obj)} for object {obj} cannot be saved "
-                + "into torch.compile() package since it's defined in local scope. "
-                + "Please define the class at global scope (top level of a module)."
+                "into torch.compile() package since it's defined in local scope. "
+                "Please define the class at global scope (top level of a module)."
             )
 
         if (
@@ -4172,7 +4179,7 @@ class CheckFunctionManager:
             install_no_tensor_aliasing_guard(
                 builder.no_tensor_aliasing_guard_managers,
                 no_tensor_aliasing_names,
-                ["check_no_aliasing(" + ", ".join(no_tensor_aliasing_names) + ")"],
+                [f"check_no_aliasing({', '.join(no_tensor_aliasing_names)})"],
                 None,
             )
 
@@ -4524,7 +4531,7 @@ def get_guard_fail_reason_helper(
                 if not is_recompiles_verbose_enabled():
                     break
 
-    reason_str = f"{compile_id}: " + "; ".join(reasons)
+    reason_str = f"{compile_id}: {'; '.join(reasons)}"
     return strip_local_scope(reason_str)
 
 
@@ -4593,7 +4600,7 @@ def get_and_maybe_log_recompilation_reasons(
     if do_recompiles_log or config.error_on_recompile:
         if is_recompiles_verbose_enabled():
             failures = "\n\n".join(
-                f"guard {i} failures:\n" + textwrap.indent(reason, "- ")
+                f"guard {i} failures:\n{textwrap.indent(reason, '- ')}"
                 for i, reason in enumerate(reasons)
             )
         else:
@@ -4662,7 +4669,7 @@ def guard_error_hook(
     print(
         f"ERROR RUNNING GUARDS {code.co_name} {code.co_filename}:{code.co_firstlineno}"
     )
-    print("lambda " + ", ".join(guard_manager.args) + ":")
+    print(f"lambda {', '.join(guard_manager.args)}:")
     print(" ", " and\n  ".join(guard_manager.code_parts))
 
     print(guard_manager)

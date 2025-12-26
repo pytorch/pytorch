@@ -1472,6 +1472,39 @@ class f(torch.nn.Module):
 
             _ = torch.baddbmm(bias3, A, Bmat)
 
+    def test_safe_expand_caching(self):
+        """Verify safe_expand results are cached for repeated expressions."""
+        from torch.fx.experimental.symbolic_shapes import safe_expand
+
+        # Clear cache to get accurate measurements
+        safe_expand.cache_clear()
+
+        shape_env = ShapeEnv()
+        a = create_symint(shape_env, 2)
+        b = create_symint(shape_env, 3)
+
+        # Create a complex expression that benefits from caching
+        # Use the underlying sympy expressions
+        expr = sympy.sympify(a) + sympy.sympify(b)
+        expr = expr * (sympy.sympify(a) - sympy.sympify(b))
+
+        # Call safe_expand multiple times with the same expression
+        result1 = safe_expand(expr)
+        result2 = safe_expand(expr)
+        result3 = safe_expand(expr)
+
+        # Results should be identical
+        self.assertEqual(result1, result2)
+        self.assertEqual(result2, result3)
+
+        # Check cache statistics - should have 1 miss and 2 hits
+        cache_info = safe_expand.cache_info()
+        self.assertEqual(cache_info.misses, 1)
+        self.assertEqual(cache_info.hits, 2)
+
+        # Verify cache is unlimited (maxsize is None)
+        self.assertIsNone(cache_info.maxsize)
+
 
 @skipIfTorchDynamo(
     "Creating ShapeEnv fails for confusing reasons (also we never expect dynamo to see code like this)"
@@ -3050,6 +3083,53 @@ class TestDimConstraints(TestCase):
                 "L['d'].size()[1] == L['c'].size()[1]",
                 "L['e'].size()[1] == L['c'].size()[1]",
             },
+        )
+
+    def test_dim_constraints_subexpression_deduplication(self):
+        """Test that common subexpressions are handled correctly before constraint solving."""
+        from sympy import Symbol
+
+        from torch._dynamo.source import (
+            LocalSource,
+            TensorProperty,
+            TensorPropertySource,
+        )
+
+        src0 = TensorPropertySource(
+            base=LocalSource(local_name="x"), prop=TensorProperty.SIZE, idx=0
+        )
+
+        s = Symbol("s", positive=True, integer=True)
+        symbol_to_source = {s: [src0]}
+        var_to_val = {s: 64}
+        marked_dynamic = {s}
+
+        dim_constraints = DimConstraints(
+            symbol_to_source, var_to_val, marked_dynamic, {}
+        )
+
+        # Test that the deduplication helper exists and works
+        exprs = {s >= 8, s <= 256}
+        deduped, replacements = dim_constraints._deduplicate_subexprs(exprs)
+
+        # The method should return the same expressions (deduplication warms caches)
+        self.assertEqual(deduped, exprs)
+        self.assertEqual(replacements, {})
+
+        # Test with a single expression (early exit path)
+        single_expr = {s >= 2}
+        deduped_single, _ = dim_constraints._deduplicate_subexprs(single_expr)
+        self.assertEqual(deduped_single, single_expr)
+
+        # Add constraints and solve - this exercises the deduplication in context
+        dim_constraints.add(s >= 8)
+        dim_constraints.add(s <= 256)
+        dim_constraints.solve()
+
+        # Verify the solution contains expected constraints
+        self.assertTrue(len(dim_constraints._dynamic_results) > 0)
+        self.assertTrue(
+            any("8" in result for result in dim_constraints._dynamic_results)
         )
 
 

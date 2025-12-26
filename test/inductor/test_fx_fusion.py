@@ -154,6 +154,57 @@ class TestFxFusion(TestCase):
 
         torch.testing.assert_close(module(input), traced(input))
 
+    def test_view_to_reshape_single_pass(self):
+        """
+        Test that view_to_reshape correctly replaces view ops with reshape ops
+        using a single pass over the graph nodes.
+        """
+        from torch._inductor.fx_passes.post_grad import view_to_reshape
+
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                # Multiple view ops that should be converted to reshape
+                y = x.view(-1)
+                z = y.view(2, 6)
+                return z.sin()
+
+        module = TestModule()
+        # Use make_fx to get the graph in ATen form (with view.default)
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        example_input = torch.randn(3, 4)
+        gm = make_fx(module)(example_input)
+
+        # Count view ops before transformation
+        view_count_before = sum(
+            1
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target is torch.ops.aten.view.default
+        )
+        self.assertGreater(view_count_before, 0, "Should have view ops before transformation")
+
+        # Apply the transformation
+        view_to_reshape(gm)
+
+        # Count view ops after transformation (should be 0)
+        view_count_after = sum(
+            1
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target is torch.ops.aten.view.default
+        )
+        self.assertEqual(view_count_after, 0, "All view ops should be replaced with reshape")
+
+        # Count reshape ops after transformation
+        reshape_count = sum(
+            1
+            for n in gm.graph.nodes
+            if n.op == "call_function" and n.target is torch.ops.aten.reshape.default
+        )
+        self.assertEqual(reshape_count, view_count_before, "View ops should become reshape ops")
+
+        # Verify the result is correct
+        torch.testing.assert_close(module(example_input), gm(example_input))
+
 
 if __name__ == "__main__":
     run_tests()

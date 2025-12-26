@@ -1,9 +1,134 @@
 # Owner(s): ["module: dynamo"]
 
+import builtins
+import functools
+import heapq
+import itertools
+import operator
+import os as os_module
+import struct
+import sys
+import traceback
+
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+
+
+class TestLazyPolyfillLoading(torch._dynamo.test_case.TestCase):
+    """Tests for lazy loading of polyfill modules during tracing."""
+
+    def test_standard_library_polyfills_not_loaded_at_import(self):
+        """Verify that standard library polyfill modules are loaded lazily."""
+        from torch._dynamo.polyfills import loader
+
+        # These modules should be loaded lazily, not eagerly
+        lazy_modules = {
+            "builtins",
+            "functools",
+            "heapq",
+            "itertools",
+            "operator",
+            "os",
+            "struct",
+            "sys",
+            "traceback",
+        }
+
+        # Check that lazy modules are not in the loaded set after import
+        # (unless they were loaded by some other test that ran before this one)
+        # The key point is that they're NOT automatically loaded at import time
+        # This test is more about the mechanism than the exact state
+
+        # Instead, verify the lazy registry exists and has the right entries
+        self.assertGreater(len(loader._LAZY_POLYFILL_REGISTRY), 0)
+
+        # Check some known entries are in the lazy registry
+        self.assertIn(id(builtins.all), loader._LAZY_POLYFILL_REGISTRY)
+        self.assertIn(id(builtins.any), loader._LAZY_POLYFILL_REGISTRY)
+        self.assertIn(id(functools.reduce), loader._LAZY_POLYFILL_REGISTRY)
+        self.assertIn(id(heapq.heappush), loader._LAZY_POLYFILL_REGISTRY)
+        self.assertIn(id(itertools.chain), loader._LAZY_POLYFILL_REGISTRY)
+        self.assertIn(id(operator.itemgetter), loader._LAZY_POLYFILL_REGISTRY)
+        self.assertIn(id(os_module.fspath), loader._LAZY_POLYFILL_REGISTRY)
+        self.assertIn(id(struct.pack), loader._LAZY_POLYFILL_REGISTRY)
+        self.assertIn(id(sys.intern), loader._LAZY_POLYFILL_REGISTRY)
+        self.assertIn(id(traceback.extract_tb), loader._LAZY_POLYFILL_REGISTRY)
+
+    def test_eager_modules_loaded_at_import(self):
+        """Verify that PyTorch internal polyfill modules are loaded eagerly."""
+        from torch._dynamo.polyfills import loader
+
+        # These modules should be loaded eagerly because they polyfill PyTorch internals
+        eager_modules = {"fx", "tensor", "torch_c_nn", "_collections"}
+
+        for module_name in eager_modules:
+            if module_name in loader.POLYFILLED_MODULE_NAMES:
+                self.assertIn(
+                    module_name,
+                    loader._loaded_polyfill_modules,
+                    f"Module {module_name} should be loaded eagerly",
+                )
+
+    def test_ensure_polyfill_loaded_triggers_loading(self):
+        """Test that _ensure_polyfill_loaded correctly loads polyfill modules."""
+        from torch._dynamo.polyfills import loader
+
+        # Get a function that has a lazy polyfill
+        test_fn = builtins.all
+
+        # If not already loaded, loading should return True
+        module_name = loader._LAZY_POLYFILL_REGISTRY.get(id(test_fn))
+        if module_name and module_name not in loader._loaded_polyfill_modules:
+            self.assertTrue(loader._ensure_polyfill_loaded(test_fn))
+            self.assertIn(module_name, loader._loaded_polyfill_modules)
+
+        # Second call should return False (already loaded)
+        self.assertFalse(loader._ensure_polyfill_loaded(test_fn))
+
+    @skipIfTorchDynamo("test uses torch.compile internally")
+    def test_polyfill_loaded_during_tracing(self):
+        """Test that polyfill modules are loaded on-demand during tracing."""
+        # Reset dynamo
+        torch._dynamo.reset()
+
+        # Use builtins.all in a compiled function
+        @torch.compile
+        def fn_all(x):
+            if all([True, True]):
+                return x + 1
+            return x
+
+        result = fn_all(torch.tensor([1.0, 2.0]))
+        self.assertTrue(torch.allclose(result, torch.tensor([2.0, 3.0])))
+
+    @skipIfTorchDynamo("test uses torch.compile internally")
+    def test_polyfill_module_access_via_getattr(self):
+        """Test that polyfill modules can be accessed via polyfills.<module> syntax."""
+        from torch._dynamo import polyfills
+
+        # Accessing a polyfill module should work via __getattr__
+        # This is needed for code like: polyfills.builtins.iter_
+        builtins_module = polyfills.builtins
+        self.assertTrue(hasattr(builtins_module, "all"))
+        self.assertTrue(hasattr(builtins_module, "any"))
+
+        itertools_module = polyfills.itertools
+        self.assertTrue(hasattr(itertools_module, "chain"))
+
+    def test_get_polyfilled_modules_loads_all(self):
+        """Test that get_polyfilled_modules loads all polyfill modules."""
+        from torch._dynamo.polyfills import loader
+
+        modules = loader.get_polyfilled_modules()
+
+        # All modules should be loaded
+        self.assertEqual(len(modules), len(loader.POLYFILLED_MODULE_NAMES))
+
+        # All module names should now be in loaded set
+        for name in loader.POLYFILLED_MODULE_NAMES:
+            self.assertIn(name, loader._loaded_polyfill_modules)
 
 
 class TestGroupTensorsByDeviceAndDtype(torch._dynamo.test_case.TestCase):

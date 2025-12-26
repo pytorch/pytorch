@@ -1353,6 +1353,32 @@ class DictTests(torch._dynamo.test_case.TestCase):
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         self.assertEqual(fn(x), opt_fn(x))
 
+    def test_dict_key_caching(self):
+        """Verify dict operations work correctly with cached key lookups."""
+
+        def fn(d, x):
+            # Test get with default - exercises maybe_getitem_const
+            a = d.get("a", 0)
+            b = d.get("b", 0)
+            c = d.get("missing", 10)
+            # Test direct access - exercises getitem_const
+            val_a = d["a"]
+            val_b = d["b"]
+            # Test __contains__
+            has_a = "a" in d
+            has_missing = "missing" in d
+            result = x * a + x * b + c
+            if has_a:
+                result = result + val_a
+            if not has_missing:
+                result = result * val_b
+            return result
+
+        d = {"a": 1, "b": 2}
+        x = torch.randn(4)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(d, x), opt_fn(d, x))
+
 
 instantiate_parametrized_tests(DictTests)
 

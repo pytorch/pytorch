@@ -477,6 +477,89 @@ class TestReinplacingPassCorrectness(InductorTestCase):
         f(x)
         self.assertEqual(num_reinplacing_failures(), 0)
 
+    def test_combined_node_order_and_inplaceable_op_collection(self):
+        """Verify that inplaceable ops are collected during node_order building.
+
+        This test ensures that the optimization to combine node_order building
+        with inplaceable op collection in reinplace_inplaceable_ops_core works
+        correctly. The pass should:
+        1. Build node_order in a single pass
+        2. Collect inplaceable ops during the same pass
+        3. Process the collected ops in the correct forward order
+        """
+        ReinplaceCounters.clear()
+
+        # Test with multiple inplaceable operations
+        def f(x):
+            out1 = torch.empty_like(x)
+            out2 = torch.empty_like(x)
+            # Multiple auto_functionalized ops that need to be collected
+            sin(x, out1)
+            sin(out1, out2)
+            return out2
+
+        x = torch.randn(3, device=device)
+        gm = make_fx(f, tracing_mode="fake")(x)
+
+        # Count auto_functionalized nodes before reinplacing
+        auto_func_count_before = sum(
+            1
+            for node in gm.graph.nodes
+            if node.target
+            in (
+                torch.ops.higher_order.auto_functionalized,
+                torch.ops.higher_order.auto_functionalized_v2,
+            )
+        )
+
+        # This should work correctly with the combined pass
+        reinplace_inplaceable_ops_core(gm.graph)
+
+        # Verify the pass processed all auto_functionalized nodes
+        # (they should all have the 'only_clone_these_tensors' metadata)
+        auto_func_with_meta = sum(
+            1
+            for node in gm.graph.nodes
+            if node.target
+            in (
+                torch.ops.higher_order.auto_functionalized,
+                torch.ops.higher_order.auto_functionalized_v2,
+            )
+            and "only_clone_these_tensors" in node.meta
+        )
+        self.assertEqual(auto_func_count_before, auto_func_with_meta)
+
+        # All operations should be reinplaced successfully
+        self.assertEqual(num_reinplacing_failures(), 0)
+
+    def test_can_inplace_with_storage_caching(self):
+        """Verify that can_inplace correctly caches get_node_storage results.
+
+        This test exercises the can_inplace function which internally uses
+        get_node_storage to check if an operation can be reinplaced. The function
+        should:
+        1. Cache the storage lookup result in a local variable
+        2. Reuse the cached result for both the None check and the storage_to_nodes lookup
+        3. Correctly handle in-place operations that trigger storage lookups
+        """
+        ReinplaceCounters.clear()
+
+        def f(x):
+            # Create a view operation that triggers storage lookups
+            y = x.view(-1)
+            out = torch.empty_like(y)
+            # This sin operation will trigger can_inplace checks
+            sin(y, out)
+            return out
+
+        x = torch.randn(2, 3, device=device)
+        result = torch.compile(f)(x)
+        expected = x.view(-1).sin()
+        self.assertEqual(result, expected)
+
+        # The operation should be successfully reinplaced
+        self.assertEqual(num_reinplacing_failures(), 0)
+
 
 instantiate_parametrized_tests(TestReinplacingPassCorrectness)
 

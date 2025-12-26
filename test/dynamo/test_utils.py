@@ -1078,6 +1078,55 @@ class TestDynamoTimed(TestCase):
         self.assertEqual(compilation_events[0].param_bytes, 4 * 24)
         self.assertEqual(compilation_events[0].param_count, 3)
 
+    def test_dynamo_timed_fast_path(self):
+        """
+        Test that dynamo_timed has a fast path when instrumentation is disabled.
+
+        When no profiler is active, chromium event log is not active, and no
+        optional logging features are requested (log_pt2_compile_event,
+        log_waitcounter, dynamo_compile_column_us), the fast path should
+        be used which avoids creating context managers but still records
+        the timing metric.
+        """
+        # Clear any existing metrics and ensure chromium log is not initialized
+        utils.compilation_time_metrics.clear()
+        utils.CHROMIUM_EVENT_LOG = None
+
+        test_key = "test_fast_path_key"
+        executed = False
+
+        with utils.dynamo_timed(test_key):
+            executed = True
+
+        # Verify the code executed
+        self.assertTrue(executed)
+
+        # Verify that timing was still recorded even in fast path
+        self.assertIn(test_key, utils.compilation_time_metrics)
+        self.assertEqual(len(utils.compilation_time_metrics[test_key]), 1)
+        self.assertGreaterEqual(utils.compilation_time_metrics[test_key][0], 0)
+
+    def test_dynamo_timed_fast_path_not_used_with_logging(self):
+        """
+        Test that the fast path is NOT used when logging features are requested.
+
+        When log_pt2_compile_event, log_waitcounter, or dynamo_compile_column_us
+        are set, the full instrumentation path should be used.
+        """
+        utils.compilation_time_metrics.clear()
+        utils.CHROMIUM_EVENT_LOG = None
+
+        # With log_waitcounter=True, the fast path should not be used
+        # We test this indirectly by ensuring the context manager still works
+        test_key = "test_no_fast_path_key"
+        executed = False
+
+        with utils.dynamo_timed(test_key, log_waitcounter=True):
+            executed = True
+
+        self.assertTrue(executed)
+        self.assertIn(test_key, utils.compilation_time_metrics)
+
 
 class TestInductorConfigParsingForLogging(TestCase):
     """
