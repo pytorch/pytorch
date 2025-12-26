@@ -16,6 +16,7 @@ from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Uni
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
+from torch._library.opaque_object import OpaqueType
 from torch._subclasses import FakeTensor
 from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental._backward_state import BackwardState
@@ -423,6 +424,13 @@ class ViewAndMutationMeta:
     subclass_fw_graph_out_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
     # length = # backward graph inputs
     subclass_tangent_meta: list[Union[PlainTensorMeta, SubclassCreationMeta]]
+
+    # This stores descriptors for opaque objects that are appended to the end of
+    # the graph inputs. These are not tensors or subclasses, but objects that
+    # are synthesized from subclass inputs and need to be passed through to the
+    # inner graph.
+    opaque_inp_descs: list[AOTInput] = field(default_factory=list)
+
     # TODO: we should kill this
     # (need to default it to not break internal)
     is_train: bool = False
@@ -1051,7 +1059,7 @@ class AOTState:
     stack: contextlib.ExitStack
 
 
-FxValue = Union[Tensor, int, SymInt, BackwardState]
+FxValue = Union[Tensor, int, SymInt, BackwardState, OpaqueType]
 
 
 class CompilerWrapper:

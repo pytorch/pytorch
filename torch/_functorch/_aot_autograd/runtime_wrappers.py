@@ -51,6 +51,8 @@ from .descriptors import (
     AOTOutput,
     DummyAOTInput,
     MetadataMutationAOTOutput,
+    PlainAOTInput,
+    SubclassGetAttrAOTInput,
     SyntheticBaseAOTInput,
     ViewBaseAOTInput,
 )
@@ -97,6 +99,34 @@ from .utils import (
 zip = strict_zip
 
 aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
+
+
+def _evaluate_opaque_descriptor(descriptor: AOTInput, args: Sequence[FxValue]):
+    """
+    Evaluate an AOTInput descriptor at runtime to extract an opaque object.
+
+    For example, evaluating:
+        SubclassMethodAOTInput(
+            base=SubclassGetAttrAOTInput(PlainAOTInput(idx=0), "device_mesh"),
+            target="get_group",
+            args=(mesh_dim,)
+        )
+
+    Would extract: args[0].device_mesh.get_group(mesh_dim)
+    """
+
+    match descriptor:
+        case PlainAOTInput(idx):
+            # This should never happen, but no harm just handling it.
+            return args[idx]
+        case SubclassGetAttrAOTInput(base, attr):
+            # base.attr
+            base_value = _evaluate_opaque_descriptor(base, args)
+            return getattr(base_value, attr)
+        case _:
+            raise NotImplementedError(
+                f"Unsupported descriptor type: {type(descriptor)}"
+            )
 
 
 def _describe_arg_for_logging(arg: object) -> str:
@@ -743,6 +773,13 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 append_symints=True,
             )
 
+            # Extract opaque objects based on opaque_inp_descs
+            if runtime_metadata.opaque_inp_descs:
+                for opaque_desc in runtime_metadata.opaque_inp_descs:
+                    # Evaluate the descriptor to get the actual value
+                    value = _evaluate_opaque_descriptor(opaque_desc, args)
+                    unwrapped_args.append(value)
+
             if aot_graphs_log.isEnabledFor(logging.DEBUG):
                 _log_args_list(unwrapped_args, "After unwrapping, unwrapped_args")
 
@@ -761,6 +798,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 is_runtime=True,
                 included_subclass_symints=True,
+                num_derived_opaques=0,
             )
 
             if aot_graphs_log.isEnabledFor(logging.DEBUG):
@@ -1935,6 +1973,9 @@ def _backward_epilogue_functional(
             included_subclass_symints=True,
             is_runtime=True,
             make_subclass_override=make_subclass_override,
+            num_derived_opaques=len(
+                maybe_subclass_metadata.fw_metadata.opaque_inp_descs
+            ),
         )
         return outs_wrapped
     return out
