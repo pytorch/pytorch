@@ -29,7 +29,7 @@ MemPool::MemPool(
   device_ = c10::cuda::current_device();
   CUDACachingAllocator::createOrIncrefPool(device_, id_, allocator);
   if (use_on_oom) {
-    CUDACachingAllocator::setUseOnOOM(device_, id_);
+    CUDACachingAllocator::setUseOnOOM(device_, id_, true);
   }
   if (no_split) {
     CUDACachingAllocator::setNoSplit(device_, id_);
@@ -42,6 +42,7 @@ MemPool::~MemPool() {
   // However, this assertion is not true if a memory pool is shared
   // with a cuda graph. That CUDAGraph will increase the use count
   // until it is reset.
+  CUDACachingAllocator::setUseOnOOM(device_, id_, false);
   CUDACachingAllocator::releasePool(device_, id_);
   c10::cuda::CUDACachingAllocator::emptyCache(id_);
 }
