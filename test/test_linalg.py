@@ -7271,7 +7271,8 @@ class TestLinalg(TestCase):
         E2a, V2a = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=False)
         iters1 = len(lambdas1)
         iters2 = len(lambdas2)
-        self.assertLess(abs(iters1 - iters2), 0.1 * max(iters1, iters2))
+        tol_iter = 0.1 if dtype == torch.cdouble else 0.05
+        self.assertLess(abs(iters1 - iters2), tol_iter * max(iters1, iters2))
 
         eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
