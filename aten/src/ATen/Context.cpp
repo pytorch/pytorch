@@ -498,7 +498,7 @@ at::BlasBackend Context::blasPreferredBackend() {
 bool Context::ckSupported() {
 #ifdef USE_ROCM
   static const std::vector<std::string> supported_archs = {
-    "gfx90a", "gfx942", "gfx950"
+    "gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1101", "gfx1102", "gfx1103","gfx1150", "gfx1151", "gfx1200", "gfx1201"
   };
   for (auto index : c10::irange(detail::getCUDAHooks().deviceCount())) {
     if(!detail::getCUDAHooks().isGPUArch(supported_archs, index)) {
@@ -514,7 +514,7 @@ bool Context::ckSupported() {
 }
 
 void Context::setBlasPreferredBackend(at::BlasBackend b) {
-#ifdef _MSC_VER
+#if defined(_MSC_VER) && !defined(USE_ROCM)
   TORCH_WARN_ONCE(
     "torch.backends.cuda.preferred_blas_library is an experimental feature. "
     "It is not supported on Windows."
