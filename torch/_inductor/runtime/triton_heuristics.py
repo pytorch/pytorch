@@ -1632,7 +1632,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
     ) -> StaticallyLaunchedCudaKernel | None:
-        if not torch._inductor.config.use_static_cuda_launcher:
+        if not torch._inductor.config.use_static_triton_launcher:
             return None
 
         def check_can_launch() -> StaticallyLaunchedCudaKernel:
@@ -1690,7 +1690,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             return result
         except CannotStaticallyLaunchKernel as e:
             log.info("Bypassing StaticallyLaunchedCudaKernel due to %s", str(e))  # noqa: G200
-            if torch._inductor.config.strict_static_cuda_launcher:
+            if torch._inductor.config.strict_static_triton_launcher:
                 raise e
             return None
 
