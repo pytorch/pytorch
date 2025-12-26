@@ -45,12 +45,12 @@ def matmul(A: Tensor | None, B: Tensor) -> Tensor:
 
 
 def bform(X: Tensor, A: Tensor | None, Y: Tensor) -> Tensor:
-    """Return bilinear form of matrices: :math:`X^T A Y`."""
+    """Return bilinear form of matrices: :math:`X^H A Y`."""
     return matmul(X.mH, matmul(A, Y))
 
 
 def qform(A: Tensor | None, S: Tensor):
-    """Return quadratic form :math:`S^T A S`."""
+    """Return quadratic form :math:`S^H A S`."""
     return bform(S, A, S)
 
 
