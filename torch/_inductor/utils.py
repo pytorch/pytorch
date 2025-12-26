@@ -2779,7 +2779,7 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
 
 @functools.cache
-def get_gpu_dram_gbps() -> int:
+def get_gpu_dram_gbps() -> float:
     dram_bw_gbs = datasheet_dram_bw_gbs()
     if dram_bw_gbs is not None:
         return dram_bw_gbs

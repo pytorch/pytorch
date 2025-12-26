@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 
 import torch
+from torch.types import Device
 
 
 get_cuda_stream: Optional[Callable[[int], int]]
@@ -170,7 +171,7 @@ class DeviceInterface:
             raise RuntimeError("This device is not capable of supporting Triton")
 
     @staticmethod
-    def get_device_name() -> str:
+    def get_device_name(device: Device) -> str:
         raise NotImplementedError
 
 
