@@ -1,4 +1,8 @@
+import traceback
+from collections.abc import Callable
+
 import torch
+from torch._utils import _LazySeedTracker
 
 import torch_openreg._C  # type: ignore[misc]
 from . import meta  # noqa: F401
@@ -7,6 +11,10 @@ from .amp import get_amp_supported_dtype  # noqa: F401
 
 _initialized = False
 _is_in_bad_fork = getattr(torch_openreg._C, "_isInBadFork", lambda: False)
+_queued_calls: list[
+    tuple[Callable[[], None], list[str]]
+] = []  # don't invoke these until initialization occurs
+_lazy_seed_tracker = _LazySeedTracker()
 
 
 class device:
@@ -58,8 +66,22 @@ def is_initialized():
     return _initialized and not _is_in_bad_fork()
 
 
+def _lazy_call(callable, **kwargs):
+    if is_initialized():
+        callable()
+    else:
+        global _lazy_seed_tracker
+        if kwargs.get("seed_all", False):
+            _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
+        elif kwargs.get("seed", False):
+            _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+        else:
+            # Don't store the actual traceback to avoid memory cycle
+            _queued_calls.append((callable, traceback.format_stack()))
+
+
 def _lazy_init():
-    global _initialized
+    global _initialized, _queued_calls
     if is_initialized():
         return
     if _is_in_bad_fork():
@@ -68,6 +90,20 @@ def _lazy_init():
             "multiprocessing, you must use the 'spawn' start method"
         )
     torch_openreg._C._init()
+
+    _queued_calls.extend(call for call in _lazy_seed_tracker.get_calls() if call)
+
+    for queued_call, origin_trackback in _queued_calls:
+        try:
+            queued_call()
+        except Exception as e:
+            msg = (
+                "Error during lazy initialization call from:\n"
+                + "".join(origin_trackback)
+                + f"\nError message: {e}"
+            )
+            raise Exception(msg) from e  # noqa: TRY002
+
     _initialized = True
 
 
@@ -87,5 +123,9 @@ __all__ = [
     "manual_seed",
     "manual_seed_all",
     "get_rng_state",
+    "get_rng_state_all",
+    "seed",
+    "seed_all",
     "set_rng_state",
+    "set_rng_state_all",
 ]

@@ -87,8 +87,8 @@ struct OPENREG_EXPORT OpenRegHooksInterface : public at::PrivateUse1HooksInterfa
   }
   // LITERALINCLUDE END: OPENREG HOOK EXAMPLES
 
-  at::Generator getNewGenerator(DeviceIndex device_index) const override {
-    return at::make_generator<OpenRegGeneratorImpl>(device_index);
+  at::Generator getNewGenerator(c10::DeviceIndex device_index) const override {
+    return createOpenRegGenerator(device_index);
   }
 };
 
