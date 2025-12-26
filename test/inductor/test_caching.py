@@ -1804,6 +1804,307 @@ class InterfacesTest(TestMixin, TestCase):
 
 
 @instantiate_parametrized_tests
+class ForceDisableCachesTest(TestMixin, TestCase):
+    """Test class for force_disable_caches integration with the caching module."""
+
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-force-disable-caches-{cls.cls_id}"
+
+    def test_force_disable_caches_disables_caching_module(self) -> None:
+        """Test that force_disable_caches=True disables the caching module.
+
+        Verifies that when torch._inductor.config.force_disable_caches is True,
+        IS_CACHING_MODULE_ENABLED() returns False even if the base config
+        would otherwise enable caching.
+        """
+        # Setup: patch the base config to return True (enabled)
+        # and force_disable_caches to return True
+        with (
+            patch.object(config, "_is_caching_module_enabled_base", return_value=True),
+            patch.object(config, "_is_force_disable_caches", return_value=True),
+        ):
+            # Execute & Assert: IS_CACHING_MODULE_ENABLED should return False
+            self.assertFalse(config.IS_CACHING_MODULE_ENABLED())
+
+    def test_caching_module_enabled_when_force_disable_is_false(self) -> None:
+        """Test that caching works when force_disable_caches=False.
+
+        Verifies that when force_disable_caches is False and the base config
+        enables caching, IS_CACHING_MODULE_ENABLED() returns True.
+        """
+        # Setup: patch both configs to enabled states
+        with (
+            patch.object(config, "_is_caching_module_enabled_base", return_value=True),
+            patch.object(config, "_is_force_disable_caches", return_value=False),
+        ):
+            # Execute & Assert: IS_CACHING_MODULE_ENABLED should return True
+            self.assertTrue(config.IS_CACHING_MODULE_ENABLED())
+
+    def test_caching_module_disabled_when_base_config_is_false(self) -> None:
+        """Test that caching is disabled when base config is False.
+
+        Verifies that when the base versioned config returns False,
+        IS_CACHING_MODULE_ENABLED() returns False regardless of force_disable_caches.
+        """
+        # Setup: patch base config to False, force_disable to False
+        with (
+            patch.object(config, "_is_caching_module_enabled_base", return_value=False),
+            patch.object(config, "_is_force_disable_caches", return_value=False),
+        ):
+            # Execute & Assert: IS_CACHING_MODULE_ENABLED should return False
+            self.assertFalse(config.IS_CACHING_MODULE_ENABLED())
+
+    @patch_on_disk_cache_base_dir
+    def test_memoizer_disabled_when_force_disable_caches_true(self) -> None:
+        """Test that Memoizer operations become no-ops when force_disable_caches=True.
+
+        Verifies that when force_disable_caches is enabled, memoized functions
+        always execute (no caching) and replay always raises KeyError.
+        """
+        # Setup: enable force_disable_caches
+        with (
+            patch.object(config, "_is_caching_module_enabled_base", return_value=True),
+            patch.object(config, "_is_force_disable_caches", return_value=True),
+        ):
+            memoizer = Memoizer()
+            call_count = 0
+
+            @memoizer.memoize()
+            def compute(x: int) -> int:
+                nonlocal call_count
+                call_count += 1
+                return x * 2
+
+            # Execute: call twice - should execute both times (no caching)
+            result1 = compute(5)
+            result2 = compute(5)
+
+            # Assert: function was called both times
+            self.assertEqual(call_count, 2)
+            self.assertEqual(result1, 10)
+            self.assertEqual(result2, 10)
+
+
+@instantiate_parametrized_tests
+class FreshCacheIntegrationTest(TestMixin, TestCase):
+    """Test class for fresh_cache integration with the caching module."""
+
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-fresh-cache-{cls.cls_id}"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    @set_caching_module_enabled(True)
+    def test_memoizer_cache_clear_clears_in_memory_cache(self) -> None:
+        """Test that Memoizer.cache_clear() clears the in-memory cache.
+
+        Verifies that calling cache_clear() on a Memoizer instance resets
+        its in-memory cache to empty.
+        """
+        # Setup: create a memoizer and cache some values
+        memoizer = Memoizer()
+        call_count = 0
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        compute(5)
+        compute(10)
+
+        # Verify cache has entries
+        self.assertEqual(len(memoizer._cache._memory), 2)
+        self.assertEqual(call_count, 2)
+
+        # Execute: clear the cache
+        memoizer.cache_clear()
+
+        # Assert: cache is now empty
+        self.assertEqual(len(memoizer._cache._memory), 0)
+
+        # Verify that calling the memoized function again would be a cache miss
+        # by checking that replay raises KeyError
+        @memoizer.replay()
+        def compute_replay(x: int) -> int:
+            raise AssertionError("Should not be called")
+
+        with self.assertRaises(KeyError):
+            compute_replay(5)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_cache_clear_clears_disk_cache(self) -> None:
+        """Test that PersistentMemoizer.cache_clear() clears the on-disk cache.
+
+        Verifies that calling cache_clear() on a PersistentMemoizer removes
+        the on-disk cache directory.
+        """
+        from pathlib import Path
+
+        # Setup: create a persistent memoizer and cache some values
+        persistent = PersistentMemoizer(sub_dir=Path(self.sub_dir()))
+        call_count = 0
+
+        @persistent.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        compute(5)
+        self.assertEqual(call_count, 1)
+
+        # Verify disk cache directory exists and has content
+        disk_cache_dir = persistent._disk_cache._cache_dir
+        self.assertTrue(disk_cache_dir.exists())
+
+        # Execute: clear the persistent memoizer cache
+        persistent.cache_clear()
+
+        # Assert: disk cache directory is removed
+        self.assertFalse(disk_cache_dir.exists())
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_registered_with_clear_on_fresh_cache(self) -> None:
+        """Test that Memoizer is registered with clear_on_fresh_cache.
+
+        Verifies that when a Memoizer is created, it is automatically
+        registered to be cleared when fresh_cache() is invoked.
+        """
+        from torch._inductor.utils import _registered_caches
+
+        # Setup: create a memoizer
+        memoizer = Memoizer()
+
+        # Assert: memoizer is in the registered caches list
+        self.assertIn(memoizer, _registered_caches)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_registered_with_clear_on_fresh_cache(self) -> None:
+        """Test that PersistentMemoizer is registered with clear_on_fresh_cache.
+
+        Verifies that when a PersistentMemoizer is created, it is automatically
+        registered to be cleared when fresh_cache() is invoked.
+        """
+        from pathlib import Path
+
+        from torch._inductor.utils import _registered_caches
+
+        # Setup: create a persistent memoizer
+        persistent = PersistentMemoizer(sub_dir=Path(self.sub_dir()))
+
+        # Assert: persistent memoizer is in the registered caches list
+        self.assertIn(persistent, _registered_caches)
+        # Also verify the underlying memoizer is registered
+        self.assertIn(persistent._memoizer, _registered_caches)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_fresh_cache_clears_memoizer(self) -> None:
+        """Test that fresh_cache() context manager clears Memoizer caches.
+
+        Verifies that when entering fresh_cache() context, all registered
+        Memoizer instances have their caches cleared.
+        """
+        from torch._inductor.utils import fresh_cache
+
+        # Setup: create a memoizer and cache some values
+        memoizer = Memoizer()
+        call_count = 0
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        compute(5)
+        self.assertEqual(len(memoizer._cache._memory), 1)
+
+        # Execute: enter fresh_cache context (this calls clear_caches())
+        with fresh_cache():
+            # Assert: memoizer cache was cleared
+            self.assertEqual(len(memoizer._cache._memory), 0)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_fresh_cache_clears_persistent_memoizer_disk_cache(self) -> None:
+        """Test that fresh_cache() clears PersistentMemoizer disk cache.
+
+        Verifies that when entering fresh_cache() context, PersistentMemoizer
+        instances have their on-disk cache directories removed.
+        """
+        from pathlib import Path
+
+        from torch._inductor.utils import fresh_cache
+
+        # Setup: create a persistent memoizer and cache some values
+        persistent = PersistentMemoizer(sub_dir=Path(self.sub_dir()))
+        call_count = 0
+
+        @persistent.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        compute(5)
+
+        # Verify disk cache exists
+        disk_cache_dir = persistent._disk_cache._cache_dir
+        self.assertTrue(disk_cache_dir.exists())
+
+        # Execute: enter fresh_cache context
+        with fresh_cache():
+            # Assert: disk cache directory was removed
+            self.assertFalse(disk_cache_dir.exists())
+            # And memory cache was cleared (via the underlying Memoizer)
+            self.assertEqual(len(persistent._memoizer._cache._memory), 0)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_cache_clear_is_idempotent(self) -> None:
+        """Test that calling cache_clear() multiple times is safe.
+
+        Verifies that clearing an already-empty cache does not raise errors.
+        """
+        from pathlib import Path
+
+        # Setup: create memoizers
+        memoizer = Memoizer()
+        persistent = PersistentMemoizer(sub_dir=Path(self.sub_dir()))
+
+        # Execute: call cache_clear multiple times on empty caches
+        memoizer.cache_clear()
+        memoizer.cache_clear()
+
+        persistent.cache_clear()
+        persistent.cache_clear()
+
+        # Assert: no errors raised, caches are still empty
+        self.assertEqual(len(memoizer._cache._memory), 0)
+        self.assertFalse(persistent._disk_cache._cache_dir.exists())
+
+
+@instantiate_parametrized_tests
 class ShouldPadMemoizerTest(TestMixin, TestCase):
     """Test class for _should_pad memoizer integration.
 
