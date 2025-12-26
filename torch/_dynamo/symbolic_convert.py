@@ -3698,13 +3698,16 @@ class InstructionTranslatorBase(
             self.push(ConstantVariable.create(True))
         else:
             self.push(ConstantVariable.create(False))
-    
+
     def MATCH_CLASS(self, inst):
+        import builtins
+
         from torch._dynamo.variables.builtin import BuiltinVariable
         from torch._dynamo.variables.constant import ConstantVariable
         from torch._dynamo.variables.tensor import TensorVariable
         from torch._dynamo.variables.user_defined import UserDefinedClassVariable
-        import builtins
+
+        from .exc import Unsupported
 
         names = self.pop()
         cls_type = self.pop()
@@ -3717,17 +3720,26 @@ class InstructionTranslatorBase(
         if hasattr(subject, "realize"):
             subject = subject.realize()
 
-        # Explicitly handle Tensor vs UserDefinedClass mismatch to avoid internal assertion errors
-        if isinstance(subject, TensorVariable) and isinstance(cls_type, UserDefinedClassVariable):
-            match_result = ConstantVariable(False)
+        if isinstance(subject, TensorVariable) and isinstance(
+            cls_type, UserDefinedClassVariable
+        ):
+            match_result = ConstantVariable.create(False)
         else:
             try:
                 isinstance_var = BuiltinVariable(builtins.isinstance)
-                match_result = self.call_function(isinstance_var, (subject, cls_type), {})
+                match_result = self.call_function(
+                    isinstance_var, [subject, cls_type], {}
+                )
             except AssertionError:
-                match_result = ConstantVariable(False)
+                match_result = ConstantVariable.create(False)
             except Exception:
                 raise
+
+        if match_result is None:
+            self.push(subject)
+            self.push(cls_type)
+            self.push(names)
+            raise Unsupported("MATCH_CLASS: isinstance returned None")
 
         try:
             is_match = match_result.as_python_constant()
@@ -3735,24 +3747,22 @@ class InstructionTranslatorBase(
             self.push(subject)
             self.push(cls_type)
             self.push(names)
-            from .exc import Unsupported
-            raise Unsupported("MATCH_CLASS: cannot statically resolve isinstance")
+            raise Unsupported(
+                "MATCH_CLASS: cannot statically resolve isinstance"
+            ) from None
 
         if is_match:
             attr_names = names.as_python_constant()
             getattr_var = BuiltinVariable(builtins.getattr)
-            
             for name in attr_names:
-                name_var = ConstantVariable(name)
-                val = self.call_function(getattr_var, (subject, name_var), {})
+                name_var = ConstantVariable.create(name)
+                val = self.call_function(getattr_var, [subject, name_var], {})
                 self.push(val)
-            
             self.push(match_result)
         else:
-            # Restore subject to stack for the next case block
             self.push(subject)
             self.push(match_result)
-    
+
     def MATCH_SEQUENCE(self, inst: Instruction) -> None:
         tos = self.stack[-1]
         assert tos.is_python_constant()

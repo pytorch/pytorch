@@ -4190,6 +4190,29 @@ class GraphModule(torch.nn.Module):
         finally:
             torch = old_torch
 
+    def test_match_class_structural_pattern_matching(self):
+        from dataclasses import dataclass
+
+        @dataclass
+        class Point:
+            x: int
+            y: int
+
+        def match_point(obj):
+            match obj:
+                case Point(x=val):
+                    return val + 1
+                case _:
+                    return -1
+
+        p = Point(x=10, y=20)
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(cnts)(match_point)
+        self.assertEqual(opt_fn(p), 11)
+
+        t = torch.randn(2)
+        self.assertEqual(opt_fn(t), -1)
+
 
 def udf_mul(x, y):
     return x * y
