@@ -399,7 +399,9 @@ def standalone_compile(
                 nonlocal fake_mode
                 if "example_value" in node.meta:
                     maybe_tensor = node.meta["example_value"]
-                    if isinstance(maybe_tensor, torch._subclasses.fake_tensor.FakeTensor):
+                    if isinstance(
+                        maybe_tensor, torch._subclasses.fake_tensor.FakeTensor
+                    ):
                         fake_mode = maybe_tensor.fake_mode
 
             # If gm came from Dynamo, then last_node.args[0] is always a list,

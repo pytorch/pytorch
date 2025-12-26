@@ -374,7 +374,7 @@ class FakeTensorConverter:
             # meta tensor, which requires setting in_kernel_invocation to True.
             outer_fake_mode = t.fake_mode
             fake_device = t.fake_device
-            constant = t.constant if hasattr(t, 'constant') else None
+            constant = t.constant if hasattr(t, "constant") else None
 
             # Use in_kernel_invocation to make the FakeTensor report its true
             # meta device, so we can pass it to from_meta_and_device
@@ -409,7 +409,7 @@ class FakeTensorConverter:
 
                 # Unflatten the subclass with the new fake inner tensors
                 subclass_type = type(t)
-                out = subclass_type.__tensor_unflatten__(
+                out = subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
                     new_inner_tensors, ctx, t.size(), t.stride()
                 )
                 self.set_tensor_memo(t, out)

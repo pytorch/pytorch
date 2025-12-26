@@ -2192,12 +2192,12 @@ class GuardBuilder(GuardBuilderBase):
         )
 
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard) -> None:
-        value = self.get(guard.name)
+        value = self.get(guard)
         # Use no_dispatch to avoid FakeTensorMode intercepting tensor operations
         # during deepcopy. This is needed for cross-compilation scenarios where
         # tensors are created outside FakeTensorMode (e.g., DeviceMesh in DTensor).
         with no_dispatch():
-            original_metadata = deepcopy(self.get(guard.name).__tensor_flatten__()[1])
+            original_metadata = deepcopy(self.get(guard).__tensor_flatten__()[1])
         if hasattr(value, "__metadata_guard__"):
             verify_guard_fn_signature(value)
             cls = type(value)
@@ -2917,7 +2917,8 @@ class GuardBuilder(GuardBuilderBase):
                     pytype = torch.Tensor
                     # Skip guards check since we're cross-compiling with fake tensors.
                     # The guards will expect real tensor types but inputs are fake.
-                    self.check_fn_manager.output_graph.skip_guards_check = True
+                    if self.check_fn_manager.output_graph is not None:
+                        self.check_fn_manager.output_graph.skip_guards_check = True
                 if value.dispatch_keys is not None:
                     dispatch_keys = value.dispatch_keys
 
@@ -3492,8 +3493,13 @@ class GuardsStatePickler(pickle.Pickler):
                 obj.device,
                 # For FakeTensors, use the expected runtime type (torch.Tensor)
                 # rather than the compile-time type (FakeTensor) for cross-compilation support.
-                obj.pytype if isinstance(obj, torch._subclasses.FakeTensor) and obj.pytype is not None else (
-                    torch.Tensor if isinstance(obj, torch._subclasses.FakeTensor) else type(obj)
+                obj.pytype
+                if isinstance(obj, torch._subclasses.FakeTensor)
+                and obj.pytype is not None
+                else (
+                    torch.Tensor
+                    if isinstance(obj, torch._subclasses.FakeTensor)
+                    else type(obj)
                 ),
                 torch._C._dispatch_keys(obj).raw_repr(),
                 obj.grad,

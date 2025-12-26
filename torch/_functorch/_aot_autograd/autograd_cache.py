@@ -836,7 +836,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         if shape_env is None:
             return None
 
-
         symints = cache_info.forward_symints
         guards = shape_env.get_pruned_guards(symints)
         return shape_env.produce_guards_expression(placeholders=symints, guards=guards)

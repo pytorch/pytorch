@@ -64,8 +64,7 @@ def _reorder_parameters_to_match_model(
 
         # Remove common prefixes
         for prefix in ["getattr_", "L__self___"]:
-            if name.startswith(prefix):
-                name = name[len(prefix) :]
+            name = name.removeprefix(prefix)
         # Normalize triple underscores around numbers to single underscores
         # e.g., mlp___0___weight -> mlp_0_weight
         name = re.sub(r"___(\d+)___", r"_\1_", name)
@@ -100,8 +99,7 @@ def _reorder_parameters_to_match_model(
 
     # Add any remaining parameters that weren't in the mapping
     # (this shouldn't happen in normal cases, but handle gracefully)
-    for gm_name, param in current_params.items():
-        new_ordered_params[gm_name] = param
+    new_ordered_params.update(current_params)
 
     # Replace the parameters dict with the reordered one
     gm._parameters.clear()

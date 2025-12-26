@@ -2557,7 +2557,7 @@ class OutputGraph(OutputGraphCommon):
         and they need to be transferred to the new mode to avoid fake mode
         mismatch errors in detect_fake_mode.
         """
-        from torch._subclasses.fake_tensor import FakeTensor, is_fake
+        from torch._subclasses.fake_tensor import is_fake
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
         def transfer_tensor(t: torch.Tensor) -> torch.Tensor:
@@ -2573,14 +2573,14 @@ class OutputGraph(OutputGraphCommon):
                     inner = getattr(t, attr)
                     inner_tensors[attr] = transfer_tensor(inner)
                 # Reconstruct the subclass with transferred inner tensors
-                return type(t).__tensor_unflatten__(
+                return type(t).__tensor_unflatten__(  # type: ignore[attr-defined]
                     inner_tensors, ctx, t.shape, t.stride()
                 )
 
             # Transfer FakeTensors to the target mode
             if is_fake(t):
                 fake_t = t  # type: FakeTensor
-                if fake_t.fake_mode is target_mode:
+                if fake_t.fake_mode is target_mode:  # type: ignore[attr-defined]
                     # Already in target mode
                     return t
                 # Transfer to target mode using from_tensor

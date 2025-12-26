@@ -906,10 +906,13 @@ class MockFXGraphCacheOutput(OutputCode):
     to serialize/deserialize it safely (preserving node metadata and
     supporting FakeTensor, AOT artifacts, etc.).
     """
+
     # The actual graph module (cleared during serialization)
     gm: Optional[torch.fx.GraphModule] = None
     # Serialized graph module bytes (populated during serialization)
-    _serialized_graph_module: Optional[bytes] = dataclasses.field(default=None, init=False)
+    _serialized_graph_module: Optional[bytes] = dataclasses.field(
+        default=None, init=False
+    )
 
     def __post_init__(self) -> None:
         self._boxed_call = True
@@ -926,6 +929,7 @@ class MockFXGraphCacheOutput(OutputCode):
         # If we serialized earlier, we must deserialize using fake_mode.
         assert self._serialized_graph_module is not None
         from torch._guards import detect_fake_mode
+
         fake_mode = detect_fake_mode(example_inputs)
         if fake_mode is None:
             raise RuntimeError(
@@ -933,6 +937,7 @@ class MockFXGraphCacheOutput(OutputCode):
                 "GraphPickler deserialization requires fake mode."
             )
         from torch.fx._graph_pickler import GraphPickler
+
         gm = GraphPickler.loads(self._serialized_graph_module, fake_mode)
         assert isinstance(gm, torch.fx.GraphModule)
         gm.recompile()
@@ -957,12 +962,14 @@ class MockFXGraphCacheOutput(OutputCode):
         # Serialize the FX graph via GraphPickler and clear gm to avoid std pickle issues.
         if self.gm is not None:
             from torch.fx._graph_pickler import GraphPickler
+
             for node in self.gm.graph.nodes:
                 node.meta.pop("source_fn_stack", None)
                 node.meta.pop("nn_module_stack", None)
                 node.meta.pop("fwd_source_fn_stack", None)
             self._serialized_graph_module = GraphPickler.dumps(self.gm)
             self.gm = None
+
 
 @dataclasses.dataclass
 class RegionalOutputCode(OutputCode):

@@ -1,13 +1,13 @@
 import torch
+import torch.distributed as dist
+import torch.fx.traceback as fx_traceback
 import torch.nn as nn
 import torch.nn.functional as F
-import torch.fx.traceback as fx_traceback
-import torch.distributed as dist
-from torch.testing._internal.distributed.fake_pg import FakeStore
-
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import Replicate, Shard
+from torch.testing._internal.distributed.fake_pg import FakeStore
+
 
 torch._dynamo.config.enable_aot_compile = True
 
@@ -56,7 +56,8 @@ def dtensorify_module(
 class MultiHeadSelfAttention(nn.Module):
     def __init__(self, embed_dim: int, num_heads: int):
         super().__init__()
-        assert embed_dim % num_heads == 0, "embed_dim must be divisible by num_heads"
+        if embed_dim % num_heads != 0:
+            raise ValueError("embed_dim must be divisible by num_heads")
         self.embed_dim = embed_dim
         self.num_heads = num_heads
         self.head_dim = embed_dim // num_heads
@@ -81,7 +82,13 @@ class MultiHeadSelfAttention(nn.Module):
 
 
 class TransformerBlock(nn.Module):
-    def __init__(self, embed_dim: int, num_heads: int, mlp_ratio: float = 4.0, dropout: float = 0.0):
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        mlp_ratio: float = 4.0,
+        dropout: float = 0.0,
+    ):
         super().__init__()
         self.ln1 = nn.LayerNorm(embed_dim)
         self.attn = MultiHeadSelfAttention(embed_dim, num_heads)
@@ -116,7 +123,9 @@ class Transformer(nn.Module):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, embed_dim)
         self.pos_embed = nn.Parameter(torch.zeros(1, max_seq_len, embed_dim))
-        self.layers = nn.ModuleList([TransformerBlock(embed_dim, num_heads) for _ in range(num_layers)])
+        self.layers = nn.ModuleList(
+            [TransformerBlock(embed_dim, num_heads) for _ in range(num_layers)]
+        )
         self.ln_f = nn.LayerNorm(embed_dim)
         self.head = nn.Linear(embed_dim, vocab_size, bias=False)
         self.device_mesh = device_mesh
@@ -131,7 +140,9 @@ class Transformer(nn.Module):
             return block(hidden)
 
         for block in self.layers:
-            x = torch.utils.checkpoint.checkpoint(_run_block, block, x, use_reentrant=False)
+            x = torch.utils.checkpoint.checkpoint(
+                _run_block, block, x, use_reentrant=False
+            )
 
         x = self.ln_f(x)
         logits = self.head(x)  # DTensor
@@ -168,36 +179,53 @@ def main():
     )
 
     # Create model
-    model = Transformer(vocab_size, embed_dim, num_heads, num_layers, max_seq_len, device_mesh=device_mesh).to(device)
+    model = Transformer(
+        vocab_size,
+        embed_dim,
+        num_heads,
+        num_layers,
+        max_seq_len,
+        device_mesh=device_mesh,
+    ).to(device)
 
     # Torchtitan-style: dtensorify params and buffers before capture/export
-    dtensorify_module(model, device_mesh, param_placements=[Replicate()], buffer_placements=[Replicate()])
+    dtensorify_module(
+        model,
+        device_mesh,
+        param_placements=[Replicate()],
+        buffer_placements=[Replicate()],
+    )
 
     model.eval()
 
     # Capture with Dynamo first, then export/compile with AOTAutograd using the captured GraphModule
-    from torch._subclasses.fake_tensor import FakeTensorMode
-    from torch._functorch.aot_autograd import (
-        aot_export_joint_with_descriptors,
-        aot_compile_joint_with_descriptors,
-    )
     from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
+    from torch._functorch.aot_autograd import (
+        aot_compile_joint_with_descriptors,
+        aot_export_joint_with_descriptors,
+    )
+    from torch._subclasses.fake_tensor import FakeTensorMode
 
     fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
     with fake_mode, torch._dynamo.config.patch(install_free_tensors=True):
-        local_input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+        local_input_ids = torch.randint(
+            0, vocab_size, (batch_size, seq_len), device=device
+        )
         input_ids_dt = DTensor.from_local(local_input_ids, device_mesh, [Shard(0)])
 
         from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
+
         gm = _dynamo_graph_capture_for_export(model)((input_ids_dt,))
         fake_mode = gm.meta["fake_mode"]
 
     import contextlib
+
     with contextlib.ExitStack() as stack:
         if fake_mode is not None:
             stack.enter_context(fake_mode)
 
         from contextlib import ExitStack
+
         with ExitStack() as export_stack:
             jd = aot_export_joint_with_descriptors(
                 export_stack,
@@ -210,11 +238,13 @@ def main():
             def fwd_compile(gm: torch.fx.GraphModule, example_inputs):
                 gm = regional_inductor(gm, example_inputs)
                 from torch._inductor.output_code import MockFXGraphCacheOutput
+
                 return MockFXGraphCacheOutput(gm)
 
             def bwd_compile(gm: torch.fx.GraphModule, example_inputs):
                 gm = regional_inductor(gm, example_inputs)
                 from torch._inductor.output_code import MockFXGraphCacheOutput
+
                 return MockFXGraphCacheOutput(gm)
 
             compiled_wrapper = aot_compile_joint_with_descriptors(
@@ -225,11 +255,19 @@ def main():
 
         serialization_path = "/tmp/cross_precompile_1.pt"
         with open(serialization_path, "wb") as f:
-            f.write(BundledAOTAutogradSerializableCallable.serialize_compile_artifacts(compiled_wrapper))
+            f.write(
+                BundledAOTAutogradSerializableCallable.serialize_compile_artifacts(
+                    compiled_wrapper
+                )
+            )
 
     # Load compiled callable
     with open(serialization_path, "rb") as f:
-        loaded_fn = BundledAOTAutogradSerializableCallable.deserialize_compile_artifacts(f.read())
+        loaded_fn = (
+            BundledAOTAutogradSerializableCallable.deserialize_compile_artifacts(
+                f.read()
+            )
+        )
 
     # Create DTensor inputs for run
     local_input_ids = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
@@ -245,7 +283,9 @@ def main():
     loss = F.cross_entropy(logits.view(-1, vocab_size), targets.view(-1))
     loss.backward()
 
-    print("Successfully cross compiled with compiler toolkit using DTensor params and DTensor input_ids")
+    print(
+        "Successfully cross compiled with compiler toolkit using DTensor params and DTensor input_ids"
+    )
     dist.destroy_process_group()
 
 

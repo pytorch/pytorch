@@ -1326,6 +1326,7 @@ def aot_compile_joint_with_descriptors(
     """
     import random
     import time
+
     from torch._dynamo.aot_compile_types import (
         BundledAOTAutogradSerializableCallable,
         SerializableCallable,
@@ -1344,11 +1345,13 @@ def aot_compile_joint_with_descriptors(
             time.time_ns(),
             forward_symints=[],
         )
-        cache_ctx = torch._functorch.config.patch({
-            "bundled_autograd_cache": True,
-            "force_non_lazy_backward_lowering": True,
-            "bypass_autograd_cache_key": True,
-        })
+        cache_ctx = torch._functorch.config.patch(
+            {
+                "bundled_autograd_cache": True,
+                "force_non_lazy_backward_lowering": True,
+                "bypass_autograd_cache_key": True,
+            }
+        )
 
     with cache_ctx:
         compiled_fn, _ = aot_stage2_compile(
