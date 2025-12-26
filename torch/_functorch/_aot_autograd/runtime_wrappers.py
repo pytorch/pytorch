@@ -449,10 +449,9 @@ def _create_runtime_wrapper(
         )
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
-        num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices
-        if num_mutations_to_apply > 0:
-            updated_inputs = all_outs[:num_mutations_to_apply]
-            fw_outs = all_outs[num_mutations_to_apply:]
+        if num_mutated_runtime_inps > 0:
+            updated_inputs = all_outs[:num_mutated_runtime_inps]
+            fw_outs = all_outs[num_mutated_runtime_inps:]
 
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
                 meta = runtime_metadata.input_info[inpt_idx]
