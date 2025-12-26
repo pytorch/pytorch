@@ -798,6 +798,7 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 num_fw_outs_saved_for_bw=self.num_fw_outs_saved_for_bw,
                 is_runtime=True,
                 included_subclass_symints=True,
+                num_derived_opaques=0,
             )
 
             if aot_graphs_log.isEnabledFor(logging.DEBUG):
@@ -1972,6 +1973,9 @@ def _backward_epilogue_functional(
             included_subclass_symints=True,
             is_runtime=True,
             make_subclass_override=make_subclass_override,
+            num_derived_opaques=len(
+                maybe_subclass_metadata.fw_metadata.opaque_inp_descs
+            ),
         )
         return outs_wrapped
     return out
