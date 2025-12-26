@@ -30,6 +30,8 @@ from torch.testing._internal.common_device_type import (
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
     skipXPUIf,
+    e4m3_type,
+    E4M3_MAX_POS,
 )
 from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
@@ -1563,10 +1565,10 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_mixed_dtypes(self, device):
         query = torch.randn((1, 1, 8, 64), dtype=torch.bfloat16, device=device)
         key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
-            torch.float8_e4m3fn
+            e4m3_type
         )
         value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
-            torch.float8_e4m3fn
+            e4m3_type
         )
         kernel_options = {"BACKEND": "TRITON_DECODE"}
         out = torch.compile(flex_attention)(
@@ -1588,13 +1590,11 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
         )
 
-        key_scale = torch.max(torch.abs(key_ref)) / torch.finfo(torch.float8_e4m3fn).max
-        value_scale = (
-            torch.max(torch.abs(value_ref)) / torch.finfo(torch.float8_e4m3fn).max
-        )
+        key_scale = torch.max(torch.abs(key_ref)) / E4M3_MAX_POS
+        value_scale = torch.max(torch.abs(value_ref)) / E4M3_MAX_POS
 
-        key_fp8 = (key_ref / key_scale).to(torch.float8_e4m3fn)
-        value_fp8 = (value_ref / value_scale).to(torch.float8_e4m3fn)
+        key_fp8 = (key_ref / key_scale).to(e4m3_type)
+        value_fp8 = (value_ref / value_scale).to(e4m3_type)
 
         def score_mod(score, b, h, m, n):
             # Dequantize keys inside the attention score computation
@@ -1627,7 +1627,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
         )
 
-        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+        fp8_max = E4M3_MAX_POS
 
         key_scale = torch.amax(torch.abs(key_ref), dim=(-2, -1)) / fp8_max  # (B, H)
         value_scale = torch.amax(torch.abs(value_ref), dim=(-2, -1)) / fp8_max  # (B, H)
@@ -1635,8 +1635,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         key_scale_b = key_scale[..., None, None]  # (B, H, 1, 1) for broadcasting
         value_scale_b = value_scale[..., None, None]
 
-        key_fp8 = (key_ref / key_scale_b).to(torch.float8_e4m3fn)
-        value_fp8 = (value_ref / value_scale_b).to(torch.float8_e4m3fn)
+        key_fp8 = (key_ref / key_scale_b).to(e4m3_type)
+        value_fp8 = (value_ref / value_scale_b).to(e4m3_type)
 
         def score_mod(score, b, h, m, n):
             # Dequantize keys inside the attention score computation
@@ -1670,13 +1670,13 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             dtype=torch.bfloat16,
             device=device,
             requires_grad=True,
-        ).to(torch.float8_e4m3fn)
+        ).to(e4m3_type)
         v = torch.testing.make_tensor(
             (1, 1, 1024, 64),
             dtype=torch.bfloat16,
             device=device,
             requires_grad=True,
-        ).to(torch.float8_e4m3fn)
+        ).to(e4m3_type)
 
         kernel_options = {"BACKEND": "TRITON_DECODE"}
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
