@@ -3709,16 +3709,9 @@ class InstructionTranslatorBase(
 
         from .exc import Unsupported
 
-        names = self.pop()
-        cls_type = self.pop()
-        subject = self.pop()
-
-        if hasattr(names, "realize"):
-            names = names.realize()
-        if hasattr(cls_type, "realize"):
-            cls_type = cls_type.realize()
-        if hasattr(subject, "realize"):
-            subject = subject.realize()
+        names = self.pop().realize()
+        cls_type = self.pop().realize()
+        subject = self.pop().realize()
 
         if isinstance(subject, TensorVariable) and isinstance(
             cls_type, UserDefinedClassVariable
@@ -3736,17 +3729,11 @@ class InstructionTranslatorBase(
                 raise
 
         if match_result is None:
-            self.push(subject)
-            self.push(cls_type)
-            self.push(names)
             raise Unsupported("MATCH_CLASS: isinstance returned None")
 
         try:
             is_match = match_result.as_python_constant()
         except NotImplementedError:
-            self.push(subject)
-            self.push(cls_type)
-            self.push(names)
             raise Unsupported(
                 "MATCH_CLASS: cannot statically resolve isinstance"
             ) from None

@@ -4190,7 +4190,7 @@ class GraphModule(torch.nn.Module):
         finally:
             torch = old_torch
 
-    def test_match_class_structural_pattern_matching(self):
+    def test_structural_pattern_matching_cpython_suite(self):
         from dataclasses import dataclass
 
         @dataclass
@@ -4198,20 +4198,63 @@ class GraphModule(torch.nn.Module):
             x: int
             y: int
 
-        def match_point(obj):
+        class CustomArgs:
+            __match_args__ = ("a", "b")
+
+            def __init__(self, a, b):
+                self.a = a
+                self.b = b
+
+        class A:
+            B = 10
+
+            class C:
+                D = 20
+
+        def patma_comprehensive(obj):
             match obj:
-                case Point(x=val):
-                    return val + 1
+                case Point(0, 0):
+                    return "Origin"
+                case Point(0, y=y):
+                    return f"Y-Axis at {y}"
+                case Point(x, y) if x == y:
+                    return f"Diagonal at {x}"
+                case CustomArgs(a, b):
+                    return f"Custom({a}, {b})"
+                case A.B:
+                    return "Matched Class Attribute A.B"
+                case A.C.D:
+                    return "Matched Nested Attribute A.C.D"
+                case int(z):
+                    return f"Integer: {z}"
+                case [Point(x1, y1), Point(x2, y2)]:
+                    return f"Line ({x1},{y1}) to ({x2},{y2})"
                 case _:
-                    return -1
+                    return "Mismatch"
 
-        p = Point(x=10, y=20)
         cnts = torch._dynamo.testing.CompileCounter()
-        opt_fn = torch._dynamo.optimize(cnts)(match_point)
-        self.assertEqual(opt_fn(p), 11)
+        opt_fn = torch._dynamo.optimize(cnts)(patma_comprehensive)
 
+        self.assertEqual(opt_fn(Point(0, 0)), "Origin")
+        self.assertEqual(opt_fn(Point(0, 5)), "Y-Axis at 5")
+        self.assertEqual(opt_fn(Point(3, 3)), "Diagonal at 3")
+        self.assertEqual(opt_fn(CustomArgs(1, 2)), "Custom(1, 2)")
+        self.assertEqual(opt_fn(10), "Matched Class Attribute A.B")
+        self.assertEqual(opt_fn(20), "Matched Nested Attribute A.C.D")
+        self.assertEqual(opt_fn(99), "Integer: 99")
+        self.assertEqual(opt_fn([Point(0, 0), Point(1, 1)]), "Line (0,0) to (1,1)")
+        self.assertEqual(opt_fn("string"), "Mismatch")
+
+        def patma_tensor_safety(obj):
+            match obj:
+                case Point():
+                    return "Matched Point"
+                case _:
+                    return "Mismatch"
+
+        opt_tensor_fn = torch._dynamo.optimize(cnts)(patma_tensor_safety)
         t = torch.randn(2)
-        self.assertEqual(opt_fn(t), -1)
+        self.assertEqual(opt_tensor_fn(t), "Mismatch")
 
 
 def udf_mul(x, y):
