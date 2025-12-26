@@ -49,6 +49,8 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasCUDART() const override;
   long versionCUDART() const override;
   long versionCuDNN() const override;
+  long versionRuntimeCuDNN() const override;
+  long versionCuDNNFrontend() const override;
   long versionMIOpen() const override;
   std::string showConfig() const override;
   double batchnormMinEpsilonCuDNN() const override;

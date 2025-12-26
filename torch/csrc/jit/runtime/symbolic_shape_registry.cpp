@@ -1,5 +1,4 @@
 #include <c10/util/Exception.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/ir_views.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>

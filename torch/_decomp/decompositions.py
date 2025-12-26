@@ -352,6 +352,18 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
     # return (max_deriv - sign * (buffer / (1 + buffer))) * grad_output
 
 
+@register_decomposition(aten.ldexp)
+@out_wrapper()
+def ldexp(self: Tensor, other: Tensor) -> Tensor:
+    two_dtype = (
+        torch.float32
+        if utils.is_integer_dtype(self.dtype) or utils.is_boolean_dtype(self.dtype)
+        else self.dtype
+    )
+    two_tensor = self.new_full((), 2.0, dtype=two_dtype)
+    return self * torch.pow(two_tensor, other)
+
+
 def apply_loss_reduction(loss: Tensor, reduction: int):
     if reduction == Reduction.MEAN.value:
         return torch.mean(loss)
@@ -382,7 +394,7 @@ def to_real_dtype(dtype: torch.dtype):
 def mse_loss(
     self: Tensor, target: Tensor, reduction: int = Reduction.MEAN.value
 ) -> Tensor:
-    # pyrefly: ignore  # unsupported-operation
+    # pyrefly: ignore [unsupported-operation]
     loss = (self - target) ** 2
     return apply_loss_reduction(loss, reduction)
 
@@ -416,7 +428,7 @@ def smooth_l1_loss(
     beta: float = 1.0,
 ):
     loss = (self - target).abs()
-    # pyrefly: ignore  # unsupported-operation
+    # pyrefly: ignore [unsupported-operation]
     loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
     return apply_loss_reduction(loss, reduction)
 
@@ -2040,7 +2052,7 @@ def unsafe_chunk_py_impl(tensor, chunks, dim=0) -> list[Tensor]:
     split_size = (dim_size + chunks - 1) // chunks
 
     if split_size == 0 and dim_size == 0:
-        split_sizes = [split_size for _ in chunks]
+        split_sizes = [split_size for _ in range(chunks)]
         split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size)
         return torch.ops.aten.unsafe_split_with_sizes.default(tensor, split_sizes, dim)
     return torch.ops.aten.unsafe_split.Tensor(tensor, split_size, dim)
@@ -4134,7 +4146,7 @@ def _nll_loss_forward(
         return result, total_weight
 
     if weight is not None:
-        # pyrefly: ignore  # unbound-name
+        # pyrefly: ignore [unbound-name]
         w = w.expand(self.shape)
         wsum = torch.gather(w, channel_dim, safe_target_).squeeze(channel_dim)
         wsum = torch.where(target != ignore_index, wsum, 0)
@@ -4562,6 +4574,8 @@ def should_fold(tensor1: torch.Tensor, tensor2: torch.Tensor, is_out: bool) -> b
 @aten.matmul.out.py_impl(DispatchKey.CompositeImplicitAutograd)
 @out_wrapper(pass_is_out=True)
 def matmul(tensor1, tensor2, *, is_out=False):
+    from torch.fx.experimental.symbolic_shapes import guard_or_false, guard_or_true
+
     dim_tensor1 = tensor1.dim()
     dim_tensor2 = tensor2.dim()
     assert dim_tensor1 != 0 and dim_tensor2 != 0
@@ -4630,11 +4644,11 @@ def matmul(tensor1, tensor2, *, is_out=False):
         if (
             dim_tensor1 == 3
             and dim_tensor2 == 3
-            and batch_tensor1[0] != batch_tensor2[0]
+            and guard_or_true(batch_tensor1[0] != batch_tensor2[0])
         ):
-            if batch_tensor1[0] == 1 and tensor1.requires_grad:
+            if guard_or_false(batch_tensor1[0] == 1) and tensor1.requires_grad:
                 return matmul(tensor1.squeeze(0), tensor2)
-            if batch_tensor2[0] == 1 and tensor2.requires_grad:
+            if guard_or_false(batch_tensor2[0] == 1) and tensor2.requires_grad:
                 return matmul(tensor1, tensor2.squeeze(0))
 
         # expand the batch portion (i.e. cut off matrix dimensions and expand rest)
@@ -4951,9 +4965,9 @@ def _reflection_pad_backward(grad_output, x, padding):
 @register_decomposition(aten.aminmax)
 @out_wrapper("min", "max")
 def aminmax(self, *, dim=None, keepdim=False):
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     amin = torch.amin(self, dim=dim, keepdim=keepdim)
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     amax = torch.amax(self, dim=dim, keepdim=keepdim)
     return amin, amax
 
@@ -5198,7 +5212,7 @@ def baddbmm(self, batch1, batch2, beta=1, alpha=1):
         alpha = int(alpha)
     result = torch.bmm(batch1, batch2)
     if not isinstance(alpha, numbers.Number) or alpha != 1:
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         result = result * alpha
     if beta == 0:
         return result
@@ -5258,7 +5272,7 @@ def _weight_norm_interface(v, g, dim=0):
 def isin(elements, test_elements, *, assume_unique=False, invert=False):
     # handle when either elements or test_elements are Scalars (they can't both be)
     if not isinstance(elements, torch.Tensor):
-        elements = torch.tensor(elements, device=test_elements.device)
+        elements = torch.scalar_tensor(elements, device=test_elements.device)
     if not isinstance(test_elements, torch.Tensor):
         if invert:
             return torch.ne(elements, test_elements)
@@ -5363,6 +5377,7 @@ register_inplace(aten.index_reduce_, aten.index_reduce)
 register_inplace(aten.__ior__, aten.__or__)
 register_inplace(aten.__irshift__, aten.__rshift__)
 register_inplace(aten.__ixor__, aten.__xor__)
+register_inplace(aten.ldexp_, aten.ldexp)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
 register_inplace(aten.logit_, aten.logit)
 register_inplace(aten.relu_, aten.relu)

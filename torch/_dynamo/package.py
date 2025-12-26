@@ -24,9 +24,9 @@ import platform
 import shutil
 import sys
 import types
-from collections.abc import Generator, Iterator
+from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, Callable, NewType, Optional, TYPE_CHECKING
+from typing import Any, NewType, Optional, TYPE_CHECKING
 from typing_extensions import Never
 
 import torch
@@ -319,7 +319,7 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
     code_source = _find_code_source(toplevel)
     if code_source is None:
         _raise_resolution_error(code, toplevel)
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return toplevel.__qualname__, code_source.strip(".")
 
 
@@ -611,11 +611,11 @@ class CompilePackage:
                             f"Source code changes detected for {code.module} (line {code.firstlineno} - line {code.lastlineno})"
                         )
 
-                # pyrefly: ignore  # bad-assignment
+                # pyrefly: ignore [bad-assignment]
                 self._source_info = dynamo.source_info
 
             main, *codes = dynamo.codes
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self._codes = {self._innermost_fn.__code__: main}
             for code in codes:
                 self._codes[SerializedCode.to_code_object(code.python_code)] = code
@@ -623,7 +623,7 @@ class CompilePackage:
             self._add_function(
                 self._innermost_fn.__code__, self._innermost_fn.__module__
             )
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self._initialized = True
 
     def _add_function(
@@ -767,7 +767,7 @@ class CompilePackage:
             for name in names:
                 module.__dict__.pop(name)
 
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         self._installed_globals = {}
 
         _reset_precompile_entries(self._innermost_fn.__code__)
@@ -1122,9 +1122,9 @@ class DiskDynamoCache(DiskDynamoStore):
                 result = super().load_cache_entry(key)
                 counters["dynamo_cache"]["dynamo_cache_hit"] += 1
                 return result
-            except Exception as e:
+            except Exception:
                 counters["dynamo_cache"]["dynamo_cache_error"] += 1
-                logger.warning("Failed to load package from path %s: %s", path, str(e))
+                logger.warning("Failed to load package from path %s", exc_info=True)
                 return None
         logger.info("No package found for %s", key)
         counters["dynamo_cache"]["dynamo_cache_miss"] += 1

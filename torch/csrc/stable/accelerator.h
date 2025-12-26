@@ -1,11 +1,12 @@
 #pragma once
 
 #include <torch/csrc/inductor/aoti_torch/c/shim.h>
+#include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/shim_utils.h>
 
 #include <memory>
 
-namespace torch::stable::accelerator {
+HIDDEN_NAMESPACE_BEGIN(torch, stable, accelerator)
 
 using DeleterFnPtr = void (*)(void*);
 
@@ -75,4 +76,4 @@ inline DeviceIndex getCurrentDeviceIndex() {
   return device_index;
 }
 
-} // namespace torch::stable::accelerator
+HIDDEN_NAMESPACE_END(torch, stable, accelerator)

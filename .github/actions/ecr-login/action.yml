@@ -1,0 +1,107 @@
+name: Login to ECR via OIDC
+
+description: |
+  Configures AWS credentials via OIDC and logs into Amazon ECR.
+  Works uniformly on all runner types (AWS EC2, GCP, ROCm, b200, etc.)
+
+inputs:
+  aws-role-to-assume:
+    description: IAM role to assume via OIDC
+    required: false
+    default: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
+  aws-region:
+    description: AWS region
+    required: false
+    default: us-east-1
+  role-duration-seconds:
+    description: Duration for the assumed role session
+    required: false
+    default: "18000"
+  use-iam-profile-if-available:
+    description: If true, will check for and use an IAM instance profile if available.
+    required: false
+    default: 'true'
+
+outputs:
+  auth-method:
+    description: Authentication method used (oidc or instance-profile)
+    value: ${{ steps.check_env.outputs.has_profile == 'true' && 'instance-profile' || 'oidc' }}
+
+runs:
+  using: composite
+  steps:
+    - name: Check for IAM instance profile
+      id: check_env
+      if: inputs.use-iam-profile-if-available == 'true'
+      shell: bash
+      run: |
+        echo "::group::Checking for IAM instance profile"
+        echo "Checking EC2 metadata endpoint for IAM instance profile..."
+
+        # Try IMDSv2 first (more secure, required on some instances)
+        echo "Attempting IMDSv2..."
+        TOKEN=$(curl -sf -X PUT "http://169.254.169.254/latest/api/token" \
+          -H "X-aws-ec2-metadata-token-ttl-seconds: 60" \
+          --connect-timeout 2 2>/dev/null) || TOKEN=""
+
+        if [[ -n "$TOKEN" ]]; then
+          echo "IMDSv2 token obtained, checking IAM info..."
+          IAM_INFO=$(curl -sf -H "X-aws-ec2-metadata-token: $TOKEN" \
+            "http://169.254.169.254/latest/meta-data/iam/info" \
+            --connect-timeout 2 2>/dev/null) || IAM_INFO=""
+        else
+          echo "IMDSv2 not available, trying IMDSv1..."
+          IAM_INFO=$(curl -sf --connect-timeout 2 \
+            "http://169.254.169.254/latest/meta-data/iam/info" 2>/dev/null) || IAM_INFO=""
+        fi
+
+        if [[ -n "$IAM_INFO" ]]; then
+          echo "IAM instance profile detected:"
+          echo "$IAM_INFO" | head -5
+          echo "has_profile=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "No IAM instance profile found (not on EC2, or no profile attached)"
+          echo "has_profile=false" >> "$GITHUB_OUTPUT"
+        fi
+        echo "::endgroup::"
+
+    - name: Configure AWS credentials via OIDC
+      id: configure-oidc
+      if: inputs.use-iam-profile-if-available == 'false' || steps.check_env.outputs.has_profile == 'false'
+      uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+      with:
+        role-to-assume: ${{ inputs.aws-role-to-assume != '' && inputs.aws-role-to-assume || 'arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only' }}
+        role-session-name: gha-ecr-login
+        aws-region: ${{ inputs.aws-region }}
+        role-duration-seconds: ${{ inputs.role-duration-seconds }}
+        role-skip-session-tagging: true
+
+    - name: Log authentication method
+      shell: bash
+      run: |
+        if [[ "${{ steps.check_env.outputs.has_profile }}" == "true" ]]; then
+          echo "✓ Using IAM instance profile for authentication"
+        else
+          echo "✓ Using OIDC for authentication"
+        fi
+
+    - name: Set AWS region for instance profile auth
+      if: steps.check_env.outputs.has_profile == 'true'
+      shell: bash
+      run: |
+        echo "Setting AWS_REGION=${{ inputs.aws-region }} for instance profile auth"
+        echo "AWS_REGION=${{ inputs.aws-region }}" >> "$GITHUB_ENV"
+        echo "AWS_DEFAULT_REGION=${{ inputs.aws-region }}" >> "$GITHUB_ENV"
+
+    # Primary ECR login - works with both OIDC and instance profile credentials
+    - name: Log in to ECR
+      id: ecr-login
+      uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
+      with:
+        registries: 308535385114  # META_AWS_ACCOUNT_ID
+        aws-region: ${{ inputs.aws-region }}
+
+    - name: Verify ECR login
+      shell: bash
+      run: |
+        echo "✓ Successfully logged into ECR (registry: 308535385114)"

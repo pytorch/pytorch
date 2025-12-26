@@ -58,6 +58,7 @@ def _generate_fake_kernel(op_name: str, op_profile: set[OpProfile]) -> Callable:
             fake_strides = [-1] * t.rank
             expected = 1
             fake_stride = expected
+            # pyrefly: ignore [bad-assignment]
             for i in range(t.rank):
                 fake_strides[i] = fake_stride  # type: ignore[assignment]
                 fake_stride = fake_stride * fake_shape[i]  # type: ignore[assignment]
@@ -246,7 +247,6 @@ def save_op_profiles(op_profiles: dict[str, set[OpProfile]], f: FileLike) -> Non
     yaml_str = generate_yaml_from_profiles(op_profiles)
 
     if isinstance(f, (str, os.PathLike)):
-        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
         with open(f, "w") as file:
@@ -312,7 +312,6 @@ def load_op_profiles(f: FileLike) -> dict[str, set[OpProfile]]:
     Loads the saved operator profiles from `save_op_profiles`.
     """
     if isinstance(f, (str, os.PathLike)):
-        # pyrefly: ignore  # no-matching-overload
         f = os.fspath(f)
 
         with open(f) as file:

@@ -14,7 +14,7 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, HAS_TRITON
 
 
 DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
@@ -138,8 +138,14 @@ class TestOnlineSoftmax(TestCase):
         self.assertTrue(same(ref, act, tol=1e-2))
 
         if nrow == 2048 and dim == 0:
+            num_kernels = 2
+            # Note: split reduction is not triggered for this shape on some xpu devices.
+            #       check "num_splits" for more details
+            if GPU_TYPE == "xpu":
+                num_kernels = 1
+
             # split reduction is triggered. We have multiple kernels
-            self.assertTrue(code.count("def triton") >= 2)
+            self.assertTrue(code.count("def triton") >= num_kernels)
         else:
             if nrow == 2 and dim == 0:
                 # persistent reduction triggered
@@ -310,5 +316,5 @@ class TestOnlineSoftmax(TestCase):
 instantiate_parametrized_tests(TestOnlineSoftmax)
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA_AND_TRITON:
+    if IS_LINUX and HAS_GPU and HAS_TRITON:
         run_tests()

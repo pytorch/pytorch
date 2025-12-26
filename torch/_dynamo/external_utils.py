@@ -22,7 +22,8 @@ Key functionality groups:
 
 import functools
 import warnings
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -96,9 +97,9 @@ def wrap_numpy(f: Callable[_P, _R]) -> Callable[_P, _R]:
         args, kwargs = pytree.tree_map_only(
             torch.Tensor, lambda x: x.numpy(), (args, kwargs)
         )
-        # pyrefly: ignore  # invalid-param-spec
+        # pyrefly: ignore [invalid-param-spec]
         out = f(*args, **kwargs)
-        # pyrefly: ignore  # missing-attribute
+        # pyrefly: ignore [missing-attribute]
         return pytree.tree_map_only(np.ndarray, lambda x: torch.as_tensor(x), out)
 
     return wrap
@@ -195,6 +196,10 @@ def get_nonrecursive_disable_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     # this function is in external_utils so that convert_frame doesn't skip it.
     @functools.wraps(fn)
     def nonrecursive_disable_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if torch.compiler.is_exporting():
+            raise RuntimeError(
+                "Non-recursive torch.compiler.disable is not supported with torch.export."
+            )
         return fn(*args, **kwargs)
 
     return nonrecursive_disable_wrapper

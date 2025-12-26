@@ -1,10 +1,9 @@
 from collections.abc import Sequence
 from pathlib import Path
 from re import match as _match
-from typing import Optional, Union
 
 
-def read_file(fname: Union[Path, str]) -> list[str]:
+def read_file(fname: Path | str) -> list[str]:
     with open(fname, encoding="utf-8") as f:
         return f.readlines()
 
@@ -36,7 +35,7 @@ def _embed_headers(
 
 
 def embed_headers(
-    fname: str, include_dirs: Optional[Union[Sequence[str], Sequence[Path], str]] = None
+    fname: str, include_dirs: Sequence[str] | Sequence[Path] | str | None = None
 ) -> str:
     if include_dirs is None:
         base_dir = Path(__file__).parent.parent.parent

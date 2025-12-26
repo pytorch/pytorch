@@ -180,7 +180,9 @@ struct TORCH_API AccumulateGrad : public Node {
       if (!GradMode::is_enabled() && !new_grad.is_sparse() &&
           !new_grad.is_sparse_csr() &&
           !(variable.is_sparse_csr() && new_grad.layout() == at::kStrided) &&
-          at::caching::adjusted_use_count(new_grad) <= num_expected_refs &&
+          impl::is_tensor_stealable(
+              new_grad,
+              num_expected_refs + at::caching::is_cached_tensor(new_grad)) &&
           (new_grad.is_mkldnn() ||
            utils::obeys_layout_contract(new_grad, variable))) {
         // See Case 1.1: Stealable dense new_grad
@@ -193,7 +195,7 @@ struct TORCH_API AccumulateGrad : public Node {
           // SparseTensor should be the only one holding a reference to these.
           new_grad._indices().use_count() <= 1 &&
           new_grad._values().use_count() <= 1 &&
-          new_grad.use_count() <= num_expected_refs) {
+          impl::is_tensor_stealable(new_grad, num_expected_refs)) {
         // Case 1.2: Stealable sparse new_grad
         // No scenario where we expect this to be true currently
         TORCH_INTERNAL_ASSERT_DEBUG_ONLY(

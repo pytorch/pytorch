@@ -1,5 +1,4 @@
 from types import TracebackType
-from typing import Optional
 from typing_extensions import Self
 
 from filelock import FileLock as base_FileLock
@@ -28,9 +27,9 @@ class FileLock(base_FileLock):
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_value: Optional[BaseException],
-        traceback: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_value: BaseException | None,
+        traceback: TracebackType | None,
     ) -> None:
         self.region_counter.__exit__()
         with _WaitCounter("pytorch.filelock.exit").guard():

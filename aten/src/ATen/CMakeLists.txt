@@ -26,6 +26,24 @@ macro(set_bool OUT IN)
   endif()
 endmacro()
 
+function(rocm_generate_ck_conf SRC DST)
+  set(CK_ENABLE_INT8  "ON")
+  set(CK_ENABLE_FP16  "ON")
+  set(CK_ENABLE_FP32  "ON")
+  set(CK_ENABLE_FP64  "ON")
+  set(CK_ENABLE_BF16  "ON")
+  set(CK_ENABLE_FP8   "ON")
+  set(CK_ENABLE_BF8   "ON")
+  set(CK_USE_XDL  "ON")
+  set(CK_USE_WMMA "ON")
+
+  configure_file(
+    "${SRC}"
+    "${DST}"
+    @ONLY
+  )
+endfunction()
+
 set_bool(AT_BUILD_WITH_BLAS USE_BLAS)
 set_bool(AT_BUILD_WITH_LAPACK USE_LAPACK)
 set_bool(AT_BLAS_F2C BLAS_F2C)
@@ -38,7 +56,7 @@ set_bool(AT_HIPSPARSELT_ENABLED CAFFE2_USE_HIPSPARSELT)
 
 configure_file(Config.h.in "${CMAKE_CURRENT_SOURCE_DIR}/Config.h")
 # TODO: Do not generate CUDAConfig.h for ROCm BUILDS
-# At the moment, `jit_macors.h` include CUDAConfig.h for both CUDA and HIP builds
+# At the moment, `jit_macros.h` include CUDAConfig.h for both CUDA and HIP builds
 if(USE_CUDA OR USE_ROCM)
   configure_file(cuda/CUDAConfig.h.in "${CMAKE_CURRENT_SOURCE_DIR}/cuda/CUDAConfig.h")
 endif()
@@ -171,6 +189,7 @@ file(GLOB native_transformers_cuda_cu "native/transformers/cuda/*.cu")
 file(GLOB native_transformers_cuda_cpp "native/transformers/cuda/*.cpp")
 file(GLOB native_transformers_hip_hip "native/transformers/hip/*.hip")
 file(GLOB native_transformers_hip_cpp "native/transformers/hip/*.cpp")
+file(GLOB native_transformers_xpu_cpp "native/transformers/xpu/*.cpp")
 file(GLOB native_quantized_cudnn_hip_cpp "native/quantized/cudnn/hip/*.cpp")
 file(GLOB native_utils_cpp "native/utils/*.cpp")
 file(GLOB flash_attention_cuda_kernels_cu ${PROJECT_SOURCE_DIR}/third_party/flash-attention/csrc/flash_attn/src/*.cu)
@@ -260,7 +279,7 @@ IF(USE_FBGEMM_GENAI)
   if(USE_CUDA)
     # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
     # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
-    set(FBGEMM_CUTLASS_KERNELS_REGEX ".*mx8mx8bf16_grouped.*")
+    set(FBGEMM_CUTLASS_KERNELS_REGEX ".*(mx8mx8bf16_grouped|f4f4bf16_grouped|f4f4bf16).*")
     file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
@@ -271,7 +290,7 @@ IF(USE_FBGEMM_GENAI)
     foreach(cu_file ${fbgemm_genai_native_cuda_cu})
       _BUILD_FOR_ADDITIONAL_ARCHS(
         "${cu_file}"
-        "100a")
+        "100a;103a;110a")
     endforeach()
 
     file(GLOB_RECURSE fbgemm_genai_native_cuda_cpp
@@ -289,14 +308,16 @@ IF(USE_FBGEMM_GENAI)
 
     set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
-    set(fbgemm_genai_mx8mx8bf16_grouped
+    set(fbgemm_genai_cuh
       "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped/"
+      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/f4f4bf16_grouped/"
+      "${FBGEMM_GENAI_SRCS}/"
     )
 
     target_include_directories(fbgemm_genai PRIVATE
       ${FBGEMM_THIRD_PARTY}/cutlass/include
       ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
-      ${fbgemm_genai_mx8mx8bf16_grouped}
+      ${fbgemm_genai_cuh}
       ${FBGEMM_GENAI_SRCS}/common/include/   # includes fbgemm_gpu/quantize/utils.h, fbgemm_gpu/quantize/tuning_cache.hpp
       ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
     )
@@ -305,6 +326,12 @@ IF(USE_FBGEMM_GENAI)
     list(APPEND ATen_CUDA_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
     list(APPEND ATen_CUDA_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
   elseif(USE_ROCM)
+    # Path to vendored CK
+    set(FBGEMM_CK_DIR "${FBGEMM_THIRD_PARTY}/composable_kernel")
+    rocm_generate_ck_conf(
+      "${FBGEMM_CK_DIR}/include/ck/config.h.in"
+      "${FBGEMM_CK_DIR}/include/ck/config.h"
+    )
     # Only include the kernels we want to build to avoid increasing binary size.
     file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
       "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
@@ -314,12 +341,13 @@ IF(USE_FBGEMM_GENAI)
     # Add additional HIPCC compiler flags for performance
     set(FBGEMM_GENAI_EXTRA_HIPCC_FLAGS
       -mllvm
-      -amdgpu-coerce-illegal-types=1
-      -mllvm
       -enable-post-misched=0
       -mllvm
       -greedy-reverse-local-assignment=1
       -fhip-new-launch-api)
+    if(DEFINED ROCM_VERSION_DEV AND ROCM_VERSION_DEV VERSION_LESS "7.2.0")
+        list(PREPEND FBGEMM_GENAI_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
+      endif()
 
     # Only compile for gfx942 for now.
     # This is rather hacky, I could not figure out a clean solution :(
@@ -352,6 +380,9 @@ IF(USE_FBGEMM_GENAI)
     list(APPEND ATen_HIP_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
     list(APPEND ATen_HIP_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
   endif()
+
+  # Ensure torch_cpu is built before fbgemm_genai to avoid race conditions
+  add_dependencies(fbgemm_genai torch_cpu)
 endif()
 
 # XNNPACK
@@ -411,6 +442,7 @@ endif()
 
 if(USE_XPU)
   list(APPEND ATen_XPU_SRCS ${mkldnn_xpu_cpp})
+  list(APPEND ATen_XPU_SRCS ${native_transformers_xpu_cpp})
   list(APPEND ATen_XPU_DEPENDENCY_LIBS xpu_mkldnn)
 
   list(APPEND ATen_XPU_DEPENDENCY_LIBS ${OCL_LIBRARY})
@@ -483,33 +515,21 @@ endif()
 
 if(USE_ROCM)
   if((USE_FLASH_ATTENTION AND USE_ROCM_CK_SDPA) OR USE_ROCM_CK_GEMM)
-    # NOTE: The PyTorch build does not actually add_subdirectory
-    # third_party/composable_kernel or use it as a CMake library. What is used
-    # is header only, so this should be ok, except that the CMake build generates
-    # a ck/config.h. We just do that part here. Without this, the ck.h from the
-    # ROCM SDK may get accidentally used instead.
-    function(_pytorch_rocm_generate_ck_conf)
-      set(CK_ENABLE_INT8 "ON")
-      set(CK_ENABLE_FP16 "ON")
-      set(CK_ENABLE_FP32 "ON")
-      set(CK_ENABLE_FP64 "ON")
-      set(CK_ENABLE_BF16 "ON")
-      set(CK_ENABLE_FP8 "ON")
-      set(CK_ENABLE_BF8 "ON")
-      set(CK_USE_XDL "ON")
-      set(CK_USE_WMMA "ON")
-      configure_file(
-        "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
-        "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
-        )
-    endfunction()
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/hip)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/include)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/library/include)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/composable_kernel/example/ck_tile/01_fmha)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_BINARY_DIR}/composable_kernel)
     list(APPEND ATen_HIP_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/aiter/csrc/include)
-    _pytorch_rocm_generate_ck_conf()
+    # NOTE: The PyTorch build does not actually add_subdirectory
+    # third_party/composable_kernel or use it as a CMake library. What is used
+    # is header only, so this should be ok, except that the CMake build generates
+    # a ck/config.h. We just do that part here. Without this, the ck.h from the
+    # ROCM SDK may get accidentally used instead.
+    rocm_generate_ck_conf(
+      "${Torch_SOURCE_DIR}/third_party/composable_kernel/include/ck/config.h.in"
+      "${CMAKE_CURRENT_BINARY_DIR}/composable_kernel/ck/config.h"
+    )
   endif()
 
   # Next two lines are needed because TunableOp uses third-party/fmt

@@ -26,6 +26,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ROCM,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     skip_unless_torch_gpu,
     with_comms,
@@ -548,7 +549,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         ],
     )
     def test_grouped_mm(self, kwargs):
-        # TODO: torch._grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
+        # TODO: torch.nn.functional.grouped_mm can take inputs of dimension (2D, 3D) x (2D, 3D)
         # More tests need to be added.
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
@@ -573,8 +574,8 @@ class DistMatrixOpsTest(DTensorTestBase):
         )
         offs = torch.tensor([16, 64], device=self.device_type, dtype=torch.int32)
 
-        h = torch._grouped_mm(inp, w1, offs=offs)
-        out = torch._grouped_mm(h, w2, offs=offs)
+        h = F.grouped_mm(inp, w1, offs=offs)
+        out = F.grouped_mm(h, w2, offs=offs)
 
         dist_inp = distribute_tensor(inp, device_mesh, kwargs["inp_placements"])
         # colwise sharded
@@ -584,8 +585,8 @@ class DistMatrixOpsTest(DTensorTestBase):
         dist_offs = distribute_tensor(offs, device_mesh, [Replicate()])
 
         with comm_mode:
-            dist_h = torch._grouped_mm(dist_inp, dist_w1, offs=dist_offs)
-            dist_out = torch._grouped_mm(dist_h, dist_w2, offs=dist_offs)
+            dist_h = F.grouped_mm(dist_inp, dist_w1, offs=dist_offs)
+            dist_out = F.grouped_mm(dist_h, dist_w2, offs=dist_offs)
             self.assertEqual(
                 comm_mode.get_total_counts(), kwargs["expected_comm_counts_fwd"]
             )
@@ -613,6 +614,10 @@ class DistMatrixOpsTest(DTensorTestBase):
 
 
 instantiate_parametrized_tests(DistMatrixOpsTest)
+
+DistMatrixOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistMatrixOpsTest,
+)
 
 if __name__ == "__main__":
     run_tests()

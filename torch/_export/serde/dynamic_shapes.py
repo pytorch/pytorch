@@ -46,6 +46,7 @@ def _postprocess_serialized_shapes(
     """
     from torch.utils._sympy.numbers import int_oo
 
+    # pyrefly: ignore [bad-assignment]
     dims = {
         k: RootDim(
             min=v["min"],  # type: ignore[arg-type]
@@ -54,7 +55,7 @@ def _postprocess_serialized_shapes(
         )
         for k, v in sorted(dims.items())
     }
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     spec = DynamicShapesSpec(dynamic_shapes=dynamic_shapes, dims=dims)
     if to_dict:
         return _dataclass_to_dict(spec)
@@ -184,7 +185,7 @@ def _dump_dynamic_shapes(
     kwargs = kwargs or {}
     if isinstance(dynamic_shapes, dict):
         dynamic_shapes = dynamic_shapes.values()  # type: ignore[assignment]
-    # pyrefly: ignore  # bad-assignment, bad-argument-type
+    # pyrefly: ignore [bad-assignment, bad-argument-type]
     dynamic_shapes = tuple(dynamic_shapes)
     combined_args = tuple(args) + tuple(kwargs.values())
 
