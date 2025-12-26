@@ -600,7 +600,7 @@ class CompiledFxGraph(OutputCode):
         self._wrap_compiled_regions = config.wrap_inductor_compiled_regions
 
     def __del__(self) -> None:
-        if self.compiled_fn_runner is not None:
+        if getattr(self, "compiled_fn_runner", None) is not None:
             # For torch._inductor.config.graph_partition = True,
             # self.compiled_fn_runner.partitions hold cudagraphified functions
             # which prevents deallocation. When CompiledFxGraph is deleted,
