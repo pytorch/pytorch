@@ -4795,7 +4795,12 @@ class DistributedTest:
 
             # Test a simple linear as well as a ResNet model.
             models_to_test = [
-                nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)).cuda()
+                nn.Sequential(nn.Linear(3, 3), nn.Linear(3, 3), nn.Linear(3, 3)).cuda(),
+                # run model of at least 1M parameters to hit potential race conditions in
+                # stream semantics
+                nn.Sequential(
+                    nn.Linear(3, 1024), nn.Linear(1024, 1024), nn.Linear(1024, 3)
+                ).cuda(),
             ]
             if HAS_TORCHVISION:
                 models_to_test.append(torchvision.models.resnet50().cuda())
@@ -4837,7 +4842,7 @@ class DistributedTest:
                     for i in range(8):
                         inp = (
                             torch.randn(1, 3, 1000, 1000, device="cuda")
-                            if j == 1
+                            if j == 2
                             else torch.randn(10, 3, device="cuda")
                         )
                         model(inp).sum().backward()
