@@ -7271,6 +7271,8 @@ class TestLinalg(TestCase):
         E2a, V2a = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=False)
         iters1 = len(lambdas1)
         iters2 = len(lambdas2)
+        # For complex dtypes, LOBPCG shows larger iteration variability,
+        # so a larger tolerance is allowed here.
         tol_iter = 0.1 if dtype == torch.cdouble else 0.05
         self.assertLess(abs(iters1 - iters2), tol_iter * max(iters1, iters2))
 
