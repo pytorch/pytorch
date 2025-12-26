@@ -4987,7 +4987,7 @@ def random_sparse_matrix(rows, columns, density=0.01, **kwargs):
     return A.coalesce()
 
 
-def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
+def random_sparse_pd_matrix(matrix_size, density=0.01, dtype=torch.double, **kwargs):
     """Return random sparse positive-definite matrix with given density.
 
     The eigenvalues of the matrix are defined as::
@@ -5002,7 +5002,7 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, **kwargs):
     """
     import math
     torch = kwargs.get('torch', globals()['torch'])
-    dtype = kwargs.get('dtype', torch.double)
+    dtype = kwargs.get('dtype', dtype)
     device = kwargs.get('device', 'cpu')
     data = {(i, i): float(i + 1) / matrix_size
             for i in range(matrix_size)}
