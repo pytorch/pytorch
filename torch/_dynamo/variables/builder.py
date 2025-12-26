@@ -3600,7 +3600,7 @@ def _automatic_dynamic(
         outer_context = _automatic_dynamic(
             e, tx, source, static_shapes, outer_only=True
         )
-        assert isinstance(outer_context, SubclassSymbolicContext)
+        assert isinstance(outer_context, StatefulSymbolicContext)
 
         # Get symbolic contexts for inner tensors
         inner_contexts = {}  # mapping from attr -> symbolic context

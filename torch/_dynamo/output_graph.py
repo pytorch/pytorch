@@ -400,7 +400,9 @@ class ExportMetaData:
     # maps graph input index to its' source which is later
     # used in export to map to correct user input. In its' flat form,
     # just looks like GetItem(base=LocalSource("foo", idx=0))
-    graph_input_idx_to_local_source: dict[int, Source] = dc_field(default_factory=dict)
+    graph_input_idx_to_local_source: dict[int, Source | None] = dc_field(
+        default_factory=dict
+    )
     # maps user output idx to what type of output it is. There are 3 options:
     # 1) graph out
     # 2) user input
@@ -2368,7 +2370,6 @@ class OutputGraph(OutputGraphCommon):
                 cg.pop_top()
 
             for idx, arg in enumerate(self.graphargs):
-                assert arg.source is not None
                 self.export_metadata.graph_input_idx_to_local_source[idx] = arg.source
 
             cg.make_call_generated_code(name)
