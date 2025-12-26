@@ -2021,6 +2021,10 @@ def add_hop_context(cls):
     def wrapped_call_function(self, *args, **kwargs):
         try:
             return original_call_function(self, *args, **kwargs)
+        except UncapturedHigherOrderOpError as e:
+            if not hasattr(e, "_hop_name"):
+                e._hop_name = self._HOP_NAME  # pyrefly: ignore[missing-attribute]
+            raise
         except (Unsupported, ObservedException) as e:
             # Only tag if not already tagged (reports deepest HOP only)
             if hasattr(e, "_hop_name"):
@@ -2033,11 +2037,11 @@ def add_hop_context(cls):
                 e._hop_name = self._HOP_NAME  # pyrefly: ignore[missing-attribute]
                 raise
             else:
-                msg = e.msg if hasattr(e, "msg") else str(type(e))
-                real_stack = e.real_stack if hasattr(e, "real_stack") else None
+                real_stack = getattr(e, "real_stack", None)
                 full_msg = (
                     "This higher order operator doesn't work unless it is "
-                    f"captured completely with torch.compile. Got:\n{msg}"
+                    "captured completely with torch.compile. Got graph break/error:"
+                    f"\n\n{str(e)}"
                 )
                 exc = UncapturedHigherOrderOpError(full_msg, real_stack)
                 exc._hop_name = self._HOP_NAME  # pyrefly: ignore[missing-attribute]
