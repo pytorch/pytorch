@@ -254,7 +254,7 @@ def set_proxy_slot(obj: Tensor, tracer: _ProxyTracer, proxy: _ProxyTensor) -> No
 
 @overload
 def set_proxy_slot(
-    obj: _AnyScriptObjectType, tracer: _ProxyTracer, proxy: Proxy
+    obj: _AnyScriptObjectType | OpaqueType, tracer: _ProxyTracer, proxy: Proxy
 ) -> None: ...
 
 
@@ -262,10 +262,6 @@ def set_proxy_slot(
 def set_proxy_slot(
     obj: PySymType, tracer: _ProxyTracer, proxy: _PySymProxyType
 ) -> None: ...
-
-
-@overload
-def set_proxy_slot(obj: OpaqueType, tracer: _ProxyTracer, proxy: Proxy) -> None: ...
 
 
 def set_proxy_slot(
@@ -284,14 +280,10 @@ def set_proxy_slot(
             or not _is_proxy_tensor_update_tensor_tracker_disabled()
         ):
             tracer.tensor_tracker[obj] = proxy
-    elif isinstance(obj, (_AnyScriptObject)):
+    elif isinstance(obj, (_AnyScriptObject)) or is_opaque_value(obj):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
         assert isinstance(proxy, Proxy)
         tracer.script_object_tracker[obj] = proxy
-    elif is_opaque_value(obj):
-        # Never clobber pre-existing proxy. See SymInt note below.
-        assert isinstance(proxy, Proxy)
-        tracer.opaque_tracker[obj] = proxy
     else:
         # NB: Never clobber pre-existing proxy.  Although the proxies
         # are in principle equivalent, when we do graph partitioning
@@ -426,10 +418,8 @@ def get_proxy_slot(
     tracker: Any
     if isinstance(obj, Tensor):
         tracker = tracer.tensor_tracker
-    elif isinstance(obj, _AnyScriptObject):
+    elif isinstance(obj, _AnyScriptObject) or is_opaque_value(obj):
         tracker = tracer.script_object_tracker
-    elif is_opaque_value(obj):
-        tracker = tracer.opaque_tracker
     else:
         assert isinstance(obj, py_sym_types), type(obj)
         tracker = tracer.symnode_tracker
@@ -853,11 +843,7 @@ def track_tensor_tree(
             # NB: eagerly set meta here, so that the numbering is in order
             set_meta(proxy, e)
             set_proxy_slot(e, tracer, thunkify(tracer, lambda: proxy))
-        elif isinstance(e, _AnyScriptObject):
-            assert isinstance(proxy, Proxy)
-            set_proxy_slot(e, tracer, proxy)
-            set_meta(proxy, e)
-        elif is_opaque_value(e):
+        elif isinstance(e, _AnyScriptObject) or is_opaque_value(e):
             assert isinstance(proxy, Proxy)
             set_proxy_slot(e, tracer, proxy)
             set_meta(proxy, e)
@@ -1285,11 +1271,10 @@ class _SympyExprTrackerValue:
 
 
 class PythonKeyTracer(Tracer):
-    script_object_tracker: MutableMapping[_AnyScriptObjectType, Proxy]
+    script_object_tracker: MutableMapping[_AnyScriptObjectType | OpaqueType, Proxy]
     symnode_tracker: _SymNodeDict
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
-    opaque_tracker: MutableMapping[OpaqueType, Proxy]
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
 
@@ -1301,7 +1286,6 @@ class PythonKeyTracer(Tracer):
             dict=None, ref_type=_WeakHashRef
         )
         self.sympy_expr_tracker = {}
-        self.opaque_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
 
         # Stores the torch function that was called during tracing
         self.torch_fn_metadata = None
@@ -1843,7 +1827,6 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
     symnode_tracker: MutableMapping[PySymType, _PySymProxyType]
     tensor_tracker: MutableMapping[Tensor, _ProxyTensor]
     sympy_expr_tracker: dict[sympy.Symbol, _SympyExprTrackerValue]
-    opaque_tracker: MutableMapping[object, Proxy]
     torch_fn_metadata: Optional[OpOverload]
     torch_fn_counts: dict[OpOverload, int]
     enable_thunkify: bool = False
@@ -1856,7 +1839,6 @@ class _GraphAppendingTracerEx(fx.proxy.GraphAppendingTracer):
         self.script_object_tracker = WeakIdKeyDictionary(
             dict=None, ref_type=_WeakHashRef
         )
-        self.opaque_tracker = WeakIdKeyDictionary(dict=None, ref_type=_WeakHashRef)
         # Stores the torch function that was called during tracing
         self.torch_fn_metadata = None
         # Stores the counts for every torch function called. This is to help
