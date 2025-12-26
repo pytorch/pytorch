@@ -1201,38 +1201,12 @@ def aot_dispatch_subclass(
     # NB: doesn't take descs, this is going from the NEW flat_args to the
     # subclasses, we don't need to do bookkeeping here
     def inner_fn(fn, args, *, use_trace_joint: bool):
-        opaque_args = None
-        num_opaque = len(meta.opaque_inp_descs)
-
-        # Step 1: OpaqueObjects don't need wrapping - they're passed through
-        # as-is so remove them here and add them back later before we call the
-        # function.
-        if num_opaque > 0:
-            if use_trace_joint:
-                primals, tangents = args
-                tensor_primals, opaque_args = (
-                    primals[:-num_opaque],
-                    primals[-num_opaque:],
-                )
-                args = (tensor_primals, tangents)
-            else:
-                args, opaque_args = args[:-num_opaque], args[-num_opaque:]
-
-        # Step 2: wrap tensor inputs into subclasses if necessary
+        # Step 1: wrap tensor inputs into subclasses if necessary
         all_args = wrap_tensor_subclasses_maybe_joint(
             args, is_joint_structure=use_trace_joint, meta=meta
         )
 
-        # Step 3: Append OpaqueObjects back
-        if opaque_args:
-            if use_trace_joint:
-                primals, tangents = all_args
-                primals = tuple(primals) + tuple(opaque_args)
-                all_args = (primals, tangents)
-            else:
-                all_args = tuple(all_args) + tuple(opaque_args)
-
-        # Step 4: call the inner function, with our (maybe subclass) inputs
+        # Step 2: call the inner function, with our (maybe subclass) inputs
         wrapped_outs, wrapped_outs_descs = call_and_expect_output_descs(fn, all_args)
 
         if use_trace_joint:
@@ -1261,7 +1235,7 @@ def aot_dispatch_subclass(
                 (forward_outs_descs, backward_outs_descs),
             )
 
-        # Step 5: Unwrap any subclass outputs back into dense tensors
+        # Step 3: Unwrap any subclass outputs back into dense tensors
         return unwrap_tensor_subclasses(
             wrapped_outs, wrapped_outs_descs, append_symints=True
         )
