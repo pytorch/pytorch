@@ -6,7 +6,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
-from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available
+from torch._inductor.kernel.flex.flex_flash_attention import (
+    _hierarchical_indexer_cute,
+    ensure_flash_available,
+    HierarchicalIndex,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
@@ -676,13 +680,35 @@ class TestFlexFlash(InductorTestCase):
             )
 
     @dtypes(torch.float16, torch.bfloat16)
+    def test_mixed_dtypes(self, device, dtype):
+        """Ensure flash attention rejects mixed dtypes (e.g., fp32 Q with fp16 K/V)"""
+        B, H, S, D = 2, 8, 512, 64
+
+        query = torch.randn(B, H, S, D, dtype=torch.bfloat16, device=device)
+        key = torch.randn(B, H, S, D, dtype=dtype, device=device).to(
+            torch.float8_e4m3fn
+        )
+        value = torch.randn(B, H, S, D, dtype=dtype, device=device).to(
+            torch.float8_e4m3fn
+        )
+
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+
+        from torch._inductor.exc import InductorError
+
+        with self.assertRaisesRegex(
+            InductorError,
+            "Mixed query, key, and value dtype is not supported on this platform",
+        ):
+            compiled_fn(query, key, value, kernel_options={"BACKEND": "FLASH"})
+
+    @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_rejects_mask_mod_on_unsupported_gpu(
         self, device, dtype
     ):
         major, _ = torch.cuda.get_device_capability()
         if major == 10:
             self.skipTest("Block sparsity backward is supported on SM100")
-
         q, k, v = create_test_tensors(dtype=dtype, device=device)
 
         def causal_mask(_b, _h, q_idx, kv_idx):
@@ -796,6 +822,210 @@ class TestFlexFlash(InductorTestCase):
 
 
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
+
+
+class TestHierarchicalIndex(InductorTestCase):
+    def test_hierarchical_index_preserves_args(self):
+        from sympy import Symbol
+
+        b = Symbol("b")
+        q_idx = Symbol("q_idx")
+        idx = HierarchicalIndex(b, q_idx)
+
+        self.assertIsInstance(idx, HierarchicalIndex)
+        self.assertEqual(idx.args, (b, q_idx))
+
+    def test_hierarchical_indexer_single_dim_no_wrap(self):
+        from sympy import Symbol
+
+        indexer = _hierarchical_indexer_cute(size=[10])
+        q_idx = Symbol("q_idx")
+
+        self.assertEqual(indexer([q_idx]), q_idx)
+
+    def test_hierarchical_indexer_multi_dim_wraps(self):
+        from sympy import Symbol
+
+        indexer = _hierarchical_indexer_cute(size=[4, 128])
+        b = Symbol("b")
+        q_idx = Symbol("q_idx")
+
+        result = indexer([b, q_idx])
+
+        self.assertIsInstance(result, HierarchicalIndex)
+        self.assertEqual(result.args, (b, q_idx))
+
+    def test_hierarchical_indexer_3d_and_4d(self):
+        from sympy import Symbol
+
+        b, h, q_idx, kv_idx = (
+            Symbol("b"),
+            Symbol("h"),
+            Symbol("q_idx"),
+            Symbol("kv_idx"),
+        )
+
+        indexer_3d = _hierarchical_indexer_cute(size=[2, 4, 512])
+        result_3d = indexer_3d([b, h, q_idx])
+        self.assertIsInstance(result_3d, HierarchicalIndex)
+        self.assertEqual(result_3d.args, (b, h, q_idx))
+
+        indexer_4d = _hierarchical_indexer_cute(size=[2, 4, 512, 512])
+        result_4d = indexer_4d([b, h, q_idx, kv_idx])
+        self.assertIsInstance(result_4d, HierarchicalIndex)
+        self.assertEqual(result_4d.args, (b, h, q_idx, kv_idx))
+
+    def test_isinstance_detection_for_load(self):
+        from sympy import Symbol
+
+        b = Symbol("b")
+        q_idx = Symbol("q_idx")
+
+        self.assertIsInstance(HierarchicalIndex(b, q_idx), HierarchicalIndex)
+        self.assertNotIsInstance(b * Symbol("S") + q_idx, HierarchicalIndex)
+
+    def test_hierarchical_indexer_rank_mismatch(self):
+        from sympy import Symbol
+
+        indexer = _hierarchical_indexer_cute(size=[2, 4])
+        b = Symbol("b")
+
+        with self.assertRaises(AssertionError) as ctx:
+            indexer([b])
+        self.assertIn("Rank mismatch", str(ctx.exception))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        not ensure_flash_available(), "Flash attention (CUTE) library not available"
+    )
+    def test_hierarchical_indexing_2d(self):
+        batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
+        dtype = torch.float16
+        device = "cuda"
+
+        bias_2d = torch.randn(batch_size, num_heads, device=device, dtype=dtype)
+
+        def score_mod_2d(score, b, h, q_idx, kv_idx):
+            return score + bias_2d[b, h]
+
+        q, k, v = create_test_tensors(
+            batch_size=batch_size,
+            num_heads=num_heads,
+            seq_len=seq_len,
+            dim=dim,
+            dtype=dtype,
+            device=device,
+        )
+
+        flash_vs_triton(q, k, v, score_mod=score_mod_2d)
+
+        compiled_fn = torch.compile(flex_attention)
+        _, code = run_and_get_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=score_mod_2d,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+        code_str = "\n".join(code)
+
+        expected_pattern = "in_ptr4[tmp3, tmp4]"
+        self.assertIn(
+            expected_pattern,
+            code_str,
+            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        not ensure_flash_available(), "Flash attention (CUTE) library not available"
+    )
+    def test_hierarchical_indexing_3d(self):
+        batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
+        dtype = torch.float16
+        device = "cuda"
+
+        bias_3d = torch.randn(
+            batch_size, num_heads, seq_len, device=device, dtype=dtype
+        )
+
+        def score_mod_3d(score, b, h, q_idx, kv_idx):
+            return score + bias_3d[b, h, q_idx]
+
+        q, k, v = create_test_tensors(
+            batch_size=batch_size,
+            num_heads=num_heads,
+            seq_len=seq_len,
+            dim=dim,
+            dtype=dtype,
+            device=device,
+        )
+
+        flash_vs_triton(q, k, v, score_mod=score_mod_3d)
+
+        compiled_fn = torch.compile(flex_attention)
+        _, code = run_and_get_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=score_mod_3d,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+        code_str = "\n".join(code)
+
+        expected_pattern = "in_ptr4[tmp4, tmp5, tmp6]"
+        self.assertIn(
+            expected_pattern,
+            code_str,
+            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        not ensure_flash_available(), "Flash attention (CUTE) library not available"
+    )
+    def test_hierarchical_indexing_4d(self):
+        batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
+        dtype = torch.float16
+        device = "cuda"
+
+        bias_4d = torch.randn(
+            batch_size, num_heads, seq_len, seq_len, device=device, dtype=dtype
+        )
+
+        def score_mod_4d(score, b, h, q_idx, kv_idx):
+            return score + bias_4d[b, h, q_idx, kv_idx]
+
+        q, k, v = create_test_tensors(
+            batch_size=batch_size,
+            num_heads=num_heads,
+            seq_len=seq_len,
+            dim=dim,
+            dtype=dtype,
+            device=device,
+        )
+
+        flash_vs_triton(q, k, v, score_mod=score_mod_4d)
+
+        compiled_fn = torch.compile(flex_attention)
+        _, code = run_and_get_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=score_mod_4d,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+        code_str = "\n".join(code)
+
+        expected_pattern = "in_ptr4[tmp5, tmp6, tmp7, tmp8]"
+        self.assertIn(
+            expected_pattern,
+            code_str,
+            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+        )
 
 
 if __name__ == "__main__":
