@@ -41,6 +41,7 @@ import dataclasses
 import functools
 import gc
 import itertools
+import logging
 import operator
 import sys
 import threading
@@ -69,6 +70,7 @@ from torch._inductor.compile_fx import (
 from torch._inductor.cudagraph_utils import (
     check_for_mutation,
     CheckInvariantStatus,
+    collect_cuda_data_ptrs,
     FunctionID,
     log_cudagraph_skip_and_bump_counter,
     log_data_ptr_mismatch,
@@ -763,7 +765,7 @@ LevelList = list  # levels (distance from root of tree)
 
 
 class OutputAliasInfo:
-    pass
+    __slots__ = []
 
 
 class _UnaliasedStorage(OutputAliasInfo):
@@ -1332,7 +1334,7 @@ class CUDAGraphNode:
             )
 
             ref = static_input_persistent_storage_ptrs.get(
-                o.untyped_storage().data_ptr(), None
+                o.untyped_storage().data_ptr()
             )
             # also treat empty storages as static outputs because we do not need to manage their lifetime
             # and they should not participate in checkpointing
@@ -1471,6 +1473,7 @@ class CUDAGraphNode:
     def _path_to_root(self) -> Generator[CUDAGraphNode, None, None]:
         "Returns all nodes in the path starting at self and ending at root"
         node = self
+        # pyrefly: ignore [bad-assignment]
         while node:
             yield node
             node = node.parent  # type: ignore[assignment]
@@ -1823,6 +1826,7 @@ def check_memory_pool(
     pool_id: tuple[int, int],
     live_storages_ptrs: list[StorageWeakRefWrapper],
 ) -> None:
+    """Validate cudagraph pool allocations against tracked live storages and surface leaks."""
     assert all(isinstance(elem, StorageWeakRefWrapper) for elem in live_storages_ptrs)  # noqa: C419
     unique_storages = {stor.data_ptr() for stor in live_storages_ptrs if stor()}  # noqa: set_linter
 
@@ -1853,7 +1857,10 @@ def check_memory_pool(
 
     torch._check(
         len(unique_storages) == 0,
-        lambda: f"These storage data ptrs are not allocated in pool {pool_id} but should be {unique_storages}",
+        lambda: (
+            f"These storage data ptrs are not allocated in pool {pool_id} but should be: {unique_storages}. "
+            f"This could be a bug in inductor aliasing tracking or in a custom op's meta function. Please file an issue."
+        ),
     )
 
     if len(allocated_not_in_live_storages) != 0:
@@ -1863,9 +1870,53 @@ def check_memory_pool(
             # pyrefly: ignore [bad-argument-type]
             formatted.append(f"Data Pointer: {dp}, history: \n{trace}")
         formatted_s = "\n".join(formatted)
+
+        history_hint = ""
+        if not config.triton.cudagraph_trees_history_recording:
+            history_hint = "- Set torch._inductor.config.triton.cudagraph_trees_history_recording = True for allocation origins\n"
+
+        objgraph_hint = (
+            (
+                "- Objgraph backrefs disabled; set torch._inductor.config.triton.cudagraph_trees_objgraph = True "
+                "(refs_live_tensor_{index}.svg)\n"
+            )
+            if not config.triton.cudagraph_trees_objgraph
+            else ""
+        )
+        objgraph_files_hint = ""
+
+        if config.triton.cudagraph_trees_objgraph:
+            # pyrefly: ignore  # import-error
+            import objgraph
+
+            generated_files: list[str] = []
+
+            tensors = objgraph.by_type("torch.Tensor")
+            for index, bad_dp in enumerate(allocated_not_in_live_storages):
+                bad_tensor = next(
+                    (t for t in tensors if bad_dp in collect_cuda_data_ptrs(t)), None
+                )
+                if bad_tensor is None:
+                    continue
+                filename = f"refs_live_tensor_{index}.svg"
+                objgraph.show_backrefs(bad_tensor, filename=filename, max_depth=5)
+                generated_files.append(filename)
+            if generated_files:
+                objgraph_files_hint = (
+                    f"- Objgraph backrefs written: {', '.join(generated_files)}\n"
+                )
+
+        dangling_addrs = OrderedSet(allocated_not_in_live_storages.keys())
         msg = (
-            f"These live storage data ptrs are in the cudagraph pool but not "
-            f"accounted for as an output of cudagraph trees: \n\n{formatted_s}"
+            f"Detected {len(allocated_not_in_live_storages)} tensor(s) in the cudagraph pool not tracked as outputs. "
+            f"All live allocations must be tracked for correctness.\n"
+            f"Debugging:\n"
+            f"{history_hint}"
+            f"{objgraph_hint}"
+            f"- Search gc.get_objects() for tensors with data_ptr() in {dangling_addrs}\n"
+            f"- Use refcycle to find what is preventing cleanup\n"
+            f"{objgraph_files_hint}"
+            f"Allocations:\n{formatted_s}"
         )
         raise RuntimeError(msg)
 
@@ -2142,7 +2193,8 @@ class CUDAGraphTreeManager:
         )
 
         if not self.in_recording:
-            unexpected_rerecord, unexpected_rerecord_reason = False, lambda: ""
+            unexpected_rerecord = False
+            unexpected_rerecord_reason = None
             for child in child_nodes[function_id]:
                 # here we are checking memory consistency between recording and execution,
                 # as well as things like stability of tensor locations, etc
@@ -2156,7 +2208,17 @@ class CUDAGraphTreeManager:
                     or status == CheckInvariantStatus.CudagraphManagedIdxMismatch
                 ):
                     unexpected_rerecord = True
-                    unexpected_rerecord_reason = status_logger
+                    # Only compute detailed reason when debug logging is enabled
+                    if log.isEnabledFor(logging.DEBUG):
+                        unexpected_rerecord_reason = status_logger()
+                        log.debug(
+                            "function %d re-recording due to %s",
+                            function_id.id,
+                            unexpected_rerecord_reason,
+                        )
+                    else:
+                        # Defer reason computation until needed (for exceed_rerecord_limit)
+                        unexpected_rerecord_reason = status_logger
 
             # now that we know the new function can't be run as a child of the
             # current node, if it is a root, try to end the current execution.
@@ -2184,11 +2246,19 @@ class CUDAGraphTreeManager:
                 self.num_rerecord[curr_node_id][function_id] += 1
                 if self.exceed_rerecord_limit(curr_node_id, function_id):
                     _id = curr_node_id.id if curr_node_id else None
+                    # unexpected_rerecord_reason is either a string (if debug was enabled)
+                    # or a callable (if debug was disabled)
+                    assert unexpected_rerecord_reason is not None
+                    reason = (
+                        unexpected_rerecord_reason
+                        if isinstance(unexpected_rerecord_reason, str)
+                        else unexpected_rerecord_reason()
+                    )
                     log_cudagraph_skip_and_bump_counter(
                         f"skipping cudagraph due to function {function_id.id} exceeding max "
                         f"re-recording limit "
                         f"(={torch._inductor.config.triton.cudagraph_unexpected_rerecord_limit}) "
-                        f"on cudagraph node {_id} due to {unexpected_rerecord_reason()}."
+                        f"on cudagraph node {_id} due to {reason}."
                     )
                     return self.ids_to_funcs[function_id].model(new_inputs)
 

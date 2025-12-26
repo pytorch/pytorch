@@ -37,10 +37,10 @@ def create_int8_compensation(
     w_scale: ir.TensorBox,
 ) -> tuple[
     bool,
-    Union[ir.TensorBox, ir.ShapeAsConstantBuffer],
-    Optional[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]],
+    ir.TensorBox,
+    Optional[ir.TensorBox],
 ]:
-    x_w_scale: Optional[Union[ir.TensorBox, ir.ShapeAsConstantBuffer]] = None
+    x_w_scale: Optional[ir.TensorBox] = None
     use_int8_fast_compensation_path = all(
         isinstance(item, ir.TensorBox)
         and item.get_name() in V.graph.constants
@@ -223,7 +223,9 @@ def register_onednn_fusion_ops():
             has_out_variant=False,
             kernel_creator=mkldnn_ir.QLinearPointwiseBinaryPT2E.create,
         )
-        cpu_needs_realized_inputs = [
+        cpu_needs_realized_inputs: list[
+            Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]
+        ] = [
             torch.ops.mkldnn._convolution_pointwise,
             torch.ops.mkldnn._convolution_pointwise_,
             torch.ops.mkldnn._convolution_transpose_pointwise,

@@ -1318,30 +1318,27 @@ class DynamicRendezvousHandler(RendezvousHandler):
             self._keep_alive()
 
     def _keep_alive(self) -> None:
-        self._heartbeat_lock.acquire()
+        with self._heartbeat_lock:
+            op = _RendezvousKeepAliveOp()
 
-        op = _RendezvousKeepAliveOp()
+            deadline = self._get_deadline(self._settings.timeout.heartbeat)
 
-        deadline = self._get_deadline(self._settings.timeout.heartbeat)
+            try:
+                self._op_executor.run(op, deadline)
 
-        try:
-            self._op_executor.run(op, deadline)
-
-            msg = (
-                f"The node '{self._this_node}' has sent a keep-alive heartbeat to the rendezvous "
-                f"'{self._settings.run_id}'."
-            )
-            self._record(message=msg)
-            logger.debug(msg)
-        except RendezvousError as ex:
-            msg = (
-                f"The node '{self._this_node}' has failed to send a keep-alive heartbeat to the "
-                f"rendezvous '{self._settings.run_id}' due to an error of type {type(ex).__name__}."
-            )
-            self._record(message=msg, node_state=NodeState.FAILED)
-            logger.warning(msg)
-        finally:
-            self._heartbeat_lock.release()
+                msg = (
+                    f"The node '{self._this_node}' has sent a keep-alive heartbeat to the rendezvous "
+                    f"'{self._settings.run_id}'."
+                )
+                self._record(message=msg)
+                logger.debug(msg)
+            except RendezvousError as ex:
+                msg = (
+                    f"The node '{self._this_node}' has failed to send a keep-alive heartbeat to the "
+                    f"rendezvous '{self._settings.run_id}' due to an error of type {type(ex).__name__}."
+                )
+                self._record(message=msg, node_state=NodeState.FAILED)
+                logger.warning(msg)
 
     def _start_heartbeats(self) -> None:
         self._keep_alive_timer = _PeriodicTimer(

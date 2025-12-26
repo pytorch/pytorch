@@ -11,7 +11,7 @@ on:
     - cron: 45 4,12 * * 0,6
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}
   cancel-in-progress: true
 
 
@@ -76,7 +76,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: periodic-dynamo-benchmarks-build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm86
+      build-environment: ${{ needs.periodic-dynamo-benchmarks-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-dynamo-benchmarks-build.outputs.test-matrix }}
     secrets: inherit
@@ -176,7 +176,7 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: rocm-periodic-dynamo-benchmarks-build
     with:
-      build-environment: linux-jammy-rocm-py3_10
+      build-environment: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.build-environment }}
       docker-image: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.docker-image }}
       test-matrix: ${{ needs.rocm-periodic-dynamo-benchmarks-build.outputs.test-matrix }}
     secrets: inherit
@@ -203,7 +203,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: inductor-smoke-build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm80
+      build-environment: ${{ needs.inductor-smoke-build.outputs.build-environment }}
       docker-image: ${{ needs.inductor-smoke-build.outputs.docker-image }}
       test-matrix: ${{ needs.inductor-smoke-build.outputs.test-matrix }}
     secrets: inherit
@@ -260,7 +260,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: periodic-dynamo-benchmarks-cpu-build
     with:
-      build-environment: linux-jammy-py3.10-gcc11-build
+      build-environment: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.build-environment }}
       docker-image: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.docker-image }}
       test-matrix: ${{ needs.periodic-dynamo-benchmarks-cpu-build.outputs.test-matrix }}
     secrets: inherit

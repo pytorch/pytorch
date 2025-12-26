@@ -12,6 +12,7 @@ from torch.distributed.distributed_c10d import (
     _check_op,
     _get_default_group,
     _resolve_process_group,
+    GroupName,
     ProcessGroup,
     ReduceOp,
     Work,
@@ -104,7 +105,7 @@ def _prepare_collective_groups(
 # work object). Functional collectives expect the implementation to allocate outputs, accept
 # process group name that must be resolved and do not support async ops (return output).
 def _local_functional_all_gather_into_tensor(
-    tensor: torch.Tensor, group_size: int, group_name: str
+    tensor: torch.Tensor, group_size: int, group_name: GroupName
 ) -> torch.Tensor:
     # "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
     from . import LocalTensor
@@ -138,7 +139,7 @@ def _local_functional_all_gather_into_tensor(
 
 
 def _local_functional_reduce_scatter_tensor(
-    tensor: torch.Tensor, reduce_op: str, group_size: int, group_name: str
+    tensor: torch.Tensor, reduce_op: str, group_size: int, group_name: GroupName
 ) -> torch.Tensor:
     #  "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
@@ -181,7 +182,7 @@ def _local_functional_reduce_scatter_tensor(
 
 
 def _local_functional_shard_dim_alltoall(
-    tensor: torch.Tensor, gather_dim: int, shard_dim: int, group_name: str
+    tensor: torch.Tensor, gather_dim: int, shard_dim: int, group_name: GroupName
 ) -> torch.Tensor:
     # "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
@@ -229,7 +230,7 @@ def _local_functional_all_to_all_single(
     tensor: torch.Tensor,
     output_split_sizes: list[torch.SymInt],
     input_split_sizes: list[torch.SymInt],
-    group_name: str,
+    group_name: GroupName,
 ) -> torch.Tensor:
     # "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
     from . import LocalIntNode, LocalTensor
@@ -270,7 +271,7 @@ def _local_functional_all_to_all_single(
 
         for i, dst in enumerate(group_ranks):
             splits = []
-            for j, src in enumerate(group_ranks):
+            for src in group_ranks:
                 splits.append(split_local_tensors[src][i])
             output_local_tensors[dst] = torch.cat(splits)
 
@@ -278,15 +279,6 @@ def _local_functional_all_to_all_single(
     output = LocalTensor(output_local_tensors)
 
     return output
-
-
-def _local_functional_wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
-    # "wait_tensor(Tensor input) -> Tensor"
-    from . import LocalTensor
-
-    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
-
-    return tensor
 
 
 def _local_broadcast_(
@@ -1030,7 +1022,7 @@ def local_p2p_op(
     dst: torch.SymInt,
     tensor: torch.Tensor,
     op: Callable[[torch.Tensor, int], Work | None],
-) -> Work | None | list[Work | None]:
+) -> Work | list[Work | None] | None:
     """
     Runs a point-to-point (P2P) operation for all combinations of source and destination ranks.
     """
@@ -1049,7 +1041,7 @@ def local_p2p_op(
     return w
 
 
-def wait_all(work: Work | None | list[Work | None]) -> None:
+def wait_all(work: Work | list[Work | None] | None) -> None:
     """
     Waits for all work objects in the input to complete.
 

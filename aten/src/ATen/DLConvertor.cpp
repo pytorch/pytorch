@@ -1,5 +1,4 @@
 #include <ATen/DLConvertor.h>
-#include <ATen/Functions.h>
 
 using namespace std;
 namespace at {
@@ -152,7 +151,10 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
   return ctx;
 }
 
-static Device getATenDevice(DLDeviceType type, c10::DeviceIndex index, void* data = nullptr) {
+Device dlDeviceToTorchDevice(
+    DLDeviceType type,
+    c10::DeviceIndex index,
+    void* data) {
   switch (type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
@@ -437,7 +439,8 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
   }
 
   DLTensor& dl_tensor = src->dl_tensor;
-  Device device = getATenDevice(dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
+  Device device = dlDeviceToTorchDevice(
+      dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
   ScalarType stype = toScalarType(dl_tensor.dtype);
 
   if (!dl_tensor.strides) {
@@ -465,6 +468,21 @@ template at::Tensor fromDLPackImpl<DLManagedTensorVersioned>(DLManagedTensorVers
 
 } // namespace
 
+void toDLPackNonOwning(const Tensor& src, DLTensor* out) {
+  // Fill in the pre-allocated DLTensor struct with direct pointers
+  // This is a non-owning conversion - the caller owns the tensor
+  // and must keep it alive for the duration of DLTensor usage
+  out->data = src.data_ptr();
+  out->device = torchDeviceToDLDevice(src.device());
+  out->ndim = static_cast<int32_t>(src.dim());
+  out->dtype = getDLDataType(src);
+  // sizes() and strides() return pointers to TensorImpl's stable storage
+  // which remains valid as long as the tensor is alive
+  out->shape = const_cast<int64_t*>(src.sizes().data());
+  out->strides = const_cast<int64_t*>(src.strides().data());
+  out->byte_offset = 0;
+}
+
 DLManagedTensor* toDLPack(const Tensor& src) {
   return toDLPackImpl<DLManagedTensor>(src);
 }
@@ -489,7 +507,7 @@ Tensor maybeCopyTensor(
   bool force_move = copy.has_value() && !*copy;
 
   if (optional_dl_device.has_value()) {
-    auto device = at::getATenDevice(
+    auto device = at::dlDeviceToTorchDevice(
         optional_dl_device->device_type,
         static_cast<c10::DeviceIndex>(optional_dl_device->device_id));
 
