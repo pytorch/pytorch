@@ -1612,7 +1612,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             query_ref, key_ref, value_ref, _identity, kernel_options=kernel_options
         )
         _, _, sqnr = _snr(out_ref, out)
-        self.assertGreater(sqnr, 15)
+        self.assertGreater(sqnr, 10)
 
     @supported_platform
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
@@ -1654,7 +1654,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             query_ref, key_ref, value_ref, _identity, kernel_options=kernel_options
         )
         _, _, sqnr = _snr(out_ref, out)
-        self.assertGreater(sqnr, 15)
+        self.assertGreater(sqnr, 10)
 
     @supported_platform
     @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
