@@ -948,6 +948,7 @@ libtorch_python_core_sources = [
     "torch/csrc/inductor/aoti_eager/kernel_meta_info.cpp",
     "torch/csrc/inductor/resize_storage_bytes.cpp",
     "torch/csrc/inductor/static_launcher/static_cuda_launcher.cpp",
+    "torch/csrc/inductor/static_launcher/static_xpu_launcher.cpp",
     "torch/csrc/jit/backends/backend_init.cpp",
     "torch/csrc/jit/python/init.cpp",
     "torch/csrc/jit/passes/onnx.cpp",
