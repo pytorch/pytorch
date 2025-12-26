@@ -2197,9 +2197,13 @@ def fwd_only(
     if run_functional_passes:
         remove_noop_ops(gm.graph)
 
-        from .fx_passes.joint_graph import early_patterns
+        # NOTE: applying early_patterns to user patterns cause
+        # duplicate patterns being found in vllm. Check
+        # https://github.com/pytorch/pytorch/pull/170649#issuecomment-3693427775
+        # for more details.
+        # from .fx_passes.joint_graph import early_patterns
+        # early_patterns.apply(gm.graph)
 
-        early_patterns.apply(gm.graph)
         gm.graph.eliminate_dead_code()
 
     gm.recompile()
