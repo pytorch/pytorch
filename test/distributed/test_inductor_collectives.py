@@ -2443,7 +2443,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([4, 4])"]
+                assert str(n.meta["val"].size()) == "torch.Size([4, 4])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2480,7 +2480,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([u0, 4])"]
+                assert str(n.meta["val"].size()) == "torch.Size([u0, 4])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2501,7 +2501,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([s75, s75])"]
+                assert str(n.meta["val"].size()) == "torch.Size([s75, s75])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2555,7 +2555,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([8, 1])"]
+                assert str(n.meta["val"].size()) == "torch.Size([8, 1])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2592,7 +2592,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([4*u0, 4])"]
+                assert str(n.meta["val"].size()) == "torch.Size([4*u0, 4])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2615,9 +2615,9 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert str(n.meta["val"].size()) in [
-                    "torch.Size([2*(((s75**2)//2)), s75])"
-                ]
+                assert (
+                    str(n.meta["val"].size()) == "torch.Size([2*(((s75**2)//2)), s75])"
+                )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )

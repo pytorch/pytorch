@@ -573,7 +573,7 @@ from a multi-output view call"
                     base_idx = None
                 else:
                     # First, check if o's ._base is an existing output
-                    maybe_existing_out_idx = out_tensor_ids.get(id(o._base), None)
+                    maybe_existing_out_idx = out_tensor_ids.get(id(o._base))
                     if maybe_existing_out_idx is not None:
                         # Special case where the output is an alias of a graph intermediate, but that intermediate
                         # is itself also a user output.
@@ -584,9 +584,7 @@ from a multi-output view call"
                     else:
                         # Next, check if o's ._base is an intermediate base that we already returned
                         maybe_existing_base_output_idx = (
-                            intermediate_base_tensor_id_to_output_idx.get(
-                                id(o._base), None
-                            )
+                            intermediate_base_tensor_id_to_output_idx.get(id(o._base))
                         )
                         if maybe_existing_base_output_idx is not None:
                             output_type = OutputType.alias_of_intermediate
