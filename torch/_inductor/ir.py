@@ -5435,6 +5435,77 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
         return self.outputs
 
 
+class NVUniversalGemmBuffer(TemplateBuffer):
+    """
+    Buffer for NVIDIA Universal GEMM kernels.
+
+    Unlike CuteDSL templates which use Jinja templates, this generates
+    simpler Python code that directly calls the cutlass_api library.
+    """
+
+    def __init__(
+        self,
+        layout: Layout,
+        inputs: Sequence[IRNode],
+        kernel: Any,
+        accumulator_type: Any,
+    ) -> None:
+        # We pass None initially, then override with our method below
+        super().__init__(layout, inputs, make_kernel_render=None)
+        self.kernel = kernel
+        self.accumulator_type = accumulator_type
+        self.outputs: list[Buffer] = [self]
+        # Store kernel metadata for code generation since kernels aren't serializeable yet
+        self.kernel_metadata = {
+            "kernel_name": kernel.metadata.kernel_name,
+            "min_cc": kernel.metadata.min_cc,
+        }
+        # Override the instance attribute set by parent with our method
+        # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
+        self.make_kernel_render = self._make_kernel_render
+
+    def get_outputs(self) -> list[Buffer]:
+        return self.outputs
+
+    def _make_kernel_render(
+        self, out_node: Any, hint_override: Optional[int] = None
+    ) -> tuple[Any, Any]:
+        """
+        Create a kernel renderer for code generation.
+
+        Returns (kernel, render) tuple where:
+        - kernel: NVUniversalGemmKernel object with call_kernel() method
+        - render: function that returns source code string
+        """
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            NVUniversalGemmKernel,
+        )
+        from torch._inductor.utils import Placeholder
+
+        input_nodes: list[Any] = []
+        for inp in self.inputs:
+            if isinstance(inp, TensorBox):
+                inp = inp.data
+            if isinstance(inp, StorageBox):
+                inp = inp.data
+            input_nodes.append(inp)
+
+        kernel_name = str(Placeholder.KERNEL_NAME)
+
+        render_kernel = NVUniversalGemmKernel(
+            kernel_name=kernel_name,
+            input_nodes=input_nodes,
+            output_node=out_node,
+            kernel_metadata=self.kernel_metadata,
+            accumulator_type=self.accumulator_type,
+        )
+
+        def render():
+            return render_kernel.render()
+
+        return render_kernel, render
+
+
 def is_node_sequence(
     nodes: Sequence[Union[IRNode, Sequence[IRNode]]],
 ) -> TypeIs[Sequence[IRNode]]:
@@ -6982,7 +7053,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
             configs = kernel.configs
             kernel = kernel.fn
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return kernel, configs, restore_value_args, reset_to_zero_args
 
     @override
@@ -7138,7 +7209,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.mutable_args = [
             kernel_args[key]
             for key in identify_mutated_tensors(
-                # pyrefly: ignore  # bad-argument-type
+                # pyrefly: ignore [bad-argument-type]
                 kernel,
                 {**kernel_args, **autotuned_kwargs},
                 tma_descriptor_metadata,

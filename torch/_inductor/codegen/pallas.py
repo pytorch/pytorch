@@ -17,8 +17,31 @@ from ..runtime.runtime_utils import torch_dtype_to_jax
 from ..utils import get_fused_kernel_name, get_kernel_metadata
 from ..virtualized import V
 from .block_analysis import BlockPatternMatcher
-from .common import BackendFeature, CSEVariable, IndentedBuffer, OpOverrides
-from .simd import pexpr, SIMDKernel, SIMDScheduling
+from .common import (
+    BackendFeature,
+    CSEVariable,
+    IndentedBuffer,
+    OpOverrides,
+    PythonPrinter,
+)
+from .simd import SIMDKernel, SIMDScheduling
+
+
+class PallasPrinter(PythonPrinter):
+    """
+    Custom sympy printer for Pallas that handles JAX-specific constructs.
+    """
+
+    def _print_Where(self, expr: sympy.Expr) -> str:
+        """Convert sympy Where to jnp.where."""
+        c = self.doprint(expr.args[0])
+        p = self.doprint(expr.args[1])
+        q = self.doprint(expr.args[2])
+        return f"jnp.where({c}, {p}, {q})"
+
+
+# Use Pallas-specific printer for expression generation
+pallas_pexpr = PallasPrinter().doprint
 
 
 if TYPE_CHECKING:
@@ -827,7 +850,7 @@ class PallasKernel(SIMDKernel):
     """
 
     overrides = PallasKernelOverrides  # type: ignore[assignment]
-    kexpr: Callable[[sympy.Expr], str] = pexpr  # Use Python expression printer
+    kexpr: Callable[[sympy.Expr], str] = pallas_pexpr  # Use Pallas expression printer
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -937,6 +960,10 @@ class PallasKernel(SIMDKernel):
                 # Extract the constant offset (terms not involving var)
                 offset = index - var_expr
                 offset = V.graph.sizevars.simplify(offset)
+
+                # Pallas doesn't support negative stride slices, fall back to explicit indexing
+                if stride < 0:
+                    return self.kexpr(index)
 
                 # Generate JAX slice notation
                 if stride == 1 and offset == 0:
