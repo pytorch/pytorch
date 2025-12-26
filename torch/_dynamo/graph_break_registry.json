@@ -357,6 +357,17 @@
       ]
     }
   ],
+  "GB2863": [
+    {
+      "Gb_type": "backward() with non-leaf tensor inputs",
+      "Context": "backward(inputs=[...]) with non-leaf tensor",
+      "Explanation": "Dynamo cannot trace backward() with non-leaf tensor inputs. Non-leaf tensors require retain_grad() which is not yet supported.",
+      "Hints": [
+        "Only pass leaf tensors (parameters, inputs) to backward(inputs=...)",
+        "Or call backward() without the inputs argument to auto-detect leaves"
+      ]
+    }
+  ],
   "GB0037": [
     {
       "Gb_type": "Dynamic shape operator (no meta kernel)",
@@ -1280,6 +1291,30 @@
     }
   ],
   "GB0123": [
+    {
+      "Gb_type": "Unsupported Tensor.backward() call",
+      "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
+      "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported Tensor.backward() call",
+      "Context": "call_method {self} backward {args} {kwargs}",
+      "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
+    {
+      "Gb_type": "Unsupported Tensor.backward() call",
+      "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
+      "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
+      "Hints": [
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
     {
       "Gb_type": "Unsupported Tensor.backward() call",
       "Context": "call_method {self} backward {args} {kwargs}",
@@ -3428,6 +3463,14 @@
       ]
     }
   ],
+  "GB1501": [
+    {
+      "Gb_type": "sparse_grad_accumulate_grad",
+      "Context": "accumulate_grad_ with sparse gradient",
+      "Explanation": "Sparse gradients are not supported in compiled autograd",
+      "Hints": []
+    }
+  ],
   "GB0323": [
     {
       "Gb_type": "torch.scan: improper additional_inputs",
@@ -3600,14 +3643,6 @@
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
-    }
-  ],
-  "GB2750": [
-    {
-      "Gb_type": "sparse_grad_accumulate_grad",
-      "Context": "accumulate_grad_ with sparse gradient",
-      "Explanation": "Sparse gradients are not supported in compiled autograd",
-      "Hints": []
     }
   ],
   "GB0341": [
@@ -3992,7 +4027,7 @@
     },
     {
       "Gb_type": "autograd.grad with compiled autograd",
-      "Context": "",
+      "Context": "torch.autograd.grad()",
       "Explanation": "torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled. These two features have conflicting requirements for how the autograd graph is traced.",
       "Hints": [
         "Disable compiled autograd by removing the compiled_autograd context manager.",
