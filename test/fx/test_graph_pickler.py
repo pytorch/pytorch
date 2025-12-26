@@ -14,6 +14,7 @@ import torch
 import torch.library
 from torch._dynamo.testing import make_test_cls_with_patches
 from torch._inductor.test_case import TestCase
+from torch.fx import symbolic_trace
 from torch.testing._internal.inductor_utils import HAS_CPU
 
 
@@ -89,6 +90,20 @@ class TestGraphPickler(TestCase):
             return a + b
 
         check_model(self, fn, (torch.tensor([False, True]), torch.tensor([True, True])))
+
+
+class TestNodeStateSerialization(TestCase):
+    def test_type_entry_preserved_in_getstate(self):
+        class M(torch.nn.Module):
+            def forward(self, x):
+                y = torch.neg(x)
+                return y + 1
+
+        gm = symbolic_trace(M())
+        node = next(n for n in gm.graph.nodes if n.op == "call_function")
+        node.type = torch.Tensor
+        state = node.__getstate__()
+        self.assertIs(state["type"], torch.Tensor)
 
 
 if __name__ == "__main__":

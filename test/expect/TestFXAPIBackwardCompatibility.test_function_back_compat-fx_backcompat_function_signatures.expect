@@ -50,15 +50,6 @@ torch.fx.interpreter.Transformer.call_module(self, target: 'Target', args: Tuple
 torch.fx.interpreter.Transformer.get_attr(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> torch.fx.proxy.Proxy
 torch.fx.interpreter.Transformer.placeholder(self, target: 'Target', args: Tuple[torch.fx.node.Argument, ...], kwargs: Dict[str, Any]) -> torch.fx.proxy.Proxy
 torch.fx.interpreter.Transformer.transform(self) -> torch.fx.graph_module.GraphModule
-torch.fx.node.Node.__init__(self, graph: 'Graph', name: str, op: str, target: 'Target', args: Tuple[Argument, ...], kwargs: Dict[str, Argument], return_type: Optional[Any] = None) -> None
-torch.fx.node.Node.append(self, x: 'Node') -> None
-torch.fx.node.Node.format_node(self, placeholder_names: Optional[List[str]] = None, maybe_return_typename: Optional[List[str]] = None, include_tensor_metadata: bool = False) -> Optional[str]
-torch.fx.node.Node.insert_arg(self, idx: int, arg: torch.fx.node.Argument) -> None
-torch.fx.node.Node.prepend(self, x: 'Node') -> None
-torch.fx.node.Node.replace_all_uses_with(self, replace_with: 'Node', delete_user_cb: Optional[Callable[[Node], bool]] = None, propagate_meta: bool = False) -> List[Node]
-torch.fx.node.Node.replace_input_with(self, old_input: 'Node', new_input: 'Node') -> None
-torch.fx.node.Node.update_arg(self, idx: int, arg: torch.fx.node.Argument) -> None
-torch.fx.node.Node.update_kwarg(self, key: str, arg: torch.fx.node.Argument) -> None
 torch.fx.node.map_aggregate(a: torch.fx.node.Argument, fn: Callable[[torch.fx.node.Argument], torch.fx.node.Argument]) -> torch.fx.node.Argument
 torch.fx.node.map_arg(a: torch.fx.node.Argument, fn: Callable[[torch.fx.node.Node], torch.fx.node.Argument]) -> torch.fx.node.Argument
 torch.fx.passes.reinplace.reinplace(gm, *sample_args)
