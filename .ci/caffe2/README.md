@@ -19,3 +19,12 @@ Additionally, the following sections were updated to make them clearer:
 - Contributing guidelines
 
 These changes aim to provide more clarity for users and new contributors.
+## Fix typos and clarify sections
+
+In this commit, several typos in the README file have been corrected.
+Additionally, the following sections were updated to make them clearer:
+- Installation instructions
+- Usage examples
+- Contributing guidelines
+
+These changes aim to provide more clarity for users and new contributors.
