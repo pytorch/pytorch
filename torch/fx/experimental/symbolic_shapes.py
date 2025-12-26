@@ -59,6 +59,7 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymFloat, SymInt
 from torch._C._functorch import get_unwrapped, is_batchedtensor
 from torch._guards import ShapeGuard, SLoc, Source, TracingContext
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import dtrace_structured, LazyString, structured, trace_structured
 from torch._subclasses.meta_utils import is_sparse_any
 from torch._utils_internal import signpost_event
@@ -939,6 +940,8 @@ def _iterate_exprs(val: IterateExprs) -> Iterator[sympy.Basic]:
         pass
     # see Note: [Generator arguments in AOTDispatcher]
     elif isinstance(val, torch.Generator):
+        pass
+    elif isinstance(val, FakeScriptObject):
         pass
     else:
         raise AssertionError(f"cannot extract sympy expressions from {val} {type(val)}")

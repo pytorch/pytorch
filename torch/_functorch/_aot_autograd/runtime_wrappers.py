@@ -1669,7 +1669,12 @@ def _raise_if_functorch_active():
 
 # NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
 def _backward_prologue_functional(
-    ctx_saved_tensors, ctx_symints, metadata, maybe_subclass_metadata, *flat_args
+    ctx_saved_tensors,
+    ctx_symints,
+    ctx_opaque_objects,
+    metadata,
+    maybe_subclass_metadata,
+    *flat_args,
 ):
     # Calling convention: we expect a grad_out passed to the backward:
     # - for every output of the fw that does *not* alias an input or graph intermediate
@@ -1769,6 +1774,7 @@ def _backward_prologue_functional(
     all_args = [
         *ctx_symints,
         *ctx_saved_tensors,
+        *ctx_opaque_objects,  # Opaque objects (like FakeScriptObject) go after saved tensors
         *flat_bw_args_with_grads,
         *bw_tokens,
         *rng_args,
@@ -1802,7 +1808,9 @@ def _backward_prologue_functional(
     tangents_start_idx = (
         len(all_args) - num_flat_bw_args_with_grads - len(rng_args) - len(bw_tokens)
     )
-    assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors
+    assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors + len(
+        ctx_opaque_objects
+    )
     tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
     # TODO: figure out how to refactor the backward properly
@@ -2238,6 +2246,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
                 )
 
+                # Opaque objects (like FakeScriptObject) are saved separately
+                opaque_objects_saved_for_backwards = fw_outs[
+                    CompiledFunction.metadata.opaque_objects_saved_for_backwards_slice
+                ]
+
                 def mark_dynamic_activations(activations: list[torch.Tensor]):
                     for (
                         idx,
@@ -2255,6 +2268,9 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         ]
                     )
                 )
+                # Store opaque objects separately - they don't need tensor-specific handling
+                ctx.opaque_objects = list(opaque_objects_saved_for_backwards)
+
                 symint_outs = fw_outs[
                     CompiledFunction.metadata.symints_saved_for_backwards_slice
                 ]
@@ -2343,6 +2359,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 all_args = _backward_prologue_functional(
                     ctx.saved_tensors,
                     ctx.symints,
+                    ctx.opaque_objects,
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
                     *flat_args,
