@@ -4,12 +4,15 @@ Collective runtime estimation using CUDA events and power-of-2 rounding.
 
 from __future__ import annotations
 
+import functools
 import itertools
+import operator
 from functools import lru_cache
 from typing import Any, Optional
 
 import torch
 import torch.fx as fx
+from torch._inductor.fx_passes.bucketing import _schedulable_wait_node
 from torch._inductor.utils import clear_on_fresh_cache, tabulate_2d
 from torch._logging import getArtifactLogger, trace_structured
 from torch.fx.operator_schemas import normalize_function
@@ -225,14 +228,14 @@ def _log_compute_estimations(
         "Node",
         "Benchmarked Est(us)",
         "Analytical Est(us)",
-        "Diff(%)",
+        "Diff(ratio)",
         "Diff(us)",
         "Flops",
     ]
 
     rows = [
         [
-            _node_summary(node)[:120],
+            _node_summary(node),
             est_b * 1e3,
             est_a * 1e3,
             (est_a / est_b) if est_b > 0 else 0,
@@ -256,11 +259,73 @@ def _log_compute_estimations(
     )
 
 
+def _log_graph_collective_benchmarks(gm: fx.GraphModule, artifact_name: str) -> None:
+    from torch._inductor import fx_utils
+
+    collective_nodes = []
+    collective_keys = []
+    benchmarked = []
+
+    for node in gm.graph.nodes:
+        if _schedulable_wait_node(node):
+            start = node.args[0]
+            collective_nodes.append(start)
+            opt_args_kwargs = normalize_function(
+                start.target,  # type: ignore[arg-type]
+                args=start.args,
+                kwargs=start.kwargs,
+                normalize_to_only_use_kwargs=True,
+            )
+            assert opt_args_kwargs is not None
+            _, kwargs = opt_args_kwargs
+            group_name = kwargs.get("group_name", None)
+            group_size = kwargs.get("group_size", None)
+
+            # Extract first tensor input size in bytes
+            tensor_bytes: Optional[int] = None
+            success, args, kw = fx_utils.get_fake_args_kwargs(start)
+            if success:
+
+                def extract_first_tensor_bytes(t: torch.Tensor) -> torch.Tensor:
+                    nonlocal tensor_bytes
+                    if tensor_bytes is None:
+                        shape = [get_hint(dim) for dim in t.shape]
+                        if all(s is not None for s in shape):
+                            numel = functools.reduce(operator.mul, shape, 1)
+                            tensor_bytes = numel * t.dtype.itemsize
+                    return t
+
+                torch.utils._pytree.tree_map_only(
+                    torch.Tensor, extract_first_tensor_bytes, (args, kw)
+                )
+
+            collective_keys.append(
+                f"{start.target} group_size:{group_size} group_name:{group_name} input_bytes:{tensor_bytes}"
+            )
+            benchmarked_ms, _ = benchmark_collective_with_cuda_events(start, nruns=5)
+            benchmarked.append(benchmarked_ms if benchmarked_ms else 0.0)
+
+    if collective_nodes:
+        world_size = (
+            torch.distributed.get_world_size()
+            if torch.distributed.is_initialized()
+            else 1
+        )
+        _log_collective_benchmarks(
+            collective_nodes,
+            collective_keys,
+            benchmarked,
+            world_size,
+            artifact_name,
+        )
+
+
 def _log_collective_benchmarks(
     collective_nodes: list[fx.Node],
     collective_keys: list[str],
     benchmarked_medians: list[float],
     world_size: int,
+    artifact_name: str,
 ) -> None:
     """Log collective benchmarks with analytical comparisons for tlparse."""
     headers = [
@@ -268,8 +333,8 @@ def _log_collective_benchmarks(
         "Benchmarked(ms)",
         "NCCL Est(ms)",
         "Inductor Est(ms)",
-        "NCCL Diff(%)",
-        "Inductor Diff(%)",
+        "NCCL Diff(ratio)",
+        "Inductor Diff(ratio)",
     ]
 
     rows = []
@@ -303,7 +368,7 @@ def _log_collective_benchmarks(
 
         rows.append(
             [
-                key[:80],
+                key,
                 f"{benchmarked_ms:.4f}",
                 f"{nccl_ms:.4f}",
                 f"{inductor_ms:.4f}",
@@ -318,7 +383,7 @@ def _log_collective_benchmarks(
     trace_structured(
         "artifact",
         metadata_fn=lambda: {
-            "name": "fx_collectives_node_runtime_estimation",
+            "name": artifact_name,
             "encoding": "string",
         },
         payload_fn=lambda: log_str,
