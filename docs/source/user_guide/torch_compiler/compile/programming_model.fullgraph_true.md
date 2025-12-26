@@ -286,5 +286,7 @@ f(x)  # torch.save is not called
 
 Note that there are some restrictions to the kinds of functions that can be added to `ignore_logging_functions`.
 In particular:
-- The function should return `None`.
-- The function should be available at the module level. `logging.Logger` methods are excepted.
+- The function can take any arguments, but MUST return `None`.
+- Functions should either be module-level functions, `logging.Logger.<method>` (ignores that method for all `logging.Logger` instances) or `logger_obj.<method>` (ignores that method only for the specific `logger_obj` instance).
+
+Other functions may or may not be ignored due to implementation details. If you want to ignore a function that `ignore_logging_functions` is failing to ignore, please submit an issue.
