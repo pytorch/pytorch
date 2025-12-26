@@ -1069,20 +1069,37 @@ void add_out_sparse_csr(
         auto C_values_ptr = C_values.data_ptr<scalar_t>();
 
         auto handle = at::cuda::getCurrentCUDASparseHandle();
-        TORCH_CUDASPARSE_CHECK(cusparseSetPointerMode(handle, CUSPARSE_POINTER_MODE_HOST));
+#if AT_ROCM_ENABLED()
+        // ROCm: HOST pointer mode broken for csrgeam2, use DEVICE mode
+        TORCH_CUDASPARSE_CHECK(
+            cusparseSetPointerMode(handle, CUSPARSE_POINTER_MODE_DEVICE));
+        auto scalar_opts =
+            C_values.options().dtype(C.scalar_type()).layout(kStrided);
+        auto alpha_dev = at::empty_strided({1}, {1}, scalar_opts);
+        auto beta_dev = at::empty_strided({1}, {1}, scalar_opts);
+        alpha_dev.fill_(alpha_);
+        beta_dev.fill_(beta_);
+        const scalar_t* alpha_ptr = alpha_dev.data_ptr<scalar_t>();
+        const scalar_t* beta_ptr = beta_dev.data_ptr<scalar_t>();
+#else
+        TORCH_CUDASPARSE_CHECK(
+            cusparseSetPointerMode(handle, CUSPARSE_POINTER_MODE_HOST));
+        const scalar_t* alpha_ptr = &alpha_;
+        const scalar_t* beta_ptr = &beta_;
+#endif
 
         size_t buffer_size;
         at::cuda::sparse::csrgeam2_bufferSizeExt<scalar_t>(
             handle,
             m,
             n,
-            &alpha_,
+            alpha_ptr,
             desc.descriptor(),
             nnzA,
             A_values_ptr,
             A_crow_indices_ptr,
             A_col_indices_ptr,
-            &beta_,
+            beta_ptr,
             desc.descriptor(),
             nnzB,
             B_values_ptr,
@@ -1130,13 +1147,13 @@ void add_out_sparse_csr(
             handle,
             m,
             n,
-            &alpha_,
+            alpha_ptr,
             desc.descriptor(),
             nnzA,
             A_values_ptr,
             A_crow_indices_ptr,
             A_col_indices_ptr,
-            &beta_,
+            beta_ptr,
             desc.descriptor(),
             nnzB,
             B_values_ptr,
