@@ -10,6 +10,7 @@ import sympy  # noqa: TC002
 import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pallas import has_tpu_pallas
+from torch.utils._sympy.functions import ModularIndexing
 
 from .. import config
 from ..runtime.runtime_utils import torch_dtype_to_jax
@@ -193,6 +194,26 @@ class PallasKernelOverrides(OpOverrides):
         return f"jnp.where({cond}, {a}, {b})"
 
     @staticmethod
+    def masked(mask: str, body: Callable[[], str], other: float) -> str:
+        """
+        Computes body, but only uses the result where mask is true.
+        Where mask is false, uses the 'other' value instead.
+        """
+        result = body()
+        # Format the 'other' value properly for JAX
+        if isinstance(other, float):
+            if math.isnan(other):
+                other_str = "jnp.nan"
+            elif math.isinf(other):
+                other_str = "jnp.inf" if other > 0 else "-jnp.inf"
+            else:
+                other_str = repr(other)
+        else:
+            other_str = repr(other)
+        # Use jnp.where to select between result and other based on mask
+        return f"jnp.where({mask}, {result}, {other_str})"
+
+    @staticmethod
     def to_dtype(
         x: str,
         dtype: torch.dtype,
@@ -216,7 +237,10 @@ class PallasKernelOverrides(OpOverrides):
         """Convert a sympy expression to a JAX array indexing expression."""
         from ..utils import get_bounds_index_expr
 
-        idx_str = V.kernel.kexpr(V.kernel.prepare_indexing(expr))
+        # Prepare and rename indexing to register size symbols as kernel args
+        prepared = V.kernel.prepare_indexing(expr)
+        renamed = V.kernel.rename_indexing(prepared)
+        idx_str = V.kernel.kexpr(renamed)
         var = V.kernel.cse.generate(
             V.kernel.compute, idx_str, bounds=get_bounds_index_expr(expr)
         )
@@ -737,6 +761,55 @@ class PallasKernelOverrides(OpOverrides):
     def right_shift(a: str, b: str) -> str:
         return f"jnp.right_shift({a}, {b})"
 
+    # Random number generation operations
+    @staticmethod
+    def load_seed(name: str, offset: str) -> str:
+        """Load the random seed value from a buffer."""
+        # Load the seed from the buffer and add offset for uniqueness
+        seed_offset = V.kernel.args.seed_offset("load_seed_offset", offset)
+        return f"({V.kernel.args.input(name)}[0] + {seed_offset})"
+
+    @staticmethod
+    def rand(seed: str, offset: str) -> str:
+        """Generate uniform random numbers in [0, 1).
+
+        Uses JAX's threefry2x32 PRNG directly for vectorized random generation.
+        The seed provides the base key, offset provides per-element uniqueness.
+        """
+        # For vectorized random, we use jax.random.uniform with shape from offset
+        # Create a base key from seed, then use fold_in with vmap for per-element keys
+        # Use float32 dtype to match PyTorch's default
+        return (
+            f"jax.vmap(lambda o: jax.random.uniform("
+            f"jax.random.fold_in(jax.random.PRNGKey(jnp.uint32({seed})), jnp.uint32(o)), (), dtype=jnp.float32))"
+            f"(jnp.asarray({offset}).flatten()).reshape(jnp.asarray({offset}).shape)"
+        )
+
+    @staticmethod
+    def randn(seed: str, offset: str) -> str:
+        """Generate standard normal random numbers.
+
+        Uses JAX's threefry2x32 PRNG directly for vectorized random generation.
+        The seed provides the base key, offset provides per-element uniqueness.
+        """
+        # For vectorized random, use vmap to fold in each offset value
+        # Use float32 dtype to match PyTorch's default
+        return (
+            f"jax.vmap(lambda o: jax.random.normal("
+            f"jax.random.fold_in(jax.random.PRNGKey(jnp.uint32({seed})), jnp.uint32(o)), (), dtype=jnp.float32))"
+            f"(jnp.asarray({offset}).flatten()).reshape(jnp.asarray({offset}).shape)"
+        )
+
+    @staticmethod
+    def randint64(seed: str, offset: str, low: str, high: str) -> str:
+        """Generate random int64 values in [low, high)."""
+        # For vectorized random, use vmap to fold in each offset value
+        return (
+            f"jax.vmap(lambda o: jax.random.randint("
+            f"jax.random.fold_in(jax.random.PRNGKey(jnp.uint32({seed})), jnp.uint32(o)), (), {low}, {high}, dtype=jnp.int64))"
+            f"(jnp.asarray({offset}).flatten()).reshape(jnp.asarray({offset}).shape)"
+        )
+
 
 class PallasKernel(SIMDKernel):
     """
@@ -769,6 +842,9 @@ class PallasKernel(SIMDKernel):
         self.load_index_exprs: dict[str, sympy.Expr] = {}
         # Track outputs that need to be readable (for scatter operations)
         self.outputs_need_read: OrderedSet[str] = OrderedSet()
+        # Track if any load in this kernel used transpose
+        # Used to avoid double transpose (load + store)
+        self.has_transposed_load = False
 
     def check_bounds(
         self, expr: sympy.Expr, size: sympy.Expr, lower: bool, upper: bool
@@ -796,6 +872,10 @@ class PallasKernel(SIMDKernel):
         # Prepare and simplify the index
         prepared_index = self.prepare_indexing(index)
 
+        # Note: Block variable detection (im2col patterns) is handled in load()/store()
+        # where we have access to buffer dimensions. We check the buffer size
+        # against iteration variables there to detect gather patterns.
+
         # For simple single-symbol access (contiguous case), we can use [...]
         # which is more efficient as it operates on the entire array at once
         if isinstance(prepared_index, sympy.Symbol):
@@ -822,6 +902,13 @@ class PallasKernel(SIMDKernel):
         # Get the iteration variables for this kernel
         if not self.range_trees:
             return "..."
+
+        # Check for ModularIndexing - this is NOT contiguous access
+        # ModularIndexing is used for roll/wrap-around operations
+        if index.has(ModularIndexing):
+            # Generate actual index expression - iteration variables are already
+            # defined as jnp.arange arrays, so we just convert to JAX code
+            return self.kexpr(index)
 
         # Simplify the index
         index = V.graph.sizevars.simplify(index)
@@ -881,14 +968,14 @@ class PallasKernel(SIMDKernel):
                 if stride != 1:
                     all_unit_stride = False
                     break
-
             if all_unit_stride:
                 # Contiguous multi-dimensional access
                 return "..."
             else:
                 # Strided multi-dimensional access
-                # Since we call .contiguous() on inputs before passing to JAX,
-                # strided tensors become contiguous and we can just use [...]
+                # For most cases, inputs are made contiguous before passing to JAX,
+                # so strided tensors become contiguous and we can use [...]
+                # The buffer size check in load() handles im2col-like patterns
                 return "..."
 
         # For complex cases, use [...] since inputs are made contiguous
@@ -943,6 +1030,173 @@ class PallasKernel(SIMDKernel):
                 return True
         return False
 
+    def _get_expected_output_shape(self) -> list:
+        """Get the expected output shape from iteration variables.
+
+        Iteration variables are shaped for broadcasting. For 2D outputs:
+        - First var (e.g., y0) gets shape (1, N) - innermost dimension
+        - Second var (e.g., x1) gets shape (M, 1) - outermost dimension
+        The broadcast result is (M, N).
+        """
+        # Collect variable lengths
+        var_items = list(self.range_tree_nodes.items())
+        broadcast_vars = []
+        for var_sym, entry in var_items:
+            try:
+                length = int(entry.length) if hasattr(entry.length, "__int__") else None
+                if length is not None:
+                    broadcast_vars.append(length)
+            except (TypeError, ValueError):
+                pass
+
+        if len(broadcast_vars) <= 1:
+            return broadcast_vars
+
+        # For 2D case: variables are reshaped in reverse order
+        # First var is innermost (last dim), second var is outermost (first dim)
+        # So output shape is [second_var_length, first_var_length, ...]
+        return list(reversed(broadcast_vars))
+
+    def _is_transposed_access(self, name: str, index: sympy.Expr) -> bool:
+        """Check if buffer access needs transpose.
+
+        Transpose on load is needed when:
+        1. Non-square buffers: dimensions are swapped relative to iteration vars
+        2. Square buffers: index coefficient pattern indicates transposed access
+           (first iteration var has larger coefficient than second)
+        """
+        try:
+            buf_obj = V.graph.get_buffer(name)
+            buf_size = buf_obj.get_size()
+            buf_stride = buf_obj.get_layout().stride
+
+            # Only handle 2D buffers
+            if len(buf_size) != 2:
+                return False
+
+            size0 = int(buf_size[0]) if hasattr(buf_size[0], "__int__") else None
+            size1 = int(buf_size[1]) if hasattr(buf_size[1], "__int__") else None
+            if size0 is None or size1 is None or size0 <= 1 or size1 <= 1:
+                return False
+
+            # Check buffer stride - if column-major, don't transpose on load
+            s0 = int(buf_stride[0]) if hasattr(buf_stride[0], "__int__") else None
+            s1 = int(buf_stride[1]) if hasattr(buf_stride[1], "__int__") else None
+            if s0 is not None and s1 is not None and s0 < s1:
+                return False
+
+            # Get iteration variable info
+            var_items = list(self.range_tree_nodes.items())
+            if len(var_items) < 2:
+                return False
+
+            # Skip for reduction variables
+            has_reduction_var = any(
+                entry.prefix.startswith("r") for _, entry in var_items
+            )
+            if has_reduction_var:
+                return False
+
+            iter_sizes = []
+            for var, entry in var_items:
+                length = entry.length
+                if hasattr(length, "__int__"):
+                    iter_sizes.append(int(length))
+
+            if len(iter_sizes) < 2:
+                return False
+
+            # For 2D: iter_sizes[0] is inner, iter_sizes[1] is outer
+            expected_rows = iter_sizes[1]
+            expected_cols = iter_sizes[0]
+
+            # For non-square buffers: if shape is (cols, rows) instead of (rows, cols)
+            if size0 != size1:
+                if size0 == expected_cols and size1 == expected_rows:
+                    return True
+                return False
+
+            # For square buffers: only transpose if output is also column-major
+            # This distinguishes actual transpose operations from broadcasting
+            # Check by looking at the output buffer name (should end with the store target)
+            # We can't directly check output_buffers here, so check the store_mode
+            # on the kernel - if it's column-major output, it's transpose
+
+            # Get output buffer info from kernel args (may not be populated yet)
+            # Fall back to checking if we have column-major stores expected
+            output_is_column_major = False
+            try:
+                # Check all registered output buffers
+                for out_name in getattr(self.args, "output_buffers", {}).values():
+                    out_buf = V.graph.get_buffer(out_name)
+                    out_stride = out_buf.get_layout().stride
+                    if len(out_stride) >= 2:
+                        out_s0 = (
+                            int(out_stride[0])
+                            if hasattr(out_stride[0], "__int__")
+                            else None
+                        )
+                        out_s1 = (
+                            int(out_stride[1])
+                            if hasattr(out_stride[1], "__int__")
+                            else None
+                        )
+                        if (
+                            out_s0 is not None
+                            and out_s1 is not None
+                            and out_s0 < out_s1
+                        ):
+                            output_is_column_major = True
+                            break
+            except Exception:
+                pass
+
+            # Only use coefficient analysis if output is column-major
+            if not output_is_column_major:
+                return False
+
+            first_var = var_items[0][0]
+            second_var = var_items[1][0]
+
+            index = V.graph.sizevars.simplify(index)
+
+            def get_coefficient(var):
+                if index == var:
+                    return 1
+                if index.is_Add:
+                    for term in index.args:
+                        coeff = get_coefficient_from_term(term, var)
+                        if coeff is not None:
+                            return coeff
+                return get_coefficient_from_term(index, var)
+
+            def get_coefficient_from_term(term, var):
+                if term == var:
+                    return 1
+                if term.is_Mul:
+                    coeff = 1
+                    has_var = False
+                    for factor in term.args:
+                        if factor == var:
+                            has_var = True
+                        elif factor.is_number:
+                            coeff *= int(factor)
+                    if has_var:
+                        return coeff
+                return None
+
+            coeff_first = get_coefficient(first_var)
+            coeff_second = get_coefficient(second_var)
+
+            if coeff_first is not None and coeff_second is not None:
+                # Transposed access: first var (inner dim) has larger coefficient
+                return coeff_first > coeff_second
+
+            return False
+
+        except Exception:
+            return False
+
     def _get_index_expr(self, index: sympy.Expr) -> tuple[str, bool]:
         """
         Get the index expression string and whether it needs flattening.
@@ -960,9 +1214,16 @@ class PallasKernel(SIMDKernel):
             return self.kexpr(index), False
         else:
             index_str = self._get_index_str(index)
-            # Since inputs are made contiguous before passing to JAX,
-            # we can use direct indexing without flattening
-            return index_str, False
+            # Check if index contains ModularIndexing - this requires flattened access
+            # ModularIndexing is used for roll/wrap-around operations
+            needs_flatten = index.has(ModularIndexing) and index_str != "..."
+            # If index_str is an actual expression (not "..." or a slice pattern),
+            # we need flattened access because it uses block variables
+            if not needs_flatten and index_str != "...":
+                # Check if it's a simple slice pattern (::N or M::N)
+                if not ("::" in index_str or index_str.lstrip("-").isdigit()):
+                    needs_flatten = True
+            return index_str, needs_flatten
 
     def _determine_masked_ops_for_kernel(self) -> bool:
         """
@@ -1060,21 +1321,9 @@ class PallasKernel(SIMDKernel):
                 for s in buf_size:
                     buf_numel *= int(s) if hasattr(s, "__int__") else s
 
-                # Check if the index expression has non-unit strides
-                # If so, it's a genuine strided access pattern (like pooling)
-                # vs just a transposed tensor (which will be made contiguous)
+                # Get iteration variables used in the index expression
                 iter_vars = OrderedSet(self.range_tree_nodes.keys())
                 used_vars = index.free_symbols & iter_vars
-
-                has_non_unit_stride = False
-                for var in used_vars:
-                    var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(
-                        index, var
-                    )
-                    stride = BlockPatternMatcher.match_affine_block_expr(var_expr, var)
-                    if stride is not None and stride != 1:
-                        has_non_unit_stride = True
-                        break
 
                 # Compute the expected output size from iteration variables USED in the index
                 # Only multiply ranges of variables that appear in the index expression
@@ -1098,13 +1347,110 @@ class PallasKernel(SIMDKernel):
                 for l in used_range_lengths:
                     output_numel *= l
 
+                # Check if index has gather-pattern strides (im2col-like)
+                # For expression like 4*x3 + 224*x4 + y0 + 56*y1 + 3136*y2:
+                # - If buffer is contiguous and index coefficients don't match buffer strides,
+                #   this is a gather pattern that needs explicit indexing
+                # - If index coefficients match buffer strides (like 1 + 10*x for 10xN buffer),
+                #   it's standard strided access and [...] is correct after .contiguous()
+                has_non_unit_strides = False
+                try:
+                    buf_stride = buf_obj.get_layout().stride
+                    # Check if original buffer is contiguous (stride matches size)
+                    is_originally_contiguous = True
+                    expected_strides = [1]  # 1D buffers have stride 1
+                    if len(buf_size) > 1:
+                        expected_stride = 1
+                        expected_strides = []  # Reset for multi-dim
+                        for i in range(len(buf_size) - 1, -1, -1):
+                            expected_strides.insert(0, expected_stride)
+                            actual_stride = (
+                                int(buf_stride[i])
+                                if hasattr(buf_stride[i], "__int__")
+                                else None
+                            )
+                            if (
+                                actual_stride is None
+                                or actual_stride != expected_stride
+                            ):
+                                is_originally_contiguous = False
+                                break
+                            dim_size = (
+                                int(buf_size[i])
+                                if hasattr(buf_size[i], "__int__")
+                                else None
+                            )
+                            if dim_size is None:
+                                is_originally_contiguous = False
+                                break
+                            expected_stride *= dim_size
+
+                    if is_originally_contiguous:
+                        # Buffer is contiguous - check if access coefficients match buffer strides
+                        # Coefficients should be a subset of expected strides for normal access
+                        coefficients = OrderedSet()
+                        for var in used_vars:
+                            var_expr = BlockPatternMatcher.get_subexpr_involving_symbol(
+                                index, var
+                            )
+                            stride = BlockPatternMatcher.match_affine_block_expr(
+                                var_expr, var
+                            )
+                            if stride is None:
+                                stride = 1  # Variable without explicit coefficient has stride 1
+                            coefficients.add(
+                                int(stride) if hasattr(stride, "__int__") else stride
+                            )
+
+                        # If any coefficient is not in expected strides, it's a gather
+                        expected_stride_set = OrderedSet(expected_strides)
+                        for coef in coefficients:
+                            if coef not in expected_stride_set:
+                                has_non_unit_strides = True
+                                break
+                except Exception:
+                    pass
+
                 # Use strided indexing if:
-                # 1. Index has non-unit strides AND
-                # 2. Buffer size differs from expected output size
+                # 1. Buffer size differs from expected output size AND
+                # 2. There are iteration variables in the index (meaning we're accessing a subset)
+                # OR
+                # 3. Not all iteration variables are used (im2col-like patterns)
+                #    This handles cases like im2col where load uses 5 vars but store uses 2
+                #    The element counts may match but broadcast shapes won't align
+                # OR
+                # 4. Buffer is contiguous but index has non-unit strides (gather pattern)
+                # Note: inputs are made contiguous before passing to JAX, so we don't need
+                # to worry about transposed tensors here - the index expression directly
+                # corresponds to which elements to load from the contiguous buffer.
+                # Only consider "not all vars used" for truly multi-dim buffers.
+                # For 1D buffers or 2D broadcast buffers (with a dimension of size 1),
+                # using a subset of iteration vars is normal.
+                # Also check that the buffer has more dimensions than used vars,
+                # which indicates a gather pattern rather than simple broadcast.
+                buf_effective_dims = sum(
+                    1
+                    for s in buf_size
+                    if (int(s) if hasattr(s, "__int__") else None) != 1
+                )
+                # For im2col patterns: the index uses MORE vars than buffer has dims
+                # This means multiple iteration vars map to fewer buffer dimensions
+                # which is a gather pattern. For normal access (including broadcast),
+                # used_vars <= buf_dims.
+                not_all_vars_used = (
+                    len(used_vars) < len(iter_vars)
+                    and len(used_vars) > 0
+                    and buf_effective_dims > 1
+                    and len(used_vars) > len(buf_size)  # More vars than dims = gather
+                )
                 if (
-                    has_non_unit_stride
-                    and output_numel > 0
-                    and buf_numel != output_numel
+                    output_numel > 0
+                    and (
+                        buf_numel != output_numel
+                        or not_all_vars_used
+                        or has_non_unit_strides
+                    )
+                    and len(used_vars) > 0
                 ):
                     index_str = self._generate_strided_index(index)
                     needs_flatten = True
@@ -1114,16 +1460,78 @@ class PallasKernel(SIMDKernel):
         # Build load expression using string concatenation
         use_masked = index_str == "..." and not needs_flatten and self.use_masked_ops
 
+        # Check if we need flattened access for constant indices on multi-dim buffers
+        # This is needed for point scatter where a constant index should return a scalar
+        if not needs_flatten and index_str != "...":
+            try:
+                buf_obj = V.graph.get_buffer(name)
+                buf_size = buf_obj.get_size()
+                # If buffer is 0-dimensional (scalar), use [...] to access it
+                # JAX/Pallas doesn't support indexing scalars with [0]
+                if len(buf_size) == 0:
+                    index_str = "..."
+                # If buffer is multi-dimensional and index is a constant/scalar expression,
+                # use flattened access to get a single element
+                elif len(buf_size) > 1:
+                    has_iter_vars = self._has_iteration_vars(index)
+                    if not has_iter_vars:
+                        needs_flatten = True
+                    elif "::" in index_str:
+                        # For multi-dim buffers with strided slice patterns (like "::2"),
+                        # the slice applies to the first dimension only, which doesn't
+                        # match the semantics of the index expression (which operates on
+                        # the flattened buffer). Use flattened indexing instead.
+                        index_str = self._generate_strided_index(index)
+                        needs_flatten = True
+            except Exception:
+                pass
+
         if use_masked:
             # GPU masked load: flatten tensor and apply per-tensor mask
             mask_var = self._get_or_create_mask(name)
             load_expr = f"pltriton.load({buf}.at[pl.ds(block_size)], mask={mask_var})"
         elif needs_flatten:
-            # Flatten then index for non-contiguous access
+            # Flatten then index for non-contiguous access (gather operation)
             load_expr = f"{buf}[...].flatten()[{index_str}]"
         else:
             # Direct indexing for contiguous access
             load_expr = f"{buf}[{index_str}]"
+            # Check for transposed access using index expression coefficients
+            # For a 2D buffer with strides [S, 1], normal access is S*outer + inner
+            # Transposed access is outer + S*inner (coefficients are swapped)
+            if index_str == "...":
+                try:
+                    needs_transpose = self._is_transposed_access(name, index)
+                    if needs_transpose:
+                        load_expr = f"jnp.transpose({load_expr})"
+                        self.has_transposed_load = True
+                except Exception:
+                    pass
+            # Squeeze (N,1) intermediate buffers when kernel has 1D graph inputs
+            # to avoid wrong broadcasting: (N,) op (N,1) -> (N,N) instead of (N,)
+            # Check on demand since input_buffers may not be fully populated at __init__ time
+            is_intermediate_buffer = name.startswith("buf")
+            if is_intermediate_buffer:
+                # Check if any input buffer is a 1D graph input
+                has_1d_input = False
+                for buf_name in self.args.input_buffers:
+                    if not buf_name.startswith("buf"):
+                        try:
+                            buf_obj = V.graph.get_buffer(buf_name)
+                            buf_size = buf_obj.get_size()
+                            if len(buf_size) == 1:
+                                has_1d_input = True
+                                break
+                        except Exception:
+                            pass
+                if has_1d_input:
+                    try:
+                        buf_obj = V.graph.get_buffer(name)
+                        buf_size = buf_obj.get_size()
+                        if len(buf_size) == 2 and buf_size[-1] == 1:
+                            load_expr = f"jnp.squeeze({load_expr}, axis=-1)"
+                    except Exception:
+                        pass
 
         return self.cse.generate(
             self.compute,
@@ -1141,6 +1549,14 @@ class PallasKernel(SIMDKernel):
         We need to convert this to JAX advanced indexing with proper broadcasting.
         When there are multiple iteration variables, they need different shapes
         to form an outer product (grid) rather than broadcasting together.
+
+        Special case: For gather operations where a single iteration variable
+        and single indirect variable have the same extent, they should be
+        element-wise aligned, not broadcast into an outer product.
+
+        PyTorch advanced indexing semantics: When multiple indirect indices have
+        the same shape, they are paired element-wise (not outer product), and
+        the combined result dimension appears at the FRONT of the output.
         """
         # Get iteration variables
         iter_vars = OrderedSet(self.range_tree_nodes.keys())
@@ -1174,6 +1590,83 @@ class PallasKernel(SIMDKernel):
         # Get coefficients for indirect vars to determine output ordering
         indirect_coeffs = {str(s): get_coefficient(s) for s in indirect_var_syms}
 
+        # Special case: reduction var + single indirect var = element-wise gather
+        # Reduction vars (r prefix) iterate over the reduction dimension, and when paired
+        # with an indirect var, both are aligned to that dimension (element-wise).
+        # Pointwise vars form output dimensions and need the complex reshape code.
+        if len(used_iter_vars) == 1 and len(indirect_vars) == 1:
+            var = used_iter_vars[0]
+            var_name = str(var)
+            is_reduction_var = var in self.range_tree_nodes and self.range_tree_nodes[
+                var
+            ].prefix.startswith("r")
+
+            if is_reduction_var:
+                # Reduction var: simple element-wise gather
+                if var in self.range_tree_nodes:
+                    range_entry = self.range_tree_nodes[var]
+                    range_size = range_entry.length
+                    arange_expr = f"jnp.arange({self.kexpr(range_size)})"
+                    index_str = index_str.replace(var_name, arange_expr)
+                return index_str
+            # For pointwise vars, fall through to the complex reshape code
+
+        # Check if multiple indirect vars should be paired element-wise.
+        # In PyTorch, when multiple advanced indices have the same shape, they pair up.
+        # The paired dimension goes to the FRONT of the output.
+        # However, if indirect vars have different shapes (e.g., (1,4) and (4,1)),
+        # they form an outer product instead.
+        # We detect element-wise pairing when:
+        # 1. Multiple indirect vars exist
+        # 2. There's exactly ONE unused iteration variable (for the shared paired dim)
+        # For outer product, there are MULTIPLE unused iter vars (one per indirect dim)
+        paired_indirect = False
+        if len(indirect_vars) > 1:
+            # Count unused iteration variables (defined but not in index expression)
+            all_iter_vars = OrderedSet(self.range_tree_nodes.keys())
+            unused_iter_vars = all_iter_vars - used_iter_vars_set
+            # Element-wise pairing: one unused iter var for the shared paired dimension
+            # Outer product: multiple unused iter vars (one for each indirect var dimension)
+            paired_indirect = len(unused_iter_vars) == 1
+
+        if paired_indirect:
+            # Multiple indirect vars with element-wise pairing
+            # Output order: (paired_indirect_dim, iter_var_dims...)
+            # All indirect vars get the same shape: (N, 1, 1, ...) for first dim
+            # Iter vars come after: second dim onwards
+
+            # Count total output dims: 1 (paired) + len(iter_vars) for non-newaxis
+            # But some iter vars may be for newaxis dimensions (size 1)
+            n_output_dims = 1 + len(used_iter_vars)
+
+            # Reshape indirect vars to occupy the first dimension
+            for indirect_var in indirect_vars:
+                trailing_ones = ", 1" * len(used_iter_vars)
+                reshape_expr = f"{indirect_var}.reshape(-1{trailing_ones})"
+                index_str = index_str.replace(indirect_var, reshape_expr)
+
+            # Reshape iteration variables to occupy subsequent dimensions
+            # Sort by coefficient (descending) to determine order
+            for i, var in enumerate(used_iter_vars):
+                var_name = str(var)
+                if var in self.range_tree_nodes:
+                    range_entry = self.range_tree_nodes[var]
+                    range_size = range_entry.length
+
+                    # Shape: (1, ..., N, ..., 1) where N is at position i+1
+                    # Position 0 is for paired indirect vars
+                    shape_parts = ["1"] * n_output_dims
+                    shape_parts[i + 1] = self.kexpr(range_size)
+                    shape_str = ", ".join(shape_parts)
+                    arange_expr = (
+                        f"jnp.arange({self.kexpr(range_size)}).reshape({shape_str})"
+                    )
+
+                    index_str = index_str.replace(var_name, arange_expr)
+
+            return index_str
+
+        # Single indirect var case (or no indirect vars handled above)
         # Build a sorted list of all components by coefficient (descending)
         # Each component is (coeff, type, var) where type is 'iter' or 'indirect'
         all_components = []
@@ -1271,35 +1764,167 @@ class PallasKernel(SIMDKernel):
             store_expr = f"{out}[...] = {value}"
         else:
             # Check for scatter pattern (indirect indexing for stores)
-            scatter_info = self._detect_scatter_pattern(index)
+            scatter_info = self._detect_scatter_pattern(index, name)
 
             if scatter_info is not None:
-                # Use JAX scatter semantics for multi-dimensional scatter
-                indirect_var = scatter_info["indirect_var"]
-                dims_before = scatter_info["dims_before"]
-                dims_after = scatter_info["dims_after"]
+                is_point_scatter = scatter_info.get("is_point_scatter", False)
 
                 # Mark this output parameter as needing to be readable (for aliasing)
                 self.outputs_need_read.add(out)
                 alias_param = f"{out}_alias"
 
-                # Build index tuple: [:, :, ..., indirect_var, :, :, ...]
-                # Use slice(None) for full dimensions, indirect_var for scatter dim
-                index_parts = []
-                for var_name, size in dims_before:
-                    index_parts.append(":")
-                index_parts.append(indirect_var)
-                for var_name, size in dims_after:
-                    index_parts.append(":")
-
-                index_tuple = ", ".join(index_parts)
-
                 # Use .add() for atomic_add mode (accumulate=True), .set() otherwise
                 scatter_op = "add" if mode == "atomic_add" else "set"
-                # Use .at[index].set/add() syntax - must use .at[] on the full array
-                store_expr = f"{out}[...] = {alias_param}[...].at[{index_tuple}].{scatter_op}({value})"
+
+                if is_point_scatter:
+                    # Single-element scatter: out[fixed_dims..., indirect, fixed_dims...] = scalar
+                    indirect_var = scatter_info["indirect_var"]
+                    indirect_dim = scatter_info["indirect_dim"]
+                    output_shape = scatter_info["output_shape"]
+
+                    # Build index tuple with 0s for other dimensions, indirect_var for scatter dim
+                    # For a (2, 3) array with scatter at dim=1: out.at[0, indirect_var].set(val)
+                    index_parts = []
+                    for dim in range(len(output_shape)):
+                        if dim == indirect_dim:
+                            index_parts.append(indirect_var)
+                        else:
+                            index_parts.append("0")
+
+                    index_tuple = ", ".join(index_parts)
+                    store_expr = f"{out}[...] = {alias_param}[...].at[{index_tuple}].{scatter_op}({value})"
+                else:
+                    # Scatter with iteration variables
+                    indirect_var = scatter_info["indirect_var"]
+                    dims_before = scatter_info["dims_before"]
+                    dims_after = scatter_info["dims_after"]
+
+                    # Determine if this is element-wise or slice-based scatter:
+                    # - Element-wise: each iter var corresponds to one output dimension
+                    #   e.g., scatter(x, 0, ind, src) with x:(196,992), ind:(1,992), src:(1,992)
+                    #   Here x0 with range 992 matches output dim 1 exactly
+                    # - Slice-based: iter vars together cover multiple output dimensions
+                    #   e.g., index_put(a, [b], c) with a:(800,256,7,7), b:(601,), c:(601,256,7,7)
+                    #   Here x0 with range 12544=256*7*7 covers dims 1,2,3 together
+                    #
+                    # Heuristic: if # iter vars in store == # remaining dims, it's element-wise
+                    # BUT: if there are more iter vars in the kernel than in the store index,
+                    # then some iter vars are embedded in the indirect var, requiring slice scatter
+                    try:
+                        buf = V.graph.get_buffer(name)
+                        output_ndim = len(buf.get_size())
+                    except Exception:
+                        output_ndim = 0
+
+                    num_iter_vars_in_store = len(dims_before) + len(dims_after)
+                    # Total iteration variables in the kernel
+                    total_kernel_iter_vars = len(self.range_tree_nodes)
+                    # indirect takes 1 dim, iter vars should cover the rest
+                    remaining_dims = output_ndim - 1  # dims other than indirect
+
+                    # Element-wise scatter requires:
+                    # 1. num iter vars in store == remaining dims
+                    # 2. All kernel iter vars appear in store (none embedded in indirect)
+                    is_element_wise = (
+                        num_iter_vars_in_store == remaining_dims
+                        and num_iter_vars_in_store == total_kernel_iter_vars
+                    )
+
+                    if is_element_wise:
+                        # Element-wise scatter: use iteration variable names
+                        # For 2D output with 1 iter var: no reshaping needed (both 1D)
+                        # For 3D+ with multiple iter vars: reshape indirect var for broadcasting
+                        # e.g., for 3D output with indirect at dim 1 and iter vars at dims 0,2:
+                        #   iter vars are reshaped to (n,1,1) and (1,1,m)
+                        #   indirect_var shape (k,) needs to become (1, k, 1)
+                        index_parts = []
+                        for var_name, size in dims_before:
+                            index_parts.append(var_name)
+
+                        # Reshape indirect var only if needed for broadcasting with
+                        # multi-dimensional iter vars (i.e., more than 1 iter var)
+                        n_leading = len(dims_before)
+                        n_trailing = len(dims_after)
+                        if n_leading > 0 and n_trailing > 0:
+                            # Middle dimension: needs reshaping for both before and after
+                            leading_ones = "None, " * n_leading
+                            trailing_nones = ", None" * n_trailing
+                            indirect_reshaped = (
+                                f"{indirect_var}[{leading_ones}...{trailing_nones}]"
+                            )
+                        else:
+                            # First or last dimension: no reshaping needed
+                            indirect_reshaped = indirect_var
+                        index_parts.append(indirect_reshaped)
+
+                        for var_name, size in dims_after:
+                            index_parts.append(var_name)
+                    else:
+                        # Slice-based scatter: use : for iteration dimensions
+                        index_parts = []
+                        for var_name, size in dims_before:
+                            index_parts.append(":")
+                        index_parts.append(indirect_var)
+                        for var_name, size in dims_after:
+                            index_parts.append(":")
+
+                    index_tuple = ", ".join(index_parts)
+                    store_expr = f"{out}[...] = {alias_param}[...].at[{index_tuple}].{scatter_op}({value})"
             else:
                 index_str, needs_flatten = self._get_index_expr(index)
+
+                # Check for im2col-like patterns where store uses block variables
+                # but load doesn't. For cat/expand:
+                # - Load uses x0, store uses x0+128*x1 → x2
+                # - Both load and store prepared indices share the same block vars
+                # - OR: Load has no vars (broadcasts), store has block vars
+                # For im2col:
+                # - Load uses 4*x3+224*x4+... (NOT compressed, coefficients irregular)
+                # - Store uses x3+14*x4+... → x6+196*y5 (compressed, coefficients form products)
+                # - Store prepared uses block vars, load prepared doesn't
+                if index_str == "..." and not needs_flatten:
+                    try:
+                        prepared_index = self.prepare_indexing(index)
+                        iter_vars = OrderedSet(self.range_tree_nodes.keys())
+                        store_orig_vars = index.free_symbols & iter_vars
+                        store_prep_vars = (
+                            prepared_index.free_symbols
+                            if hasattr(prepared_index, "free_symbols")
+                            else OrderedSet()
+                        ) & iter_vars
+                        new_vars = store_prep_vars - store_orig_vars
+                        # Only trigger if store introduces new block vars
+                        if new_vars and len(store_orig_vars) > 1:
+                            # Check if loads are compatible with broadcast or cat pattern
+                            # cat: load orig vars ⊂ store orig vars (load uses subset)
+                            # im2col: load orig vars = store orig vars but load doesn't compress
+                            has_im2col_pattern = False
+                            for load_index in self.load_index_exprs.values():
+                                load_orig_vars = load_index.free_symbols & iter_vars
+                                if load_orig_vars:
+                                    # Load has iteration variables
+                                    # cat: load vars are strict subset of store vars
+                                    # im2col: load vars equal store vars but load doesn't compress
+                                    if load_orig_vars == store_orig_vars:
+                                        # Same vars - check if load gets compressed too
+                                        prep_load = self.prepare_indexing(load_index)
+                                        load_prep_vars = (
+                                            prep_load.free_symbols
+                                            if hasattr(prep_load, "free_symbols")
+                                            else OrderedSet()
+                                        ) & iter_vars
+                                        # If store compresses but load doesn't, it's im2col
+                                        if (
+                                            load_orig_vars == load_prep_vars
+                                            and store_prep_vars != store_orig_vars
+                                        ):
+                                            has_im2col_pattern = True
+                                            break
+                            if has_im2col_pattern:
+                                index_str = self._generate_strided_index(prepared_index)
+                                needs_flatten = True
+                    except Exception:
+                        pass
 
                 # Build store expression using string concatenation
                 use_masked = (
@@ -1316,29 +1941,154 @@ class PallasKernel(SIMDKernel):
                     # - Mixed indexing producing flat results needing reshape
                     # - Squeeze operations where value has more dims than output
                     # - Scalar values that need to be broadcast to the output shape
+                    # - Expand/broadcast operations (e.g., cat((x, x), 0) -> expand)
+                    # - Transpose for column-major outputs when computation is row-major
                     # - If shapes already match, operations are no-ops.
-                    # Use jnp.full for scalars (fills output with value),
-                    # otherwise reshape for arrays with matching element count.
+                    # Use jnp.full for scalars, broadcast_to for broadcast-compatible shapes,
+                    # and reshape for same-size different-shape arrays.
+
+                    # Check if output needs transpose:
+                    # - Output has column-major stride (s0 < s1)
+                    # - But input(s) have row-major stride
+                    # - This indicates an explicit transpose operation in the IR
+                    # If inputs were also column-major, no transpose needed (.copy handles it)
+                    # Also skip if we already transposed on load (avoid double transpose)
+                    needs_transpose = False
+                    if not self.has_transposed_load:
+                        try:
+                            buf = V.graph.get_buffer(name)
+                            buf_stride = buf.get_layout().stride
+                            buf_size = buf.get_size()
+                            if len(buf_stride) == 2 and len(buf_size) == 2:
+                                size0 = (
+                                    int(buf_size[0])
+                                    if hasattr(buf_size[0], "__int__")
+                                    else None
+                                )
+                                size1 = (
+                                    int(buf_size[1])
+                                    if hasattr(buf_size[1], "__int__")
+                                    else None
+                                )
+                                s0 = (
+                                    int(buf_stride[0])
+                                    if hasattr(buf_stride[0], "__int__")
+                                    else None
+                                )
+                                s1 = (
+                                    int(buf_stride[1])
+                                    if hasattr(buf_stride[1], "__int__")
+                                    else None
+                                )
+                                # Output is column-major
+                                if (
+                                    s0 is not None
+                                    and s1 is not None
+                                    and s0 < s1
+                                    and size0 is not None
+                                    and size1 is not None
+                                    and size0 > 1
+                                    and size1 > 1
+                                ):
+                                    # Check if any input is column-major
+                                    any_input_column_major = False
+                                    for inp_name in self.args.input_buffers:
+                                        try:
+                                            inp_buf = V.graph.get_buffer(inp_name)
+                                            inp_stride = inp_buf.get_layout().stride
+                                            if len(inp_stride) == 2:
+                                                inp_s0 = (
+                                                    int(inp_stride[0])
+                                                    if hasattr(inp_stride[0], "__int__")
+                                                    else None
+                                                )
+                                                inp_s1 = (
+                                                    int(inp_stride[1])
+                                                    if hasattr(inp_stride[1], "__int__")
+                                                    else None
+                                                )
+                                                if (
+                                                    inp_s0 is not None
+                                                    and inp_s1 is not None
+                                                    and inp_s0 < inp_s1
+                                                ):
+                                                    any_input_column_major = True
+                                                    break
+                                        except Exception:
+                                            pass
+                                    # Transpose only if output is column-major but no inputs are
+                                    if not any_input_column_major:
+                                        needs_transpose = True
+                        except Exception:
+                            pass
+
+                    if needs_transpose:
+                        store_expr = (
+                            f"{out}[...] = ("
+                            f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
+                            f"else jnp.transpose(jnp.asarray({value})))"
+                        )
+                    else:
+                        store_expr = (
+                            f"{out}[...] = ("
+                            f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
+                            f"else (jnp.broadcast_to(jnp.asarray({value}), {out}.shape) "
+                            f"if jnp.asarray({value}).size != {out}.size "
+                            f"else jnp.asarray({value}).reshape({out}.shape)))"
+                        )
+                elif needs_flatten:
+                    # Block variable indexing (e.g., im2col) - use flattened scatter
+                    # The index_str contains an expression like "x6 + 196*y5" which computes
+                    # flat indices. Both the index and value need to be flattened.
                     store_expr = (
-                        f"{out}[...] = (jnp.full({out}.shape, {value}) "
-                        f"if jnp.asarray({value}).ndim == 0 "
-                        f"else jnp.asarray({value}).reshape({out}.shape))"
+                        f"{out}[...] = {out}[...].flatten().at[({index_str}).flatten()].set("
+                        f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
                     )
                 else:
                     # Direct indexed assignment
-                    store_expr = f"{out}[{index_str}] = {value}"
+                    # Check if we need special handling for constant indices on multi-dim outputs
+                    # e.g., storing a scalar to a (1,1,1) output with index 0
+                    has_indirect = self._has_indirect_vars(index)
+                    try:
+                        buf = V.graph.get_buffer(name)
+                        buf_size = buf.get_size()
+                        if len(buf_size) > 1 and not self._has_iteration_vars(index):
+                            # Multi-dim output with constant index - use [...] for full assignment
+                            # This handles cases like out_ptr0[0] where output is (1,1,1)
+                            store_expr = (
+                                f"{out}[...] = ("
+                                f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
+                                f"else (jnp.broadcast_to(jnp.asarray({value}), {out}.shape) "
+                                f"if jnp.asarray({value}).size != {out}.size "
+                                f"else jnp.asarray({value}).reshape({out}.shape)))"
+                            )
+                        elif has_indirect:
+                            # Indirect indexed store (scatter): arr[indices] = value
+                            # When value is scalar but indices is an array, JAX requires
+                            # the value to match the indexed result shape. Broadcast scalar.
+                            store_expr = (
+                                f"{out}[{index_str}] = ("
+                                f"jnp.full({index_str}.shape, {value}) "
+                                f"if jnp.asarray({value}).ndim == 0 else {value})"
+                            )
+                        else:
+                            store_expr = f"{out}[{index_str}] = {value}"
+                    except Exception:
+                        store_expr = f"{out}[{index_str}] = {value}"
 
         self.stores.writeline(store_expr)
         # Track which output param this store uses for filtering in codegen_kernel
         self.store_with_output.append((out, store_expr))
 
-    def _detect_scatter_pattern(self, index: sympy.Expr) -> Optional[dict]:
+    def _detect_scatter_pattern(
+        self, index: sympy.Expr, output_name: str = ""
+    ) -> Optional[dict]:
         """
         Detect if the index expression represents a scatter operation.
 
         Scatter patterns occur when:
         1. There's an indirect variable (tmp*) in the index
-        2. Iteration variables cover other dimensions
+        2. Optionally, iteration variables cover other dimensions
 
         Returns:
             dict with keys:
@@ -1346,14 +2096,14 @@ class PallasKernel(SIMDKernel):
                 - 'indirect_dim': which dimension it indexes (0-based from output shape)
                 - 'dims_before': list of (var_name, size) for dims before indirect
                 - 'dims_after': list of (var_name, size) for dims after indirect
+                - 'is_point_scatter': True if single-element scatter (no iter vars)
+                - 'output_shape': shape of output buffer (for point scatter)
             or None if not a scatter pattern
         """
         has_indirect = self._has_indirect_vars(index)
         has_iter_vars = self._has_iteration_vars(index)
 
-        # Require both indirect and iteration variables for now
-        # Single-element scatter (no iter vars) is a different pattern
-        if not has_indirect or not has_iter_vars:
+        if not has_indirect:
             return None
 
         # Get iteration and indirect variables
@@ -1382,6 +2132,41 @@ class PallasKernel(SIMDKernel):
         indirect_coeff = get_coefficient(indirect_sym)
         if indirect_coeff == 0:
             return None
+
+        # Handle point scatter (no iteration variables)
+        # This is single-element scatter where indirect var indexes one dimension
+        if not has_iter_vars:
+            # Try to get output shape to determine which dimension indirect indexes
+            output_shape = None
+            if output_name:
+                try:
+                    buf = V.graph.get_buffer(output_name)
+                    output_shape = [int(s) for s in buf.get_size()]
+                except Exception:
+                    pass
+
+            if output_shape is None or len(output_shape) < 2:
+                return None
+
+            # Determine which dimension the indirect var indexes based on coefficient
+            # coefficient = product of sizes of all following dimensions
+            # For a (2, 3) array: dim 0 has coeff 3, dim 1 has coeff 1
+            cumulative_size = 1
+            indirect_dim = len(output_shape) - 1  # default to last dim
+            for dim in range(len(output_shape) - 1, -1, -1):
+                if indirect_coeff == cumulative_size:
+                    indirect_dim = dim
+                    break
+                cumulative_size *= output_shape[dim]
+
+            return {
+                "indirect_var": indirect_var,
+                "indirect_dim": indirect_dim,
+                "dims_before": [],
+                "dims_after": [],
+                "is_point_scatter": True,
+                "output_shape": output_shape,
+            }
 
         # Collect all variables with their coefficients
         all_vars = []
@@ -1447,6 +2232,8 @@ class PallasKernel(SIMDKernel):
             "indirect_dim": indirect_pos,
             "dims_before": dims_before,
             "dims_after": dims_after,
+            "is_point_scatter": False,
+            "output_shape": None,
         }
 
     def reduction(
@@ -1467,6 +2254,10 @@ class PallasKernel(SIMDKernel):
         The reduction happens over the loaded block of data.
         """
         assert self.inside_reduction
+
+        # Handle welford_reduce using the fallback (computes via sum reductions)
+        if reduction_type == "welford_reduce":
+            return self.welford_reduce_fallback(dtype, value)
 
         if isinstance(value, tuple):
             raise Unsupported(
@@ -1540,19 +2331,23 @@ class PallasKernel(SIMDKernel):
             else:
                 reduction_expr = f"jnp.bitwise_xor.reduce({value})"
         elif reduction_type in ("argmax", "argmin"):
-            # For argmax/argmin, we need to preserve the axis information
-            # because the result is indices, not values.
+            # For argmax/argmin, the result is indices into the reduction dimension.
+            # Unlike sum/max/min, we can't just reshape because the indices depend
+            # on which axis we reduce over. We need to determine the correct axis.
             reduction_op = reduction_ops[reduction_type]
             # Check if this is a true partial reduction (pointwise numel > 1)
             # When pointwise_numel == 1, it's effectively a full reduction to scalar
             is_partial_reduction = (
-                has_pointwise and pointwise_numel and pointwise_numel > 1
+                has_pointwise
+                and pointwise_numel
+                and pointwise_numel > 1
+                and reduction_numel
             )
             if is_partial_reduction and n_reduction_dims > 0:
                 # Partial reduction: determine the reduction axis from load index
                 # The reduction variable's coefficient in the index expression tells us its stride
                 # Higher stride = outer axis (lower axis number in row-major order)
-                reduction_axis = 0  # Default to axis 0
+                reduction_axis = -1  # Default to last axis
                 if self.load_index_exprs:
                     # Get the first load index expression
                     load_index = next(iter(self.load_index_exprs.values()))
@@ -1585,48 +2380,29 @@ class PallasKernel(SIMDKernel):
                                 pw_stride = 1
                             # Higher stride = earlier (outer) axis
                             # For 2D: axis 0 has stride = dim1_size, axis 1 has stride = 1
-                            reduction_axis = 0 if r_stride > pw_stride else 1
-                if n_reduction_dims == 1:
-                    reduction_expr = f"{reduction_op}({value}, axis={reduction_axis})"
-                else:
-                    # Multiple reduction dims - reduce over all of them
-                    axes = tuple(range(n_reduction_dims))
-                    reduction_expr = f"{reduction_op}({value}, axis={axes})"
+                            reduction_axis = 0 if r_stride > pw_stride else -1
+                reduction_expr = f"{reduction_op}({value}, axis={reduction_axis})"
             else:
                 # Full reduction to scalar
                 reduction_expr = f"{reduction_op}({value})"
         elif reduction_type in reduction_ops:
-            if (
+            # Check for true partial reduction (pointwise_numel > 1 means we have
+            # actual pointwise dimensions, not just a scalar placeholder)
+            is_partial_reduction = (
                 has_pointwise
-                and pointwise_numel
+                and pointwise_numel is not None
+                and pointwise_numel > 1
                 and reduction_numel
-                and pointwise_sizes
-            ):
+            )
+            if is_partial_reduction:
                 # For partial reductions, we need to:
-                # 1. Move pointwise axes to the front and reduction axes to the back
-                # 2. Reshape to (pointwise_numel, reduction_numel)
-                # 3. Reduce over the last axis
-                #
-                # We use moveaxis to reorder: first move axes matching pointwise sizes
-                # to the front, then the remaining (reduction) axes go to the back.
-                # Finally reshape and reduce.
-                #
-                # Generate code to dynamically determine and reorder axes:
-                pw_sizes_str = str(pointwise_sizes)
+                # 1. Find which axes are reduction axes (contiguous axes whose product = reduction_numel)
+                # 2. Move pointwise axes to front, reduction axes to back
+                # 3. Reshape to (pointwise_numel, reduction_numel) and reduce over last axis
+                # 4. Reshape output with 1s in reduced dims for proper broadcasting
                 reduction_op = reduction_ops[reduction_type]
-                reduction_expr = (
-                    f"(lambda v: (lambda pw_sizes: "
-                    f"{reduction_op}(v.reshape(-1, {reduction_numel}), axis=-1) "
-                    f"if v.ndim == 2 else "
-                    f"(lambda input_shape, pw_axes: "
-                    f"{reduction_op}("
-                    f"jnp.moveaxis(v, pw_axes, list(range(len(pw_axes)))).reshape({pointwise_numel}, -1), axis=-1)"
-                    f")("
-                    f"v.shape, "
-                    f"[i for i, s in enumerate(v.shape) if s in pw_sizes][:len(pw_sizes)]"
-                    f")"
-                    f")({pw_sizes_str}))({value})"
-                )
+                # Use a helper to find reduction axes by product matching
+                reduction_expr = f"_pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             else:
                 # Full reduction to scalar
                 reduction_expr = f"{reduction_ops[reduction_type]}({value})"
@@ -1671,12 +2447,15 @@ class PallasKernel(SIMDKernel):
         code = IndentedBuffer()
 
         # Define the Pallas kernel: accepts refs, uses broadcasted expressions
-        arg_defs, _, _, _ = self.args.python_argdefs()
+        arg_defs, call_args, _, _ = self.args.python_argdefs()
         kernel_params = [a.name for a in arg_defs]
         pure_out_params = [p for p in kernel_params if p.startswith("out_ptr")]
         output_params = [
             p for p in kernel_params if p.startswith(("out_ptr", "in_out_ptr"))
         ]
+        # Identify size variable parameters (scalars like load_seed_offset)
+        size_var_names = OrderedSet(self.args.sizevars.values())
+        size_var_params = [p for p in kernel_params if p in size_var_names]
         if not output_params:
             raise RuntimeError("Pallas backend requires at least one output buffer")
 
@@ -1702,25 +2481,48 @@ class PallasKernel(SIMDKernel):
         interpret_literal = "True" if interpret_is_cpu else "False"
 
         # For GPU (Triton backend), import pltriton for masked loads/stores
-        # Import math at module level if we'll use it for masked ops
+        # Import math for masked ops and symbolic expressions (e.g., math.floor, math.log2)
         imports = (
             """
-            import functools
-            """
-            + ("import math\n            " if self.use_masked_ops else "")
-            + """import torch
-            import jax
-            import jax.numpy as jnp
-            from jax.experimental import pallas as pl
-            from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
-            """
+import functools
+import math
+import torch
+import jax
+import jax.numpy as jnp
+from jax.experimental import pallas as pl
+from torch._inductor.runtime.runtime_utils import torch_dtype_to_jax_runtime
+def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
+    # Helper for partial reductions: reorders axes and reduces
+    # Returns result with keepdims-style shape for proper in-kernel broadcasting
+    shape = tuple(v.shape)
+    # Find contiguous axes whose product = red_numel (search from right)
+    red_axes = None
+    for i in range(len(shape) - 1, -1, -1):
+        prod = 1
+        for j in range(i, -1, -1):
+            prod *= shape[j]
+            if prod == red_numel:
+                red_axes = list(range(j, i + 1))
+                break
+        if red_axes is not None:
+            break
+    if red_axes is None:
+        red_axes = [len(shape) - 1]
+    # Build output shape with 1s for reduced dimensions (keepdims style)
+    out_shape = tuple(1 if i in red_axes else s for i, s in enumerate(shape))
+    # Move pointwise axes to front, reduction axes to back
+    pw_axes = [i for i in range(len(shape)) if i not in red_axes]
+    reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
+    result = reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
+    return result.reshape(out_shape)
+"""
             + (
-                "\n            from jax.experimental.pallas import triton as pltriton"
+                "\nfrom jax.experimental.pallas import triton as pltriton"
                 if not interpret_is_cpu
                 else ""
             )
             + (
-                "\n            from torch._inductor.runtime.runtime_utils import next_power_of_2"
+                "\nfrom torch._inductor.runtime.runtime_utils import next_power_of_2"
                 if self.use_masked_ops
                 else ""
             )
@@ -1907,21 +2709,28 @@ class PallasKernel(SIMDKernel):
 
         jit_wrapper_name = f"{kernel_name}_jit_wrapper"
         donate_indices = []
+        # Offset by 2 for (out_shapes, out_dtypes), plus size_var_params count
+        base_offset = 2 + len(size_var_params)
         for idx, name in enumerate(kernel_input_params):
             if (name in alias_params) or name.startswith("in_out_ptr"):
-                donate_indices.append(idx + 2)
+                donate_indices.append(idx + base_offset)
         if donate_indices:
             donate_literal = "(" + ", ".join(str(x) for x in donate_indices) + ",)"
         else:
             donate_literal = "()"
+        # Size variables are static args (after out_shapes and out_dtypes)
+        static_argnums = list(range(2 + len(size_var_params)))
+        static_argnums_literal = "(" + ", ".join(str(x) for x in static_argnums) + ",)"
         code.writeline(
             "@functools.partial("
-            "jax.jit, static_argnums=(0, 1), donate_argnums="
+            f"jax.jit, static_argnums={static_argnums_literal}, donate_argnums="
             f"{donate_literal})"
         )
-        code.writeline(
-            f"def {jit_wrapper_name}(out_shapes, out_dtypes, {', '.join(kernel_input_params)}):"
+        # Include size_var_params in wrapper signature
+        wrapper_params = (
+            ["out_shapes", "out_dtypes"] + size_var_params + kernel_input_params
         )
+        code.writeline(f"def {jit_wrapper_name}({', '.join(wrapper_params)}):")
         with code.indent():
             code.writeline("out_specs = tuple(")
             code.writeline("    jax.ShapeDtypeStruct(shape, dtype)")
@@ -1958,12 +2767,18 @@ class PallasKernel(SIMDKernel):
                     alias_pairs.append((input_idx, out_idx))
             alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
 
-            # For masked ops, wrap kernel with functools.partial to pass block_size
-            kernel_arg = (
-                f"functools.partial({kernel_name}_kernel, block_size=block_size),"
-                if self.use_masked_ops
-                else f"{kernel_name}_kernel,"
-            )
+            # Wrap kernel with functools.partial to pass scalar arguments
+            # (size variables and block_size for masked ops)
+            partial_args = []
+            for sv_param in size_var_params:
+                partial_args.append(f"{sv_param}={sv_param}")
+            if self.use_masked_ops:
+                partial_args.append("block_size=block_size")
+
+            if partial_args:
+                kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
+            else:
+                kernel_arg = f"{kernel_name}_kernel,"
             code.writeline("return pl.pallas_call(")
             code.writeline("    " + kernel_arg)
 
@@ -2047,15 +2862,13 @@ class PallasKernel(SIMDKernel):
             for ptr in pointer_tail:
                 arg_name_map[ptr] = f"{ptr}_jax"
 
-            if kernel_input_params:
-                alias_args_str = ", ".join(
-                    arg_name_map[name] for name in kernel_input_params
-                )
-                code.writeline(
-                    f"res = {jit_wrapper_name}(out_shapes, out_dtypes, {alias_args_str})"
-                )
-            else:
-                code.writeline(f"res = {jit_wrapper_name}(out_shapes, out_dtypes)")
+            # Build the jit_wrapper call with size vars and tensor args
+            wrapper_call_args = ["out_shapes", "out_dtypes"]
+            # Add size variable params (they're already available as locals in main)
+            wrapper_call_args.extend(size_var_params)
+            # Add tensor args (with _jax suffix)
+            wrapper_call_args.extend(arg_name_map[name] for name in kernel_input_params)
+            code.writeline(f"res = {jit_wrapper_name}({', '.join(wrapper_call_args)})")
             if copy_output_indices:
                 code.writeline(
                     "result_values = res if isinstance(res, tuple) else (res,)"
