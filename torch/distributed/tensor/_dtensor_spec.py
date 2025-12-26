@@ -2,13 +2,13 @@ import itertools
 import math
 from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, cast, NamedTuple, Optional
+from typing import Any, cast, NamedTuple
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor.placement_types import (
+    _MaskPartial,
     _StridedShard,
-    MaskPartial,
     Partial,
     Placement,
     Replicate,
@@ -102,7 +102,7 @@ class DTensorSpec:
     @staticmethod
     def _normalize_placements_into_shard_order(
         placements: tuple[Placement, ...], mesh: DeviceMesh
-    ) -> tuple[tuple[Placement, ...], Optional[ShardOrder]]:
+    ) -> tuple[tuple[Placement, ...], ShardOrder | None]:
         # If the returned shard_order is None, it means the StridedShard/Shard
         # combinations can't be interpreted as shard order.
         # If no _StridedShard in placements, we create default order.
@@ -321,10 +321,10 @@ class DTensorSpec:
                     # _StridedShard is not convertible to ShardOrder
                     return None
             else:
-                if not isinstance(cur_placement, Replicate | Partial | MaskPartial):
+                if not isinstance(cur_placement, Replicate | Partial | _MaskPartial):
                     raise ValueError(
                         f"Unsupported placement type {type(cur_placement)} encountered in "
-                        f"{placements}; expected Replicate, Partial, or MaskPartial."
+                        f"{placements}; expected Replicate, Partial, or _MaskPartial."
                     )
         for tensor_dim in range(max_tensor_dim):
             if len(tensor_dim_to_mesh_dims_order[tensor_dim]) > 0:

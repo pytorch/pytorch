@@ -577,6 +577,12 @@ capture_autograd_function = True
 # This flag is ignored and maintained for backwards compatibility.
 capture_func_transforms = True
 
+# Enable capturing torch.profiler.record_function ops in the graph
+# When True, profiler ops are emitted to the graph and preserved through
+# compilation (make_fx, functionalization). When False, profiler ops
+# are treated as nullcontext.
+capture_profiler_record_function: bool = False
+
 # If to log Dynamo compilation metrics into log files (for OSS) and Scuba tables (for fbcode).
 log_compilation_metrics = True
 
@@ -651,12 +657,28 @@ strict_precompile = os.environ.get("TORCH_STRICT_PRECOMPILE", "0") == "1"
 # registering backward hooks on tensors contained within the compiled region.
 compiled_autograd = False
 
+# We have small decompositions for some optimizer ops such as
+# addcmul and foreach_addcmul which avoid item() graph breaks by decomposing
+# into their constituent ops. This flag controls whether we use these decompositions
+# This can affect numerics for non-inductor backends.
+enable_dynamo_decompositions = True
+
 
 # Checks if we should graph break when seeing nn parameter constructors
 # in dynamo; this is so that we clearly fail and ask users to move outside
 # the function as opposed to trying to support the ctor with unclear semantics
 # See https://github.com/pytorch/pytorch/issues/157452 for more context
 graph_break_on_nn_param_ctor = True
+
+# If True, enable calling torch.compile inside __torch_dispatch__ handlers.
+# When enabled:
+# 1. __torch_dispatch__ methods are automatically wrapped with torch._dynamo.disable
+# 2. torch.compile is skipped when active TorchDispatchModes are on the stack
+#    (unless they have ignore_compile_internals=True)
+# This allows torch.compile to work inside dispatch mode handlers once all
+# ambient modes have been "consumed".
+# See https://github.com/pytorch/pytorch/issues/155331 for more context.
+inline_torch_dispatch_torch_compile = True
 
 # Eager AC/SAC reapplies the mutations (like global dict mutations) in the
 # backward during the recomputation of forward. torch.compile has no easy way to
@@ -764,8 +786,9 @@ enable_aot_compile = False
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
-# Deprecated! Please use the config in torch/fx/experimental/_config instead.
-enrich_profiler_metadata: bool = False
+# Experimental flag to enable regional compile on invoke_subgraph HOP.
+# For testing only!
+enable_invoke_subgraph_regional_compile: bool = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
