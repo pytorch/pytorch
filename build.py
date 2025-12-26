@@ -139,7 +139,9 @@ def main():
         targets = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
         targets_dt = DTensor.from_local(targets, device_mesh, [Shard(0)])
         logits = loaded_fn(model, input_ids_dt)
-        loss = F.cross_entropy(logits.view(-1, vocab_size), targets_dt.view(-1))
+        # Since the model converts DTensor to local internally, logits is a regular tensor
+        # Use targets (local tensor) for cross_entropy to match types
+        loss = F.cross_entropy(logits.view(-1, vocab_size), targets.view(-1))
         loss.backward()
 
         print("SUCCESS!")
