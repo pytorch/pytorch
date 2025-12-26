@@ -10,7 +10,7 @@
 namespace at {
 
 namespace cuda {
-struct CUDAGraph;
+struct CUDAGraphImpl;
 }
 
 /**
@@ -98,7 +98,7 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   uint64_t philox_offset_per_thread_;
   uint64_t offset_intragraph_;
   bool capturing_{};
-  std::unordered_set<cuda::CUDAGraph*> registered_graphs_;
+  std::unordered_set<cuda::CUDAGraphImpl*> registered_graphs_;
   at::TensorBase seed_extragraph_;
   at::TensorBase offset_extragraph_;
 
@@ -112,8 +112,8 @@ struct CUDAGeneratorState : public c10::intrusive_ptr_target {
 
   void increase(uint64_t increment);
 
-  void register_graph(cuda::CUDAGraph* graph);
-  void unregister_graph(cuda::CUDAGraph* graph);
+  void register_graph(cuda::CUDAGraphImpl* graph);
+  void unregister_graph(cuda::CUDAGraphImpl* graph);
 
   void capture_prologue();
   // capture_epilogue returns the wholegraph_increment
@@ -146,8 +146,8 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   void set_philox_offset_per_thread(uint64_t offset);
   uint64_t philox_offset_per_thread() const;
 
-  void register_graph(cuda::CUDAGraph* graph);
-  void unregister_graph(cuda::CUDAGraph* graph);
+  void register_graph(cuda::CUDAGraphImpl* graph);
+  void unregister_graph(cuda::CUDAGraphImpl* graph);
 
   // Generates a PhiloxCudaState with a specified increment, and increment
   // current state

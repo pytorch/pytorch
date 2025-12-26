@@ -129,7 +129,7 @@ void CUDAGeneratorState::increase(uint64_t increment) {
 /**
  * Registers this state to a CUDA graph to manage within the graph.
  */
-void CUDAGeneratorState::register_graph(cuda::CUDAGraph* graph) {
+void CUDAGeneratorState::register_graph(cuda::CUDAGraphImpl* graph) {
   // Ensures that the RNG state is not currently being captured.
   at::cuda::assertNotCapturing(
       "Cannot register the state during capturing stage.");
@@ -152,7 +152,7 @@ void CUDAGeneratorState::register_graph(cuda::CUDAGraph* graph) {
 /**
  * Unregisters a CUDA graph from the RNG state.
  */
-void CUDAGeneratorState::unregister_graph(cuda::CUDAGraph* graph) {
+void CUDAGeneratorState::unregister_graph(cuda::CUDAGraphImpl* graph) {
   // Verify the graph was previously registered.
   TORCH_CHECK(
       registered_graphs_.find(graph) != registered_graphs_.end(),
@@ -426,7 +426,7 @@ uint64_t CUDAGeneratorImpl::philox_offset_per_thread() const {
 /**
  * Registers this state to a CUDA graph to manage within the graph.
  */
-void CUDAGeneratorImpl::register_graph(cuda::CUDAGraph* graph) {
+void CUDAGeneratorImpl::register_graph(cuda::CUDAGraphImpl* graph) {
   graph->register_generator_state(state_);
   state_->register_graph(graph);
 }
@@ -434,7 +434,7 @@ void CUDAGeneratorImpl::register_graph(cuda::CUDAGraph* graph) {
 /**
  * Unregisters a CUDA graph from the RNG state.
  */
-void CUDAGeneratorImpl::unregister_graph(cuda::CUDAGraph* graph) {
+void CUDAGeneratorImpl::unregister_graph(cuda::CUDAGraphImpl* graph) {
   state_->unregister_graph(graph);
 }
 
