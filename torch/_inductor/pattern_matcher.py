@@ -306,6 +306,7 @@ class Match:
 
                 # second graph
                 example_vals = torch.fx.map_arg(args, lambda arg: arg.meta["val"])
+                # pyrefly: ignore [bad-argument-type]
                 replacement = trace_fn(graph_with_eager_vals, example_vals)
 
                 # propagate metadata from first graph to second
@@ -995,7 +996,9 @@ class RepeatedExpr(PatternExpr):
             self.inner_pattern,
         )
         # Check all anchor nodes match the pattern
-        for anchor_node in self.inner_pattern.find_anchor_nodes(ctx, OrderedSet()):
+        for anchor_node in self.inner_pattern.find_anchor_nodes(
+            ctx, OrderedSet([node])
+        ):
             anchor_m = MatchContext([self], graph=node.graph).match(
                 self.inner_pattern, anchor_node
             )

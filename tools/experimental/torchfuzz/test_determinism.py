@@ -36,6 +36,7 @@ def run_fuzzer_with_seed(seed):
             j = i + 1
             block_lines = []
             while j < len(lines) and not lines[j].startswith("==="):
+                # pyrefly: ignore [bad-argument-type]
                 block_lines.append(lines[j])
                 j += 1
             src_block = "\n".join(block_lines)

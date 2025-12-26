@@ -23,7 +23,7 @@ CONFIG_TYPES = (int, float, bool, type(None), str, list, set, tuple, dict)
 
 
 # Duplicated, because mypy needs these types statically
-T = TypeVar("T", bound=int | float | bool | None | str | list | set | tuple | dict)
+T = TypeVar("T", bound=int | float | bool | str | list | set | tuple | dict | None)
 
 
 _UNSET_SENTINEL = object()
@@ -823,14 +823,3 @@ def get_tristate_env(name: str, default: Any = None) -> bool | None:
     if value == "0":
         return False
     return default
-
-
-def inherit_fields_from(parent_cls):
-    def wrapper(child_cls):
-        for k, v in parent_cls.__dict__.items():
-            if not k.startswith("_") and k not in ("__module__", "__doc__"):
-                if k not in child_cls.__dict__:
-                    setattr(child_cls, k, v)
-        return child_cls
-
-    return wrapper

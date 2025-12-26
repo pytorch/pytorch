@@ -13193,6 +13193,36 @@ class TestMetalLibrary(TestCaseMPS):
         self.assertGreater(len(capture_listdir), 3,
                            f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
 
+    def test_metal_error_buffer(self):
+        # Test that error_buf_idx parameter works correctly
+        lib = torch.mps.compile_shader("""
+            #include <c10/metal/error.h>
+
+            kernel void check_bounds(device float* x,
+                                    constant int& limit,
+                                    device c10::metal::ErrorMessages* error_buf,
+                                    uint idx [[thread_position_in_grid]]) {
+                if (idx >= limit) {
+                    TORCH_REPORT_ERROR(error_buf, "Index ", idx, " exceeds limit ", limit);
+                    x[idx] = -1.0;
+                } else {
+                    x[idx] = idx;
+                }
+            }
+        """)
+
+        x = torch.zeros(10, device="mps")
+        # Should work without errors when limit is large enough
+        lib.check_bounds(x, 10, error_buf_idx=2)
+        self.assertEqual(x, torch.arange(10, device='mps', dtype=x.dtype))
+
+        # Test with a smaller limit that should trigger an error report
+        # The error should be raised as AcceleratorError when synchronize is called
+        y = torch.zeros(10, device="mps")
+        lib.check_bounds(y, 5, error_buf_idx=2)
+        with self.assertRaisesRegex(RuntimeError, "Index .* exceeds limit"):
+            torch.mps.synchronize()
+
 
 # TODO: Actually instantiate that test for the "mps" device to better reflect what it is doing.
 # This requires mps to be properly registered in the device generic test framework which is not the
