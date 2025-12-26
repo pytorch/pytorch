@@ -1,5 +1,12 @@
 #include "Minimal.h"
+#include "runtime/OpenRegGenerator.h"
 
+#include <ATen/core/DistributionsHelper.h>
+#include <c10/core/ScalarType.h>
+#include <c10/core/TensorOptions.h>
+#include <torch/headeronly/core/DeviceType.h>
+
+#include <optional>
 #include <unordered_set>
 
 namespace at::native::openreg {
@@ -181,5 +188,208 @@ void cpu_fallback(const c10::OperatorHandle& op, torch::jit::Stack* stack) {
   }
 }
 // LITERALINCLUDE END: FALLBACK IMPL
+
+namespace {
+// Helper to fetch a usable OpenReg generator for a device index
+inline c10::openreg::OpenRegGeneratorImpl* get_openreg_gen(
+    const std::optional<at::Generator>& gen_opt,
+    c10::DeviceIndex device_index) {
+  if (gen_opt.has_value()) {
+    auto* gen = at::check_generator<c10::openreg::OpenRegGeneratorImpl>(
+        gen_opt.value());
+    TORCH_CHECK(
+        gen->device().index() == device_index,
+        "Generator device index (",
+        (int)gen->device().index(),
+        ") does not match target tensor device index (",
+        (int)device_index,
+        ") for openreg backend");
+    return gen;
+  }
+  const auto& gen = c10::openreg::getDefaultOpenRegGenerator(device_index);
+  return at::check_generator<c10::openreg::OpenRegGeneratorImpl>(gen);
+}
+
+template <typename T>
+inline void fill_uniform(
+    T* data,
+    int64_t numel,
+    c10::openreg::OpenRegGeneratorImpl* gen) {
+  at::uniform_real_distribution<T> dist(
+      static_cast<T>(0.0), static_cast<T>(1.0));
+  for (int64_t i = 0; i < numel; ++i) {
+    data[i] = dist(gen);
+  }
+}
+
+template <typename T>
+inline void fill_normal(
+    T* data,
+    int64_t numel,
+    c10::openreg::OpenRegGeneratorImpl* gen) {
+  at::normal_distribution<T> dist(static_cast<T>(0.0), static_cast<T>(1.0));
+  for (int64_t i = 0; i < numel; ++i) {
+    data[i] = dist(gen);
+  }
+}
+
+template <typename T>
+inline void fill_uniform_int(
+    T* data,
+    int64_t numel,
+    T low,
+    T high,
+    c10::openreg::OpenRegGeneratorImpl* gen) {
+  at::uniform_int_from_to_distribution<T> dist(
+      static_cast<uint64_t>(high), static_cast<int64_t>(low));
+  for (int64_t i = 0; i < numel; ++i) {
+    data[i] = dist(gen);
+  }
+}
+
+} // anonymous namespace
+/*
+ * Note that there is lots of overloads of rand and here we only implement one
+ * of them for code clarity.
+ */
+at::Tensor rand(
+    c10::IntArrayRef size,
+    std::optional<at::Generator> generator,
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt) {
+  const auto device = c10::device_or_default(device_opt);
+  const auto dtype = c10::dtype_or_default(dtype_opt);
+  const auto layout = c10::layout_or_default(layout_opt);
+  const auto pin_memory = c10::pinned_memory_or_default(pin_memory_opt);
+
+  auto result = empty_memory_format(
+      size, dtype, layout, device, pin_memory, std::nullopt);
+
+  if (result.numel() == 0) {
+    return result;
+  }
+
+  MemoryGuard guard(result);
+  auto* gen = get_openreg_gen(generator, device.index());
+  switch (dtype) {
+    case at::kFloat: {
+      fill_uniform<float>(
+          result.mutable_data_ptr<float>(), result.numel(), gen);
+      break;
+    }
+    case at::kDouble: {
+      fill_uniform<double>(
+          result.mutable_data_ptr<double>(), result.numel(), gen);
+      break;
+    }
+    default: {
+      TORCH_CHECK(
+          false,
+          "Unsupported dtype for rand on openreg: ",
+          c10::toString(dtype));
+    }
+  }
+  return result;
+}
+/*
+ * Note that there is lots of overloads of randn and here we only implement one
+ * of them for code clarity.
+ */
+at::Tensor randn(
+    c10::IntArrayRef size,
+    std::optional<at::Generator> generator,
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt) {
+  const auto device = c10::device_or_default(device_opt);
+  const auto dtype = c10::dtype_or_default(dtype_opt);
+  const auto layout = c10::layout_or_default(layout_opt);
+  const auto pin_memory = c10::pinned_memory_or_default(pin_memory_opt);
+
+  auto result = empty_memory_format(
+      size, dtype, layout, device, pin_memory, std::nullopt);
+
+  if (result.numel() == 0) {
+    return result;
+  }
+
+  MemoryGuard guard(result);
+  auto* gen = get_openreg_gen(generator, device.index());
+  switch (dtype) {
+    case at::kFloat: {
+      fill_normal<float>(result.mutable_data_ptr<float>(), result.numel(), gen);
+      break;
+    }
+    case at::kDouble: {
+      fill_normal<double>(
+          result.mutable_data_ptr<double>(), result.numel(), gen);
+      break;
+    }
+    default: {
+      TORCH_CHECK(
+          false,
+          "Unsupported dtype for randn on openreg: ",
+          c10::toString(dtype));
+    }
+  }
+
+  return result;
+}
+/*
+ * Note that there is lots of overloads of randint and here we only implement
+ * one of them for code clarity.
+ */
+at::Tensor randint(
+    int64_t low,
+    int64_t high,
+    c10::IntArrayRef size,
+    std::optional<at::Generator> generator,
+    std::optional<c10::ScalarType> dtype_opt,
+    std::optional<c10::Layout> layout_opt,
+    std::optional<c10::Device> device_opt,
+    std::optional<bool> pin_memory_opt) {
+  const auto device = c10::device_or_default(device_opt);
+  const auto dtype = c10::dtype_or_default(dtype_opt);
+  const auto layout = c10::layout_or_default(layout_opt);
+  const auto pin_memory = c10::pinned_memory_or_default(pin_memory_opt);
+
+  auto result = empty_memory_format(
+      size, dtype, layout, device, pin_memory, std::nullopt);
+
+  if (result.numel() == 0) {
+    return result;
+  }
+
+  MemoryGuard guard(result);
+  auto* gen = get_openreg_gen(generator, device.index());
+  switch (dtype) {
+    case at::kInt: {
+      fill_uniform_int<int32_t>(
+          result.mutable_data_ptr<int32_t>(), result.numel(), low, high, gen);
+      break;
+    }
+    case at::kLong: {
+      fill_uniform_int<int64_t>(
+          result.mutable_data_ptr<int64_t>(), result.numel(), low, high, gen);
+      break;
+    }
+    case at::kShort: {
+      fill_uniform_int<int16_t>(
+          result.mutable_data_ptr<int16_t>(), result.numel(), low, high, gen);
+      break;
+    }
+    default: {
+      TORCH_CHECK(
+          false,
+          "Unsupported dtype for randint on openreg: ",
+          c10::toString(dtype));
+    }
+  }
+
+  return result;
+}
 
 } // namespace at::native::openreg
