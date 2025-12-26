@@ -50,7 +50,20 @@ def output_alias_each_other(outputs):
     return False
 
 
+def _all_tensor_leaves_empty(obj) -> bool:
+    return all(t.numel() == 0 for t in tree_flatten_only(torch.Tensor, obj))
+
+
 def _check_alias_info(context, real_out, real_in, fake_out, fake_in):
+    # Skip alias checks for empty tensors - aliasing is unobservable.
+    if (
+        _all_tensor_leaves_empty(real_out)
+        and _all_tensor_leaves_empty(real_in)
+        and _all_tensor_leaves_empty(fake_out)
+        and _all_tensor_leaves_empty(fake_in)
+    ):
+        return
+
     r_aliasing = outputs_alias_inputs(real_out, real_in)
     f_aliasing = outputs_alias_inputs(fake_out, fake_in)
     if r_aliasing != f_aliasing:
