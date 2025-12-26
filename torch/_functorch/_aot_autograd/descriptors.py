@@ -471,9 +471,14 @@ class SubclassGetAttrAOTInput(AOTInput):
 
 @dataclasses.dataclass(frozen=True)
 class SubclassMethodAOTInput(AOTInput):
-    """Represents a method call on a subclass input.  This tells you which particular
+    """
+    Represents a method call on a subclass input.  This tells you which particular
     method of the subclass this particular input corresponds to (called on the 'base'
     originally subclass argument.)
+
+    The main use-case for this is in ViewAndMutationMeta.opaque_inp_descs to be
+    able to describe opaque arguments which are derived from other tensor
+    subclasses (such as the ProcessGroup from a DTensor).
     """
 
     base: AOTInput
