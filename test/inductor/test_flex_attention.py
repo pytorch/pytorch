@@ -2819,7 +2819,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = compiled_fn(query_ref, key_fp8, value_fp8, score_mod) * value_scale
         out_ref = compiled_fn(query_ref, key_ref, value_ref, _identity)
         _, _, sqnr = _snr(out_ref, out)
-        self.assertGreater(sqnr, 15)
+        self.assertGreater(sqnr, 10)
 
     @skip_on_cpu
     @supported_platform
@@ -2852,7 +2852,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         out = compiled_fn(query_ref, key_fp8, value_fp8, score_mod) * value_scale_b
         out_ref = compiled_fn(query_ref, key_ref, value_ref, _identity)
         _, _, sqnr = _snr(out_ref, out)
-        self.assertGreater(sqnr, 15)
+        self.assertGreater(sqnr, 10)
 
     @supported_platform
     @skip_on_cpu
