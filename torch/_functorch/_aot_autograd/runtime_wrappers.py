@@ -2231,11 +2231,20 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 num_forward_returns = CompiledFunction.metadata.num_forward_returns
 
                 # Partitioners must put symint arguments at the end separate from tensor arguments
-                tensors_saved_for_backwards = fw_outs[
-                    CompiledFunction.metadata.tensors_saved_for_backwards_slice
+                # Split tensors into those that need VC checks (via save_for_backward)
+                # and those that don't (stashed directly on ctx).
+                # The partitioner sorts tensors so that no-VC-check tensors are at the end.
+                tensors_saved_with_vc_check = fw_outs[
+                    CompiledFunction.metadata.tensors_saved_for_backwards_with_vc_check_slice
+                ]
+                tensors_saved_no_vc_check = fw_outs[
+                    CompiledFunction.metadata.tensors_saved_for_backwards_no_vc_check_slice
                 ]
                 assert all(
-                    isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
+                    isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check
+                )
+                assert all(
+                    isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check
                 )
 
                 def mark_dynamic_activations(activations: list[torch.Tensor]):
@@ -2247,14 +2256,22 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     return activations
 
                 # See Note [Detaching saved tensors in AOTAutograd]
+                # Only save tensors that need VC checks via save_for_backward
                 ctx.save_for_backward(
                     *mark_dynamic_activations(
                         [
                             x.detach() if x._is_view() else x
-                            for x in tensors_saved_for_backwards
+                            for x in tensors_saved_with_vc_check
                         ]
                     )
                 )
+                # Stash tensors that don't need VC checks directly on ctx
+                # These are tensors from autograd.Function that were saved via ctx.x = x
+                # rather than ctx.save_for_backward(x)
+                ctx._tensors_no_vc_check = [
+                    x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
+                ]
+
                 symint_outs = fw_outs[
                     CompiledFunction.metadata.symints_saved_for_backwards_slice
                 ]
@@ -2340,8 +2357,15 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def backward(ctx, *flat_args):
+                # Combine tensors from both sources:
+                # 1. ctx.saved_tensors - tensors that went through save_for_backward (with VC check)
+                # 2. ctx._tensors_no_vc_check - tensors stashed directly on ctx (no VC check)
+                # The order matches the partitioner's output: VC-check tensors first, then no-VC-check tensors
+                all_saved_tensors = list(ctx.saved_tensors) + getattr(
+                    ctx, "_tensors_no_vc_check", []
+                )
                 all_args = _backward_prologue_functional(
-                    ctx.saved_tensors,
+                    all_saved_tensors,
                     ctx.symints,
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
