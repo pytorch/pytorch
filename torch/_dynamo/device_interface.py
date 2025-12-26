@@ -171,7 +171,7 @@ class DeviceInterface:
             raise RuntimeError("This device is not capable of supporting Triton")
 
     @staticmethod
-    def get_device_name(device: Device) -> str:
+    def get_device_name(device: Device = None) -> str:
         raise NotImplementedError
 
 
