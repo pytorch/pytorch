@@ -115,7 +115,7 @@ class BertSelfAttention(nn.Module):
 
             # we can then use that as an indirect index into the embedding table values to look up the features for that index
             # this is just a `gather` primitive op. The resulting tensor will
-            # have all the dimensions of embeddeding_idx (query_sequence x key_sequence),
+            # have all the dimensions of embedding_idx (query_sequence x key_sequence),
             # plus all the dimensions of `embed` that were not indirectly accessed (`embedding_range`).
             # this form of indirect indexing is more straightforward than either advanced indexing or torch.gather which both
             # have a lot of dependencies on the positions of indexing tensors.

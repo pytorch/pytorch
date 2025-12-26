@@ -3,11 +3,11 @@ from __future__ import annotations
 import dis
 import inspect
 import sys
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 import torch
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
@@ -1000,7 +1000,7 @@ class Tensor(_Tensor):
         seen_dims = 0
         last = 0
 
-        for i, l in enumerate(levels):
+        for l in levels:
             if l.is_positional():
                 # Validate consecutive positional dimensions
                 assert last == 0 or last + 1 == l.position(), (

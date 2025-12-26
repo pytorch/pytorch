@@ -266,7 +266,13 @@ class BenchmarkRunner:
                 print(
                     f"{mode} Execution Time (us) : {results['reported_run_time_us'][0]:.3f}"
                 )
-                print(f"Peak Memory (KB) : {results['peak_memory']}\n")
+                print(f"Peak Memory (KB) : {results['peak_memory']}")
+                # Calculate and print memory bandwidth if operator provides memory traffic
+                if results.get("memory_bandwidth_gb_s") is not None:
+                    print(
+                        f"Memory Bandwidth (GB/s) : {results['memory_bandwidth_gb_s']:.2f}"
+                    )
+                print()
 
     def _perf_result_to_dict(self, results, test_case):
         """This function is the parallel of _print_perf_result, which instead of
@@ -286,6 +292,8 @@ class BenchmarkRunner:
             "latency unit": "us",
             "peak memory": results["peak_memory"],
             "memory unit": "KB",
+            "memory bandwidth": results.get("memory_bandwidth_gb_s"),
+            "memory bandwidth unit": "GB/s",
         }
 
         # parsing test_case.test_config.input_config, adding it as entries to the 'out' dictionary
@@ -297,7 +305,7 @@ class BenchmarkRunner:
             break_idxs = [-1]
             curr_brackets = []
             for i, c in enumerate(s):
-                if c in open_to_close.keys():
+                if c in open_to_close:
                     curr_brackets.append(c)
                 elif c in open_to_close.values():
                     assert curr_brackets and open_to_close[curr_brackets[-1]] == c, (
@@ -553,6 +561,7 @@ class BenchmarkRunner:
             run_type = perf_item.get("run")
             latency = perf_item.get("latency", 0)
             peak_memory = perf_item.get("peak memory", 0)
+            memory_bandwidth = perf_item.get("memory bandwidth", 0)
             device = perf_item.get("device", "unknown")
             dtype = perf_item.get("dtype", "torch.float").split(".")[1]
             runtime = perf_item.get("runtime", None)
@@ -580,6 +589,9 @@ class BenchmarkRunner:
                 else "unknown"
             )
 
+            # Extract operator name from test_name
+            operator_name = test_name.split("_")[0]
+
             # Create the record
             @dataclass
             class BenchmarkInfo:
@@ -593,6 +605,7 @@ class BenchmarkRunner:
                 name: str
                 type: str
                 origins: list[str]
+                extra_info: dict[str, Any]
 
             @dataclass
             class MetricInfo:
@@ -618,10 +631,14 @@ class BenchmarkRunner:
                         "device": device,
                         "arch": device_arch,
                         "use_compile": use_compile,
+                        "operator_name": operator_name,
                     },
                 ),
                 model=ModelInfo(
-                    name=test_name, type="micro-benchmark", origins=["pytorch"]
+                    name=test_name,
+                    type="micro-benchmark",
+                    origins=["pytorch"],
+                    extra_info={"operator_name": operator_name},
                 ),
                 metric=MetricInfo(
                     name="latency",
@@ -642,6 +659,16 @@ class BenchmarkRunner:
             )
             records.append(asdict(record_memory))
 
+            # Add record for memory bandwidth
+            record_memory_bandwidth = copy.deepcopy(record_latency)
+            record_memory_bandwidth.metric = MetricInfo(
+                name="memory bandwidth",
+                unit="GB/s",
+                benchmark_values=[memory_bandwidth],
+                target_value=None,
+            )
+            records.append(asdict(record_memory_bandwidth))
+
         # Write all records to the output file
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(records, f, indent=2)
@@ -657,6 +684,7 @@ class BenchmarkRunner:
             "run_backward",
             "Execution Time",
             "Peak Memory (KB)",
+            "Memory Bandwidth (GB/s)",
         ]
 
         if self.args.output_json or self.args.output_json_for_dashboard:
@@ -703,6 +731,17 @@ class BenchmarkRunner:
                 result_dict = dict()
                 result_dict["reported_run_time_us"] = [r[0] for r in results]
                 result_dict["peak_memory"] = results[0][1]
+
+                # Calculate memory bandwidth if operator provides memory traffic
+                memory_traffic_bytes = test_case.op_bench.get_memory_traffic_bytes()
+                if memory_traffic_bytes is not None:
+                    execution_time_s = result_dict["reported_run_time_us"][0] / 1e6
+                    result_dict["memory_bandwidth_gb_s"] = (
+                        memory_traffic_bytes / execution_time_s / 1e9
+                    )
+                else:
+                    result_dict["memory_bandwidth_gb_s"] = None
+
                 self._print_perf_result(results=result_dict, test_case=test_case)
 
                 # output results to csv
@@ -721,6 +760,7 @@ class BenchmarkRunner:
                         test_case.test_config.run_backward,
                         result_dict["reported_run_time_us"][0],
                         result_dict["peak_memory"],
+                        result_dict["memory_bandwidth_gb_s"],
                     ],
                 )
                 if self.args.output_json or self.args.output_json_for_dashboard:

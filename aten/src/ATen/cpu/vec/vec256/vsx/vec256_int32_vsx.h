@@ -155,7 +155,7 @@ class Vectorized<int32_t> {
       const Vectorized<int32_t>& a,
       const Vectorized<int32_t>& b,
       const Vectorized<int32_t>& mask) {
-    // the mask used here returned by comparision of vec256
+    // the mask used here returned by comparison of vec256
     // assuming this we can use the same mask directly with vec_sel
     // warning intel style mask will not work properly
     return {

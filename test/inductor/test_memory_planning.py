@@ -3,7 +3,7 @@
 import sys
 import unittest
 
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfXpu
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_gpu
 
 
@@ -82,7 +82,6 @@ class TestMemoryPlanning(TestCase):
         ).run(code)
         self.assertTrue(same(f(*args), result))
 
-    @skipIfXpu(msg="aoti doesn't work on XPU")
     def test_aoti(self):
         f, args = self._generate(device=GPU_TYPE)
         dim0_x = Dim("dim0_x", min=1, max=2048)
@@ -92,13 +91,13 @@ class TestMemoryPlanning(TestCase):
         )
 
         FileCheck().check(
-            "int64_t int_array_0[] = {24L + align(12L*s77), };"
+            "int64_t int_array_0[] = {24L + align(12L*s6), };"
         ).check_next("int64_t int_array_1[] = {1L, };").check_next(
             "AtenTensorHandle pool1_handle;"
         ).check_next(
             "aoti_torch_empty_strided(1, int_array_0, int_array_1,"
         ).check_next("RAIIAtenTensorHandle pool1(pool1_handle);").check_next(
-            "int64_t int_array_2[] = {s77, 3L};"
+            "int64_t int_array_2[] = {s6, 3L};"
         ).check_next("int64_t int_array_3[] = {3L, 1L};").check_next(
             "AtenTensorHandle tmp_tensor_handle_0;"
         ).check_next("aoti_torch__alloc_from_pool(pool1, 0").run(code)

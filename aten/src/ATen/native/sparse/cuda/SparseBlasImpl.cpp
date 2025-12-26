@@ -100,13 +100,6 @@ void block_sparse_triangular_solve_vec(
     bool upper,
     bool transpose,
     bool unitriangular) {
-#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
-  TORCH_CHECK(
-      false,
-      "Calling triangular solver with block sparse GPU tensors requires compiling ",
-      "PyTorch with ROCm 4.5.0+. ",
-      "Please use PyTorch built with newer ROCm version.");
-#else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == kSparseBsr);
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
@@ -217,7 +210,6 @@ void block_sparse_triangular_solve_vec(
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
-#endif
 }
 
 void block_sparse_triangular_solve_mat(
@@ -227,13 +219,6 @@ void block_sparse_triangular_solve_mat(
     bool upper,
     bool transpose,
     bool unitriangular) {
-#if !AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
-  TORCH_CHECK(
-      false,
-      "Calling triangular solver with block sparse GPU tensors requires compiling ",
-      "PyTorch with ROCm 4.5.0+. ",
-      "Please use PyTorch built with newer ROCm version.");
-#else
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.layout() == kSparseBsr);
   // values is expected to be a blocks of sparse matrix
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(A.values().dim() == 3);
@@ -357,7 +342,6 @@ void block_sparse_triangular_solve_mat(
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
-#endif
 }
 
 void block_sparse_mv(
@@ -575,24 +559,9 @@ void spmm(
   cusparseOperation_t opB = transpose_B ? CUSPARSE_OPERATION_TRANSPOSE
                                         : CUSPARSE_OPERATION_NON_TRANSPOSE;
 
-  // CUDA < 11.0 doesn't support 64-bit indices and doesn't raise an error about this
-  // silently returning incorrect results
-#if defined(USE_ROCM) && (ROCM_VERSION < 60300)
-  auto mat1_32 = at::native::_sparse_csr_tensor_unsafe(
-      mat1.crow_indices().to(kInt),
-      mat1.col_indices().to(kInt),
-      mat1.values(),
-      mat1.sizes(),
-      mat1.scalar_type(),
-      mat1.layout(),
-      mat1.device());
-  auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1_32);
-  auto algorithm = CUSPARSE_MM_ALG_DEFAULT;
-#else // defined(USE_ROCM) && (ROCM_VERSION < 60300)
   // TODO: update this to support COO sparse layout
   auto descA = at::cuda::sparse::CuSparseSpMatCsrDescriptor(mat1);
   auto algorithm = CUSPARSE_SPMM_CSR_ALG2;
-#endif // defined(USE_ROCM) && (ROCM_VERSION < 60300)
 
   auto descB = at::cuda::sparse::CuSparseConstDnMatDescriptor(
       transpose_B ? mat2_->mT() : *mat2_);

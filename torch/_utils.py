@@ -3,13 +3,14 @@ import copyreg
 import functools
 import importlib
 import logging
+import math
 import sys
 import traceback
 import warnings
 from collections import defaultdict
 from collections.abc import Callable
 from types import ModuleType
-from typing import Any, Generic, Optional, TYPE_CHECKING
+from typing import Any, Generic, TYPE_CHECKING
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -82,9 +83,8 @@ def _to(self, device, non_blocking=False):
         return untyped_storage
 
     device_module = getattr(torch, device.type, None)
-    assert device_module is not None, (
-        f"{device.type.upper()} device module is not loaded"
-    )
+    if device_module is None:
+        raise AssertionError(f"{device.type.upper()} device module is not loaded")
     with device_module.device(device):
         if self.is_sparse and hasattr(device_module, "sparse"):
             new_type = getattr(device_module.sparse, self.__class__.__name__)
@@ -96,9 +96,10 @@ def _to(self, device, non_blocking=False):
             )
             return new_type(indices, values, self.size())
         else:
-            assert not self.is_sparse, (
-                f"sparse storage is not supported for {device.type.upper()} tensors"
-            )
+            if self.is_sparse:
+                raise AssertionError(
+                    f"sparse storage is not supported for {device.type.upper()} tensors"
+                )
             untyped_storage = torch.UntypedStorage(self.size(), device=device)
             untyped_storage.copy_(self, non_blocking)
             return untyped_storage
@@ -118,7 +119,7 @@ def _get_async_or_non_blocking(function_name, non_blocking, kwargs):
         message = "{}() got an unexpected keyword argument '{}'"
         argument = list(kwargs.keys()).pop()
         raise TypeError(message.format(function_name, argument))
-    warnings.warn("'async' is deprecated; use 'non_blocking'")
+    warnings.warn("'async' is deprecated; use 'non_blocking'", stacklevel=2)
     return kwargs["async"]
 
 
@@ -137,7 +138,10 @@ def _get_restore_location(device):
         elif isinstance(map_location, (str, torch.device)):
             return map_location
         else:
-            assert callable(map_location)
+            if not callable(map_location):
+                raise AssertionError(
+                    f"expected callable map_location, got {type(map_location).__name__}"
+                )
             raise RuntimeError(
                 "Callable map_location not supported with _rebuild_wrapper_subclass "
                 "or _rebuild_device_tensor_from_numpy"
@@ -193,14 +197,17 @@ def get_tensor_metadata(tensor):
     # Tensor's Metadata for serializing.
     # Currently, this only returns a dict[string, bool] specifying whether
     # `conj` or `neg` bit is set.
-    assert isinstance(tensor, torch.Tensor)
+    if not isinstance(tensor, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(tensor).__name__}")
     return torch._C._get_tensor_metadata(tensor)  # type: ignore[attr-defined]
 
 
 def set_tensor_metadata(tensor, metadata):
     # See `get_tensor_metadata` above
-    assert isinstance(metadata, dict)
-    assert isinstance(tensor, torch.Tensor)
+    if not isinstance(metadata, dict):
+        raise AssertionError(f"expected dict, got {type(metadata).__name__}")
+    if not isinstance(tensor, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(tensor).__name__}")
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
 
 
@@ -686,8 +693,8 @@ def _take_tensors(tensors, size_limit):
         if buf_and_size[1] + size > size_limit and buf_and_size[1] > 0:
             yield buf_and_size[0]
             buf_and_size = buf_dict[t] = [[], 0]
-        buf_and_size[0].append(tensor)  # pyrefly: ignore  # missing-attribute
-        buf_and_size[1] += size  # pyrefly: ignore  # unsupported-operation
+        buf_and_size[0].append(tensor)  # pyrefly: ignore [missing-attribute]
+        buf_and_size[1] += size  # pyrefly: ignore [unsupported-operation]
     for buf, _ in buf_dict.values():
         if len(buf) > 0:
             yield buf
@@ -744,17 +751,15 @@ class ExceptionWrapper:
         if exc_info is None:
             exc_info = sys.exc_info()
         self.exc_type = exc_info[0]
-        self.exc_msg = "".join(
-            # pyrefly: ignore  # no-matching-overload
-            traceback.format_exception(*exc_info)
-        )
+        # pyrefly: ignore [not-iterable]
+        self.exc_msg = "".join(traceback.format_exception(*exc_info))
         self.where = where
 
     def reraise(self):
         r"""Reraises the wrapped exception in the current thread"""
         # Format a message such as: "Caught ValueError in DataLoader worker
         # process 2. Original Traceback:", followed by the traceback.
-        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"  # pyrefly: ignore  # missing-attribute
+        msg = f"Caught {self.exc_type.__name__} {self.where}.\nOriginal {self.exc_msg}"  # pyrefly: ignore [missing-attribute]
         if self.exc_type is KeyError:
             # KeyError calls repr() on its argument (usually a dict key). This
             # makes stack traces unreadable. It will not be changed in Python
@@ -763,13 +768,13 @@ class ExceptionWrapper:
         elif getattr(self.exc_type, "message", None):
             # Some exceptions have first argument as non-str but explicitly
             # have message field
-            # pyrefly: ignore  # not-callable
+            # pyrefly: ignore [not-callable]
             raise self.exc_type(
-                # pyrefly: ignore  # unexpected-keyword
+                # pyrefly: ignore [unexpected-keyword]
                 message=msg
             )
         try:
-            exception = self.exc_type(msg)  # pyrefly: ignore  # not-callable
+            exception = self.exc_type(msg)  # pyrefly: ignore [not-callable]
         except Exception:
             # If the exception takes multiple arguments or otherwise can't
             # be constructed, don't try to instantiate since we don't know how to
@@ -858,7 +863,7 @@ def _get_device_index(
     """
     if isinstance(device, str):
         device = torch.device(device)
-    device_idx: Optional[int] = None
+    device_idx: int | None = None
     if isinstance(device, torch.device):
         if not allow_cpu and device.type == "cpu":
             raise ValueError(f"Expected a non cpu device, but got: {device}")
@@ -1021,12 +1026,12 @@ class _LazySeedTracker:
         self.call_order = []
 
     def queue_seed_all(self, cb, traceback):
-        self.manual_seed_all_cb = (cb, traceback)  # pyrefly: ignore  # bad-assignment
+        self.manual_seed_all_cb = (cb, traceback)  # pyrefly: ignore [bad-assignment]
         # update seed_all to be latest
         self.call_order = [self.manual_seed_cb, self.manual_seed_all_cb]
 
     def queue_seed(self, cb, traceback):
-        self.manual_seed_cb = (cb, traceback)  # pyrefly: ignore  # bad-assignment
+        self.manual_seed_cb = (cb, traceback)  # pyrefly: ignore [bad-assignment]
         # update seed to be latest
         self.call_order = [self.manual_seed_all_cb, self.manual_seed_cb]
 
@@ -1056,7 +1061,7 @@ class CallbackRegistry(Generic[P]):
                 )
 
 
-def try_import(module_name: str) -> Optional[ModuleType]:
+def try_import(module_name: str) -> ModuleType | None:
     # Implementation based on
     # https://docs.python.org/3/library/importlib.html#checking-if-a-module-can-be-imported
     if (module := sys.modules.get(module_name, None)) is not None:
@@ -1068,7 +1073,8 @@ def try_import(module_name: str) -> Optional[ModuleType]:
 
         # https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader
         # "The finder should always set this attribute"
-        assert spec.loader is not None, "The loader attribute should always be set"
+        if spec.loader is None:
+            raise AssertionError("The loader attribute should always be set")
         spec.loader.exec_module(module)
         return module
 
@@ -1117,3 +1123,69 @@ NAME_MAPPING = {
     ("exceptions", "StandardError"): ("builtins", "Exception"),
     ("UserDict", "UserDict"): ("collections", "UserDict"),
 }
+
+
+def _maybe_view_chunk_cat(
+    res: "torch.Tensor", group_size: int, gather_dim: int
+) -> "torch.Tensor":
+    """
+    This is intuitively the same as torch.cat(torch.chunk(res, group_size,
+    dim=0), dim=gather_dim), but returns a view if data movement is not
+    necessary.  This operation arises in NCCL all_gather, where you always get
+    a result which is concatenated on dim=0, even though actually you may need
+    to undo this concatenation and then re-cat on the gather dim.
+
+    When is data-movement not necessary?  Intuitively, we need to understand if
+    the unflatten in this reference implementation of this code triggers a
+    copy or not:
+
+        chunks = torch.unflatten(res, 0, [group_size, -1])
+        return torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
+
+    Assume res is contiguous (it will be coming out of the collective).  We
+    essentially need to know if the movedim maintains the contiguity of the
+    tensor.  Moving a dimension typically does NOT preserve contiguity, unless
+    EVERY dimension it is moved across is size 1.
+
+    Example: shape [4, d1, d2] with group_size=4, gather_dim=1 -> [1, 4*d1, d2]
+
+        [4, d1, d2] -> [4, 1, d1, d2] -> [1, 4, d1, d2] (contiguous!)
+
+    Example: shape [4, 2, d2] with group_size=4, gather_dim=2 -> [1, 2, 4*d2]
+
+        [4, 2, d2] -> [4, 1, 2, d2] -> [1, 2, 4, d2] (not contiguous!)
+
+    Args:
+        res: Tensor with gathered data in dim 0, shape [group_size, ...]
+        group_size: Number of ranks in the group
+        gather_dim: Dimension to gather along in the output
+
+    Returns:
+        Tensor with data rearranged to gather along gather_dim
+    """
+
+    if gather_dim == 0:
+        # When gather_dim is 0, chunk+cat is a no-op
+        return res
+
+    shape = list(res.shape)
+
+    # Optimization: Can use view instead of split+cat when:
+    # 1. res.shape[0] == group_size (invariant after all_gather)
+    # 2. All dims between 0 and gather_dim (exclusive) have size 1
+    numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
+
+    if shape[0] == group_size and numel_between == 1:
+        # View optimization: reshape to collapse dim 0 into gather_dim
+        final_shape = (
+            [1]  # Dim 0 becomes 1
+            + shape[1:gather_dim]  # Dims 1 to gather_dim-1 unchanged
+            + [shape[0] * shape[gather_dim]]  # gather_dim gets multiplied by group_size
+            + shape[gather_dim + 1 :]  # Rest unchanged
+        )
+        return res.view(final_shape)
+    else:
+        # General case: fall back to split + cat
+        # This is better than torch.flatten as cat can be vectorized, whereas
+        # the contiguous kernel is always bad.
+        return torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)

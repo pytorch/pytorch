@@ -698,7 +698,7 @@ C10_CLANG_DIAGNOSTIC_POP()
 
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 using c10::Half;
 using c10::operator+;
@@ -724,7 +724,7 @@ using c10::detail::fp16_ieee_to_fp32_bits;
 using c10::detail::fp16_ieee_to_fp32_value;
 } // namespace detail
 
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 namespace std {
 

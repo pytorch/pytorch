@@ -75,7 +75,10 @@
     :toctree: generated
     :nosignatures:
 
+     XPUPluggableAllocator
+     change_current_allocator
      empty_cache
+     get_per_process_memory_fraction
      max_memory_allocated
      max_memory_reserved
      mem_get_info
@@ -85,6 +88,7 @@
      memory_stats_as_nested_dict
      reset_accumulated_memory_stats
      reset_peak_memory_stats
+     set_per_process_memory_fraction
 ```
 
 ```{eval-rst}

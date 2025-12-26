@@ -139,8 +139,6 @@ dtensor_fails = {
     xfail("aminmax"),
     xfail("any"),
     xfail("arange"),
-    xfail("argmax"),
-    xfail("argmin"),
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
     xfail("as_strided_copy"),
@@ -253,8 +251,6 @@ dtensor_fails = {
     xfail("masked_fill"),
     xfail("masked_scatter"),
     xfail("masked_select"),
-    xfail("masked.argmax"),
-    xfail("masked.argmin"),
     xfail("masked.logsumexp"),
     xfail("masked.median"),
     xfail("matrix_exp"),
@@ -435,8 +431,6 @@ dtensor_fails = {
     xfail("signal.windows.nuttall"),
     xfail("signal.windows.kaiser"),
     xfail("stack"),
-    xfail("std"),
-    xfail("std", "unbiased"),
     xfail("std_mean"),
     xfail("std_mean", "unbiased"),
     xfail("stft"),
@@ -727,7 +721,7 @@ class TestDTensorOps(TestCase):
             self.assertEqual(full_tensor, tensor.mean(dim=reduce_dim))
 
             if is_evenly_shardable:
-                self.assertTrue("P->R" in debug_mode.debug_string())
+                self.assertTrue("P(avg)->R" in debug_mode.debug_string())
             else:
                 self.assertTrue("S(0)->R" in debug_mode.debug_string())
 
@@ -802,7 +796,7 @@ class TestLocalDTensorOps(TestDTensorOps):
         self.run_opinfo_test(dtype, op)
 
     def test_mean(self):
-        with LocalTensorMode(frozenset(range(0, self.world_size))):
+        with LocalTensorMode(frozenset(range(self.world_size))):
             self.run_mean()
 
     def test_one_hot(self):
@@ -811,7 +805,7 @@ class TestLocalDTensorOps(TestDTensorOps):
     def run_opinfo_test(
         self, dtype, op, requires_grad=True, sample_inputs_filter=lambda s: True
     ):
-        with LocalTensorMode(frozenset(range(0, self.world_size))):
+        with LocalTensorMode(frozenset(range(self.world_size))):
             super().run_opinfo_test(dtype, op, requires_grad, sample_inputs_filter)
 
     def assertEqualOnRank(self, x, y, msg=None, *, rank=0):

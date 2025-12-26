@@ -101,11 +101,11 @@ def broadcast_types(t1, t2):
         # We make the types the same length which is the first requirement
         # for consistency
         if s1 > s2:
-            for i in range(s1 - s2):
+            for _ in range(s1 - s2):
                 new_t2.insert(0, 1)
 
         elif s2 > s1:
-            for i in range(s2 - s1):
+            for _ in range(s2 - s1):
                 new_t1.insert(0, 1)
 
         # we replace occurrences of "1" with each tensor with
@@ -250,7 +250,7 @@ def transpose_inference_rule(n: Node):
     We check that dimensions for the transpose operations
     are within range of the tensor type of the node
     """
-    if n.target == torch.transpose:
+    if n.target is torch.transpose:
         assert isinstance(n.args[0], Node)
         t = n.args[0].type
 
@@ -674,7 +674,7 @@ class GraphTypeChecker:
             return n.type
 
         elif n.op == "call_function":
-            if n.target == getattr:
+            if n.target is getattr:
                 assert getattr in _INFERENCE_RULES
                 return _INFERENCE_RULES[n.target](n, self.traced)
 

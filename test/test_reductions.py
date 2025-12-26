@@ -1710,7 +1710,7 @@ class TestReductions(TestCase):
                                             with_extremal=False, atol=None, rtol=None,
                                             exact_dtype=True, with_keepdim=False):
         # Test 0-d to 3-d tensors.
-        for ndims in range(0, 4):
+        for ndims in range(4):
             shape = _rand_shape(ndims, min_size=5, max_size=10)
             for n in range(ndims + 1):
                 for c in combinations(list(range(ndims)), n):
@@ -1899,7 +1899,7 @@ class TestReductions(TestCase):
         # Note [all, any uint8 compatibility]: However for compatibility reason,
         # for `uint8`, they return Tensor of same dtype `uint8`.
         # Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
-        exact_dtype = True if dtype != torch.uint8 else False
+        exact_dtype = dtype != torch.uint8
 
         def _test_all_any(x):
             self.compare_with_numpy(torch.all, np.all, x)
@@ -2623,7 +2623,7 @@ class TestReductions(TestCase):
         # Generate some random test cases
         ops = ['quantile', 'nanquantile']
         inputs = [tuple(np.random.randint(2, 10, size=i)) for i in range(1, 4)]
-        quantiles = [tuple(np.random.rand(i)) for i in range(0, 5)]
+        quantiles = [tuple(np.random.rand(i)) for i in range(5)]
         keepdims = [True, False]
 
         # Add corner cases
@@ -2652,7 +2652,7 @@ class TestReductions(TestCase):
                                               [None] + list(range(a.ndim))):
                 result = torch_op(a, q, dim=dim, keepdim=keepdim, interpolation=interpolation)
                 expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim,
-                                    interpolation=interpolation, keepdims=keepdim)
+                                    method=interpolation, keepdims=keepdim)
                 self.assertEqual(result.cpu(), torch.from_numpy(np.array(expected)).type(result.type()))
 
                 # Test out variation
@@ -3754,6 +3754,44 @@ as the input tensor excluding its innermost dimension'):
             RuntimeError, err_msg) if dtype is torch.chalf else contextlib.nullcontext()
         with ctx:
             self.assertEqual(torch.mean(t), expected)
+
+    def test_scalar_tensor_as_dim_argument(self):
+        """Tests that scalar tensors work correctly as dimension arguments.
+
+        This tests the fix for the PythonArgParser bug where scalar Tensors
+        passed to IntList/SymIntList parameters would be incorrectly handled.
+        """
+        x = torch.ones(1, 2, 3, 4, 5)
+
+        # Scalar tensors should work correctly (same as passing an int)
+        result_tensor = x.sum(dim=torch.tensor(3))
+        result_int = x.sum(dim=3)
+        self.assertEqual(result_tensor.shape, result_int.shape)
+        self.assertEqual(result_tensor.shape, torch.Size([1, 2, 3, 5]))
+
+        # Test with different integer dtypes
+        for dtype in [torch.int32, torch.int64, torch.int16, torch.int8]:
+            dim_tensor = torch.tensor(1, dtype=dtype)
+            result = x.sum(dim=dim_tensor)
+            expected = x.sum(dim=1)
+            self.assertEqual(result.shape, expected.shape)
+
+    @skipIfTorchDynamo("Test uses random.randint which creates FakeTensors")
+    def test_scalar_tensor_dim_compiled_mode(self):
+        """Tests that scalar FakeTensors from random.randint work correctly in compiled mode."""
+        def foo():
+            x = torch.ones(2, 2, 2)
+            return x.sum(dim=random.randint(0, 0))
+
+        @torch.compile
+        def foo_compile():
+            x = torch.ones(2, 2, 2)
+            return x.sum(dim=random.randint(0, 0))
+
+        result_eager = foo()
+        result_compiled = foo_compile()
+        self.assertEqual(result_eager.shape, result_compiled.shape)
+        self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
 instantiate_device_type_tests(TestReductions, globals())
 

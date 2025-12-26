@@ -37,6 +37,7 @@ class MapImpl(HigherOrderOperator):
         super().__init__("map_impl")
 
     def __call__(self, *args, **kwargs):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
 
 
@@ -125,7 +126,7 @@ def map(
 
 class MapAutogradOp(torch.autograd.Function):
     @staticmethod
-    # pyrefly: ignore  # bad-override
+    # pyrefly: ignore [bad-override]
     def forward(ctx, f, num_mapped_args, *flat_args):
         ctx._f = f
         ctx._num_mapped_args = num_mapped_args

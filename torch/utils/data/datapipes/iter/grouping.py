@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from collections import defaultdict
 from collections.abc import Callable, Iterator, Sized
-from typing import Any, Optional, TypeVar
+from typing import Any, NoReturn, TypeVar
 
 from torch.utils.data.datapipes._decorator import functional_datapipe
 from torch.utils.data.datapipes.datapipe import DataChunk, IterDataPipe
@@ -18,7 +18,7 @@ __all__ = [
 _T_co = TypeVar("_T_co", covariant=True)
 
 
-def __getattr__(name: str):
+def __getattr__(name: str) -> NoReturn:
     raise AttributeError(f"module {__name__} has no attribute {name}")
 
 
@@ -110,7 +110,7 @@ class UnBatcherIterDataPipe(IterDataPipe):
         [0, 1, 2, 3, 4, 5, 6]
     """
 
-    def __init__(self, datapipe: IterDataPipe, unbatch_level: int = 1):
+    def __init__(self, datapipe: IterDataPipe, unbatch_level: int = 1) -> None:
         self.datapipe = datapipe
         self.unbatch_level = unbatch_level
 
@@ -199,14 +199,14 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         *,
         keep_key: bool = False,
         buffer_size: int = 10000,
-        group_size: Optional[int] = None,
-        guaranteed_group_size: Optional[int] = None,
+        group_size: int | None = None,
+        guaranteed_group_size: int | None = None,
         drop_remaining: bool = False,
-    ):
+    ) -> None:
         _check_unpickable_fn(group_key_fn)
-        # pyrefly: ignore  # invalid-type-var
+        # pyrefly: ignore [invalid-type-var]
         self.datapipe = datapipe
-        # pyrefly: ignore  # invalid-type-var
+        # pyrefly: ignore [invalid-type-var]
         self.group_key_fn = group_key_fn
 
         self.keep_key = keep_key
@@ -218,14 +218,14 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         if group_size is not None and buffer_size is not None:
             if not (0 < group_size <= buffer_size):
                 raise AssertionError("group_size must be > 0 and <= buffer_size")
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.guaranteed_group_size = group_size
         if guaranteed_group_size is not None:
             if group_size is None or not (0 < guaranteed_group_size <= group_size):
                 raise AssertionError(
                     "guaranteed_group_size must be > 0 and <= group_size and group_size must be set"
                 )
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.guaranteed_group_size = guaranteed_group_size
         self.drop_remaining = drop_remaining
         self.wrapper_class = DataChunk
@@ -234,7 +234,7 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         biggest_key = None
         biggest_size = 0
         result_to_yield = None
-        for findkey in self.buffer_elements.keys():
+        for findkey in self.buffer_elements:
             if len(self.buffer_elements[findkey]) > biggest_size:
                 biggest_size = len(self.buffer_elements[findkey])
                 biggest_key = findkey
@@ -322,5 +322,5 @@ class GrouperIterDataPipe(IterDataPipe[DataChunk]):
         self.curr_buffer_size = 0
         self.buffer_elements = defaultdict(list)
 
-    def __del__(self):
+    def __del__(self) -> None:
         self.buffer_elements.clear()

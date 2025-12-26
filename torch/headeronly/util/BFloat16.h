@@ -395,7 +395,7 @@ inline C10_HOST_DEVICE bool operator<(BFloat16& lhs, BFloat16& rhs) {
 C10_CLANG_DIAGNOSTIC_POP()
 } // namespace c10
 
-namespace torch::headeronly {
+HIDDEN_NAMESPACE_BEGIN(torch, headeronly)
 
 namespace detail {
 using c10::detail::bits_from_f32;
@@ -415,7 +415,7 @@ using c10::operator/=;
 using c10::operator<;
 using c10::operator>;
 using c10::operator<<;
-} // namespace torch::headeronly
+HIDDEN_NAMESPACE_END(torch, headeronly)
 
 namespace std {
 
