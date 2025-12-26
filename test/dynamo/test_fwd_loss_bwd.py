@@ -961,13 +961,13 @@ class GraphModule(torch.nn.Module):
         getitem_3: "f32[4]" = grad_1[1];  grad_1 = None
         new_grad_strided_2: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
         copy__2: "f32[4, 4]" = new_grad_strided_2.copy_(getitem_2);  getitem_2 = copy__2 = None
-        add_: "f32[4, 4]" = new_grad_strided.add_(new_grad_strided_2);  new_grad_strided_2 = add_ = None
+        add: "f32[4, 4]" = new_grad_strided + new_grad_strided_2;  new_grad_strided = new_grad_strided_2 = None
         new_grad_strided_3: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
         copy__3: "f32[4]" = new_grad_strided_3.copy_(getitem_3);  getitem_3 = copy__3 = None
-        add__1: "f32[4]" = new_grad_strided_1.add_(new_grad_strided_3);  new_grad_strided_3 = add__1 = None
+        add_1: "f32[4]" = new_grad_strided_1 + new_grad_strided_3;  new_grad_strided_1 = new_grad_strided_3 = None
 
         detach: "f32[]" = loss.detach();  loss = None
-        return (detach, new_grad_strided, new_grad_strided_1)
+        return (detach, add, add_1)
 """,  # noqa: B950
         )
 
