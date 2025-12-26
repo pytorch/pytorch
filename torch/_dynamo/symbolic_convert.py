@@ -3704,8 +3704,6 @@ class InstructionTranslatorBase(
 
         from torch._dynamo.variables.builtin import BuiltinVariable
         from torch._dynamo.variables.constant import ConstantVariable
-        from torch._dynamo.variables.tensor import TensorVariable
-        from torch._dynamo.variables.user_defined import UserDefinedClassVariable
 
         from .exc import Unsupported
 
@@ -3713,20 +3711,13 @@ class InstructionTranslatorBase(
         cls_type = self.pop().realize()
         subject = self.pop().realize()
 
-        if isinstance(subject, TensorVariable) and isinstance(
-            cls_type, UserDefinedClassVariable
-        ):
+        try:
+            isinstance_var = BuiltinVariable(builtins.isinstance)
+            match_result = self.call_function(isinstance_var, [subject, cls_type], {})
+        except AssertionError:
             match_result = ConstantVariable.create(False)
-        else:
-            try:
-                isinstance_var = BuiltinVariable(builtins.isinstance)
-                match_result = self.call_function(
-                    isinstance_var, [subject, cls_type], {}
-                )
-            except AssertionError:
-                match_result = ConstantVariable.create(False)
-            except Exception:
-                raise
+        except Exception:
+            raise
 
         if match_result is None:
             raise Unsupported("MATCH_CLASS: isinstance returned None")
