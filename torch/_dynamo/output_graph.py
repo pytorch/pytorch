@@ -2371,7 +2371,6 @@ class OutputGraph(OutputGraphCommon):
                 cg.pop_top()
 
             for idx, arg in enumerate(self.graphargs):
-                assert arg.source is not None
                 self.export_metadata.graph_input_idx_to_local_source[idx] = arg.source
 
             cg.make_call_generated_code(name)
