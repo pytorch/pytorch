@@ -302,7 +302,7 @@ class Library:
                          registered.
 
         Example::
-
+            >>> # xdoctest: +SKIP("Requires Python <= 3.11")
             >>> my_lib = Library("aten", "IMPL")
             >>> def div_cpu(self, other):
             >>>     return self * (1 / other)
@@ -632,6 +632,7 @@ def impl(
             will be tied to the lifetime of the Library object.
 
     Examples:
+        >>> # xdoctest: +SKIP("Requires Python <= 3.11")
         >>> import torch
         >>> import numpy as np
         >>> # Example 1: Register function.
@@ -806,7 +807,7 @@ def register_kernel(
 
     Args:
         op (str | OpOverload): The operator to register an impl to.
-        device_types (None | str | Sequence[str]): The device_types to register an impl to.
+        device_types (str | None | Sequence[str]): The device_types to register an impl to.
             If None, we will register to all device types -- please only use
             this option if your implementation is truly device-type-agnostic.
         func (Callable): The function to register as the implementation for
