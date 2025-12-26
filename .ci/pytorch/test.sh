@@ -1811,6 +1811,7 @@ test_operator_microbenchmark() {
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
   # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
+  # matmul mm addmm bmm conv optimizer activation norm
   for OP_BENCHMARK_TESTS in scaled_mm scaled_grouped_mm; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
