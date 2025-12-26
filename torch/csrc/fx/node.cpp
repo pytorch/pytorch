@@ -1065,10 +1065,11 @@ static PyObject* NodeBase_replace_all_uses_with(
       return nullptr;
     }
 
-    // Call replace hooks. In Python: "if replace_hooks:" is False for empty
-    // list, so only access .name when there are actual hooks to call. Use
-    // attribute lookup to match Python semantics (raises AttributeError if
-    // replace_with doesn't have .name).
+    // Call replace hooks
+    // Access .name via attribute lookup to match Python semantics (raises
+    // AttributeError if replace_with doesn't have .name)
+    // Note: Only access .name if there are actually hooks to call, matching
+    // Python's behavior where `if replace_hooks:` is falsy for empty list.
     if (replace_hooks && PySequence_Check(replace_hooks.get())) {
       Py_ssize_t num_hooks = PySequence_Size(replace_hooks.get());
       if (num_hooks > 0) {
