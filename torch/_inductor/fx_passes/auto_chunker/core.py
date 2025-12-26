@@ -146,6 +146,8 @@ def find_amplifier_node(graph: Graph) -> Optional[Node]:
             and ratio > config.auto_chunker.amplify_ratio_threshold
         ):
             amplifier_nodes_ratio.append((node, ratio))
+        elif ratio >= 4 and output_size >= 64_000:
+            log.debug("Node '%s' get skipped as amplifier_node due to small amplification ratio or size. ratio %s, size %s", node.format_node(), ratio, output_size)
 
     amplifier_nodes_ratio = sorted(
         amplifier_nodes_ratio, key=lambda x: x[1], reverse=True
