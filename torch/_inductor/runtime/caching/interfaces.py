@@ -6,16 +6,30 @@ This module provides high-level caching interfaces for memoization and
 result caching functionality.
 """
 
+import atexit
 import functools
+import json
+import logging
 import pickle
+import shutil
 from collections.abc import Callable
+from dataclasses import dataclass
 from hashlib import sha256
 from os import PathLike
-from typing import cast
+from pathlib import Path
+from typing import cast, TypedDict
 from typing_extensions import ParamSpec, TypeVar
 
-from . import config, implementations
+from filelock import FileLock
 
+import torch
+from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import clear_on_fresh_cache
+
+from . import config, implementations, locks
+
+
+logger = torch._logging.getArtifactLogger(__name__, "caching")
 
 # Type variable for function parameters
 _P = ParamSpec("_P")
@@ -25,36 +39,51 @@ _R = TypeVar("_R")
 _EncodedR = TypeVar("_EncodedR")
 
 
-def _make_key(
-    custom_params_encoder: Callable[..., object] | None,
-    *args: object,
-    **kwargs: object,
-) -> str:
-    """Generate a cache key from function parameters.
+class CacheDumpEntry(TypedDict):
+    """A single cache entry in the dump format.
 
-    Args:
-        custom_params_encoder: Optional encoder to apply to function parameters.
-                              If None, params are pickled directly.
-        *args: Positional arguments to encode.
-        **kwargs: Keyword arguments to encode.
-
-    Returns:
-        A 32-character hex string suitable for use as a cache key.
+    Attributes:
+        params: The encoded function parameters.
+        result: The encoded function result.
     """
-    if custom_params_encoder is None:
-        # Pickle the parameters directly
-        pickled_params: bytes = pickle.dumps((args, kwargs))
-    else:
-        # Encode the parameters using the custom encoder
-        encoded_params = custom_params_encoder(*args, **kwargs)
-        # Pickle the encoded output
-        pickled_params = pickle.dumps(encoded_params)
 
-    # Hash the pickled bytes with SHA256
-    hash_obj = sha256(pickled_params)
+    params: object
+    result: object
 
-    # Get hex digest and truncate to 32 characters
-    return hash_obj.hexdigest()[:32]
+
+class CacheDump(TypedDict):
+    """The structure of the memoizer cache dump file.
+
+    The cache_entries field contains either:
+    - Direct entries: {cache_key: CacheDumpEntry} when no sub_key is used
+    - Nested entries: {sub_key: {cache_key: CacheDumpEntry}} when sub_key is set
+
+    Multiple Memoizer instances with different sub_keys can coexist in the same file.
+
+    Attributes:
+        cache_entries: Dictionary mapping cache keys (or sub_keys) to cache entries.
+        cache_size: The total number of cache entries. When sub_keys are used,
+            this is the sum of entries across all sub_keys.
+    """
+
+    cache_entries: dict[str, CacheDumpEntry | dict[str, CacheDumpEntry]]
+    cache_size: int
+
+
+@dataclass
+class CacheEntry:
+    """A cache entry containing encoded parameters and result.
+
+    This dataclass stores the encoded form of function parameters and
+    the (possibly encoded) result for human-readable cache dumps.
+
+    Attributes:
+        encoded_params: The encoded function parameters used for debugging/inspection.
+        encoded_result: The (possibly encoded) result of the function call.
+    """
+
+    encoded_params: object
+    encoded_result: object
 
 
 class _BaseMemoizer:
@@ -63,6 +92,38 @@ class _BaseMemoizer:
     This class provides the common memoize method that orchestrates
     record and replay functionality.
     """
+
+    @staticmethod
+    def _make_key(
+        custom_params_encoder: Callable[..., object] | None,
+        *args: object,
+        **kwargs: object,
+    ) -> str:
+        """Generate a cache key from function parameters.
+
+        Args:
+            custom_params_encoder: Optional encoder to apply to function parameters.
+                                  If None, params are pickled directly.
+            *args: Positional arguments to encode.
+            **kwargs: Keyword arguments to encode.
+
+        Returns:
+            A 32-character hex string suitable for use as a cache key.
+        """
+        if custom_params_encoder is None:
+            # Pickle the parameters directly
+            pickled_params: bytes = pickle.dumps((args, kwargs))
+        else:
+            # Encode the parameters using the custom encoder
+            encoded_params = custom_params_encoder(*args, **kwargs)
+            # Pickle the encoded output
+            pickled_params = pickle.dumps(encoded_params)
+
+        # Hash the pickled bytes with SHA256
+        hash_obj = sha256(pickled_params)
+
+        # Get hex digest and truncate to 32 characters
+        return hash_obj.hexdigest()[:32]
 
     def record(
         self,
@@ -178,16 +239,291 @@ class Memoizer(_BaseMemoizer):
     This class provides methods for recording, retrieving, and managing
     cached function results in memory with custom encoding/decoding logic.
 
+    Cache entries are stored as CacheEntry objects containing both the encoded
+    parameters and the encoded result. This makes debugging easier since entries
+    can be inspected with full context about what inputs produced each result.
+
+    On memoizer destruction, the cache is automatically dumped to a shared JSON file
+    in the cache directory for debugging and inspection purposes. Multiple Memoizer
+    instances contribute to the same file additively.
+
     Note: Use this over functools.cache when you need to support parameters
     that functools.cache cannot handle, or when you need custom encoding/decoding
     of results.
     """
 
-    def __init__(self) -> None:
-        """Initialize the Memoizer instance with an in-memory cache."""
+    def __init__(self, sub_key: str | None = None) -> None:
+        """Initialize the Memoizer instance with an in-memory cache.
+
+        Args:
+            sub_key: Optional key for organizing cache entries in the JSON dump.
+                    If provided, cache entries are stored under cache_entries[sub_key].
+                    If None, cache entries are merged directly into root cache_entries.
+        """
         self._cache: implementations._InMemoryCacheImpl = (
             implementations._InMemoryCacheImpl()
         )
+        # Optional sub_key for nested cache structure
+        self._sub_key: str | None = sub_key
+        # Register atexit handler to dump cache on program exit
+        if config.IS_DUMP_MEMOIZER_CACHE_ENABLED():
+            atexit.register(self._dump_to_disk)
+        # Pre-populate cache from dump file if configured (with sub_key now set)
+        self._maybe_prepopulate_from_dump()
+        # Register with clear_on_fresh_cache for fresh_cache() integration
+        clear_on_fresh_cache(self)
+
+    def cache_clear(self) -> None:
+        """Clear the in-memory cache.
+
+        This method resets the in-memory cache to empty. It is called by
+        the fresh_cache() context manager via clear_on_fresh_cache registration.
+        """
+        self._cache._memory.clear()
+
+    @functools.cached_property
+    def _shared_cache_filepath(self) -> Path:
+        """Get the shared cache filepath for memoizer cache dumps.
+
+        Returns:
+            The path to the shared memoizer cache JSON file.
+        """
+        return Path(cache_dir()) / "memoizer_cache.json"
+
+    @functools.cached_property
+    def _shared_cache_lockfile(self) -> Path:
+        """Get the lock file path for the shared memoizer cache.
+
+        Returns:
+            The path to the lock file for the shared cache.
+        """
+        return Path(cache_dir()) / "memoizer_cache.lock"
+
+    def _read_dump_from_disk(self, filepath: Path | None = None) -> CacheDump | None:
+        """Read a cache dump from disk.
+
+        Attempts to read and parse a cache JSON file.
+
+        Args:
+            filepath: Path to the dump file to read. If None, uses the
+                     shared cache filepath (self._shared_cache_filepath).
+
+        Returns:
+            The cache dump if the file exists and is valid JSON, None otherwise.
+        """
+        target_path = filepath if filepath is not None else self._shared_cache_filepath
+        try:
+            with open(target_path) as f:
+                data = json.load(f)
+                return cast(CacheDump, data)
+        except FileNotFoundError:
+            return None
+        except json.JSONDecodeError:
+            return None
+
+    def _write_dump_to_disk(self, dump: CacheDump) -> None:
+        """Write the cache dump to disk.
+
+        Writes the provided dump to the shared cache JSON file and logs the result.
+
+        Args:
+            dump: The cache dump to write.
+        """
+        try:
+            with open(self._shared_cache_filepath, "w") as f:
+                json.dump(dump, f, indent=2)
+
+            # Log the filepath
+            if self._sub_key:
+                logger.log(
+                    logging.INFO,
+                    "Memoizer cache (sub_key=%s) dumped to: %s",
+                    self._sub_key,
+                    self._shared_cache_filepath,
+                )
+            else:
+                logger.log(
+                    logging.INFO,
+                    "Memoizer cache dumped to: %s",
+                    self._shared_cache_filepath,
+                )
+        except Exception as e:
+            # If dumping fails, just log it and don't crash the program
+            logger.log(
+                logging.WARNING,
+                "Warning: Failed to dump memoizer cache: %s",
+                e,
+            )
+
+    def _prepare_dump(self, existing_dump: CacheDump | None) -> CacheDump:
+        """Prepare a cache dump from the current Memoizer state.
+
+        Takes the existing dump (if any) and merges it with the current
+        in-memory cache entries.
+
+        Args:
+            existing_dump: The existing dump to merge with, or None if starting fresh.
+
+        Returns:
+            The prepared cache dump ready to be written to disk.
+        """
+        # Start with existing data or empty structure
+        if existing_dump is not None:
+            dump = existing_dump
+        else:
+            dump: CacheDump = {"cache_entries": {}, "cache_size": 0}
+
+        # Ensure cache_entries exists
+        if "cache_entries" not in dump:
+            dump["cache_entries"] = {}
+
+        # Format cache entries as {"params": ..., "result": ...}
+        formatted_cache: dict[str, CacheDumpEntry] = {}
+        for key, value in self._cache._memory.items():
+            entry = cast(CacheEntry, value)
+            formatted_cache[key] = CacheDumpEntry(
+                params=entry.encoded_params,
+                result=entry.encoded_result,
+            )
+
+        # Merge based on sub_key
+        if self._sub_key:
+            # Store under sub_key
+            dump["cache_entries"][self._sub_key] = formatted_cache
+        else:
+            # Merge directly into cache_entries
+            dump["cache_entries"].update(formatted_cache)
+
+        # Calculate total cache size across all entries
+        total_size = 0
+        for value in dump["cache_entries"].values():
+            if isinstance(value, dict):
+                # Check if it's a CacheDumpEntry (has 'params' and 'result') or a sub_key dict
+                if "params" in value and "result" in value:
+                    # Direct entry
+                    total_size += 1
+                else:
+                    # Sub_key with nested entries
+                    total_size += len(value)
+            else:
+                total_size += 1
+        dump["cache_size"] = total_size
+
+        return dump
+
+    def _dump_to_disk(self) -> None:
+        """Dump the in-memory cache to a shared JSON file.
+
+        This method is automatically called on program exit via atexit.
+        It reads any existing cache data, merges it with this instance's cache,
+        and writes the combined result back. Multiple Memoizer instances
+        contribute to the same file additively.
+
+        If self._sub_key is set and non-empty, cache entries are stored under
+        cache_entries[sub_key]. Otherwise, they're merged directly into cache_entries.
+
+        Cache entries are formatted as {"params": <encoded_params>, "result": <encoded_result>}
+        for better human readability.
+
+        The filepath where the cache was dumped is logged.
+        """
+        # Skip if cache is empty
+        if not self._cache._memory:
+            return
+
+        # Ensure parent directory exists
+        self._shared_cache_filepath.parent.mkdir(parents=True, exist_ok=True)
+
+        # Acquire file lock to ensure thread/process safety
+        flock = FileLock(str(self._shared_cache_lockfile))
+        with locks._acquire_flock_with_timeout(flock):
+            existing_dump = self._read_dump_from_disk()
+            dump = self._prepare_dump(existing_dump)
+            self._write_dump_to_disk(dump)
+
+    def _maybe_prepopulate_from_dump(self) -> None:
+        """Pre-populate cache entries from a dump file if configured.
+
+        Checks the CACHE_DUMP_FILE_PATH config option for a path to a JSON dump file
+        produced by IS_DUMP_MEMOIZER_CACHE_ENABLED. If a valid path is provided and
+        the file exists, loads cache entries from it into the in-memory cache.
+
+        For Memoizer instances without a sub_key, loads entries from the root cache_entries.
+        For Memoizer instances with a sub_key, loads entries from cache_entries[sub_key].
+
+        This method is called during __init__ to pre-populate the cache.
+        """
+        dump_file_path = config.CACHE_DUMP_FILE_PATH()
+
+        # Skip if no dump file configured
+        if not dump_file_path:
+            return
+
+        # Read the dump file using the helper method
+        dump = self._read_dump_from_disk(Path(dump_file_path))
+        if dump is None:
+            return
+
+        # Extract entries to load from the dump
+        entries_to_load = self._extract_entries_from_dump(dump)
+        if not entries_to_load:
+            return
+
+        # Populate the cache
+        self._populate_cache_from_entries(entries_to_load)
+
+        # Log the result
+        if self._sub_key:
+            logger.log(
+                logging.INFO,
+                "Loaded %d cache entries from %s (sub_key=%s)",
+                len(entries_to_load),
+                dump_file_path,
+                self._sub_key,
+            )
+        else:
+            logger.log(
+                logging.INFO,
+                "Loaded %d cache entries from %s",
+                len(entries_to_load),
+                dump_file_path,
+            )
+
+    def _extract_entries_from_dump(self, dump: CacheDump) -> dict[str, CacheDumpEntry]:
+        """Extract cache entries from a dump based on sub_key.
+
+        Args:
+            dump: The cache dump to extract entries from.
+
+        Returns:
+            Dictionary of cache entries to load.
+        """
+        cache_entries = dump.get("cache_entries", {})
+
+        if self._sub_key:
+            # Load from nested structure
+            entries = cache_entries.get(self._sub_key, {})
+            return cast(dict[str, CacheDumpEntry], entries)
+        else:
+            # Load from root level (but skip any nested structures)
+            return {
+                k: cast(CacheDumpEntry, v)
+                for k, v in cache_entries.items()
+                if isinstance(v, dict) and "params" in v and "result" in v
+            }
+
+    def _populate_cache_from_entries(self, entries: dict[str, CacheDumpEntry]) -> None:
+        """Populate the in-memory cache from dump entries.
+
+        Args:
+            entries: Dictionary of cache entries to load.
+        """
+        for key, entry in entries.items():
+            cache_entry = CacheEntry(
+                encoded_params=entry["params"],
+                encoded_result=entry["result"],
+            )
+            self._cache.insert(key, cache_entry)
 
     def record(
         self,
@@ -245,7 +581,16 @@ class Memoizer(_BaseMemoizer):
                 result = fn(*args, **kwargs)
 
                 # Generate cache key from parameters
-                cache_key = _make_key(custom_params_encoder, *args, **kwargs)
+                cache_key = self._make_key(custom_params_encoder, *args, **kwargs)
+
+                # Encode params for human-readable dump
+                if custom_params_encoder is not None:
+                    encoded_params = custom_params_encoder(*args, **kwargs)
+                else:
+                    encoded_params = {
+                        "args": args,
+                        "kwargs": kwargs,
+                    }
 
                 # Encode the result if encoder is provided
                 if custom_result_encoder is not None:
@@ -255,8 +600,12 @@ class Memoizer(_BaseMemoizer):
                 else:
                     encoded_result = result
 
-                # Store in cache
-                self._cache.insert(cache_key, encoded_result)
+                # Store CacheEntry in cache
+                cache_entry = CacheEntry(
+                    encoded_params=encoded_params,
+                    encoded_result=encoded_result,
+                )
+                self._cache.insert(cache_key, cache_entry)
 
                 # Return the original result (not the encoded version)
                 return result
@@ -325,20 +674,22 @@ class Memoizer(_BaseMemoizer):
                     KeyError: If no cached result exists for the given parameters.
                 """
                 # Generate cache key from parameters
-                cache_key = _make_key(custom_params_encoder, *args, **kwargs)
+                cache_key = self._make_key(custom_params_encoder, *args, **kwargs)
 
                 # Check if result is cached
                 cached_hit = self._cache.get(cache_key)
                 if cached_hit is None:
                     raise KeyError(f"No cached result found for key: {cache_key}")
 
+                # Extract the cached value
+                cache_entry = cast(CacheEntry, cached_hit.value)
+
                 # Decode and return the cached result
-                cached_value = cached_hit.value
                 if custom_result_decoder is not None:
                     # Get the decoder function by calling the factory with params
                     decoder_fn = custom_result_decoder(*args, **kwargs)
-                    return decoder_fn(cast(_EncodedR, cached_value))
-                return cast(_R, cached_value)
+                    return decoder_fn(cast(_EncodedR, cache_entry.encoded_result))
+                return cast(_R, cache_entry.encoded_result)
 
             return inner
 
@@ -355,6 +706,11 @@ class PersistentMemoizer(_BaseMemoizer):
 
     Results are persisted across process restarts.
 
+    On program exit, the in-memory cache entries are automatically dumped to
+    the shared JSON file. If sub_dir is non-empty, entries are stored under
+    a nested structure based on the sub_dir. If sub_dir is empty, entries are
+    merged directly into the root cache_entries.
+
     Note: Use this over functools.cache when you need to support parameters
     that functools.cache cannot handle, custom result encoding and/or decoding,
     or when you need disk caching to persist results across program boundaries.
@@ -366,13 +722,32 @@ class PersistentMemoizer(_BaseMemoizer):
         Args:
             sub_dir: Optional subdirectory within the cache directory for
                     organizing cached results. Defaults to empty string if not specified.
+                    If non-empty, cache entries will be stored under cache_entries[sub_dir].
+                    If empty, cache entries are merged into root cache_entries.
         """
         # Use a Memoizer instance for in-memory caching
-        self._memoizer: Memoizer = Memoizer()
+        self._memoizer: Memoizer = Memoizer(sub_key=str(sub_dir) if sub_dir else None)
         # Store on-disk cache as a separate attribute
         self._disk_cache: implementations._OnDiskCacheImpl = (
-            implementations._OnDiskCacheImpl(sub_dir)
+            implementations._OnDiskCacheImpl(sub_dir=sub_dir)
         )
+        # Register with clear_on_fresh_cache for fresh_cache() integration
+        clear_on_fresh_cache(self)
+
+    def cache_clear(self) -> None:
+        """Clear the on-disk cache.
+
+        This method removes the on-disk cache directory. The in-memory cache
+        is cleared automatically by the underlying Memoizer instance, which
+        registers itself with clear_on_fresh_cache.
+
+        This is called by the fresh_cache() context manager via clear_on_fresh_cache
+        registration.
+        """
+        # Clear on-disk cache by removing the cache directory
+        # Note: in-memory cache is cleared by the Memoizer's own cache_clear
+        if self._disk_cache._cache_dir.exists():
+            shutil.rmtree(self._disk_cache._cache_dir, ignore_errors=True)
 
     def record(
         self,
@@ -436,16 +811,17 @@ class PersistentMemoizer(_BaseMemoizer):
                 result = memory_record_fn(*args, **kwargs)
 
                 # Also store in disk cache
-                cache_key = _make_key(custom_params_encoder, *args, **kwargs)
+                cache_key = self._make_key(custom_params_encoder, *args, **kwargs)
 
-                # Get the encoded result from memory cache
+                # Get the cache entry from memory cache
                 # We know it must be there since memory_record_fn just cached it
                 cached_hit = self._memoizer._cache.get(cache_key)
-                encoded_result = cached_hit.value  # type: ignore[union-attr]
+                assert cached_hit, "Cache entry must exist in memory cache"
+                cache_entry = cast(CacheEntry, cached_hit.value)
 
-                # Store in disk cache (requires bytes, so pickle)
-                pickled_result: bytes = pickle.dumps(encoded_result)
-                self._disk_cache.insert(cache_key, pickled_result)
+                # Store the full CacheEntry in disk cache for easier debugging
+                pickled_entry: bytes = pickle.dumps(cache_entry)
+                self._disk_cache.insert(cache_key, pickled_entry)
 
                 return result
 
@@ -529,21 +905,21 @@ class PersistentMemoizer(_BaseMemoizer):
                     pass  # Memory miss, check disk
 
                 # Memory miss - check disk cache
-                cache_key = _make_key(custom_params_encoder, *args, **kwargs)
+                cache_key = self._make_key(custom_params_encoder, *args, **kwargs)
                 disk_hit = self._disk_cache.get(cache_key)
                 if disk_hit is not None:
-                    # Disk cache hit - unpickle the bytes
+                    # Disk cache hit - unpickle the CacheEntry
                     pickled_value = disk_hit.value
-                    cached_value = pickle.loads(pickled_value)
+                    cache_entry = cast(CacheEntry, pickle.loads(pickled_value))
 
                     # Populate memory cache for future access
-                    self._memoizer._cache.insert(cache_key, cached_value)
+                    self._memoizer._cache.insert(cache_key, cache_entry)
 
                     # Decode and return
                     if custom_result_decoder is not None:
                         decoder_fn = custom_result_decoder(*args, **kwargs)
-                        return decoder_fn(cast(_EncodedR, cached_value))
-                    return cast(_R, cached_value)
+                        return decoder_fn(cast(_EncodedR, cache_entry.encoded_result))
+                    return cast(_R, cache_entry.encoded_result)
 
                 # Complete miss
                 raise KeyError(f"No cached result found for key: {cache_key}")

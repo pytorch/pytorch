@@ -1,11 +1,11 @@
 #  Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
 from torch._ops import OpOverload
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     ArgsType,
     KwargsType,
@@ -23,6 +23,7 @@ from torch.distributed.tensor.placement_types import (
     Replicate,
     Shard,
 )
+from torch.utils._pytree import tree_map_only
 
 
 logger = logging.getLogger(__name__)
@@ -63,7 +64,7 @@ def _insert_single_dim_replication_strategy(
     """
     Inserts the [Replicate(), Replicate(), ...] strategy after asserting that such strategy does not yet exist.
     """
-    for i, strategy in enumerate(single_dim_strategies_with_placeholders):
+    for strategy in single_dim_strategies_with_placeholders:
         assert not all(isinstance(p, Replicate) for p in strategy)
     single_dim_strategies_with_placeholders.append(
         [Replicate()] * (1 + num_input_tensors)
@@ -161,6 +162,7 @@ def _expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
     single_dim_strategy: _SingleDimStrategyFunc,
+    output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
 ) -> _ExpandedSingleDimStrategyFunc:
     """
     Expands the single_mesh_dim impl across all mesh dims, and expands ShardingPlacholder into all
@@ -171,53 +173,149 @@ def _expand_single_dim_strategy_to_mesh(
 
     The expanded_strategy function accesses both the args_schema/kwargs_schema, which contains TensorMeta in place of
     tensor arguments, but also the op_schema which contains OpStrategy in place of Tensor args.
+
+    Args:
+        output_tensor_meta: tensor metadata for the output(s), precomputed during sharding prop
     """
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
-    unique_input_placements = _get_unique_placements(op_schema)
-    num_inputs = _get_num_tensor_inputs(op_schema)
+    def _create_expanded_strategy(
+        op_schema: OpSchema,
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
+    ) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
+        def expanded_strategy(
+            op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+        ) -> StrategyType:
+            # Note: op_schema vs [args_schema, kwargs_schema]
+            # -----------------------------------------------
+            # Inside `expanded_strategy function we purposefully have access to 2 similar structures.
+            # 1) (op, args_schema, kwargs_schema): This is all the single_dim_strategy is allowed to see.
+            # importantly, it does not contain information about input placements or meshes - just TensorMeta.
+            # 2) op_schema - captured from the parent scope, this contains the input placement and mesh info, needed
+            # to actually perform expansion.
+            unique_input_placements = _get_unique_placements(op_schema)
+            num_inputs = _get_num_tensor_inputs(op_schema)
 
-    def expanded_strategy(
+            # Note: Trees vs Flat Lists
+            # -------------------------
+            # op_schema.args_schema may contain a TupleStrategy with child strategies for List[Tensor] inputs.
+            # args_schema has corresponding TupleStrategy, but with TensorSpec in place of child strategies.
+            # CURRENTLY: single_dim_strategy will return a flat list of Placements for each strategy, where any
+            # input tuple strategies have been inlined.  I'm not sure if we want to keep doing this, or preserve a pytree
+            # structure here.  I'm following the convention in the current DTensor sharding strategies for now.
+            # Inside expanded_strategy, we need to carefully align the OpStrategies / Specs from op_schema which are _not_
+            # flattened, with the flat Placement list returned from single_dim strategy.
+            strategies_over_one_mesh_dim = single_dim_strategy(
+                op, args_schema, kwargs_schema
+            )
+            strategies_over_one_mesh_dim = _insert_single_dim_replication_strategy(
+                strategies_over_one_mesh_dim, num_inputs
+            )
+            expanded_strategies_over_one_mesh_dim = (
+                _fill_single_dim_strategy_placeholders(
+                    unique_input_placements, strategies_over_one_mesh_dim
+                )
+            )
+
+            # Note: does not support `allow_unbacked_sharding` which is needed by matmul rules for some compile test
+            # currently, we should probably change that test though, since it seems wrong to me to allow sharding unbacked
+            # dims
+            return expand_to_full_mesh_op_strategy(
+                mesh,
+                op_schema,
+                cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
+                output_tensor_meta=output_tensor_meta,
+            )
+
+        return expanded_strategy
+
+    def _translate_foreach_op_schema(
+        op_schema: OpSchema, output_tensor_meta: Sequence[TensorMeta], index: int
+    ) -> tuple[OpSchema, TensorMeta]:
+        """Translate foreach op to per-element version of schema."""
+        op_parts = str(op_schema.op).split(".")
+        base_op_name = op_parts[-2].replace("_foreach_", "")
+        foreach_variant = op_parts[-1]
+
+        # select per-element inputs, outputs
+        target_args, target_kwargs = tree_map_only(
+            TupleStrategy,
+            lambda x: x.children[index],
+            (op_schema.args_schema, op_schema.kwargs_schema),
+            is_leaf=lambda x: isinstance(x, TupleStrategy),
+        )
+        target_output_meta = output_tensor_meta[index]
+
+        # figure out target op variant
+        variant_map = {
+            "List": "Tensor",
+            "ScalarList": "Scalar",
+            "Scalar": "Scalar",
+            "Tensor": "Tensor",
+            "default": "default",
+        }
+        target_variant = (
+            "default"
+            if len(target_args) == 1
+            else variant_map.get(foreach_variant, "default")
+        )
+
+        # this seems a bit messy
+        base_op = getattr(torch.ops.aten, base_op_name)
+        target_op = (
+            getattr(base_op, target_variant)
+            if target_variant in base_op.overloads()
+            else base_op.default
+        )
+
+        op_schema = OpSchema(
+            target_op,  # type: ignore[arg-type]
+            args_schema=tuple(target_args),
+            kwargs_schema=op_schema.kwargs_schema,
+        )
+        return op_schema, target_output_meta
+
+    def expanded_foreach_strategy(
         op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
     ) -> StrategyType:
-        # Note: op_schema vs [args_schema, kwargs_schema]
-        # -----------------------------------------------
-        # Inside `expanded_strategy function we purposefully have access to 2 similar structures.
-        # 1) (op, args_schema, kwargs_schema): This is all the single_dim_strategy is allowed to see.
-        # importantly, it does not contain information about input placements or meshes - just TensorMeta.
-        # 2) op_schema - captured from the parent scope, this contains the input placement and mesh info, needed
-        # to actually perform expansion.
+        tensorlist_len: int | None = None
+        for i, obj in enumerate(op_schema.args_schema):
+            if isinstance(obj, TupleStrategy):
+                if tensorlist_len is None:
+                    tensorlist_len = len(obj.children)
+                elif len(obj.children) != tensorlist_len:
+                    raise AssertionError(
+                        f"Expected {tensorlist_len} children in index {i}, but found {len(obj.children)}."
+                    )
 
-        # Note: Trees vs Flat Lists
-        # -------------------------
-        # op_schema.args_schema may contain a TupleStrategy with child strategies for List[Tensor] inputs.
-        # args_schema has corresponding TupleStrategy, but with TensorSpec in place of child strategies.
-        # CURRENTLY: single_dim_strategy will return a flat list of Placements for each strategy, where any
-        # input tuple strategies have been inlined.  I'm not sure if we want to keep doing this, or preserve a pytree
-        # structure here.  I'm following the convention in the current DTensor sharding strategies for now.
-        # Inside expanded_strategy, we need to carefully align the OpStrategies / Specs from op_schema which are _not_
-        # flattened, with the flat Placement list returned from single_dim strategy.
-        strategies_over_one_mesh_dim = single_dim_strategy(
-            op, args_schema, kwargs_schema
-        )
-        strategies_over_one_mesh_dim = _insert_single_dim_replication_strategy(
-            strategies_over_one_mesh_dim, num_inputs
-        )
-        expanded_strategies_over_one_mesh_dim = _fill_single_dim_strategy_placeholders(
-            unique_input_placements, strategies_over_one_mesh_dim
-        )
+        if tensorlist_len is None:
+            raise AssertionError("Must have at least one tuple input to a foreach op")
 
-        # Note: does not support `allow_unbacked_sharding` which is needed by matmul rules for some compile test
-        # currently, we should probably change that test though, since it seems wrong to me to allow sharding unbacked
-        # dims
-        return expand_to_full_mesh_op_strategy(
-            mesh,
-            op_schema,
-            cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
-        )
+        child_strategies: list[StrategyType] = []
+        for tensorlist_i in range(tensorlist_len):
+            per_index_schema, per_index_output_meta = _translate_foreach_op_schema(
+                op_schema,
+                output_tensor_meta,  # type: ignore[arg-type]
+                tensorlist_i,
+            )
+            # TODO: enrich OpSchema._comparison_key so we can lru_cache this (for starters, it doesn't include placements)
+            per_index_strategy = _create_expanded_strategy(
+                per_index_schema, per_index_output_meta
+            )
+            child_strategies.append(
+                per_index_strategy(
+                    op, per_index_schema.args_meta, per_index_schema.kwargs_meta
+                )
+            )
 
-    return expanded_strategy
+        return TupleStrategy(children=child_strategies)
+
+    # TODO maybe this could be helped by adding a new 'tag' to the OpOverload?
+    if op_schema.op.name().startswith("aten::_foreach_"):
+        return expanded_foreach_strategy
+
+    return _create_expanded_strategy(op_schema, output_tensor_meta)
 
 
 def register_single_dim_strategy(

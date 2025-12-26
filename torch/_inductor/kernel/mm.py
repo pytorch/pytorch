@@ -49,6 +49,7 @@ from ..utils import (
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
+    use_nv_universal_gemm_template,
     use_triton_blackwell_tma_template,
     use_triton_scaling_template,
     use_triton_template,
@@ -424,6 +425,14 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
                 templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
 
+            if (
+                inductor_config.is_fbcode()
+                and inductor_config.triton.enable_tlx_templates
+            ):
+                from torch._inductor.fb.tlx_templates.mm_templates import append_tlx
+
+                templates_to_use = append_tlx(templates_to_use)
+
         templates_to_use.append(mm_contiguous_subgraph_template)
 
     choices.extend(
@@ -449,6 +458,15 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
     if out_dtype is None and is_nonzero and use_ck_tile_gemm_template(layout, m, n, k):
         CKTileGemmTemplate.add_choices(choices, layout, kernel_inputs.nodes())
+
+    if (
+        out_dtype is None
+        and is_nonzero
+        and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2)
+    ):
+        from ..codegen.nv_universal_gemm import add_nv_universal_gemm_choices
+
+        add_nv_universal_gemm_choices(choices, layout, kernel_inputs.nodes())
 
     if out_dtype is None and use_cpp_gemm_template(layout, mat1, mat2):
         CppGemmTemplate.add_choices(
@@ -754,6 +772,7 @@ scaling_pairs = [
     (ScalingType.RowWise, ScalingType.RowWise),
     (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128),
     (ScalingType.BlockWise1x128, ScalingType.BlockWise1x128),
+    (ScalingType.BlockWise128x128, ScalingType.BlockWise1x128),
 ]
 
 
