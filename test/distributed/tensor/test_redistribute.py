@@ -1273,6 +1273,106 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
 
 
+class DistributeWithStridedShardTest(DistributeWithDeviceOrderTest):
+    @property
+    def world_size(self) -> int:
+        return 8
+
+    @with_comms
+    def test_strided_shard_redistribution(self):
+        torch.manual_seed(21)
+        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        input_data = torch.randn((31, 13, 11), device=self.device_type)
+        sharding_src_dst_pairs_with_expected_trace = [
+            (
+                (
+                    [Shard(0), Shard(0), _StridedShard(0, split_factor=3)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1, 2)),),
+                ),
+                (
+                    [Replicate(), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 2)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), Shard(0), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
+                ),
+                (
+                    [Replicate(), Shard(0), _StridedShard(0, split_factor=3)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 2)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), _StridedShard(0, split_factor=3), Shard(0)],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),),
+                ),
+                (
+                    [_StridedShard(0, split_factor=3), Shard(0), Replicate()],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
+                ),
+            ),
+            (
+                (
+                    [Shard(0), Shard(0), Replicate()],
+                    (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
+                ),
+                (
+                    [Replicate(), _StridedShard(1, split_factor=5), Shard(0)],
+                    (
+                        ShardOrderEntry(tensor_dim=0, mesh_dims=(2,)),
+                        ShardOrderEntry(tensor_dim=1, mesh_dims=(1,)),
+                    ),
+                ),
+            ),
+        ]
+        for idx, ((src_placement, src_order), (dst_placement, dst_order)) in enumerate(
+            sharding_src_dst_pairs_with_expected_trace
+        ):
+            sharded_dt = _distribute_tensor(
+                input_data.clone(),
+                mesh,
+                src_placement,
+                shard_order=src_order,
+                src_data_rank=None,
+            )
+            with DebugMode(record_torchfunction=False) as debug_mode:
+                sharded_dt = redistribute(sharded_dt, mesh, dst_placement, dst_order)
+            trace_str = self._extract_redistribute_trace_from_debug_mode(
+                debug_mode.debug_string()
+            )
+            if idx == 0:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]_S(0, 3)->S(0)[0]S(0)[1]S(1)->S(0)[0]S(1)[1]S(1)[0]->RS(1)[1]S(1)[0]->RS(0)[1]S(1)->RS(0)[1]S(0)[2]""",
+                )
+            elif idx == 1:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]S(1)->RS(0)S(1)->RS(0)_S(0, 3)""",
+                )
+            elif idx == 2:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[1]_S(0, 3)S(0)[2]->S(0)[1]_S(0, 3)R->S(0)[1]S(1)R->S(1)[1]S(1)[0]R->_S(0, 3)S(1)R->_S(0, 3)S(0)[0]R""",
+                )
+            elif idx == 3:
+                self.assertExpectedInline(
+                    trace_str,
+                    """S(0)[0]S(0)[1]R->S(0)_S(1, 5)R->R_S(1, 5)R->R_S(1, 5)S(0)""",
+                )
+            expected_dt = _distribute_tensor(
+                input_data.clone(),
+                mesh,
+                dst_placement,
+                shard_order=dst_order,
+                src_data_rank=None,
+            )
+            self.assertEqual(sharded_dt.to_local(), expected_dt.to_local())
+
+
 RedistributeTestWithLocalTensor = create_local_tensor_test_class(
     RedistributeTest,
 )
@@ -1284,6 +1384,10 @@ MultiDimRedistributeTestWithLocalTensor = create_local_tensor_test_class(
 
 DistributeWithDeviceOrderTestWithLocalTensor = create_local_tensor_test_class(
     DistributeWithDeviceOrderTest,
+)
+
+DistributeWithStridedShardTestLocalTensor = create_local_tensor_test_class(
+    DistributeWithStridedShardTest,
 )
 
 if __name__ == "__main__":
