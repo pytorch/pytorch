@@ -1,7 +1,22 @@
 # Owner(s): ["module: fx"]
 
 import torch
+from torch._functorch._aot_autograd.descriptors import (
+    PlainAOTInput,
+    SubclassGetAttrAOTInput,
+    SubclassMethodAOTInput,
+)
+from torch._functorch._aot_autograd.runtime_wrappers import (
+    _evaluate_opaque_descriptor,
+    AOTDispatchSubclassWrapper,
+)
+from torch._functorch._aot_autograd.schemas import (
+    AOTConfig,
+    SubclassMeta,
+    ViewAndMutationMeta,
+)
 from torch._library.opaque_object import register_opaque_type
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
@@ -40,11 +55,6 @@ class TestOpaqueInfrastructure(TestCase):
 
     def test_plain_aot_input_descriptor_evaluation(self):
         """Test PlainAOTInput descriptor evaluation."""
-        from torch._functorch._aot_autograd.descriptors import PlainAOTInput
-        from torch._functorch._aot_autograd.runtime_wrappers import (
-            _evaluate_opaque_descriptor,
-        )
-
         counter = OpaqueCounter(42)
         wrapper = WrapperWithOpaque(counter)
 
@@ -62,14 +72,6 @@ class TestOpaqueInfrastructure(TestCase):
 
     def test_subclass_get_attr_descriptor_evaluation(self):
         """Test SubclassGetAttrAOTInput descriptor evaluation."""
-        from torch._functorch._aot_autograd.descriptors import (
-            PlainAOTInput,
-            SubclassGetAttrAOTInput,
-        )
-        from torch._functorch._aot_autograd.runtime_wrappers import (
-            _evaluate_opaque_descriptor,
-        )
-
         counter = OpaqueCounter(42)
         wrapper = WrapperWithOpaque(counter)
 
@@ -85,16 +87,59 @@ class TestOpaqueInfrastructure(TestCase):
         self.assertIs(result, counter)
         self.assertEqual(result.get_value(), 42)
 
-    def test_nested_subclass_descriptors(self):
-        """Test deeply nested descriptor evaluation."""
-        from torch._functorch._aot_autograd.descriptors import (
-            PlainAOTInput,
-            SubclassGetAttrAOTInput,
-        )
-        from torch._functorch._aot_autograd.runtime_wrappers import (
-            _evaluate_opaque_descriptor,
+        # Test SubclassMethodAOTInput descriptor (method call)
+        # Create a wrapper with a method
+        class WrapperWithMethod:
+            def __init__(self):
+                self.counter = OpaqueCounter(100)
+
+            def get_counter(self):
+                return self.counter
+
+        wrapper_with_method = WrapperWithMethod()
+
+        # This represents: args[0].get_counter()
+        plain_desc2 = PlainAOTInput(idx=0)
+        method_desc = SubclassMethodAOTInput(
+            plain_desc2, "get_counter", args=(), kwargs={}
         )
 
+        args2 = [wrapper_with_method]
+        result2 = _evaluate_opaque_descriptor(method_desc, args2)
+
+        # Verify we got the counter from the method call
+        self.assertIs(result2, wrapper_with_method.counter)
+        self.assertEqual(result2.get_value(), 100)
+
+        # Test chained descriptor: args[0].counter.get_value()
+        # But get_value returns int, so let's test a realistic chain like DTensor
+        # args[0].device_mesh.get_group(0)
+        class FakeDeviceMesh:
+            def get_group(self, dim):
+                return OpaqueCounter(200 + dim)
+
+        class FakeDTensor:
+            def __init__(self):
+                self.device_mesh = FakeDeviceMesh()
+
+        dtensor = FakeDTensor()
+
+        # Build: args[0].device_mesh.get_group(1)
+        plain_desc3 = PlainAOTInput(idx=0)
+        mesh_desc = SubclassGetAttrAOTInput(plain_desc3, "device_mesh")
+        group_desc = SubclassMethodAOTInput(
+            mesh_desc, "get_group", args=(1,), kwargs={}
+        )
+
+        args3 = [dtensor]
+        result3 = _evaluate_opaque_descriptor(group_desc, args3)
+
+        # Verify we got the process group
+        self.assertIsInstance(result3, OpaqueCounter)
+        self.assertEqual(result3.get_value(), 201)  # 200 + dim(1)
+
+    def test_nested_subclass_descriptors(self):
+        """Test deeply nested descriptor evaluation."""
         # Create nested structure: wrapper1.wrapper2.counter
         counter = OpaqueCounter(100)
         inner_wrapper = WrapperWithOpaque(counter)
@@ -119,7 +164,6 @@ class TestOpaqueInfrastructure(TestCase):
 
     def test_opaque_object_in_traced_graph(self):
         """Test that opaque objects can be traced into FX graphs."""
-        from torch.fx.experimental.proxy_tensor import make_fx
 
         counter = OpaqueCounter(42)
 
@@ -147,6 +191,91 @@ class TestOpaqueInfrastructure(TestCase):
         # The second placeholder should be for the opaque object
         opaque_placeholder = placeholders[1]
         self.assertTrue(opaque_placeholder.name.startswith("opaque_obj"))
+
+    def test_opaque_inp_descs_in_aot_autograd(self):
+        """Test that opaque_inp_descs work correctly in AOTDispatchSubclassWrapper."""
+        # Create a wrapper object that contains an opaque object
+        # This simulates a subclass input (like DTensor with device_mesh)
+        counter = OpaqueCounter(999)
+        wrapper = WrapperWithOpaque(counter)
+
+        # Create descriptor that describes how to extract opaque from runtime args
+        # Runtime args: [wrapper]
+        # Descriptor: args[0].counter
+        wrapper_desc = PlainAOTInput(idx=0)
+        opaque_desc = SubclassGetAttrAOTInput(wrapper_desc, "counter")
+
+        # Create runtime metadata with opaque_inp_descs
+        runtime_metadata = ViewAndMutationMeta(
+            input_info=[],
+            output_info=[],
+            num_intermediate_bases=0,
+            keep_input_mutations=False,
+            is_train=False,
+            traced_tangents=[],
+            traced_tangents_descs=[],
+            subclass_inp_meta=[],  # No tensor subclasses in this simple test
+            subclass_fw_graph_out_meta=[],
+            subclass_tangent_meta=[],
+            opaque_inp_descs=[opaque_desc],  # This is what we're testing!
+        )
+
+        # Track what the compiled function receives
+        compiled_fn_args = {"called": False, "args": None}
+
+        # Create a mock compiled function
+        # It should receive the opaque_object appended after any unwrapped args
+        def compiled_fn(args):
+            compiled_fn_args["called"] = True
+            compiled_fn_args["args"] = args
+            # The wrapper first unwraps args, then appends opaques
+            # With subclass_inp_meta=[], unwrapping returns the original args
+            # So we expect: [wrapper, opaque_object]
+            self.assertEqual(len(args), 2)
+            # First arg is the wrapper (not unwrapped since no subclass_inp_meta)
+            self.assertIs(args[0], wrapper)
+            # Second arg is the extracted opaque object
+            self.assertIsInstance(args[1], OpaqueCounter)
+            self.assertEqual(args[1].get_value(), 999)
+            self.assertIs(args[1], counter)
+            return []  # Return empty list (no outputs)
+
+        # Create SubclassMeta (needed for wrapper)
+        subclass_meta = SubclassMeta()
+
+        # Create wrapper
+        wrapper_obj = AOTDispatchSubclassWrapper(
+            trace_joint=False,
+            fw_only=None,
+            maybe_subclass_meta=subclass_meta,
+            num_fw_outs_saved_for_bw=None,
+        )
+
+        # Create a minimal AOTConfig (many fields can be None for this test)
+        aot_config = AOTConfig(
+            fw_compiler=None,
+            bw_compiler=None,
+            partition_fn=None,
+            decompositions={},
+            num_params_buffers=0,
+            aot_id=0,
+            keep_inference_input_mutations=False,
+        )
+
+        # Call post_compile to get the wrapped function
+        wrapped_fn = wrapper_obj.post_compile(
+            compiled_fn, aot_config, runtime_metadata=runtime_metadata
+        )
+
+        # Call the wrapped function with runtime args
+        # The wrapper should extract the opaque object and pass it to compiled_fn
+        runtime_args = [wrapper]
+        wrapped_fn(runtime_args)
+
+        # Verify the compiled function was called with the extracted opaque object
+        self.assertTrue(compiled_fn_args["called"], "Compiled function was not called")
+        self.assertIsNotNone(compiled_fn_args["args"])
+        # All verifications of the opaque object happened inside compiled_fn
 
 
 if __name__ == "__main__":
