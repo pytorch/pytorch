@@ -349,10 +349,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # These tests are expected to throw SIGABRT(6);
         # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
+        #
+        # CUDA: Uses native __trap() instruction → CUDA runtime catches it →
+        #       clean exit(6) → exit code 6
+        # ROCm: No native trap instruction, uses assert(0) (NanCheck.cu:24-27) →
+        #       calls abort() → OS sends SIGABRT signal → process killed by signal →
+        #       exit code -6
         TEST_NAN_ASSERT_RETURN = (
             0
             if (IS_SANDCASTLE and not (TEST_MULTIGPU and CUDA_12_AND_ABOVE))
-            else signal.SIGABRT
+            else (-signal.SIGABRT if torch.version.hip else signal.SIGABRT)
         )
         self.special_return_code_checks = {
             self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
@@ -561,7 +567,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             torch.float8_e5m2,
         ],
     )
-    @skip_if_rocm_multiprocess
     def test_nan_assert(self, type):
         # Expecting a device-side error when NaN is detected
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
@@ -5233,6 +5238,80 @@ class SparseCollective(MultiProcessTestCase):
             else:
                 # Rethrow the exception if it's a different error
                 raise
+
+
+class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 1
+
+    def setUp(self):
+        super().setUp()
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # self.num_gpus = torch.cuda.device_count()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter(self):
+        """
+        This is testing against a known bug in NCCL.
+
+        TODO: remove once this is fixed upstream
+
+        https://github.com/pytorch/pytorch/issues/168092
+        https://github.com/NVIDIA/nccl/issues/1950
+        """
+        device = torch.device(f"cuda:{self.rank:d}")
+
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            device_id=device,
+        )
+
+        size = 8192 + 1  # known bad size
+        input_tensor = torch.randn(size, dtype=torch.bfloat16, device=device)
+
+        with self.subTest("reduce_scatter"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            dist.reduce_scatter(
+                output=output_tensor,
+                input_list=[input_tensor],
+                op=dist.ReduceOp.AVG,
+            )
+            torch.testing.assert_close(output_tensor, input_tensor)
+
+        with self.subTest("reduce_scatter_tensor"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            dist.reduce_scatter_tensor(
+                output=output_tensor,
+                input=input_tensor,
+                op=dist.ReduceOp.AVG,
+            )
+            torch.testing.assert_close(output_tensor, input_tensor)
+
+        with self.subTest("reduce_scatter_tensor_coalesced"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            with dist._coalescing_manager():
+                dist.reduce_scatter_tensor(
+                    output=output_tensor,
+                    input=input_tensor,
+                    op=dist.ReduceOp.AVG,
+                )
+            torch.testing.assert_close(output_tensor, input_tensor)
 
 
 class NCCLTraceTestBase(MultiProcessTestCase):
