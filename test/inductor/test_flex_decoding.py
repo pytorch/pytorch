@@ -11,6 +11,7 @@ from unittest import expectedFailure
 from unittest.mock import patch
 
 import torch
+from torch._inductor.exc import InductorError
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.experimental._paged_attention import PagedAttention
@@ -30,6 +31,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipXPUIf,
 )
+from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
 from torch.utils._triton import has_triton_tma_device
 
@@ -250,7 +252,6 @@ test_Bq_Bkv = [
 test_block_size = [
     64,
     128,
-    (1, 64),
     (128, 64),
 ]
 
@@ -1558,14 +1559,136 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(causal_njt, dtype, device=device)
 
     @supported_platform
-    def test_mixed_dtypes_fails(self, device):
-        query = torch.randn((1, 1, 8, 64), dtype=torch.float32, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    def test_mixed_dtypes(self, device):
+        query = torch.randn((1, 1, 8, 64), dtype=torch.bfloat16, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
+            torch.float8_e4m3fn
+        )
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
+            torch.float8_e4m3fn
+        )
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+        out = torch.compile(flex_attention)(
+            query, key, value, _identity, kernel_options=kernel_options
+        )
+        self.assertEqual(out.shape, query.shape)
+        self.assertEqual(out.dtype, query.dtype)
+
+    @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    def test_mixed_dtypes_sqnr_per_tensor(self, device):
+        query_ref = torch.testing.make_tensor(
+            (1, 1, 8, 64), dtype=torch.bfloat16, device=device
+        )
+        key_ref = torch.testing.make_tensor(
+            (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        value_ref = torch.testing.make_tensor(
+            (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+
+        key_scale = torch.max(torch.abs(key_ref)) / torch.finfo(torch.float8_e4m3fn).max
+        value_scale = (
+            torch.max(torch.abs(value_ref)) / torch.finfo(torch.float8_e4m3fn).max
+        )
+
+        key_fp8 = (key_ref / key_scale).to(torch.float8_e4m3fn)
+        value_fp8 = (value_ref / value_scale).to(torch.float8_e4m3fn)
+
+        def score_mod(score, b, h, m, n):
+            # Dequantize keys inside the attention score computation
+            return score * key_scale
+
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        out = (
+            compiled_fn(
+                query_ref, key_fp8, value_fp8, score_mod, kernel_options=kernel_options
+            )
+            * value_scale
+        )
+        out_ref = compiled_fn(
+            query_ref, key_ref, value_ref, _identity, kernel_options=kernel_options
+        )
+        _, _, sqnr = _snr(out_ref, out)
+        self.assertGreater(sqnr, 15)
+
+    @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    def test_mixed_dtypes_sqnr_per_head(self, device):
+        query_ref = torch.testing.make_tensor(
+            (1, 4, 8, 64), dtype=torch.bfloat16, device=device
+        )
+        key_ref = torch.testing.make_tensor(
+            (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        value_ref = torch.testing.make_tensor(
+            (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+
+        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+
+        key_scale = torch.amax(torch.abs(key_ref), dim=(-2, -1)) / fp8_max  # (B, H)
+        value_scale = torch.amax(torch.abs(value_ref), dim=(-2, -1)) / fp8_max  # (B, H)
+
+        key_scale_b = key_scale[..., None, None]  # (B, H, 1, 1) for broadcasting
+        value_scale_b = value_scale[..., None, None]
+
+        key_fp8 = (key_ref / key_scale_b).to(torch.float8_e4m3fn)
+        value_fp8 = (value_ref / value_scale_b).to(torch.float8_e4m3fn)
+
+        def score_mod(score, b, h, m, n):
+            # Dequantize keys inside the attention score computation
+            return score * key_scale[b, h]
+
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        out = (
+            compiled_fn(
+                query_ref, key_fp8, value_fp8, score_mod, kernel_options=kernel_options
+            )
+            * value_scale_b
+        )
+        out_ref = compiled_fn(
+            query_ref, key_ref, value_ref, _identity, kernel_options=kernel_options
+        )
+        _, _, sqnr = _snr(out_ref, out)
+        self.assertGreater(sqnr, 15)
+
+    @supported_platform
+    @unittest.skipIf(SKIP_UT_ON_CPU, "Skip on CPU as not supported")
+    def test_mixed_dtype_backwards(self, device):
+        q = torch.testing.make_tensor(
+            (1, 1, 8, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        )
+        k = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        ).to(torch.float8_e4m3fn)
+        v = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        ).to(torch.float8_e4m3fn)
+
+        kernel_options = {"BACKEND": "TRITON_DECODE"}
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+
         with self.assertRaisesRegex(
-            ValueError, "Expected query, key, and value to have the same dtype"
+            InductorError,
+            "Backward pass with mixed query, key, and value dtype is not supported",
         ):
-            flex_attention(query, key, value, _identity)
+            out_mixed = (
+                compiled_fn(q, k, v, _identity, kernel_options=kernel_options)
+            ).mean()
+            out_mixed.backward()
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -1909,6 +2032,45 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
             else:
                 self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+
+    @supported_platform
+    @common_utils.parametrize("q_seq_len", [4, 8, 16, 23, 64])
+    def test_multi_block_m(self, q_seq_len, device):
+        def mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        B, KV_SEQ_LEN, NUM_Q_HEAD, NUM_KV_HEAD, HEAD_DIM = 1, 128, 32, 8, 128
+        mask = create_block_mask(
+            mask_mod=mask_mod,
+            B=1,
+            H=1,
+            Q_LEN=q_seq_len,
+            KV_LEN=KV_SEQ_LEN,
+            device=device,
+            BLOCK_SIZE=16,  # follow the vllm integration
+        )
+
+        flex_attention_compiled = torch.compile(flex_attention)
+
+        dtype = torch.float
+        q = torch.randn(B, NUM_Q_HEAD, q_seq_len, HEAD_DIM, device=device, dtype=dtype)
+        k = torch.randn(
+            B, NUM_KV_HEAD, KV_SEQ_LEN, HEAD_DIM, device=device, dtype=dtype
+        )
+        v = torch.randn(
+            B, NUM_KV_HEAD, KV_SEQ_LEN, HEAD_DIM, device=device, dtype=dtype
+        )
+
+        # settings for vllm integration
+        kernel_options = dict(BLOCK_M=16, BLOCK_N=16)
+        kwargs = dict(
+            block_mask=mask,
+            kernel_options=kernel_options,
+            enable_gqa=True,
+        )
+        eager = flex_attention(q, k, v, **kwargs)
+        out = flex_attention_compiled(q, k, v, **kwargs)
+        torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
