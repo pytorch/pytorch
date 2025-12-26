@@ -832,7 +832,10 @@ class BuildExtension(build_ext):
             extra_cc_cflags = self.compiler.compiler_so[1:]
             with_cuda = any(map(_is_cuda_file, sources))
             with_sycl = any(map(_is_sycl_file, sources))
-            assert not (with_sycl and with_cuda)
+            if with_sycl and with_cuda:
+                raise AssertionError(
+                    "cannot have both SYCL and CUDA files in the same extension"
+                )
 
             # extra_postargs can be either:
             # - a dict mapping cxx/nvcc/sycl to extra flags
@@ -1041,7 +1044,10 @@ class BuildExtension(build_ext):
                 common_cflags.extend(COMMON_MSVC_FLAGS)
             with_cuda = any(map(_is_cuda_file, sources))
             with_sycl = any(map(_is_sycl_file, sources))
-            assert not (with_sycl and with_cuda)
+            if with_sycl and with_cuda:
+                raise AssertionError(
+                    "cannot have both SYCL and CUDA files in the same extension"
+                )
 
             # extra_postargs can be either:
             # - a dict mapping cxx/nvcc to extra flags
@@ -2159,7 +2165,10 @@ def _jit_compile(name,
     with_cudnn = any('cudnn' in f for f in extra_ldflags or [])
     if with_sycl is None:
         with_sycl = any(map(_is_sycl_file, sources))
-    assert not (with_sycl and with_cuda)
+    if with_sycl and with_cuda:
+        raise AssertionError(
+            "cannot have both SYCL and CUDA files in the same extension"
+        )
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
@@ -2264,7 +2273,10 @@ def _write_ninja_file_and_compile_objects(
         with_cuda = any(map(_is_cuda_file, sources))
     if with_sycl is None:
         with_sycl = any(map(_is_sycl_file, sources))
-    assert not (with_sycl and with_cuda)
+    if with_sycl and with_cuda:
+        raise AssertionError(
+            "cannot have both SYCL and CUDA files in the same extension"
+        )
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         logger.debug('Emitting ninja build file %s...', build_file_path)
@@ -2324,7 +2336,10 @@ def _write_ninja_file_and_build_library(
         with_cuda = any(map(_is_cuda_file, sources))
     if with_sycl is None:
         with_sycl = any(map(_is_sycl_file, sources))
-    assert not (with_sycl and with_cuda)
+    if with_sycl and with_cuda:
+        raise AssertionError(
+            "cannot have both SYCL and CUDA files in the same extension"
+        )
     extra_ldflags = _prepare_ldflags(
         extra_ldflags or [],
         with_cuda,
@@ -2608,10 +2623,18 @@ def _get_build_directory(name: str, verbose: bool) -> str:
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
-        cu_str = ('cpu' if torch.version.cuda is None else
-                  f'cu{torch.version.cuda.replace(".", "")}')
+        # Determine GPU accelerator prefix based on available accelerators. Fallback to CPU.
+        # Priority: ROCm/HIP > CUDA > CPU
+        # Note: torch.backends.cuda.is_built() returns True for both CUDA and ROCm,
+        # so we need to check torch.version.hip to distinguish them
+        if torch.version.hip is not None:
+            accelerator_str = f'rocm{torch.version.hip.replace(".", "")}'
+        elif torch.version.cuda is not None:
+            accelerator_str = f'cu{torch.version.cuda.replace(".", "")}'
+        else:
+            accelerator_str = 'cpu'
         python_version = f'py{sys.version_info.major}{sys.version_info.minor}{getattr(sys, "abiflags", "")}'
-        build_folder = f'{python_version}_{cu_str}'
+        build_folder = f'{python_version}_{accelerator_str}'
 
         root_extensions_directory = os.path.join(
             root_extensions_directory, build_folder)

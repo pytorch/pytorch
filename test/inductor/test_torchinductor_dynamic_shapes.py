@@ -86,11 +86,6 @@ test_failures = {
     ),
 }
 
-if not torch._inductor.config.cpp_wrapper:
-    test_failures["test_conv_inference_heuristics_dynamic_shapes"] = TestFailure(
-        ("cuda",)
-    )
-
 if any(os.getenv("BUILD_ENVIRONMENT", "").endswith(x) for x in ("-debug", "-asan")):
     # Fails with TORCH_INTERNAL_ASSERT(!is_heap_allocated()), see https://github.com/pytorch/pytorch/issues/130073
     # After https://github.com/pytorch/pytorch/pull/161586, starts failing UBSAN so we can't even xfail.
