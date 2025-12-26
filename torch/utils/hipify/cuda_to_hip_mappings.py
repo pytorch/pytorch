@@ -9401,6 +9401,10 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
         ("cuda::OptionalCUDAStreamGuard", ("hip::OptionalHIPStreamGuard", API_CAFFE2)),
         ("c10/cuda/CUDAGuard.h", ("c10/hip/HIPGuard.h", API_CAFFE2)),
         ("gloo/cuda", ("gloo/hip", API_CAFFE2)),
+        # replace CUDACachingAllocator.h with amended version that redirects profiler-related calls
+        # to masquerade as c10::DeviceType::CUDA
+        ("c10/cuda/CUDACachingAllocator.h", ("c10/hip/HIPCachingAllocatorAmend.h", API_CAFFE2)),
+        ("c10::reportMemoryUsageToProfiler", ("c10::hip::reportMemoryUsageToProfilerMasqueradingAsCUDA", API_CAFFE2)),
     ]
 )
 
