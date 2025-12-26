@@ -7,7 +7,9 @@ from torch._C import _acceleratorGraph
 
 
 class Graph(_acceleratorGraph):
-    r"""Wrapper around an :ref:`accelerator<accelerators>` graph that supports capture and replay.
+    r"""
+    Wrapper around an :ref:`accelerator<accelerators>` graph that supports capture and replay.
+    Can also be used as a context manager to capture work on the current stream of the current device.
 
     Arguments:
         keep_graph (bool, optional): If ``False``, the underlying graph is destroyed and the
