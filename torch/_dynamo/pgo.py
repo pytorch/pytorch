@@ -57,6 +57,7 @@ class ReservedWorkflowIdUserError(ValueError):
 
 
 log = logging.getLogger(__name__)
+symbolic_shape_log = logging.getLogger("torch.fx.experimental.symbolic_shapes")
 
 LOCK_TIMEOUT = 10
 
@@ -386,6 +387,7 @@ def update_automatic_dynamic(
         # Do some logs (damn, I spend more code logging than I do actually doing
         # the updates lol)
         if is_update and old_entry.scalar != mut_entry.scalar:
+            symbolic_shape_log.info("marking %s as dynamic (from automatic dynamic)", name)
             log.debug(
                 "automatic dynamic int %s val %s != %s",
                 name,
@@ -421,6 +423,7 @@ def update_automatic_dynamic(
                 if i is None
                 else getattr(old_entry, tup_name)[i]
             )
+            symbolic_shape_log.info("marking %s as dynamic (from automatic dynamic)", name)
             log.debug(
                 "automatic dynamic %s %s %s %s != %s",
                 tup_name,
