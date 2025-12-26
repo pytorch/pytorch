@@ -26,6 +26,16 @@
     device_index
 ```
 
+## Graphs
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+
+    Graph
+```
+
 ```{eval-rst}
 .. automodule:: torch.accelerator.memory
 ```
@@ -48,14 +58,4 @@
      memory_stats
      reset_accumulated_memory_stats
      reset_peak_memory_stats
-```
-
-## Graphs (beta)
-
-```{eval-rst}
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-
-    Graph
 ```
