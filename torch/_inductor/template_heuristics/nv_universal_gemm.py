@@ -3,11 +3,12 @@ from __future__ import annotations
 import ctypes
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch._inductor.utils import ensure_nvmatmul_heuristics_available
 from torch._logging import getArtifactLogger
+from torch.utils._ordered_set import OrderedSet
 
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 
@@ -45,7 +46,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
     this class filters/ranks pre-built kernel objects from cutlass_api.
     """
 
-    def should_run(self, inputs: KernelInputs = None) -> bool:
+    def should_run(self, inputs: Optional[KernelInputs] = None) -> bool:
         """Check if heuristics should be used.
 
         Only requires nvMatmulHeuristics to be available. The max_autotune check
@@ -85,7 +86,6 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         Returns:
             Filtered list of kernels, sorted by estimated performance
         """
-        # Extract valid configs from available kernels
         valid_tile_m, valid_tile_n, valid_cluster_m, valid_cluster_n = (
             self._extract_valid_configs_from_kernels(kernels)
         )
@@ -142,7 +142,6 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             )
             return kernels[:count]
 
-        # Sort by estimated runtime and return top N
         matched.sort(key=lambda x: x[1])
         result = [k for k, _ in matched[:count]]
 
@@ -154,7 +153,10 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         autotuning_log.info(
             "nvMatmulHeuristics kernel filtering: %d heuristic configs matched %d "
             "of %d available kernels, returning top %d",
-            len(config_key_to_runtime), len(matched), len(kernels), len(result),
+            len(config_key_to_runtime),
+            len(matched),
+            len(kernels),
+            len(result),
         )
         for i, (kernel, runtime) in enumerate(matched[:count]):
             meta = kernel.metadata
@@ -163,8 +165,12 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 autotuning_log.info(
                     "  Selected kernel %d: tile=(%d, %d, %d), cluster=(%d, %d), "
                     "estimated_runtime=%.2f us",
-                    i, design.tile_shape[0], design.tile_shape[1], design.tile_shape[2],
-                    design.cluster_shape[0], design.cluster_shape[1],
+                    i,
+                    design.tile_shape[0],
+                    design.tile_shape[1],
+                    design.tile_shape[2],
+                    design.cluster_shape[0],
+                    design.cluster_shape[1],
                     runtime * 1e6,
                 )
 
@@ -172,12 +178,12 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
     def _extract_valid_configs_from_kernels(
         self, kernels: list
-    ) -> tuple[set, set, set, set]:
+    ) -> tuple[OrderedSet, OrderedSet, OrderedSet, OrderedSet]:
         """Extract valid tile/cluster configurations from available kernels."""
-        tile_m_set: set[int] = set()
-        tile_n_set: set[int] = set()
-        cluster_m_set: set[int] = set()
-        cluster_n_set: set[int] = set()
+        tile_m_set: OrderedSet[int] = OrderedSet()
+        tile_n_set: OrderedSet[int] = OrderedSet()
+        cluster_m_set: OrderedSet[int] = OrderedSet()
+        cluster_n_set: OrderedSet[int] = OrderedSet()
 
         for kernel in kernels:
             meta = kernel.metadata
@@ -203,10 +209,10 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
     def _make_validity_callback(
         self,
-        valid_tile_m: set,
-        valid_tile_n: set,
-        valid_cluster_m: set,
-        valid_cluster_n: set,
+        valid_tile_m: OrderedSet,
+        valid_tile_n: OrderedSet,
+        valid_cluster_m: OrderedSet,
+        valid_cluster_n: OrderedSet,
     ):
         """
         Create callback for nvMatmulHeuristics that only accepts configurations
@@ -243,10 +249,10 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         layout_a: str,
         layout_b: str,
         count: int,
-        valid_tile_m: set,
-        valid_tile_n: set,
-        valid_cluster_m: set,
-        valid_cluster_n: set,
+        valid_tile_m: OrderedSet,
+        valid_tile_n: OrderedSet,
+        valid_cluster_m: OrderedSet,
+        valid_cluster_n: OrderedSet,
     ) -> list[HeuristicConfig]:
         """
         Get kernel configurations recommended by nvMatmulHeuristics.
@@ -282,16 +288,16 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 nvMatmulHeuristics.NvMatmulHeuristicsBackendPropertyCallbackKind.KERNEL_ADDITIONAL_VALIDITY_CHECK,
                 validity_callback,
             )
-        except Exception as e:
-            log.debug("Could not set validity callback: %s", e)
+        except Exception:
+            log.debug("Could not set validity callback", exc_info=True)
 
         # Set CTA_TILE_N_DIV_REQUIREMENT
         cta_n_div = ctypes.c_int(32)
         lh.setBackendValueProperty(
             backend,
             nvMatmulHeuristics.NvMatmulHeuristicsBackendProperty.CTA_TILE_N_DIV_REQUIREMENT,
-            ctypes.byref(cta_n_div),
-            ctypes.sizeof(cta_n_div),
+            ctypes.byref(cta_n_div),  # pyre-ignore[6]: ctypes typing
+            ctypes.sizeof(cta_n_div),  # pyre-ignore[6]: ctypes typing
         )
 
         layout = self._get_layout_enum(layout_a, layout_b)
@@ -309,7 +315,13 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             autotuning_log.info(
                 "nvMatmulHeuristics returned 0 configs for M=%d, N=%d, K=%d, "
                 "dtype=%s, layout=(%s, %s), precision=%s",
-                m, n, k, dtype_a, layout_a, layout_b, precision,
+                m,
+                n,
+                k,
+                dtype_a,
+                layout_a,
+                layout_b,
+                precision,
             )
             return []
 
@@ -329,19 +341,30 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         configs.sort(key=lambda c: c.estimated_runtime)
 
-        # Log the configs returned by nvMatmulHeuristics
         autotuning_log.info(
             "nvMatmulHeuristics for M=%d, N=%d, K=%d, dtype=%s, layout=(%s, %s), "
             "precision=%s: %d configs returned",
-            m, n, k, dtype_a, layout_a, layout_b, precision, len(configs),
+            m,
+            n,
+            k,
+            dtype_a,
+            layout_a,
+            layout_b,
+            precision,
+            len(configs),
         )
         for i, cfg in enumerate(configs):
-            runtime_us = cfg.estimated_runtime * 1e6  # Convert to microseconds
+            runtime_us = cfg.estimated_runtime * 1e6
             autotuning_log.info(
                 "  Config %d: tile=(%d, %d, %d), cluster=(%d, %d), "
                 "estimated_runtime=%.2f us",
-                i, cfg.tile_m, cfg.tile_n, cfg.tile_k,
-                cfg.cluster_m, cfg.cluster_n, runtime_us,
+                i,
+                cfg.tile_m,
+                cfg.tile_n,
+                cfg.tile_k,
+                cfg.cluster_m,
+                cfg.cluster_n,
+                runtime_us,
             )
 
         return configs
