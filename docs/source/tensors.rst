@@ -534,6 +534,7 @@ Tensor class reference
     Tensor.nextafter
     Tensor.nextafter_
     Tensor.nonzero
+    Tensor.nonzero_static
     Tensor.norm
     Tensor.normal_
     Tensor.numel
