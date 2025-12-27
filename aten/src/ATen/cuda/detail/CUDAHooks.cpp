@@ -22,6 +22,7 @@
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <cudnn_frontend.h>
+#include <cudnn_frontend_shim.h>
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -36,7 +37,6 @@
 #include <ATen/cuda/detail/LazyNVRTC.h>
 #endif
 
-#include <cuda.h>
 
 #include <sstream>
 #include <cstddef>
@@ -60,7 +60,7 @@ void set_magma_init_fn(void (*fn)()) {
 namespace {
 bool _hasPrimaryContext(DeviceIndex device_index) {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
-              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
+              "hasPrimaryContext expects a valid device index, but got device_index=", static_cast<int>(device_index));
   unsigned int ctx_flags = 0;
   // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
   // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
@@ -445,18 +445,9 @@ std::string CUDAHooks::showConfig() const {
 
 #if !defined(USE_ROCM)
 #if AT_CUDNN_ENABLED()
-
-
-  auto printCudnnStyleVersion = [&](size_t v) {
-    oss << (v / 1000) << '.' << (v / 100 % 10);
-    if (v % 100 != 0) {
-      oss << '.' << (v % 100);
-    }
-  };
-
   size_t cudnnVersion = cudnnGetVersion();
-  oss << "  - CuDNN ";
-  printCudnnStyleVersion(cudnnVersion);
+  oss << "  - CuDNN runtime version ";
+  oss << cudnn_frontend::detail::convert_version_to_str(cudnnVersion);
   size_t cudnnCudartVersion = cudnnGetCudartVersion();
   if (cudnnCudartVersion != CUDART_VERSION) {
     oss << "  (built against CUDA ";
@@ -465,8 +456,8 @@ std::string CUDAHooks::showConfig() const {
   }
   oss << '\n';
   if (cudnnVersion != CUDNN_VERSION) {
-    oss << "    - Built with CuDNN ";
-    printCudnnStyleVersion(CUDNN_VERSION);
+    oss << "    - Built with CuDNN compile-time version";
+    oss << cudnn_frontend::detail::convert_version_to_str(CUDNN_VERSION);
     oss << '\n';
   }
 #endif

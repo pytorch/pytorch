@@ -873,7 +873,7 @@ class TestConverter(TestCase):
 
         class MNotIn(torch.nn.Module):
             def forward(self, x: torch.Tensor):
-                return x.dtype in [torch.int8]
+                return x.dtype == torch.int8
 
         class MTensorIn(torch.nn.Module):
             def forward(self, x: torch.Tensor, x_dict: dict[torch.Tensor, str]):
@@ -1405,7 +1405,7 @@ class TestConverter(TestCase):
     )
     # qnnpack not supported on s390x
     @xfailIfS390X
-    def test_ts2ep_convert_quantized_model(self):
+    def test_ts2ep_convert_quantized_model1(self):
         class Standalone(torch.nn.Module):
             def __init__(self):
                 super().__init__()

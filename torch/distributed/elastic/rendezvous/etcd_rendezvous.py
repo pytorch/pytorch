@@ -12,7 +12,6 @@ import logging
 import sys
 import threading
 import time
-from typing import Optional
 
 
 try:
@@ -153,7 +152,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
     +--------------------------------------------+--------------------------+
     """
 
-    def __init__(self, rdzv_impl: "EtcdRendezvous", local_addr: Optional[str]):
+    def __init__(self, rdzv_impl: "EtcdRendezvous", local_addr: str | None):
         """
         Args:
             rdzv_impl: the implementation of the rendezvous
@@ -542,7 +541,7 @@ class EtcdRendezvous:
 
             # When reaching min workers, or changing state to frozen, we'll set
             # the active_version node to be ephemeral.
-            set_ttl: Optional[int] = None
+            set_ttl: int | None = None
             if len(state["participants"]) == self._num_max_workers:
                 state["status"] = "frozen"
                 state["keep_alives"] = []

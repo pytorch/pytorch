@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
@@ -13,11 +12,9 @@ from .ir import FixedLayout, FlexibleLayout, Layout
 
 
 if TYPE_CHECKING:
-    import sympy
+    from collections.abc import Sequence
 
-# Type aliases for serializable scalar values
-Serializable = Union[int, float, bool]
-SerializableValue = Union[Serializable, Sequence[Serializable]]
+    import sympy
 
 
 class KernelInputs(ABC):
@@ -30,7 +27,7 @@ class KernelInputs(ABC):
     def __init__(
         self,
         input_nodes: list[Any],
-        scalars: Optional[dict[str, SerializableValue]] = None,
+        scalars: Optional[dict[str, Union[float, int]]] = None,
         out_dtype: Optional[torch.dtype] = None,
     ):
         """
@@ -186,7 +183,7 @@ class KernelInputs(ABC):
             The output dtype
         """
 
-    def get_scalar(self, name: str) -> SerializableValue:
+    def get_scalar(self, name: str) -> Union[float, int]:
         """
         Get the scalar value for a given name.
 
@@ -194,7 +191,7 @@ class KernelInputs(ABC):
             name: Name of the scalar to get
 
         Returns:
-            The scalar value (can be int, float, bool, or tuple of these types)
+            The scalar value
         """
         assert name in self._scalars, f"Scalar {name} not found, but required"
         return self._scalars[name]
@@ -219,7 +216,7 @@ class MMKernelInputs(KernelInputs):
     def __init__(
         self,
         input_nodes: list[Any],
-        scalars: Optional[dict[str, SerializableValue]] = None,
+        scalars: Optional[dict[str, Union[float, int]]] = None,
         out_dtype: Optional[torch.dtype] = None,
         mat1_idx: int = -2,
         mat2_idx: int = -1,
@@ -244,7 +241,7 @@ class MMKernelInputs(KernelInputs):
             m2_idx += len(input_nodes)
 
         assert 0 <= m1_idx < len(input_nodes), f"Invalid mat1_idx: {mat1_idx}"
-        assert 0 <= m1_idx < len(input_nodes), f"Invalid mat2_idx: {mat2_idx}"
+        assert 0 <= m2_idx < len(input_nodes), f"Invalid mat2_idx: {mat2_idx}"
 
         self._mat1_idx = mat1_idx
         self._mat2_idx = mat2_idx
@@ -339,113 +336,3 @@ class MMKernelInputs(KernelInputs):
         assert k == k_check, f"K dimensions don't match: {k} vs {k_check}"
 
         return (m, n, k)
-
-
-class ConvKernelInputs(KernelInputs):
-    """
-    Specialized KernelInputs for convolution operations.
-    Stores input tensor, weight tensor, and optional bias, along with conv parameters.
-    """
-
-    def __init__(
-        self,
-        input_nodes: list[Any],
-        scalars: Optional[dict[str, SerializableValue]] = None,
-        out_dtype: Optional[torch.dtype] = None,
-        x_idx: int = 0,
-        weight_idx: int = 1,
-        bias_idx: Optional[int] = None,
-    ):
-        """
-        Initialize with convolution input nodes.
-
-        Args:
-            input_nodes: List containing [x, weight] or [x, weight, bias]
-            scalars: Dict with conv params (stride, padding, dilation, groups, transposed, output_padding)
-            out_dtype: Optional output dtype
-            x_idx: Index of input tensor (default: 0)
-            weight_idx: Index of weight tensor (default: 1)
-            bias_idx: Index of bias tensor if present (default: None)
-        """
-        super().__init__(input_nodes, scalars, out_dtype)
-        assert len(input_nodes) >= 2, "Expected at least 2 input nodes (x, weight)"
-
-        self._x_idx = x_idx
-        self._weight_idx = weight_idx
-        self._bias_idx = bias_idx
-
-        # Validate that required scalars are present
-        required_scalars = [
-            "stride",
-            "padding",
-            "dilation",
-            "transposed",
-            "output_padding",
-            "groups",
-        ]
-        for key in required_scalars:
-            assert key in self._scalars, f"Conv requires scalar '{key}'"
-
-    def out_dtype(self) -> torch.dtype:
-        """
-        Get the output dtype, whether passed in or inferred from the nodes
-
-        Returns:
-            The output dtype
-        """
-        if self._out_dtype is not None:
-            return self._out_dtype
-        return self._input_nodes[self._x_idx].get_dtype()
-
-    def output_layout(self, flexible: bool = True) -> Layout:
-        """
-        Handle output layout generation for convolution.
-
-        Args:
-            flexible: If True, return FlexibleLayout, otherwise FixedLayout
-
-        Returns:
-            Layout for the convolution output
-        """
-        from torch._inductor.kernel.conv import conv_layout
-
-        x = self._input_nodes[self._x_idx]
-        weight = self._input_nodes[self._weight_idx]
-        bias = self._input_nodes[self._bias_idx] if self._bias_idx is not None else None
-
-        # Use existing conv_layout function
-        # We know the types here because conv requires these specific scalar types
-        layout = conv_layout(
-            x,
-            weight,
-            bias,
-            self._scalars["stride"],  # type: ignore[arg-type]
-            self._scalars["padding"],  # type: ignore[arg-type]
-            self._scalars["dilation"],  # type: ignore[arg-type]
-            self._scalars["transposed"],  # type: ignore[arg-type]
-            self._scalars["output_padding"],  # type: ignore[arg-type]
-            self._scalars["groups"],  # type: ignore[arg-type]
-        )
-
-        # TODO: Handle flexible vs fixed based on config if needed
-        return layout
-
-    def get_x_weight_bias(self) -> tuple[Any, Any, Optional[Any]]:
-        """
-        Get x, weight, and optional bias nodes.
-
-        Returns:
-            Tuple of (x, weight, bias) where bias may be None
-        """
-        bias = self._input_nodes[self._bias_idx] if self._bias_idx is not None else None
-        return self._input_nodes[self._x_idx], self._input_nodes[self._weight_idx], bias
-
-    def spatial_dims(self) -> tuple[Any, ...]:
-        """
-        Get spatial dimensions from input tensor (H, W for 2D, D, H, W for 3D).
-
-        Returns:
-            Tuple of spatial dimension sizes
-        """
-        x_shape = self._input_nodes[self._x_idx].get_size()
-        return x_shape[2:]  # Skip batch and channel dims

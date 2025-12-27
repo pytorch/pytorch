@@ -69,7 +69,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch._utils import _sparse_tensors_to_validate, IMPORT_MAPPING, NAME_MAPPING
@@ -84,15 +84,15 @@ _blocklisted_modules = [
     "nt",
 ]
 
-_marked_safe_globals_set: set[Union[Callable, tuple[Callable, str]]] = set()
+_marked_safe_globals_set: set[Callable | tuple[Callable, str]] = set()
 
 
-def _add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]]):
+def _add_safe_globals(safe_globals: list[Callable | tuple[Callable, str]]):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
 
 
-def _get_safe_globals() -> list[Union[Callable, tuple[Callable, str]]]:
+def _get_safe_globals() -> list[Callable | tuple[Callable, str]]:
     global _marked_safe_globals_set
     return list(_marked_safe_globals_set)
 
@@ -103,14 +103,14 @@ def _clear_safe_globals():
 
 
 def _remove_safe_globals(
-    globals_to_remove: list[Union[Callable, tuple[Callable, str]]],
+    globals_to_remove: list[Callable | tuple[Callable, str]],
 ):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set - set(globals_to_remove)
 
 
 class _safe_globals:
-    def __init__(self, safe_globals: list[Union[Callable, tuple[Callable, str]]]):
+    def __init__(self, safe_globals: list[Callable | tuple[Callable, str]]):
         self.safe_globals = safe_globals
 
     def __enter__(self):
@@ -277,7 +277,8 @@ def get_globals_in_pkl(file) -> set[str]:
         key = read(1)
         if not key:
             raise EOFError
-        assert isinstance(key, bytes_types)
+        if not isinstance(key, bytes_types):
+            raise AssertionError(f"Expected bytes, got {type(key).__name__}")
         if key[0] == GLOBAL[0]:
             module, name = _read_global_instruction(readline)
             globals_in_checkpoint.add(f"{module}.{name}")
@@ -324,7 +325,8 @@ class Unpickler:
             key = read(1)
             if not key:
                 raise EOFError
-            assert isinstance(key, bytes_types)
+            if not isinstance(key, bytes_types):
+                raise AssertionError(f"Expected bytes, got {type(key).__name__}")
             # Risky operators
             if key[0] == GLOBAL[0]:
                 module, name = _read_global_instruction(self.readline)
