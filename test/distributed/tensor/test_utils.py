@@ -1616,6 +1616,115 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
                 )
 
 
+class TestStridedShardAlltoAll(TestStridedShardCollectiveOpUtils, LocalTensorTestBase):
+    """Tests for _StridedShard layout and collective operations."""
+
+    @property
+    def world_size(self):
+        return 126
+
+    def _do_alltoall(
+        self,
+        local_tensor: torch.Tensor,
+        shard_spec: Placement,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        logical_shape: list[int],
+        target_tensor_dim: int,
+    ) -> torch.Tensor:
+        """Perform alltoall redistribution to a new shard dimension."""
+        assert isinstance(shard_spec, _StridedShard)
+        return shard_spec._to_new_shard_dim(
+            local_tensor, mesh, mesh_dim, logical_shape, target_tensor_dim
+        )
+
+    @with_comms
+    def test_StridedShard_alltoall_to_Shard(self):
+        """
+        Test _StridedShard alltoall from _StridedShard to Shard.
+        """
+        S = Shard
+        SS = lambda x, y: S(x) if y == 1 else _StridedShard(x, split_factor=y)  # noqa: E731
+        # Each test case format: (mesh shape, tensor shape, src_placements,
+        # src_tensor_dim, target_placements, target_tensor_dim,
+        # operate_mesh_dim). src_placements should be convertible to
+        # target_placements with an a2a collective op.
+        test_cases = [
+            ((3,), (4, 4), (SS(0, 2),), 0, (S(1),), 1, 0),
+            ((3, 3), (274, 71), (S(0), SS(0, 2)), 0, (S(0), S(1)), 1, 1),
+            (
+                (3, 3, 5),
+                (147, 173, 322),
+                (SS(0, 5), S(1), SS(0, 2)),
+                0,
+                (SS(0, 5), S(1), S(1)),
+                1,
+                2,
+            ),
+            (
+                (3, 7, 2),
+                (143, 71, 147),
+                (SS(0, 5), S(1), SS(0, 2)),
+                0,
+                (SS(0, 5), S(1), S(1)),
+                1,
+                2,
+            ),
+            (
+                (3, 7, 2, 3),
+                (143, 71, 147),
+                (SS(1, 5), S(0), S(2), SS(0, 2)),
+                0,
+                (SS(1, 5), S(0), S(2), S(1)),
+                1,
+                3,
+            ),
+        ]
+        for (
+            mesh_shape,
+            tensor_shape,
+            src_p,
+            src_tensor_dim,
+            tgt_p,
+            tgt_tensor_dim,
+            operate_mesh_dim,
+        ) in test_cases:
+            world_size = math.prod(mesh_shape)
+            with LocalTensorMode(ranks=world_size):
+                mesh = init_device_mesh("cpu", mesh_shape)
+                tensor = self._range_tensor(*tensor_shape)
+                dt = distribute_tensor(
+                    tensor,
+                    mesh,
+                    src_p,
+                    src_data_rank=None,
+                )
+                logical_shape = self._get_logical_shape(
+                    # To be rigorous, we should test with the device order.
+                    # Currently we use the default left-to-right order.
+                    self._convert_default_order_placements_to_ShardConfig(src_p),
+                    mesh,
+                    operate_mesh_dim,
+                    tensor.shape,
+                )
+                dt_after_a2a = self._do_alltoall(
+                    dt.to_local(),
+                    src_p[operate_mesh_dim],
+                    mesh,
+                    operate_mesh_dim,
+                    logical_shape,
+                    tgt_tensor_dim,
+                )
+
+                dt_expected = distribute_tensor(
+                    tensor,
+                    mesh,
+                    tgt_p,
+                    src_data_rank=None,
+                )
+                self.assertEqual(dt_after_a2a, dt_expected.to_local())
+
+
 class TestExplicitRedistribute(LocalTensorTestBase):
     @property
     def world_size(self):
