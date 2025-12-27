@@ -1338,8 +1338,6 @@ def aot_compile_joint_with_descriptors(
 
     cache_ctx = nullcontext()
     if torch._dynamo.config.enable_aot_compile:
-        # For AOT Precompile we need to set the cache info here so that
-        # we still generate an entry that we can then save to disk.
         jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
             str(random.random()),
             time.time_ns(),

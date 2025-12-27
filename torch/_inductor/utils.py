@@ -3276,14 +3276,9 @@ def clone_preserve_strides(x: torch.Tensor) -> torch.Tensor:
 
 
 def _is_aligned(tensor: torch.Tensor) -> bool:
-    """
-    Check if a tensor is aligned. Returns True for FakeTensors since they don't
-    have valid data pointers (we assume aligned for cross-compilation scenarios).
-    """
     from torch._subclasses.fake_tensor import FakeTensor
 
     if isinstance(tensor, FakeTensor):
-        # FakeTensors don't have valid data pointers, assume aligned
         return True
     return (tensor.data_ptr() % ALIGNMENT) == 0
 

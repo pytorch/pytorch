@@ -43,65 +43,38 @@ def _reorder_parameters_to_match_model(
     gm: torch.fx.GraphModule, original_model: torch.nn.Module
 ) -> None:
     """
-    Reorder the graph module's parameters to match the original model's parameter order.
-
-    When dynamo captures a model, parameters are added to the graph module in the order
-    they're accessed during tracing (execution order). However, model.parameters()
-    returns parameters in a different order (definition order). This can cause issues
-    when the compiled function is called with *model.parameters().
-
-    This function reorders gm._parameters to match original_model.parameters() order.
+    Reorder gm._parameters to match original_model.parameters() order.
     """
-    # Get the mapping from gm names to original model names
-    flat_name_to_fqn = gm.meta.get("dynamo_flat_name_to_original_fqn", {})
+    import re
 
-    # Build reverse mapping: original fqn -> gm name
+    flat_name_to_fqn = gm.meta.get("dynamo_flat_name_to_original_fqn", {})
     fqn_to_gm_name: dict[str, str] = {}
 
     def normalize_name(name: str) -> str:
-        """Normalize a name for comparison by removing prefixes and normalizing underscores."""
-        import re
-
-        # Remove common prefixes
         for prefix in ["getattr_", "L__self___"]:
             name = name.removeprefix(prefix)
-        # Normalize triple underscores around numbers to single underscores
-        # e.g., mlp___0___weight -> mlp_0_weight
-        name = re.sub(r"___(\d+)___", r"_\1_", name)
-        return name
+        return re.sub(r"___(\d+)___", r"_\1_", name)
 
-    # Build normalized name to actual gm param name mapping
-    normalized_to_gm_name: dict[str, str] = {}
-    for gm_param_name in gm._parameters:
-        normalized = normalize_name(gm_param_name)
-        normalized_to_gm_name[normalized] = gm_param_name
+    normalized_to_gm_name = {
+        normalize_name(gm_param_name): gm_param_name
+        for gm_param_name in gm._parameters
+    }
 
-    # First, use the explicit mapping from metadata
     for gm_flat_name, orig_fqn in flat_name_to_fqn.items():
         normalized_flat = normalize_name(gm_flat_name)
-        # Find the gm param that matches this normalized name
         if normalized_flat in normalized_to_gm_name:
             fqn_to_gm_name[orig_fqn] = normalized_to_gm_name[normalized_flat]
 
-    # Get original model's parameter order
     original_param_order = [name for name, _ in original_model.named_parameters()]
-
-    # Build the new ordered parameters dict
-    # Note: gm._parameters is an OrderedDict, so insertion order matters
     current_params = dict(gm._parameters)
     new_ordered_params: dict[str, Any] = {}
 
-    # First, add parameters in the original model's order
     for orig_fqn in original_param_order:
         gm_name = fqn_to_gm_name.get(orig_fqn)
         if gm_name is not None and gm_name in current_params:
             new_ordered_params[gm_name] = current_params.pop(gm_name)
 
-    # Add any remaining parameters that weren't in the mapping
-    # (this shouldn't happen in normal cases, but handle gracefully)
     new_ordered_params.update(current_params)
-
-    # Replace the parameters dict with the reordered one
     gm._parameters.clear()
     gm._parameters.update(new_ordered_params)
 
@@ -345,8 +318,6 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             if self.fake_mode is not None and isinstance(
                 self.flat_inputs[i], torch.Tensor
             ):
-                # If the tensor is already a fake tensor (e.g., DTensor with fake inner tensors),
-                # use it directly instead of trying to convert it
                 if is_fake(self.flat_inputs[i]):
                     placeholder.node.meta["val"] = self.flat_inputs[i]
                 else:
@@ -777,20 +748,7 @@ def _dynamo_graph_capture_for_export(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
 ) -> Callable[..., torch.fx.GraphModule]:
     """
-    Improved dynamo graph capture using transformer approach with proper fake tensor handling.
-
-    This function creates a capture instance that handles:
-    1. PyTree flattening/unflattening with proper input ordering
-    2. Dynamo graph capture with export-specific context
-    3. FX graph transformation for export compatibility
-    4. Proper fake tensor metadata preservation
-    5. Dynamic dimension constraint handling
-
-    Notable improvements over manual approach:
-    - Uses FX Transformer for cleaner graph manipulation
-    - Properly handles fake tensor metadata and dynamic dimensions
-    - Preserves all necessary metadata for export
-    - More robust error handling and edge case management
+    Dynamo graph capture using transformer approach with proper fake tensor handling.
 
     TODO:
     1. Are we actually gonna run the bytecode?
@@ -929,9 +887,6 @@ def _dynamo_graph_capture_for_export(
             )
             clean_export_root(transformed_graph)
 
-            # Reorder parameters to match the original model's parameter order.
-            # This is important for cross-compilation where the user passes
-            # model.parameters() to the compiled function.
             if isinstance(mod, torch.nn.Module):
                 _reorder_parameters_to_match_model(transformed_graph, mod)
 

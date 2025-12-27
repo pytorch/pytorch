@@ -1281,10 +1281,7 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         get_plain_tensors,
     )
 
-    # If we have a tracing context with a fake mode, prefer that one.
-    # This is important for cross-compilation scenarios where the user
-    # has an active FakeTensorMode but Dynamo needs to use its own
-    # FakeTensorMode (which has ShapeEnv for symbolic shapes).
+    # Prefer the tracing context's fake mode if available.
     if context := TracingContext.try_get():
         fake_mode = context.fake_mode
         if fake_mode is not None:

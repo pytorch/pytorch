@@ -780,10 +780,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                         forward_symints=symints,
                     )
                 elif should_bundle_autograd_cache():
-                    # For bundled autograd cache (used for serialization), we still need
-                    # cache_info to be set so that SerializableCompiledFunction wrapping
-                    # happens, even if the cache key generation was bypassed.
-                    # We use a placeholder cache key since it won't be used for lookup.
                     aot_config.cache_info = AOTAutogradCacheInfo(
                         "bundled_cache_placeholder",
                         time.time_ns(),
@@ -831,8 +827,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
     ) -> Optional[str]:
         shape_env = cls._get_shape_env()
 
-        # Sometimes we will not have a shape environment, for example in the
-        # case when we do aot precompile using the compiler toolkit framework.
         if shape_env is None:
             return None
 
