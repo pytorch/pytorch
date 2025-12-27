@@ -247,7 +247,7 @@ void sort_kernel(
         }
       }
     );
-  }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
+  }), kByte, kUInt16, kUInt32, kLong);
 }
 
 void topk_kernel(
