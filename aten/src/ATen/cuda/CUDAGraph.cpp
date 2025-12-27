@@ -297,7 +297,7 @@ void CUDAGraphImpl::reset() {
 }
 
 // Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
-MempoolId_t CUDAGraphImpl::pool() {
+MempoolId_t CUDAGraphImpl::pool() const {
 TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
   return mempool_id_;
