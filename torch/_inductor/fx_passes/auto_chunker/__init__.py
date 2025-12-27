@@ -77,4 +77,5 @@ def chunk(gm: GraphModule) -> GraphModule:
     num_chunks = config.auto_chunker.num_chunk or decide_num_chunks(gm)
     out_gm = ChunkingApplier(gm, num_chunks).apply()
     metrics.num_auto_chunking += 1
+    log.debug("AutoChunker being applied with %s chunks", num_chunks)
     return out_gm
