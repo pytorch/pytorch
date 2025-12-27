@@ -11,13 +11,19 @@ from torch._inductor.utils import do_bench_using_profiling
 
 log = logging.getLogger(__name__)
 
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
+
 
 class TestBench(TestCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        x = torch.rand(1024, 10).cuda().half()
-        w = torch.rand(512, 10).cuda().half()
+        x = torch.rand(1024, 10).to(device_type).half()
+        w = torch.rand(512, 10).to(device_type).half()
         cls._bench_fn = functools.partial(torch.nn.functional.linear, x, w)
 
     def test_benchmarker(self):
@@ -32,4 +38,4 @@ class TestBench(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests("cuda")
+    run_tests(device_type)

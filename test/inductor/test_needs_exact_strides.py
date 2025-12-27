@@ -13,13 +13,15 @@ from torch.testing._internal.common_utils import (
     IS_LINUX,
     parametrize,
 )
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
+from torch.testing._internal.inductor_utils import HAS_GPU_AND_TRITON
 
 
 class TestNeedsExactStrides(InductorTestCase):
     @parametrize("dtype", [torch.float, torch.float8_e8m0fnu])
     def test_custom_op(self, dtype):
-        device = "cuda"  # float8_e8m0fnu errors on "cpu"
+        device = (
+            torch.accelerator.current_accelerator()
+        )  # float8_e8m0fnu errors on "cpu"
         x = torch.ones(4, 4, 2, 2, device=device, dtype=torch.float8_e8m0fnu)
         other = torch.ones(4, 4, 2, 2, device=device, dtype=torch.float8_e8m0fnu)
 
@@ -98,5 +100,5 @@ class TestNeedsExactStrides(InductorTestCase):
 instantiate_parametrized_tests(TestNeedsExactStrides)
 
 if __name__ == "__main__":
-    if IS_LINUX and HAS_CUDA_AND_TRITON:
+    if IS_LINUX and HAS_GPU_AND_TRITON:
         run_tests(needs="filelock")

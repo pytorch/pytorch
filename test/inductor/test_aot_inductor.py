@@ -1263,12 +1263,11 @@ class AOTInductorTestsTemplate:
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices or XPU",
     )
-    @skipIfXpu
     def test_fp8(self):
         # cuda only
-        if self.device != "cuda":
+        if self.device != "cuda" or self.device != "xpu":
             return
 
         class Model(torch.nn.Module):
@@ -1376,9 +1375,8 @@ class AOTInductorTestsTemplate:
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices or XPU",
     )
-    @skipIfXpu
     def test_fp8_view_of_param(self):
         # cuda only
         if self.device != GPU_TYPE:
@@ -2462,8 +2460,8 @@ class AOTInductorTestsTemplate:
         determined device from [predicate] + operands, causing CPU predicates
         to force CUDA outputs onto CPU during autotuning.
         """
-        if self.device != "cuda":
-            raise unittest.SkipTest("requires CUDA")
+        if self.device != "cuda" and self.device != "xpu":
+            raise unittest.SkipTest("requires CUDA or XPU")
 
         class Model(torch.nn.Module):
             def __init__(self, input_dim=4, hidden_dim=8):
@@ -4898,7 +4896,7 @@ class AOTInductorTestsTemplate:
     @unittest.skipIf(TEST_WITH_ROCM, "FP8 is not supported on ROCM")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices or XPU",
     )
     @patch.dict(os.environ, {"AOTI_RUNTIME_CHECK_INPUTS": "1"})
     def test_runtime_checks_fp8(self):
@@ -5595,9 +5593,8 @@ class AOTInductorTestsTemplate:
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FP8,
-        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices",
+        "FP8 is only supported on H100+, SM 8.9 and MI300+ devices or XPU",
     )
-    @skipIfXpu
     def test_aoti_debug_printer_fp8_dtype(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("requires GPU")
@@ -7549,8 +7546,8 @@ class AOTInductorTestsTemplate:
         """
         Fix https://github.com/pytorch/pytorch/issues/167630
         """
-        if self.device != "cuda":
-            raise unittest.SkipTest("test is only for cuda")
+        if self.device != "cuda" and self.device != "xpu":
+            raise unittest.SkipTest("test is only for cuda or xpu")
 
         def make_mlp(in_dim=128, hidden=256, out_dim=64, depth=3):
             layers = []
@@ -7571,7 +7568,7 @@ class AOTInductorTestsTemplate:
 
         allocated_memory = []
         for _ in range(3):
-            torch.cuda.reset_peak_memory_stats()
+            torch.accelerator.reset_peak_memory_stats()
 
             model = make_mlp(in_dim, hidden, out_dim, depth).to(self.device)
             example_inputs = (torch.randn(batch, in_dim, device=self.device),)
@@ -7582,10 +7579,10 @@ class AOTInductorTestsTemplate:
             torch._inductor.aoti_compile_and_package(ep)
 
             del model, example_inputs, ep
-            torch.cuda.synchronize()
-            torch.cuda.empty_cache()
+            torch.accelerator.synchronize()
+            torch.accelerator.empty_cache()
             gc.collect()
-            allocated_memory.append(torch.cuda.memory_allocated())
+            allocated_memory.append(torch.accelerator.memory_allocated())
 
         self.assertTrue(allocated_memory[1] == allocated_memory[2])
 
