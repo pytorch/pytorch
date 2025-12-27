@@ -1101,7 +1101,7 @@ class NativeOpSchema {
         comparison_key_ == rhs.comparison_key_;
   }
 
-  std::size_t hash() const {
+  std::size_t hash() const noexcept {
     return hash_;
   }
 
@@ -1131,7 +1131,7 @@ class NativeOpSchema {
 namespace std {
 template <>
 struct hash<NativeOpSchema> {
-  std::size_t operator()(const NativeOpSchema& schema) const {
+  std::size_t operator()(const NativeOpSchema& schema) const noexcept {
     return schema.hash();
   }
 };

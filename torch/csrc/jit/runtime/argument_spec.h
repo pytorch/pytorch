@@ -153,7 +153,7 @@ struct ArgumentSpec {
   bool isPresent(size_t i) const {
     return optional_presence[i];
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -308,7 +308,7 @@ struct CompleteArgumentSpec {
   size_t size() const {
     return ninputs;
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -488,13 +488,14 @@ struct hash<c10::TensorType> {
 
 template <>
 struct hash<torch::jit::ArgumentSpec> {
-  size_t operator()(const torch::jit::ArgumentSpec& spec) const {
+  size_t operator()(const torch::jit::ArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };
 template <>
 struct hash<torch::jit::CompleteArgumentSpec> {
-  size_t operator()(const torch::jit::CompleteArgumentSpec& spec) const {
+  size_t operator()(
+      const torch::jit::CompleteArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };
