@@ -1,20 +1,15 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <ATen/core/GraphImplInterface.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/core/Device.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/flat_hash_map.h>
-#include <ATen/core/GraphImplInterface.h>
 
-namespace at {
-
-struct Generator;
-struct CUDAGeneratorImpl;
-struct CUDAGeneratorState;
-
-namespace cuda {
+namespace at::cuda {
 
 // Standalone way to get a unique mempool id usable as a pool=... argument
 // to CUDAGraph::capture_begin
@@ -158,5 +153,4 @@ private:
   std::unique_ptr<CUDAGraphImpl> impl_;
 };
 
-} // namespace cuda
-} // namespace at
+} // namespace at::cuda

@@ -1,5 +1,4 @@
 #include <ATen/core/CachingHostAllocator.h>
-#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/MemPool.h>
