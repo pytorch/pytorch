@@ -15,7 +15,7 @@ namespace at::cuda {
 // to CUDAGraph::capture_begin
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
-struct CUDAGraphImpl : public at::GraphImplInterface {
+struct TORCH_CUDA_CPP_API CUDAGraphImpl : public at::GraphImplInterface {
   CUDAGraphImpl(const GraphImplArgs& args = {});
   ~CUDAGraphImpl();
 
