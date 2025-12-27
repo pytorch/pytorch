@@ -983,14 +983,15 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
         child_costs = generate_redistribute_costs(indices_spec_child, replicated_spec)
         indices_redistribute_costs.append(child_costs)
 
-    # 2. For placement rule of `values` and `in`, assume `values` shape =
-    # [a,b,c,d,e,f], `in` shape = [d,e,f]. Then `values`'s a,b,c (selected dim)
-    # must be replicated and d,e,f (nonselected dim) in both `values` and `in`
-    # should follow the same sharding (replicate or shard, but not partial).
-    size_offset = (
-        in_spec.strategies[0].output_spec.ndim
-        - values_spec.strategies[0].output_spec.ndim
-    )
+    # 2. For placement rule of `values` and `in`:
+    # The number of indexed dimensions is determined by the number of index tensors.
+    # For example, if we have `input[idx1, idx2] = values`, dimensions 0 and 1 of
+    # input are being indexed. These "selected dimensions" must be replicated
+    # because the indices contain global positions.
+    # Non-selected dimensions can be sharded consistently between input and values.
+    num_indexed_dims = len(indices_spec.children)
+    in_ndim = in_spec.strategies[0].output_spec.ndim
+    values_ndim = values_spec.strategies[0].output_spec.ndim
     # We can either let `values` follow `in`'s placements or reverse.
     for exemplar_spec in [in_spec, values_spec]:
         # use exemplar_spec as the target spec
@@ -1003,21 +1004,28 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
                     if not isinstance(placement, Shard):
                         raise AssertionError(f"Expected Shard, got {type(placement)}")
                     if exemplar_spec is in_spec:
-                        # let `values_spce` follow `in_spec`
-                        if placement.dim < size_offset:
-                            # sharded on selected dim, need to change to replicate
+                        # let `values_spec` follow `in_spec`
+                        if placement.dim < num_indexed_dims:
+                            # sharded on indexed dimension, must replicate
+                            # because indices contain global positions
                             in_spec_new_placements.append(Replicate())
                             values_spec_new_placements.append(Replicate())
                         else:
+                            # non-indexed dimension, can keep sharding
                             in_spec_new_placements.append(placement)
-                            values_spec_new_placements.append(
-                                Shard(placement.dim - size_offset)
-                            )
+                            # Adjust dimension for values tensor
+                            values_dim = placement.dim - num_indexed_dims
+                            if values_dim >= 0 and values_dim < values_ndim:
+                                values_spec_new_placements.append(Shard(values_dim))
+                            else:
+                                values_spec_new_placements.append(Replicate())
                     else:
                         # let `in_spec` follow `values_spec`
-                        in_spec_new_placements.append(
-                            Shard(placement.dim + size_offset)
-                        )
+                        in_dim = placement.dim + num_indexed_dims
+                        if in_dim < in_ndim:
+                            in_spec_new_placements.append(Shard(in_dim))
+                        else:
+                            in_spec_new_placements.append(Replicate())
                         values_spec_new_placements.append(placement)
                 else:
                     in_spec_new_placements.append(Replicate())

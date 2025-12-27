@@ -746,6 +746,101 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(output_dt.full_tensor(), ref)
 
     @with_comms
+    def test_index_put_sharded_dim(self):
+        """
+        Test index_put on sharded dimension.
+        See https://github.com/pytorch/pytorch/issues/170934
+
+        When input is sharded on the indexed dimension, the strategy should
+        replicate the input on that dimension to ensure correct behavior.
+        """
+        mesh = self.build_device_mesh()  # 1D mesh
+
+        # Create input tensor sharded on dimension 0
+        # Global shape: [16], local shape on each rank: [8]
+        global_input = torch.zeros(16, device=self.device_type)
+        input_dt = distribute_tensor(global_input, mesh, [Shard(0)])
+
+        # Create index tensor - will be replicated per strategy
+        global_index = torch.arange(16, device=self.device_type, dtype=torch.long)
+
+        # Create values tensor sharded on dimension 0
+        global_values = torch.ones(16, device=self.device_type)
+        values_dt = distribute_tensor(global_values, mesh, [Shard(0)])
+
+        # Perform index_put
+        ref = torch.index_put(global_input.clone(), [global_index], global_values)
+        output_dt = torch.index_put(input_dt, [global_index], values_dt)
+
+        assert isinstance(output_dt, DTensor)
+        # The indexed dimension should be replicated
+        self.assertEqual(output_dt.placements, (Replicate(),))
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
+    def test_index_put_sharded_dim_aten_direct(self):
+        """
+        Test index_put with aten op directly - exact pattern from issue #170934.
+
+        This tests the scenario where:
+        - input is sharded on the indexed dimension
+        - index is a DTensor that gets redistributed
+        - values are sharded
+
+        Before the fix, this would fail with:
+        RuntimeError: shape mismatch: value tensor of shape [8] cannot be
+        broadcast to indexing result of shape [16]
+        """
+        mesh = self.build_device_mesh()  # 1D mesh
+
+        # Exact pattern from issue #170934
+        global_input = torch.zeros(16, device=self.device_type)
+        input_dt = distribute_tensor(global_input, mesh, [Shard(0)])
+
+        global_index = torch.arange(16, device=self.device_type, dtype=torch.long)
+        index_dt = distribute_tensor(global_index, mesh, [Replicate()])
+
+        global_values = torch.ones(16, device=self.device_type)
+        values_dt = distribute_tensor(global_values, mesh, [Shard(0)])
+
+        # Use aten op directly as in the issue
+        ref = torch.ops.aten.index_put.default(
+            global_input.clone(), [global_index], global_values
+        )
+        output_dt = torch.ops.aten.index_put.default(input_dt, [index_dt], values_dt)
+
+        assert isinstance(output_dt, DTensor)
+        self.assertEqual(output_dt.placements, (Replicate(),))
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
+    def test_index_put_sharded_dim_multidim(self):
+        """
+        Test index_put on sharded dimension with multi-dimensional tensors.
+        """
+        mesh = self.build_device_mesh()  # 1D mesh
+
+        # Create input tensor with shape [8, 4], sharded on dim 0
+        global_input = torch.zeros(8, 4, device=self.device_type)
+        input_dt = distribute_tensor(global_input, mesh, [Shard(0)])
+
+        # Single index tensor for dimension 0
+        global_index = [torch.tensor([0, 2, 4, 6], device=self.device_type)]
+
+        # Values with shape [4, 4] to match indexed result shape
+        global_values = torch.ones(4, 4, device=self.device_type)
+        values_dt = distribute_tensor(global_values, mesh, [Replicate()])
+
+        # Perform index_put
+        ref = torch.index_put(global_input.clone(), global_index, global_values)
+        output_dt = torch.index_put(input_dt, global_index, values_dt)
+
+        assert isinstance(output_dt, DTensor)
+        # Dimension 0 is indexed, so it should be replicated
+        self.assertEqual(output_dt.placements, (Replicate(),))
+        self.assertEqual(output_dt.full_tensor(), ref)
+
+    @with_comms
     def test_where_type_promotion(self):
         mesh = self.build_device_mesh()  # 1D mesh
 
