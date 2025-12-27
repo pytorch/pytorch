@@ -1131,15 +1131,15 @@ from user code:
 
                     def fwd_compile(gm: torch.fx.GraphModule, example_inputs):
                         gm = regional_inductor(gm, example_inputs)
-                        from torch._inductor.output_code import MockFXGraphCacheOutput
+                        from torch._inductor.output_code import RegionalOutputCode
 
-                        return MockFXGraphCacheOutput(gm)
+                        return RegionalOutputCode(gm)
 
                     def bwd_compile(gm: torch.fx.GraphModule, example_inputs):
                         gm = regional_inductor(gm, example_inputs)
-                        from torch._inductor.output_code import MockFXGraphCacheOutput
+                        from torch._inductor.output_code import RegionalOutputCode
 
-                        return MockFXGraphCacheOutput(gm)
+                        return RegionalOutputCode(gm)
 
                     compiled_wrapper = aot_compile_joint_with_descriptors(
                         jd,

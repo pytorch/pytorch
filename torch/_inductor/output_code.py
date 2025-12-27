@@ -901,10 +901,7 @@ class CompiledAOTI(OutputCode):
 
 @dataclasses.dataclass
 class MockFXGraphCacheOutput(OutputCode):
-    gm: Optional[torch.fx.GraphModule] = None
-    _serialized_graph_module: Optional[bytes] = dataclasses.field(
-        default=None, init=False
-    )
+    gm: Any = None
 
     def __post_init__(self) -> None:
         self._boxed_call = True
@@ -915,46 +912,13 @@ class MockFXGraphCacheOutput(OutputCode):
         constants: CompiledFxGraphConstants,
         graph_kwargs: _CompileFxKwargs,
     ) -> None:
-        if self.gm is not None:
-            return
-        assert self._serialized_graph_module is not None
-        from torch._guards import detect_fake_mode
-
-        fake_mode = detect_fake_mode(example_inputs)
-        if fake_mode is None:
-            raise RuntimeError(
-                "Could not detect fake mode from example inputs. "
-                "GraphPickler deserialization requires fake mode."
-            )
-        from torch.fx._graph_pickler import GraphPickler
-
-        gm = GraphPickler.loads(self._serialized_graph_module, fake_mode)
-        assert isinstance(gm, torch.fx.GraphModule)
-        gm.recompile()
-        self.gm = gm
+        pass
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
-        if self.gm is None:
-            raise RuntimeError(
-                "MockFXGraphCacheOutput has no graph module loaded. "
-                "Did you forget to call post_compile()?"
-            )
-        with torch.fx.traceback.preserve_node_meta():
-            return self.gm(*inputs)
+        return self.gm(inputs)
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
-
-    def prepare_for_serialization(self) -> None:
-        if self.gm is not None:
-            from torch.fx._graph_pickler import GraphPickler
-
-            for node in self.gm.graph.nodes:
-                node.meta.pop("source_fn_stack", None)
-                node.meta.pop("nn_module_stack", None)
-                node.meta.pop("fwd_source_fn_stack", None)
-            self._serialized_graph_module = GraphPickler.dumps(self.gm)
-            self.gm = None
 
 
 @dataclasses.dataclass
@@ -970,6 +934,7 @@ class RegionalOutputCode(OutputCode):
         super().__init__()
         self._graph_module = graph_module
         self._serialized_graph_module = None
+        self._boxed_call = True
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         if self._graph_module is None:
@@ -1011,5 +976,9 @@ class RegionalOutputCode(OutputCode):
         if self._graph_module is not None:
             from torch.fx._graph_pickler import GraphPickler
 
+            for node in self._graph_module.graph.nodes:
+                node.meta.pop("source_fn_stack", None)
+                node.meta.pop("nn_module_stack", None)
+                node.meta.pop("fwd_source_fn_stack", None)
             self._serialized_graph_module = GraphPickler.dumps(self._graph_module)
             self._graph_module = None
