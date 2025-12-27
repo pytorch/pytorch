@@ -44,7 +44,7 @@ void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scala
 }
 
 void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_end, int64_t steps) {
-	AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "linspace_cpu", [&]() {
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "linspace_cpu", [&]() {
     // step should be of double type for all integral types
     using step_t = std::conditional_t<std::is_integral_v<scalar_t>, double, scalar_t>;
     const scalar_t start = scalar_start.to<scalar_t>();
