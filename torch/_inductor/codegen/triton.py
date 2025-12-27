@@ -3893,6 +3893,20 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 """
             )
 
+        def final_max_argmax_reduce(buffer, result_val_var, result_idx_var, value, index):
+            """
+            Final reduction for max_argmax/min_argmin that returns BOTH value and index.
+            """
+            value = self.reduction_collapse_dims(buffer, value, dtype)
+            index = self.reduction_collapse_dims(buffer, index, dtype)
+            buffer.splice(
+                f"""\
+                {result_val_var}, {result_idx_var} = triton_helpers.{root_op}_with_index({value}, {index}, {dim})
+                {result_val_var} = {self.reduction_resize(f"{result_val_var}")}
+                {result_idx_var} = {self.reduction_resize(f"{result_idx_var}")}
+                """
+            )
+
         cache_key = (src_dtype, reduction_type, value)
         if cache_key in self.cse.reduction_cache:
             return self.cse.reduction_cache[cache_key]
@@ -3981,6 +3995,30 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     self.compute, result_var, masked_value, accumulator_index
                 )
                 result_var.dtype = accumulator_dtype
+            elif reduction_type in ("max_argmax", "min_argmin"):
+                # Combined max+argmax / min+argmin reduction that returns both
+                # value and index in a single pass
+                assert isinstance(masked_value, CSEVariable)
+                accumulator_dtype = V.kernel.get_index_dtype_as_torch_dtype()
+                if logical_index:
+                    accumulator_index = f"({str(logical_index)}).to({self.dtype_to_str(accumulator_dtype)})"
+                else:
+                    accumulator_index = str(
+                        self.cse.generate(
+                            self.compute,
+                            f"tl.broadcast_to({reduction_range_prefix}index, {masked_value}.shape)",
+                            dtype=accumulator_dtype,
+                            shape=masked_value.shape,
+                        )
+                    )
+                root_op = {"max_argmax": "max", "min_argmin": "min"}[reduction_type]
+                # Create two result variables: one for value, one for index
+                result_val = self.cse.newvar(dtype=dtype, shape=tuple(result_shape))
+                result_idx = self.cse.newvar(dtype=accumulator_dtype, shape=tuple(result_shape))
+                final_max_argmax_reduce(
+                    self.compute, result_val, result_idx, masked_value, accumulator_index
+                )
+                result_var = (result_val, result_idx)
             elif reduction_type == "welford_reduce":
                 if self.cooperative_reduction:
                     # cooperative reductions require full welford for correctness
@@ -4064,6 +4102,38 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 final_argreduce(
                     self.post_loop_combine, result_var, accumulator, accumulator_index
                 )
+            elif reduction_type in ("max_argmax", "min_argmin"):
+                # Combined max+argmax / min+argmin reduction that returns both
+                # value and index in a single pass
+                accumulator_index = f"_{result_var}_index"
+                index_dtype = self.features.select_index_dtype()
+                self.body.writeline(
+                    f"{accumulator_index} = tl.full({self.dense_size_str()}, "
+                    f"{torch.iinfo(index_dtype).max}, {self.dtype_to_str(index_dtype)})"
+                )
+                root_op = {"max_argmax": "max", "min_argmin": "min"}[reduction_type]
+                # Use logical_index if it was unpacked, otherwise fall back to physical index
+                index_var = (
+                    f"({str(logical_index)}).to({self.dtype_to_str(index_dtype)})"
+                    if logical_index is not None
+                    else f"{reduction_range_prefix}index"
+                )
+                self.compute.splice(
+                    f"""\
+                {accumulator}_next, {accumulator_index}_next = triton_helpers.{root_op}imum_with_index(
+                    {accumulator}, {accumulator_index}, {value}, {index_var}
+                )
+                {accumulator} = {where_cond(f"{accumulator}_next", accumulator)}
+                {accumulator_index} = {where_cond(f"{accumulator_index}_next", accumulator_index)}
+                """
+                )
+                # Create two result variables: one for value, one for index
+                result_val = self.cse.newvar(dtype=dtype, shape=tuple(result_shape))
+                result_idx = self.cse.newvar(dtype=index_dtype, shape=tuple(result_shape))
+                final_max_argmax_reduce(
+                    self.post_loop_combine, result_val, result_idx, accumulator, accumulator_index
+                )
+                result_var = (result_val, result_idx)
             elif is_welford_reduction(reduction_type):
                 result_var = self.welford_reduce(
                     result_var, reduction_type, value, where_cond, acc_type, dtype
@@ -4161,6 +4231,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     result_var, index_dtype, torch.iinfo(index_dtype).max
                 )
                 final_argreduce(self.post_loop_store, result_var, peer_val, peer_idx)
+            elif reduction_type in ("max_argmax", "min_argmin"):
+                result_val, result_idx = result_var
+                peer_val = self.codegen_cooperative_reduction_peer_combine(
+                    result_val, src_dtype, default
+                )
+                index_dtype = self.features.select_index_dtype()
+                peer_idx = self.codegen_cooperative_reduction_peer_combine(
+                    result_idx, index_dtype, torch.iinfo(index_dtype).max
+                )
+                root_op = {"max_argmax": "max", "min_argmin": "min"}[reduction_type]
+                final_max_argmax_reduce(
+                    self.post_loop_store, result_val, result_idx, peer_val, peer_idx
+                )
             elif is_welford_reduction(reduction_type):
                 assert reduction_type == "welford_reduce"
                 result_mean, result_m2, result_weight = result_var
@@ -4225,6 +4308,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             if reduction_type in ("welford_reduce", "online_softmax_reduce"):
                 assert len(original_dtypes) == 1
                 original_dtypes = len(result_var) * original_dtypes
+            elif reduction_type in ("max_argmax", "min_argmin"):
+                # max_argmax/min_argmin return (value, index) with different dtypes
+                # value uses original dtype, index uses int64
+                assert len(original_dtypes) == 1
+                original_dtypes = (original_dtypes[0], torch.int64)
 
             assert len(result_var) == len(original_dtypes)
             for var, orig_dtype in zip(result_var, original_dtypes):

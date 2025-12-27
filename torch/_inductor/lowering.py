@@ -66,6 +66,7 @@ from .ir import (
     IndexingConstant,
     IRNode,
     is_triton,
+    MaxArgmaxReduction,
     MutableBox,
     OnlineSoftmaxReduction,
     ops_wrapper,
@@ -6152,7 +6153,7 @@ def _make_reduction_inner(
     # For argmax/argmin compute logical indices when the tensor has non-contiguous layout.
     should_compute_logical_index = False
     if (
-        reduction_type in ("argmax", "argmin")
+        reduction_type in ("argmax", "argmin", "max_argmax", "min_argmin")
         and len(reduced_sizes) > 1
         and is_triton(x)
     ):
@@ -6788,9 +6789,20 @@ def reduce_any(x, dim=None, keepdim=False):
 @register_lowering(aten.max, type_promotion_kind=None)
 def reduce_max(x, dim=None, keepdim=False):
     if dim is not None:
-        return (
-            reduce_amax(x, axis=dim, keepdims=keepdim),
-            reduce_argmax(x, axis=dim, keepdims=keepdim),
+        # Use combined max_argmax reduction for efficiency - computes both
+        # max value and argmax index in a single pass instead of two.
+        kwargs = _make_reduction_inner(
+            x,
+            axis=dim,
+            keepdims=keepdim,
+            dtype=None,
+            override_return_dtype=x.get_dtype(),
+            reduction_type="max_argmax",
+        )
+        return MaxArgmaxReduction.create(
+            reduction_type="max_argmax",
+            input_node=x,
+            **kwargs,
         )
 
     return reduce_amax(x, axis=None, keepdims=keepdim)
@@ -6799,9 +6811,20 @@ def reduce_max(x, dim=None, keepdim=False):
 @register_lowering(aten.min, type_promotion_kind=None)
 def reduce_min(x, dim=None, keepdim=False):
     if dim is not None:
-        return (
-            reduce_amin(x, axis=dim, keepdims=keepdim),
-            reduce_argmin(x, axis=dim, keepdims=keepdim),
+        # Use combined min_argmin reduction for efficiency - computes both
+        # min value and argmin index in a single pass instead of two.
+        kwargs = _make_reduction_inner(
+            x,
+            axis=dim,
+            keepdims=keepdim,
+            dtype=None,
+            override_return_dtype=x.get_dtype(),
+            reduction_type="min_argmin",
+        )
+        return MaxArgmaxReduction.create(
+            reduction_type="min_argmin",
+            input_node=x,
+            **kwargs,
         )
 
     return reduce_amin(x, axis=None, keepdims=keepdim)

@@ -102,6 +102,8 @@ RTYPE_TO_CPP = {
     "max": "max",
     "argmin": "argmin",
     "argmax": "argmax",
+    "max_argmax": "argmax",  # Uses same underlying op as argmax
+    "min_argmin": "argmin",  # Uses same underlying op as argmin
     "any": "||",
     "welford_reduce": "welford",
     "welford_combine": "welford",
@@ -117,6 +119,8 @@ VECTORIZABLE_RTYPES = OrderedSet(
         "welford_combine",
         "argmin",
         "argmax",
+        "max_argmax",
+        "min_argmin",
         "any",
     ]
 )
@@ -168,9 +172,9 @@ def reduction_init(reduction_type, dtype):
         return 0
     if reduction_type == "prod":
         return 1
-    if reduction_type in ("max", "argmax", "min", "argmin"):
+    if reduction_type in ("max", "argmax", "min", "argmin", "max_argmax", "min_argmin"):
         cdtype = DTYPE_TO_CPP[dtype]
-        if dtype == torch.bool and reduction_type in ("argmin", "argmax"):
+        if dtype == torch.bool and reduction_type in ("argmin", "argmax", "max_argmax", "min_argmin"):
             cdtype = DTYPE_TO_CPP[torch.float]
         min_var = (
             f"-std::numeric_limits<{cdtype}>::infinity()"
@@ -182,7 +186,7 @@ def reduction_init(reduction_type, dtype):
             if is_float_dtype(dtype)
             else f"std::numeric_limits<{cdtype}>::max()"
         )
-        init_var = min_var if reduction_type in ("max", "argmax") else max_var
+        init_var = min_var if reduction_type in ("max", "argmax", "max_argmax") else max_var
         return (
             init_var
             if reduction_type in ("max", "min")
@@ -197,7 +201,7 @@ def reduction_acc_type(reduction_type, dtype):
     scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
     if is_welford_reduction(reduction_type):
         return f"Welford<{scalar_type}>"
-    if reduction_type in ("argmin", "argmax"):
+    if reduction_type in ("argmin", "argmax", "max_argmax", "min_argmin"):
         if dtype == torch.bool:
             scalar_type = DTYPE_TO_CPP[torch.float]
         return f"IndexValue<{scalar_type}>"
@@ -238,22 +242,26 @@ def reduction_combine(
         else:
             mean, m2, weight = reduction_project(reduction_type, next_value)
         return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
-    if reduction_type in ("argmin", "argmax"):
+    if reduction_type in ("argmin", "argmax", "max_argmax", "min_argmin"):
+        # max_argmax/min_argmin use the same combine logic as argmax/argmin
+        base_type = {"max_argmax": "argmax", "min_argmin": "argmin"}.get(
+            reduction_type, reduction_type
+        )
         if (
             hasattr(next_value, "dtype")
             and next_value.dtype == torch.bool
             and not next_value.is_vec
         ):
             if index is not None:
-                return f"{reduction_type}_combine({var}, static_cast<float>({next_value}), {index})"
+                return f"{base_type}_combine({var}, static_cast<float>({next_value}), {index})"
             else:
                 return (
-                    f"{reduction_type}_combine({var}, static_cast<float>({next_value}))"
+                    f"{base_type}_combine({var}, static_cast<float>({next_value}))"
                 )
         if index is not None:
-            return f"{reduction_type}_combine({var}, {next_value}, {index})"
+            return f"{base_type}_combine({var}, {next_value}, {index})"
         else:
-            return f"{reduction_type}_combine({var}, {next_value})"
+            return f"{base_type}_combine({var}, {next_value})"
     raise AssertionError(reduction_type)
 
 
@@ -262,6 +270,9 @@ def reduction_project(reduction_type, acc):
         return f"{acc}.mean", f"{acc}.m2", f"{acc}.weight"
     elif reduction_type in ("argmin", "argmax"):
         return f"{acc}.index"
+    elif reduction_type in ("max_argmax", "min_argmin"):
+        # Return both value and index
+        return f"{acc}.value", f"{acc}.index"
     return acc
 
 
@@ -2288,7 +2299,7 @@ class CppKernel(Kernel):
             )
 
     def reduction(self, dtype, src_dtype, reduction_type, value):
-        argmax_or_argmin = reduction_type in ("argmax", "argmin")
+        argmax_or_argmin = reduction_type in ("argmax", "argmin", "max_argmax", "min_argmin")
         reduction_key = src_dtype, reduction_type, value
         if reduction_key in self.reduction_cse.reduction_cache:
             return self.reduction_cse.reduction_cache[reduction_key]
@@ -3003,7 +3014,7 @@ class CppVecKernel(CppKernel):
         # Note: For argmax and argmin on bool type, we always convert bool to float.
         # Fix issue: https://github.com/pytorch/pytorch/issues/143568
         assert reduction_type in VECTORIZABLE_RTYPES
-        argmax_or_argmin = reduction_type in ("argmax", "argmin")
+        argmax_or_argmin = reduction_type in ("argmax", "argmin", "max_argmax", "min_argmin")
         horizontal_reduction = self.tiling_idx >= self.reduction_depth
         init_dtype = src_dtype if argmax_or_argmin else dtype
         assert isinstance(value, CppCSEVariable), value
@@ -3177,7 +3188,11 @@ class CppVecKernel(CppKernel):
                     f"{acc} = {reduction_combine(reduction_type, acc, masked_next_value)};"
                 )
             elif argmax_or_argmin:
-                next_value = f"{reduction_type}_vec_reduce_all({acc_vec})"
+                # max_argmax/min_argmin use the same vec reduce as argmax/argmin
+                base_reduce_type = {"max_argmax": "argmax", "min_argmin": "argmin"}.get(
+                    reduction_type, reduction_type
+                )
+                next_value = f"{base_reduce_type}_vec_reduce_all({acc_vec})"
             elif is_bool:
                 if reduction_type in (
                     "any",
@@ -3303,10 +3318,10 @@ class CppVecKernel(CppKernel):
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>()"
 
-        if reduction_type in ("argmin", "argmax"):
+        if reduction_type in ("argmin", "argmax", "max_argmax", "min_argmin"):
             cdtype = DTYPE_TO_CPP[scalar_type]
             acc_type = self.reduction_acc_type_vec(reduction_type, dtype)
-            if reduction_type == "argmin":
+            if reduction_type in ("argmin", "min_argmin"):
                 val = (
                     f"std::numeric_limits<{cdtype}>::infinity()"
                     if is_float_dtype(dtype)
@@ -3335,7 +3350,7 @@ class CppVecKernel(CppKernel):
         vec_type = self._get_vec_type(scalar_type)
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>"
-        if reduction_type in ("argmin", "argmax"):
+        if reduction_type in ("argmin", "argmax", "max_argmax", "min_argmin"):
             n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
             if dtype == torch.bool:
@@ -3419,7 +3434,11 @@ class CppVecKernel(CppKernel):
                 return f"welford_combine({var}, {{{mean}, {m2}, {weight}}}, {cexpr_index(self.tail_size)})"
             else:
                 return f"welford_combine({var}, {{{mean}, {m2}, {weight}}})"
-        elif reduction_type in ("argmin", "argmax"):
+        elif reduction_type in ("argmin", "argmax", "max_argmax", "min_argmin"):
+            # max_argmax/min_argmin use the same vec combine as argmax/argmin
+            base_reduce_type = {"max_argmax": "argmax", "min_argmin": "argmin"}.get(
+                reduction_type, reduction_type
+            )
             assert src_dtype is not None
             cdtype = DTYPE_TO_CPP[src_dtype]
             if src_dtype == torch.bool:
@@ -3434,11 +3453,11 @@ class CppVecKernel(CppKernel):
                 arg_extra = f", {index}"
             if self.tail_size:
                 return (
-                    f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>"
+                    f"{base_reduce_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>"
                     f"({var}, {next_value}{arg_extra}, {cexpr_index(self.tail_size)})"
                 )
             else:
-                return f"{reduction_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>({var}, {next_value}{arg_extra})"
+                return f"{base_reduce_type}_combine_vec<{cdtype}, {n_src}, {n_idx}{t_extra}>({var}, {next_value}{arg_extra})"
         elif reduction_type == "any":
             if isinstance(next_value, CppCSEVariable):
                 assert next_value.dtype == torch.bool

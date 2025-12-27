@@ -1154,7 +1154,7 @@ def get_reduction_combine_fn(
     if reduction_type in REDUCTION_COMBINE_FN:
         return REDUCTION_COMBINE_FN[reduction_type]
 
-    elif reduction_type in ("argmax", "argmin"):
+    elif reduction_type in ("argmax", "argmin", "max_argmax", "min_argmin"):
 
         def argmax_combine_fn(
             a: tuple[object, object], b: tuple[object, object]
@@ -1162,7 +1162,7 @@ def get_reduction_combine_fn(
             a_value, a_index = a
             b_value, b_index = b
 
-            if reduction_type == "argmin":
+            if reduction_type in ("argmin", "min_argmin"):
                 mask = ops.lt(a_value, b_value)
             else:
                 mask = ops.gt(a_value, b_value)
@@ -1710,14 +1710,14 @@ class Reduction(Loops):
     def default_accumulator(
         reduction_type: str, dtype: torch.dtype
     ) -> Union[_NumLike, Sequence[_NumLike]]:
-        if reduction_type in ("max", "argmax"):
+        if reduction_type in ("max", "argmax", "max_argmax"):
             if is_float_dtype(dtype):
                 return float("-inf")
             elif is_boolean_dtype(dtype):
                 return False
             else:
                 return torch.iinfo(dtype).min
-        if reduction_type in ("min", "argmin"):
+        if reduction_type in ("min", "argmin", "min_argmin"):
             if is_float_dtype(dtype):
                 return float("inf")
             elif is_boolean_dtype(dtype):
@@ -2129,6 +2129,62 @@ class OnlineSoftmaxReduction(MultiOutputReduction):
                 )
             )
             for output_idx in range(num_output)
+        )
+        for t in results:
+            t.realize()
+        return results
+
+
+class MaxArgmaxReduction(MultiOutputReduction):
+    """
+    Combined max + argmax reduction that computes both in a single pass.
+    Returns (max_value, argmax_index) for max_argmax or (min_value, argmin_index) for min_argmin.
+
+    This is more efficient than computing max and argmax separately since
+    argmax already tracks the maximum value internally.
+    """
+
+    @classmethod
+    def create(  # type: ignore[override]
+        cls,
+        device: torch.device,
+        dst_dtype: torch.dtype,
+        src_dtype: torch.dtype,
+        inner_fn: Callable[..., Any],
+        ranges: Sequence[Expr],
+        reduction_ranges: Sequence[Expr],
+        reduction_type: str,  # "max_argmax" or "min_argmin"
+        reduction_hint: ReductionHint = ReductionHint.DEFAULT,
+        input_node: Optional[IRNode] = None,
+    ) -> Sequence[TensorBox]:
+        """
+        Create the combined reduction.
+
+        Returns a tuple of two TensorBox:
+        - output_idx=0: max/min value with dtype=dst_dtype
+        - output_idx=1: argmax/argmin index with dtype=torch.int64
+        """
+        assert reduction_type in ("max_argmax", "min_argmin")
+
+        # Output 0: max/min value (same dtype as input)
+        # Output 1: argmax/argmin index (int64)
+        output_dtypes = [dst_dtype, torch.int64]
+
+        results = tuple(
+            TensorBox.create(
+                MultiOutputReduction(
+                    device,
+                    output_dtypes[output_idx],
+                    inner_fn,
+                    ranges,
+                    reduction_ranges,
+                    reduction_type,
+                    src_dtype,
+                    reduction_hint,
+                    output_idx,
+                )
+            )
+            for output_idx in range(2)
         )
         for t in results:
             t.realize()

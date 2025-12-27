@@ -46,6 +46,8 @@ ReductionType = Literal[
     "dot",
     "xor_sum",
     "online_softmax_reduce",
+    "max_argmax",  # Combined max + argmax, returns (max_value, argmax_index)
+    "min_argmin",  # Combined min + argmin, returns (min_value, argmin_index)
 ]
 
 

@@ -2810,7 +2810,7 @@ def is_welford_reduction(reduction_type: str) -> bool:
 def reduction_num_outputs(reduction_type: str) -> int:
     if is_welford_reduction(reduction_type):
         return 3
-    elif reduction_type == "online_softmax_reduce":
+    elif reduction_type in ("online_softmax_reduce", "max_argmax", "min_argmin"):
         return 2
     else:
         return 1
