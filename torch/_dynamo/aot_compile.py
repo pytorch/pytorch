@@ -69,7 +69,7 @@ class AOTCompilePickler(pickle.Pickler):
 
     # pyrefly: ignore [bad-override]
     def reducer_override(self, obj: Any) -> Any:
-        if isinstance(obj, type((lambda x: lambda: x)(0).__closure__[0])):  # type: ignore[index] # noqa: PLC3002
+        if isinstance(obj, types.CellType):  # type: ignore[index] # noqa: PLC3002
             return type(self)._unpickle_cell, (obj.cell_contents,)
         return NotImplemented
 
