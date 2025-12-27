@@ -364,6 +364,155 @@ def forward(self, arg0_1):
             ],
         )
 
+    def test_compile_profile_timing_breakdown(self):
+        """Test that TORCH_COMPILE_PROFILE=1 outputs detailed timing breakdown."""
+        import io
+        import re
+        import sys
+
+        torch._dynamo.reset()
+
+        captured_stderr = io.StringIO()
+
+        def fn(x):
+            return x.sin().cos()
+
+        with patch.object(torch._dynamo.config, "compile_profile", True):
+            old_stderr = sys.stderr
+            sys.stderr = captured_stderr
+            try:
+                opt_fn = torch.compile(fn, backend="aot_eager")
+                opt_fn(torch.randn(10))
+            finally:
+                sys.stderr = old_stderr
+
+        output = captured_stderr.getvalue()
+
+        self.assertIn("TORCH_COMPILE_PROFILE", output)
+        self.assertIn("Compile Time Breakdown", output)
+        self.assertIn("Total compile time:", output)
+
+        self.assertTrue(
+            re.search(r"\d+\.\d{4}s", output),
+            f"Expected timing data in output, got: {output[:500]}",
+        )
+
+    def test_compile_profile_has_detailed_phases(self):
+        """Test that compile_times returns detailed phase information when profiling."""
+        torch._dynamo.reset()
+
+        def fn(x):
+            return x.sin() + x.cos()
+
+        with patch.object(torch._dynamo.config, "compile_profile", True):
+            opt_fn = torch.compile(fn, backend="aot_eager")
+            opt_fn(torch.randn(10))
+
+        self.assertIn("TorchDynamo compilation metrics", torch._dynamo.utils.compile_times(repr="str"))
+
+        self.assertGreater(
+            len(torch._dynamo.utils.compilation_time_metrics), 5,
+            f"Should have detailed timing breakdown, got: {list(torch._dynamo.utils.compilation_time_metrics.keys())}"
+        )
+
+    def test_get_cache_stats(self):
+        """Test that get_cache_stats returns correct cache statistics from counters."""
+        from torch._dynamo.utils import counters, get_cache_stats
+
+        counters.clear()
+
+        stats = get_cache_stats()
+        self.assertEqual(stats, {})
+
+        counters["inductor"]["fxgraph_cache_hit"] = 3
+        counters["inductor"]["fxgraph_cache_miss"] = 2
+
+        stats = get_cache_stats()
+        self.assertIn("fx_graph_cache", stats)
+        self.assertEqual(stats["fx_graph_cache"]["hits"], 3)
+        self.assertEqual(stats["fx_graph_cache"]["misses"], 2)
+
+        counters["inductor"]["async_compile_cache_hit"] = 5
+        counters["inductor"]["async_compile_cache_miss"] = 1
+
+        stats = get_cache_stats()
+        self.assertIn("async_compile_cache", stats)
+        self.assertEqual(stats["async_compile_cache"]["hits"], 5)
+        self.assertEqual(stats["async_compile_cache"]["misses"], 1)
+
+        counters["inductor"]["generated_module_cache_hit"] = 10
+        counters["inductor"]["generated_module_cache_miss"] = 0
+
+        stats = get_cache_stats()
+        self.assertIn("generated_module_cache", stats)
+        self.assertEqual(stats["generated_module_cache"]["hits"], 10)
+        self.assertEqual(stats["generated_module_cache"]["misses"], 0)
+
+        counters.clear()
+
+    def test_log_cache_stats(self):
+        """Test that log_cache_stats logs cache hit/miss rates."""
+        import logging
+
+        from torch._dynamo.utils import counters, log_cache_stats
+
+        counters.clear()
+
+        counters["inductor"]["fxgraph_cache_hit"] = 8
+        counters["inductor"]["fxgraph_cache_miss"] = 2
+
+        log_records = []
+        handler = logging.Handler()
+        handler.emit = lambda record: log_records.append(record)
+
+        logger = logging.getLogger("torch._dynamo")
+        original_level = logger.level
+        logger.setLevel(logging.INFO)
+        logger.addHandler(handler)
+
+        try:
+            log_cache_stats()
+        finally:
+            logger.removeHandler(handler)
+            logger.setLevel(original_level)
+            counters.clear()
+
+        self.assertTrue(len(log_records) > 0, "Expected log output from log_cache_stats")
+        log_message = log_records[0].getMessage()
+        self.assertIn("Cache hit/miss statistics", log_message)
+        self.assertIn("fx_graph_cache", log_message)
+        self.assertIn("80.0% hit rate", log_message)
+
+    def test_compile_profile_includes_cache_stats(self):
+        """Test that print_compile_profile includes cache statistics when available."""
+        import io
+        import sys
+
+        from torch._dynamo.utils import counters
+
+        torch._dynamo.reset()
+        counters.clear()
+
+        captured_stderr = io.StringIO()
+
+        def fn(x):
+            return x.sin().cos()
+
+        with patch.object(torch._dynamo.config, "compile_profile", True):
+            old_stderr = sys.stderr
+            sys.stderr = captured_stderr
+            try:
+                opt_fn = torch.compile(fn, backend="inductor")
+                opt_fn(torch.randn(10))
+            finally:
+                sys.stderr = old_stderr
+
+        output = captured_stderr.getvalue()
+        self.assertIn("TORCH_COMPILE_PROFILE", output)
+
+        if counters["inductor"]["fxgraph_cache_miss"] > 0 or counters["inductor"]["fxgraph_cache_hit"] > 0:
+            self.assertIn("Cache Statistics", output)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

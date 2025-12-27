@@ -1449,6 +1449,83 @@ class RecursiveDictGuardTests(RecursiveDictTagTests):
             with install_guard_manager_testing_hook(max_size_test):
                 opt_fn(x)
 
+    def test_guard_builder_pool_reuse(self):
+        from torch._dynamo.guards import GuardBuilderPool
+
+        GuardBuilderPool.clear()
+        self.assertEqual(GuardBuilderPool.pool_size(), 0)
+
+        torch._dynamo.reset()
+
+        @torch.compile(backend="eager")
+        def fn1(x):
+            return x + 1
+
+        @torch.compile(backend="eager")
+        def fn2(x):
+            return x * 2
+
+        @torch.compile(backend="eager")
+        def fn3(x):
+            return x - 1
+
+        x = torch.randn(10)
+        fn1(x)
+        fn2(x)
+        fn3(x)
+
+        import gc
+
+        gc.collect()
+
+        pool_size = GuardBuilderPool.pool_size()
+        self.assertGreaterEqual(pool_size, 0)
+        self.assertLessEqual(pool_size, GuardBuilderPool.MAX_POOL_SIZE)
+
+        if pool_size > 0:
+            builder = GuardBuilderPool.acquire()
+            self.assertIsNotNone(builder)
+            self.assertEqual(GuardBuilderPool.pool_size(), pool_size - 1)
+
+            GuardBuilderPool.release(builder)
+            self.assertEqual(GuardBuilderPool.pool_size(), pool_size)
+
+        GuardBuilderPool.clear()
+        self.assertEqual(GuardBuilderPool.pool_size(), 0)
+
+    def test_guard_builder_reset_clears_state(self):
+        from torch._dynamo.guards import GuardBuilderPool
+
+        torch._dynamo.reset()
+
+        @torch.compile(backend="eager")
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(10)
+        y = torch.randn(10)
+        fn(x, y)
+
+        import gc
+
+        gc.collect()
+
+        if GuardBuilderPool.pool_size() > 0:
+            builder = GuardBuilderPool.acquire()
+            self.assertIsNotNone(builder)
+
+            self.assertTrue(builder.scope is None)
+            self.assertTrue(builder.f_code is None)
+            self.assertTrue(builder.guard_manager is None)
+            self.assertTrue(builder.check_fn_manager is None)
+            self.assertEqual(len(builder.argnames), 0)
+            self.assertEqual(len(builder.code), 0)
+            self.assertEqual(len(builder.id_matched_objs), 0)
+
+            GuardBuilderPool.release(builder)
+
+        GuardBuilderPool.clear()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

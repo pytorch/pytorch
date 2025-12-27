@@ -25,19 +25,15 @@ from __future__ import annotations
 
 import collections
 import contextlib
-import cProfile
 import dataclasses
 import dis
 import functools
-import gc
 import importlib
 import inspect
 import itertools
 import logging
 import os
-import pstats
 import random
-import subprocess
 import sys
 import threading
 import time
@@ -46,7 +42,6 @@ import types
 import typing
 import weakref
 from dataclasses import dataclass
-from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
 from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
@@ -163,6 +158,7 @@ from .utils import (
     maybe_disable_inference_mode,
     maybe_disable_inference_mode_for_fake_prop,
     orig_code_map,
+    print_compile_profile,
     reset_graph_break_dup_checker,
     setup_compile_debug,
     to_int_us,
@@ -470,6 +466,11 @@ def maybe_cprofile(func: Callable[_P, _T]) -> Callable[_P, _T]:
 def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
     @functools.wraps(func)
     def profile_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        import cProfile
+        import pstats
+        import subprocess
+        from pathlib import Path
+
         trace_id = CompileContext.current_trace_id()
         assert trace_id, "Trace id is None"
         profile_path = Path(
@@ -1827,6 +1828,8 @@ def _compile(
             # Be extra careful when making changes here!
 
             if torch._dynamo.config.run_gc_after_compile:
+                import gc
+
                 with dynamo_timed("gc", dynamo_compile_column_us="gc_time_us"):
                     log.info("run_gc_after_compile: running gc")
                     gc.collect(1)
@@ -1923,6 +1926,9 @@ def _compile(
                 and not tracer_output.output_graph.export
             ):
                 tracer_output.output_graph.tracing_context.guards_context.dynamo_guards.inner = OrderedSet()
+
+            if config.compile_profile:
+                print_compile_profile(str(compile_id) if compile_id is not None else None)
 
 
 class ConvertFrame:

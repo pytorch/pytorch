@@ -1698,11 +1698,40 @@ def is_big_gpu(index_or_device: Union[int, torch.device] = 0) -> bool:
     return True
 
 
+@functools.lru_cache(maxsize=16)
+def get_device_properties(device: Optional[Union[str, int, torch.device]] = None) -> Any:
+    """Cached lookup of device properties."""
+    if torch.xpu.is_available():
+        if device is None:
+            device = torch.xpu.current_device()
+        elif isinstance(device, torch.device):
+            device = device.index if device.index is not None else 0
+        elif isinstance(device, str):
+            if ":" in device:
+                device = int(device.split(":")[1])
+            else:
+                device = 0
+        return torch.xpu.get_device_properties(device)
+
+    if torch.cuda.is_available():
+        if device is None:
+            device = torch.cuda.current_device()
+        elif isinstance(device, torch.device):
+            device = device.index if device.index is not None else 0
+        elif isinstance(device, str) and ":" in device:
+            device = int(device.split(":")[1])
+        return torch.cuda.get_device_properties(device)
+
+    from .runtime.hints import DeviceProperties
+
+    return DeviceProperties.create_from_dict({})
+
+
 @functools.lru_cache
 def get_max_num_sms() -> int:
     if torch.xpu.is_available():
-        return torch.xpu.get_device_properties().gpu_subslice_count
-    return torch.cuda.get_device_properties("cuda").multi_processor_count
+        return get_device_properties().gpu_subslice_count
+    return get_device_properties().multi_processor_count
 
 
 @functools.lru_cache
@@ -1710,9 +1739,7 @@ def using_b200() -> bool:
     """Returns true if the device is a NVIDIA B200, otherwise returns false."""
     if not torch.cuda.is_available():
         return False
-    # compute capability 10.0 or 10.0a is NVIDIA B200
-    device_properties = torch.cuda.get_device_properties(torch.cuda.current_device())
-    return device_properties.major == 10
+    return get_device_properties().major == 10
 
 
 def get_num_sms() -> int:
@@ -2792,15 +2819,12 @@ def get_gpu_shared_memory() -> int:
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
+@functools.lru_cache
 def get_max_numwarps() -> int:
-    if torch.cuda.is_available():
-        warp_size = torch.cuda.get_device_properties().warp_size
-        max_threads_per_block = torch.cuda.get_device_properties().max_threads_per_block
-    else:
-        # Defaults
-        warp_size = 32
-        max_threads_per_block = 1024
-    return max_threads_per_block // warp_size
+    if torch.cuda.is_available() or torch.xpu.is_available():
+        props = get_device_properties()
+        return props.max_threads_per_block // props.warp_size
+    return 1024 // 32
 
 
 def is_welford_reduction(reduction_type: str) -> bool:

@@ -13681,6 +13681,21 @@ fn
         f(x)
         self.assertEqual(counter.frame_count, 2)
 
+    def test_guard_deduplication_with_set(self):
+        @torch.compile(backend="eager")
+        def f(x, y, z):
+            return (x + y) + (y + z) + (x + z)
+
+        x = torch.randn(3)
+        y = torch.randn(3)
+        z = torch.randn(3)
+        self.assertEqual(f(x, y, z), (x + y) + (y + z) + (x + z))
+
+        x2 = torch.randn(5)
+        y2 = torch.randn(5)
+        z2 = torch.randn(5)
+        self.assertEqual(f(x2, y2, z2), (x2 + y2) + (y2 + z2) + (x2 + z2))
+
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
     @parametrize_pytree_module

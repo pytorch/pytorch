@@ -363,6 +363,55 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
             backends = list_backends()
             assert name in backends, (name, backends)
 
+    def test_backend_discovery_caching(self):
+        from torch._dynamo.backends import registry
+
+        backends_group = "torch_dynamo_backends"
+        name = "cached_backend"
+
+        call_count = 0
+
+        mock_entry = MagicMock()
+        mock_entry.load.return_value = lambda gm, ex: gm.forward
+
+        def mock_eps(group=None):
+            nonlocal call_count
+            call_count += 1
+            assert group == backends_group, group
+            mock_group = MagicMock()
+            mock_group.names = [name]
+            mock_group[name] = mock_entry
+            return mock_group
+
+        with patch("importlib.metadata.entry_points", mock_eps):
+            orig_backends = dict(registry._BACKENDS)
+            orig_compiler_fns = dict(registry._COMPILER_FNS)
+
+            def restore_registry():
+                registry._BACKENDS.clear()
+                registry._BACKENDS.update(orig_backends)
+                registry._COMPILER_FNS.clear()
+                registry._COMPILER_FNS.update(orig_compiler_fns)
+                registry._lazy_import.cache_clear()
+                registry._discover_entrypoint_backends.cache_clear()
+
+            self.addCleanup(restore_registry)
+
+            registry._lazy_import.cache_clear()
+            registry._discover_entrypoint_backends.cache_clear()
+
+            torch._dynamo.list_backends()
+            initial_call_count = call_count
+
+            torch._dynamo.list_backends()
+            torch._dynamo.list_backends()
+            registry.lookup_backend("inductor")
+
+            self.assertEqual(
+                call_count,
+                initial_call_count,
+            )
+
     def test_backend_recompilation(self):
         def fn(x):
             return x + x

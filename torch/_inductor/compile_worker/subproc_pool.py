@@ -117,9 +117,127 @@ class SubprocPickler:
         return pickle.loads(data)
 
 
+# Compact serialization type markers
+_COMPACT_PICKLE: bytes = b"\x00"
+_COMPACT_NONE: bytes = b"\x01"
+_COMPACT_TRUE: bytes = b"\x02"
+_COMPACT_FALSE: bytes = b"\x03"
+_COMPACT_INT_SMALL: bytes = b"\x04"  # -128 to 127, stored in 1 byte
+_COMPACT_INT: bytes = b"\x05"  # Larger ints, variable length
+_COMPACT_FLOAT: bytes = b"\x06"  # 8-byte double
+_COMPACT_BYTES_SMALL: bytes = b"\x07"  # Length < 256, 1-byte length prefix
+_COMPACT_BYTES: bytes = b"\x08"  # Larger bytes, 4-byte length prefix
+_COMPACT_STR_SMALL: bytes = b"\x09"  # UTF-8 length < 256
+_COMPACT_STR: bytes = b"\x0a"  # Larger strings
+_COMPACT_EMPTY_TUPLE: bytes = b"\x0b"
+_COMPACT_EMPTY_LIST: bytes = b"\x0c"
+_COMPACT_EMPTY_DICT: bytes = b"\x0d"
+
+
+class CompactSubprocPickler(SubprocPickler):
+    """
+    A more efficient pickler for smaller payloads that uses compact representations
+    for common simple types (None, bool, small ints, short strings/bytes) and falls
+    back to standard pickle for complex objects.
+
+    This reduces serialization overhead for the frequent small messages passed
+    between the subprocess pool and workers, such as simple return values,
+    small data structures, and exception info.
+    """
+
+    def dumps(self, obj: object) -> bytes:
+        if obj is None:
+            return _COMPACT_NONE
+        if obj is True:
+            return _COMPACT_TRUE
+        if obj is False:
+            return _COMPACT_FALSE
+        if isinstance(obj, int) and not isinstance(obj, bool):
+            if -128 <= obj <= 127:
+                return _COMPACT_INT_SMALL + struct.pack("b", obj)
+            else:
+                int_bytes = obj.to_bytes(
+                    (obj.bit_length() + 8) // 8, byteorder="little", signed=True
+                )
+                if len(int_bytes) < 256:
+                    return _COMPACT_INT + bytes([len(int_bytes)]) + int_bytes
+        if isinstance(obj, float):
+            return _COMPACT_FLOAT + struct.pack("d", obj)
+        if isinstance(obj, bytes):
+            length = len(obj)
+            if length < 256:
+                return _COMPACT_BYTES_SMALL + bytes([length]) + obj
+            elif length < 65536:
+                return _COMPACT_BYTES + struct.pack("<I", length) + obj
+        if isinstance(obj, str):
+            encoded = obj.encode("utf-8")
+            length = len(encoded)
+            if length < 256:
+                return _COMPACT_STR_SMALL + bytes([length]) + encoded
+            elif length < 65536:
+                return _COMPACT_STR + struct.pack("<I", length) + encoded
+        if isinstance(obj, tuple) and len(obj) == 0:
+            return _COMPACT_EMPTY_TUPLE
+        if isinstance(obj, list) and len(obj) == 0:
+            return _COMPACT_EMPTY_LIST
+        if isinstance(obj, dict) and len(obj) == 0:
+            return _COMPACT_EMPTY_DICT
+
+        return _COMPACT_PICKLE + pickle.dumps(obj, pickle.HIGHEST_PROTOCOL)
+
+    def loads(self, data: bytes) -> object:
+        if not data:
+            raise ValueError("Cannot deserialize empty data")
+
+        marker = data[0:1]
+
+        if marker == _COMPACT_PICKLE:
+            return pickle.loads(data[1:])
+        if marker == _COMPACT_NONE:
+            return None
+        if marker == _COMPACT_TRUE:
+            return True
+        if marker == _COMPACT_FALSE:
+            return False
+        if marker == _COMPACT_INT_SMALL:
+            return struct.unpack("b", data[1:2])[0]
+        if marker == _COMPACT_INT:
+            length = data[1]
+            return int.from_bytes(data[2 : 2 + length], byteorder="little", signed=True)
+        if marker == _COMPACT_FLOAT:
+            return struct.unpack("d", data[1:9])[0]
+        if marker == _COMPACT_BYTES_SMALL:
+            length = data[1]
+            return data[2 : 2 + length]
+        if marker == _COMPACT_BYTES:
+            length = struct.unpack("<I", data[1:5])[0]
+            return data[5 : 5 + length]
+        if marker == _COMPACT_STR_SMALL:
+            length = data[1]
+            return data[2 : 2 + length].decode("utf-8")
+        if marker == _COMPACT_STR:
+            length = struct.unpack("<I", data[1:5])[0]
+            return data[5 : 5 + length].decode("utf-8")
+        if marker == _COMPACT_EMPTY_TUPLE:
+            return ()
+        if marker == _COMPACT_EMPTY_LIST:
+            return []
+        if marker == _COMPACT_EMPTY_DICT:
+            return {}
+
+        return pickle.loads(data)
+
+
 class SubprocKind(Enum):
     FORK = "fork"
     SPAWN = "spawn"
+
+
+def get_default_subproc_kind() -> SubprocKind:
+    if sys.platform == "linux":
+        return SubprocKind.FORK
+    else:
+        return SubprocKind.SPAWN
 
 
 class SubprocPool:
@@ -132,12 +250,12 @@ class SubprocPool:
         self,
         nprocs: int,
         pickler: Optional[SubprocPickler] = None,
-        kind: SubprocKind = SubprocKind.FORK,
+        kind: Optional[SubprocKind] = None,
         quiesce: bool = False,
     ) -> None:
         entry = os.path.join(os.path.dirname(__file__), "__main__.py")
         self.pickler = pickler or SubprocPickler()
-        self.kind = kind
+        self.kind = kind if kind is not None else get_default_subproc_kind()
 
         subproc_read_fd, write_fd = os.pipe()
         read_fd, subproc_write_fd = os.pipe()

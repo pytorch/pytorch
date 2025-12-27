@@ -20,7 +20,6 @@ from collections.abc import Callable, Iterable
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch.nn
-from torch.utils._ordered_set import OrderedSet
 
 from . import config, graph_break_hints, utils
 from .bytecode_transformation import (
@@ -608,7 +607,7 @@ class PyCodegen:
             return nested_sources
 
         def collect_temp_sources(sources: deque[Source], codegen: PyCodegen) -> None:
-            seen_sources: OrderedSet[Source] = OrderedSet()
+            seen_sources: set[Source] = set()
             while sources:
                 current_source = sources.popleft()
                 if current_source in seen_sources:

@@ -1,28 +1,3 @@
-"""
-PyTorch Inductor Autotuning Cache System
-
-This module implements a caching system for autotuning configurations in PyTorch's Inductor compiler.
-It provides mechanisms to store and retrieve optimal kernel configurations both locally and remotely,
-which significantly speeds up compilation by reusing previously discovered optimal parameters.
-
-The caching system includes:
-- Local filesystem caching for individual machine reuse
-- Remote caching for sharing optimizations across machines
-- Bundled caching to efficiently store multiple related configurations
-- Cache invalidation based on PyTorch versions and backend changes
-- Serialization/deserialization support for worker processes
-
-Key components:
-- AutotuneCache: Main class for managing cache access and storage
-- AutotuneCacheBundler: Bundles multiple cache entries for efficient storage
-- LocalAutotuneCache: Handles filesystem-based caching
-- _LocalAutotuneCacheBackend: Low-level file operations for cache storage
-- AutotuneCacheArtifact: Integration with PyTorch's artifact system
-
-This caching system is critical for performance as it eliminates the need to re-run
-expensive autotuning operations when the same kernels are compiled multiple times.
-"""
-
 from __future__ import annotations
 
 import dataclasses
@@ -57,6 +32,51 @@ if TYPE_CHECKING:
     from ..remote_cache import Sample
 
 log = logging.getLogger(__name__)
+
+
+_autotune_cache_memory: dict[str, bytes] = {}
+_autotune_cache_loaded: bool = False
+
+
+def _preload_autotune_cache() -> None:
+    """Eagerly load all autotune cache files (.best_config) into memory."""
+    global _autotune_cache_loaded
+    if _autotune_cache_loaded:
+        return
+
+    _autotune_cache_loaded = True
+
+    try:
+        base_dir = cache_dir()
+    except Exception:
+        return
+
+    if not os.path.isdir(base_dir):
+        return
+
+    try:
+        for entry in os.scandir(base_dir):
+            if not entry.is_dir():
+                continue
+            try:
+                for subentry in os.scandir(entry.path):
+                    if subentry.is_file() and subentry.name.endswith(".best_config"):
+                        try:
+                            with open(subentry.path, "rb") as f:
+                                _autotune_cache_memory[subentry.path] = f.read()
+                        except (OSError, IOError):
+                            pass
+            except (OSError, PermissionError):
+                pass
+    except (OSError, PermissionError):
+        pass
+
+
+def _clear_autotune_cache_memory() -> None:
+    """Clear the in-memory autotune cache (for testing)."""
+    global _autotune_cache_loaded
+    _autotune_cache_memory.clear()
+    _autotune_cache_loaded = False
 
 
 _InductorMetaTy = dict[str, object]
@@ -598,9 +618,16 @@ def _load_cached_autotuning(
 class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
     @override
     def _get(self, key: str) -> bytes | None:
+        _preload_autotune_cache()
+
+        if key in _autotune_cache_memory:
+            return _autotune_cache_memory[key]
+
         try:
             with open(key, "rb") as fd:
-                return fd.read()
+                data = fd.read()
+                _autotune_cache_memory[key] = data
+                return data
         except FileNotFoundError:
             return None
 
@@ -610,6 +637,7 @@ class _LocalAutotuneCacheBackend(RemoteCacheBackend[bytes]):
         from torch._inductor import codecache
 
         codecache.write_atomic(key, data)
+        _autotune_cache_memory[key] = data
 
 
 class LocalAutotuneCache(RemoteCache[JsonDataTy]):

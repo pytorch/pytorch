@@ -1,3 +1,1 @@
-Right now to do precompilation we have this really janky flow that you can see in `ugly.py` and we want to move it to something like `beautiful.py`
-
-Can you come up with a plan and write the plan on disk as a markdown file with a bunch of TODOs? Each TODO should specify, in addition to the actual task, a .py file on disk that we need to write and can use to verify we finished the TODO.  Make the TODOs as granular as possible.
+Make torch.compile cold compile times faster. Read https://abseil.io/fast/hints.html for inspiration.

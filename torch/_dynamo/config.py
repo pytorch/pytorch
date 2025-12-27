@@ -202,6 +202,9 @@ disable = os.environ.get("TORCH_COMPILE_DISABLE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] Get a cprofile trace of Dynamo
 cprofile = os.environ.get("TORCH_COMPILE_CPROFILE", False)
 
+# [@compile_ignored: debug] Enable detailed compile time profiling output
+compile_profile = os.environ.get("TORCH_COMPILE_PROFILE", "0") == "1"
+
 # Legacy config, does nothing now!
 skipfiles_inline_module_allowlist: dict[Any, Any] = {}
 """Allowlist of inline modules to skip during compilation.

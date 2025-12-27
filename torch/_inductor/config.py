@@ -153,6 +153,11 @@ bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_de
 # See torch.compiler.config.force_disable_caches
 force_disable_caches: bool = Config(alias="torch.compiler.config.force_disable_caches")
 
+# Threshold in bytes for using memory-mapped files for cache entries.
+# Cache entries larger than this size will use mmap for more efficient I/O.
+# Set to 0 to disable mmap caching. Default is 10MB.
+fx_graph_cache_mmap_threshold: int = 10 * 1024 * 1024  # 10MB
+
 # Unsafe way to skip dynamic shape guards to get faster cache load
 unsafe_skip_cache_dynamic_shape_guards: bool = False
 
