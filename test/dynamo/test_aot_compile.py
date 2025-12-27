@@ -1176,8 +1176,6 @@ from user code:
             loss = F.cross_entropy(logits.view(-1, vocab_size), targets.view(-1))
             loss.backward()
 
-            import os
-
             os.unlink(serialization_path)
 
         finally:

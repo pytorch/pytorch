@@ -2,6 +2,8 @@
 
 import contextlib
 import itertools
+import random
+import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
@@ -1324,9 +1326,6 @@ def aot_compile_joint_with_descriptors(
 
     TODO: Consider if we should allow_in_graph the result by default.
     """
-    import random
-    import time
-
     from torch._dynamo.aot_compile_types import (
         BundledAOTAutogradSerializableCallable,
         SerializableCallable,
