@@ -77,6 +77,7 @@ class TorchDynamoException(RuntimeError):
             execution strategies (e.g., SKIP, RUN_ONLY) without requiring separate
             exception types for control flow.
     """
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: Optional[DynamoTracerOutput] = None

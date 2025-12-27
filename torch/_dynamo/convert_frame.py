@@ -62,7 +62,6 @@ from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
-    justknobs_check,
     maybe_upload_prof_stats_to_manifold,
     signpost_event,
 )
@@ -1694,7 +1693,7 @@ def _compile(
                     gb_type="Dynamo cache limit exceeded",
                     context=f"Limit type: {limit_type}",
                     explanation="Dynamo attempted to recompile the code object too many times, "
-                    f"exceeding the {limit_type} cache size limit."
+                    f"exceeding the {limit_type} cache size limit. "
                     "Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation.",
                     hints=[
@@ -2066,7 +2065,10 @@ class ConvertFrame:
                 log.warning(error_msg, exc_info=True)
 
             # Check if the exception has a specific frame execution strategy
-            if isinstance(e, exc.TorchDynamoException) and e.frame_exec_strategy is not None:
+            if (
+                isinstance(e, exc.TorchDynamoException)
+                and e.frame_exec_strategy is not None
+            ):
                 return ConvertFrameReturn(frame_exec_strategy=e.frame_exec_strategy)
 
         return ConvertFrameReturn()
