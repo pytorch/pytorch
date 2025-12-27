@@ -20,7 +20,7 @@ namespace {
 using namespace vec;
 
 void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_steps, const Scalar& scalar_step) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, iter.dtype(), "arange_cpu", [&]() {
+  AT_DISPATCH_V2(iter.dtype(), "arange_cpu", AT_WRAP([&] {
     using accscalar_t = at::acc_type<scalar_t, false>;
     auto start = scalar_start.to<accscalar_t>();
     auto steps = scalar_steps.to<accscalar_t>();
@@ -40,11 +40,11 @@ void arange_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scala
             return res;
           }, {p_begin, p_end});
     });
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), kHalf, kBFloat16, kUInt16, kUInt32);
 }
 
 void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, const Scalar& scalar_end, int64_t steps) {
-  AT_DISPATCH_V2(iter.dtype(), "linspace_cpu", AT_WRAP([&] {
+	AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(kHalf, kBFloat16, iter.dtype(), "linspace_cpu", [&]() {
     // step should be of double type for all integral types
     using step_t = std::conditional_t<std::is_integral_v<scalar_t>, double, scalar_t>;
     const scalar_t start = scalar_start.to<scalar_t>();
@@ -67,7 +67,7 @@ void linspace_kernel(TensorIterator& iter, const Scalar& scalar_start, const Sca
             }
           }, {p_begin, p_end});
     });
-  }), AT_EXPAND(AT_ALL_TYPES_AND_COMPLEX), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES), kHalf, kBFloat16);
+  });
 }
 
 } // anonymous namespace

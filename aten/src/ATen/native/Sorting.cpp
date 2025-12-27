@@ -23,7 +23,7 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/linspace.h>
+#include <ATen/ops/arange.h>
 #include <ATen/ops/argsort_native.h>
 #include <ATen/ops/broadcast_tensors.h>
 #include <ATen/ops/empty.h>
@@ -100,7 +100,7 @@ void _fill_indices(const TensorBase &indices, int64_t dim) {
   auto ndim = indices.dim();
   assert(0 <= dim && dim < ndim);
   auto dim_size = indices.size(dim);
-  auto idx_dim = at::linspace(0, dim_size - 1, dim_size, indices.options());
+  auto idx_dim = at::arange(0, dim_size, indices.options());
   auto idx_dim_sizes = std::vector<int64_t>(ndim, 1);
   auto idx_dim_strides = std::vector<int64_t>(ndim, 0);
   idx_dim_sizes[dim] = dim_size;

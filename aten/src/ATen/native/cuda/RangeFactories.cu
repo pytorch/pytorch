@@ -85,7 +85,7 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
   } else if (steps == 1) {
     r.fill_(start);
   } else if (isIntegralType(r.scalar_type(), 0)) {
-    AT_DISPATCH_V2(r.scalar_type(), "linspace_cuda", AT_WRAP([&] {
+    AT_DISPATCH_INTEGRAL_TYPES(r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       // Cast `end` and `start` to `float`, since range can be larger than scalar_t for integral types
@@ -98,9 +98,9 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
 
         return scalar_end - step * (steps - ind - 1);
       });
-    }), AT_EXPAND(AT_INTEGRAL_TYPES_V2));
+    });
   } else {
-    AT_DISPATCH_V2(r.scalar_type(), "linspace_cuda", AT_WRAP([&] {
+    AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND2(kHalf, kBFloat16, r.scalar_type(), "linspace_cuda", [&]() {
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
@@ -112,7 +112,7 @@ Tensor& linspace_cuda_out(const Scalar& start, const Scalar& end, int64_t steps,
 
         return scalar_end - step * (steps - ind - 1);
       });
-    }), AT_EXPAND(AT_FLOATING_TYPES), AT_EXPAND(AT_COMPLEX_TYPES), kHalf, kBFloat16);
+    });
   }
 
   if (!is_contiguous) {
@@ -209,7 +209,7 @@ Tensor& range_cuda_out(const Scalar& start, const Scalar& end, const Scalar& ste
 }
 
 Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES_AND2(at::ScalarType::Half, at::ScalarType::BFloat16, result.scalar_type(), "arange_cuda", [&]() {
+  AT_DISPATCH_V2(result.scalar_type(), "arange_cuda", AT_WRAP([&] {
     using accscalar_t = at::acc_type<scalar_t, true>;
     auto xstart = start.to<accscalar_t>();
     auto xend = end.to<accscalar_t>();
@@ -259,7 +259,7 @@ Tensor& arange_cuda_out(const Scalar& start, const Scalar& end, const Scalar& st
     if(!is_contiguous) {
       result.copy_(r);
     }
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), kHalf, kBFloat16, kUInt16, kUInt32);
 
   return result;
 }
