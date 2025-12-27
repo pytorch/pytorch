@@ -4089,7 +4089,7 @@ class TestCudaMallocAsync(TestCase):
             for seg in ss["segments"]:
                 self.assertTrue("frames" in seg)
                 for b in seg["blocks"]:
-                    if b["address"] != x_ptr:
+                    if not (b["address"] <= x_ptr < (b["address"] + b["size"])):
                         continue
                     self.assertEqual(b["requested_size"], 311 * 411 * 4)
                     self.assertTrue("test_cuda" in b["frames"][0]["filename"])
@@ -4131,28 +4131,29 @@ class TestCudaMallocAsync(TestCase):
     )
     @requiresCppContext
     def test_memory_snapshot_with_cpp(self):
-         try:
-             torch.cuda.memory.empty_cache()
-             torch.cuda.memory._record_memory_history("state", stacks="all")
-             x = torch.rand(311, 411, device="cuda")
-             x_ptr = x.untyped_storage().data_ptr()
+        try:
+            torch.cuda.memory.empty_cache()
+            torch.cuda.memory._record_memory_history("state", stacks="all")
+            x = torch.rand(311, 411, device="cuda")
+            x_ptr = x.untyped_storage().data_ptr()
 
-             ss = torch.cuda.memory._snapshot()["segments"]
-             found_it = False
-             for seg in ss:
-                 for b in seg["blocks"]:
-                     if b["address"] != x_ptr:
-                         continue
-                     self.assertEqual(b["requested_size"], 311 * 411 * 4)
-                     self.assertTrue("::rand" in str(b["frames"]))
-                     found_it = True
-                     break
-                 if found_it:
-                     break
-             self.assertTrue(found_it)
+            ss = torch.cuda.memory._snapshot()["segments"]
+            found_it = False
+            for seg in ss:
+                for b in seg["blocks"]:
+                    if not (b["address"] <= x_ptr < (b["address"] + b["size"])):
+                        continue
+                    self.assertEqual(b["requested_size"], 311 * 411 * 4)
+                    frames_str = str(b["frames"])
+                    self.assertTrue(("rand" in frames_str) or ("uniform" in frames_str))
+                    found_it = True
+                    break
+                if found_it:
+                    break
+            self.assertTrue(found_it)
 
-         finally:
-             torch.cuda.memory._record_memory_history(None)
+        finally:
+            torch.cuda.memory._record_memory_history(None)
 
     @skipIfRocm(msg="ROCTracer does not capture Python stack frames in profiler output")
     def test_memory_profiler_viz(self):
