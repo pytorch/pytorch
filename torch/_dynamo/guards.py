@@ -2991,6 +2991,14 @@ class GuardBuilder(GuardBuilderBase):
                 size = convert_to_concrete_values(metadata["size"])
                 stride = convert_to_concrete_values(metadata["stride"])
 
+                if config.skip_size_stride_guards_on_static_tensors:
+                    static, _ = tensor_always_has_static_shape(
+                        value, is_tensor=True, tensor_source=guard.originating_source
+                    )
+                    if static:
+                        size = [None] * len(size)
+                        stride = [None] * len(stride)
+
                 verbose_code_parts = get_verbose_code_parts(
                     get_tensor_guard_code_part(
                         value,

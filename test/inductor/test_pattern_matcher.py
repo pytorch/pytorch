@@ -2121,6 +2121,104 @@ class TestPatternMatcherLogging(LoggingTestCase):
 
         self.assertTrue(counters["inductor"]["apply_gumbel_max_trick"] == 1)
 
+    def test_batched_pattern_matcher_pass(self):
+        from torch._inductor.pattern_matcher import (
+            BatchedPatternMatcherPass,
+        )
+
+        counters.clear()
+
+        pass1 = PatternMatcherPass()
+        pass2 = PatternMatcherPass()
+
+        counter1 = [0]
+        counter2 = [0]
+
+        @register_graph_pattern(
+            CallFunction(torch.ops.aten.add.Tensor, Arg(), 1),
+            pass_dict=pass1,
+        )
+        def add_one_replacement(match: Match, x):
+            counter1[0] += 1
+
+        @register_graph_pattern(
+            CallFunction(torch.ops.aten.mul.Tensor, Arg(), 2),
+            pass_dict=pass2,
+        )
+        def mul_two_replacement(match: Match, x):
+            counter2[0] += 1
+
+        batched_pass = BatchedPatternMatcherPass(
+            [pass1, pass2],
+            pass_name="test_batched_pass",
+        )
+
+        def model(x):
+            y = x + 1
+            z = y * 2
+            return z
+
+        x = torch.randn(10)
+        gm = make_fx(model)(x)
+
+        batched_pass.apply(gm)
+
+        self.assertEqual(counter1[0], 1)
+        self.assertEqual(counter2[0], 1)
+
+    def test_batched_pattern_matcher_pass_empty_passes(self):
+        from torch._inductor.pattern_matcher import (
+            BatchedPatternMatcherPass,
+        )
+
+        pass1 = PatternMatcherPass()
+        pass2 = PatternMatcherPass()
+
+        batched_pass = BatchedPatternMatcherPass([pass1, pass2])
+
+        def model(x):
+            return x + 1
+
+        x = torch.randn(10)
+        gm = make_fx(model)(x)
+
+        self.assertEqual(batched_pass.apply(gm), 0)
+
+    def test_batched_pattern_matcher_pass_multiple_matches(self):
+        from torch._inductor.pattern_matcher import (
+            BatchedPatternMatcherPass,
+        )
+
+        counters.clear()
+
+        test_pass = PatternMatcherPass()
+        match_count = [0]
+
+        @register_graph_pattern(
+            CallFunction(torch.ops.aten.add.Tensor, Arg(), 1),
+            pass_dict=test_pass,
+        )
+        def add_replacement(match: Match, x):
+            match_count[0] += 1
+
+        batched_pass = BatchedPatternMatcherPass(
+            [test_pass],
+            pass_name="test_multi_match",
+        )
+
+        def model(x):
+            x = x + 1
+            x = x + 1
+            x = x + 1
+            return x
+
+        x = torch.randn(10)
+        gm = make_fx(model)(x)
+
+        batched_pass.apply(gm)
+
+        self.assertEqual(match_count[0], 3)
+
 
 if __name__ == "__main__":
     if IS_LINUX and HAS_GPU:

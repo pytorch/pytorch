@@ -39,6 +39,7 @@ import textwrap
 import threading
 import time
 import traceback
+import tracemalloc
 import types
 import typing
 import uuid
@@ -179,6 +180,10 @@ log = logging.getLogger(__name__)
 # profiling compilation time by function
 compilation_time_metrics: dict[str, list[float]] = {}
 
+# profiling compilation memory allocations by function
+# Each entry stores a list of tuples: (current_bytes, peak_bytes, num_allocations)
+compilation_memory_metrics: dict[str, list[tuple[int, int, int]]] = {}
+
 # This supports calculate_time_spent(), which reports cumulative times
 # across the process for any "phase" populated by dynamo_timed. Reset if
 # reset_frame_count() is called.
@@ -262,6 +267,7 @@ def reset_frame_count() -> None:
     global curr_frame
     cumulative_time_spent_ns.clear()
     compilation_time_metrics.clear()
+    compilation_memory_metrics.clear()
     curr_frame = 0
 
 
@@ -887,6 +893,207 @@ def compile_times(  # type: ignore[misc]
 @atexit.register
 def dump_compile_times() -> None:
     log.info(compile_times(repr="str", aggregate=True))
+
+
+# Thread-local storage for memory tracking state
+_memory_tracking_tls = threading.local()
+
+
+def _is_memory_tracking_enabled() -> bool:
+    """Check if tracemalloc-based memory tracking is enabled."""
+    return getattr(_memory_tracking_tls, "enabled", False)
+
+
+def _set_memory_tracking_enabled(enabled: bool) -> None:
+    """Set whether tracemalloc-based memory tracking is enabled."""
+    _memory_tracking_tls.enabled = enabled
+
+
+@contextmanager
+def dynamo_memory_tracked(
+    key: str,
+) -> Generator[Any, None, None]:
+    """
+    Context manager to track memory allocations during a compilation phase.
+
+    This uses tracemalloc to track memory allocations and stores metrics in
+    compilation_memory_metrics. Unlike dynamo_timed which always records,
+    memory tracking must be explicitly enabled via enable_memory_tracking()
+    since tracemalloc has non-trivial overhead.
+
+    Usage:
+        with dynamo_memory_tracked("my_phase"):
+            # code that allocates memory
+            ...
+
+    The recorded metrics are tuples of (current_bytes, peak_bytes, num_allocations):
+    - current_bytes: Memory currently allocated at end of context
+    - peak_bytes: Peak memory allocated during context
+    - num_allocations: Number of allocations made during context
+
+    Args:
+        key: Key to store the memory metrics under in compilation_memory_metrics
+    """
+    if not _is_memory_tracking_enabled() or not tracemalloc.is_tracing():
+        yield
+        return
+
+    if key not in compilation_memory_metrics:
+        compilation_memory_metrics[key] = []
+
+    num_allocs_before = sum(stat.count for stat in tracemalloc.take_snapshot().statistics("filename"))
+    tracemalloc.reset_peak()
+
+    try:
+        yield
+    finally:
+        current, peak = tracemalloc.get_traced_memory()
+        num_allocs_after = sum(stat.count for stat in tracemalloc.take_snapshot().statistics("filename"))
+
+        compilation_memory_metrics[key].append((current, peak, num_allocs_after - num_allocs_before))
+
+
+@contextmanager
+def enable_memory_tracking() -> Generator[None, None, None]:
+    """
+    Context manager to enable memory allocation tracking during compilation.
+
+    This starts tracemalloc if not already running and enables tracking for
+    dynamo_memory_tracked contexts. Memory tracking has some overhead, so it
+    should only be enabled when profiling compilation memory usage.
+
+    Usage:
+        with enable_memory_tracking():
+            compiled = torch.compile(model)
+            compiled(input)
+
+        # View memory metrics
+        print(compile_allocations())
+    """
+    was_tracing = tracemalloc.is_tracing()
+    was_enabled = _is_memory_tracking_enabled()
+
+    if not was_tracing:
+        tracemalloc.start()
+    _set_memory_tracking_enabled(True)
+
+    try:
+        yield
+    finally:
+        _set_memory_tracking_enabled(was_enabled)
+        if not was_tracing:
+            tracemalloc.stop()
+
+
+def get_memory_snapshot() -> Optional[tracemalloc.Snapshot]:
+    """
+    Get a tracemalloc snapshot if memory tracking is enabled.
+
+    Returns None if memory tracking is not enabled or tracemalloc is not running.
+    """
+    if _is_memory_tracking_enabled() and tracemalloc.is_tracing():
+        return tracemalloc.take_snapshot()
+    return None
+
+
+def get_top_memory_allocations(
+    snapshot: Optional[tracemalloc.Snapshot] = None,
+    limit: int = 10,
+    key_type: str = "lineno",
+) -> list[tracemalloc.Statistic]:
+    """
+    Get the top memory allocations from a tracemalloc snapshot.
+
+    Args:
+        snapshot: The snapshot to analyze. If None, takes a new snapshot.
+        limit: Maximum number of allocations to return.
+        key_type: How to group allocations ("lineno", "filename", or "traceback").
+
+    Returns:
+        List of tracemalloc.Statistic objects sorted by size.
+    """
+    if snapshot is None:
+        snapshot = get_memory_snapshot()
+    if snapshot is None:
+        return []
+
+    return snapshot.statistics(key_type)[:limit]
+
+
+@overload
+def compile_allocations(repr: Literal["str"], aggregate: bool = False) -> str: ...
+
+
+@overload
+def compile_allocations(
+    repr: Literal["csv"], aggregate: bool = False
+) -> tuple[list[str], list[object]]: ...
+
+
+def compile_allocations(
+    repr: str = "str", aggregate: bool = False
+) -> Union[str, None, tuple[list[str], list[str]]]:
+    """
+    Get metrics about memory allocations during torchdynamo compilation.
+
+    Accumulates information from contexts wrapped with `dynamo_memory_tracked`.
+
+    Args:
+        repr: Output format - "str" for human-readable, "csv" for headers/values
+        aggregate: If True, sum values from multiple compilations into one
+
+    Returns:
+        Formatted string or (headers, values) tuple depending on repr argument
+    """
+
+    def fmt_bytes(b: int) -> str:
+        for unit in ["B", "KB", "MB", "GB"]:
+            if abs(b) < 1024.0:
+                return f"{b:.1f}{unit}"
+            b //= 1024
+        return f"{b:.1f}TB"
+
+    def fmt_fn(
+        values: list[tuple[int, int, int]], item_fn: Callable[[tuple[int, int, int]], str]
+    ) -> str:
+        if aggregate:
+            total_current = sum(v[0] for v in values)
+            total_peak = sum(v[1] for v in values)
+            total_allocs = sum(v[2] for v in values)
+            return item_fn((total_current, total_peak, total_allocs))
+        return ", ".join(map(item_fn, values))
+
+    if repr == "str":
+        if not compilation_memory_metrics:
+            return "No memory allocation metrics recorded. Enable tracking with enable_memory_tracking()."
+
+        rows = []
+        for k, v in compilation_memory_metrics.items():
+            formatted = fmt_fn(
+                v,
+                item_fn=lambda x: f"cur={fmt_bytes(x[0])}, peak={fmt_bytes(x[1])}, allocs={x[2]}",
+            )
+            rows.append((k, formatted))
+
+        out = "TorchDynamo memory allocation metrics:\n"
+        out += tabulate(rows, headers=("Function", "Memory (current, peak, allocations)"))
+        return out
+    elif repr == "csv":
+        values = [
+            fmt_fn(
+                v,
+                item_fn=lambda x: f"{x[0]},{x[1]},{x[2]}",
+            )
+            for v in compilation_memory_metrics.values()
+        ]
+        headers = list(compilation_memory_metrics.keys())
+        return headers, values
+    return None
+
+
+def dump_compile_allocations() -> None:
+    """Log memory allocation metrics to the dynamo logger."""
+    log.info(compile_allocations(repr="str", aggregate=True))
 
 
 tensortype_to_dtype = {

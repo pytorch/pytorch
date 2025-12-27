@@ -1236,6 +1236,8 @@ class Graph:
         owning_module: Optional["GraphModule"] = None,
         tracer_cls: Optional[type["Tracer"]] = None,
         tracer_extras: Optional[dict[str, Any]] = None,
+        *,
+        capacity_hint: int = 0,
     ):
         """
         Construct an empty Graph.
@@ -1244,6 +1246,7 @@ class Graph:
         self._used_names: dict[str, int] = {}  # base name -> number
         self._insert = self._root.prepend
         self._len = 0
+        self._capacity_hint = capacity_hint
         self._graph_namespace = _Namespace()
         self._owning_module = owning_module
         self._tracer_cls = tracer_cls
@@ -1274,6 +1277,16 @@ class Graph:
             this list to switch iteration order.
         """
         return _node_list(self)
+
+    @compatibility(is_backward_compatible=False)
+    def reserve_capacity(self, node_count: int) -> None:
+        """
+        Pre-allocate internal data structures for the estimated number of nodes.
+        """
+        if node_count <= 0:
+            return
+
+        self._capacity_hint = max(self._capacity_hint, node_count)
 
     @compatibility(is_backward_compatible=False)
     def output_node(self) -> Node:
@@ -1345,7 +1358,7 @@ class Graph:
         nodes or other parts of the Graph from a custom GraphModule implementation.
         """
         memo = memo if memo else {}
-        g = Graph(tracer_cls=self._tracer_cls)
+        g = Graph(tracer_cls=self._tracer_cls, capacity_hint=self._len)
         output_vals = g.graph_copy(self, val_map=memo, return_output_node=True)
         g._codegen = copy.deepcopy(self._codegen)
         if output_vals is not None:

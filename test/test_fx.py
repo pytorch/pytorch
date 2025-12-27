@@ -1653,6 +1653,66 @@ class TestFX(JitTestCase):
         ref = torch.sin(mod.linear(input) + mod.bias)
         self.assertEqual(r, ref)
 
+    def test_graph_capacity_hint(self):
+        """Test that Graph capacity_hint reduces memory allocations during graph construction."""
+        import tracemalloc
+
+        def model(x):
+            for _ in range(1000):
+                x = x.relu()
+            return x
+
+        tracemalloc.start()
+        traced = symbolic_trace(model)
+        current, peak = tracemalloc.get_traced_memory()
+        tracemalloc.stop()
+
+        if current > 0:
+            self.assertLess(peak / current, 5.0, f"Memory ratio {peak / current:.2f} suggests excessive reallocations")
+
+    def test_graph_capacity_hint_explicit(self):
+        """Test that Graph with explicit capacity_hint works correctly."""
+        g = Graph(capacity_hint=100)
+        self.assertEqual(g._capacity_hint, 100)
+
+        a = g.placeholder("a")
+        b = g.call_function(torch.relu, (a,))
+        g.output(b)
+
+        gm = GraphModule(torch.nn.Module(), g)
+        gm.graph.lint()
+        self.assertEqual(gm(torch.rand(10)).shape, torch.Size([10]))
+
+    def test_graph_reserve_capacity(self):
+        """Test the reserve_capacity method for pre-allocating graph structures."""
+        g = Graph()
+        self.assertEqual(g._capacity_hint, 0)
+
+        g.reserve_capacity(500)
+        self.assertEqual(g._capacity_hint, 500)
+
+        g.reserve_capacity(1000)
+        self.assertEqual(g._capacity_hint, 1000)
+
+        g.reserve_capacity(200)
+        self.assertEqual(g._capacity_hint, 1000)
+
+        g.reserve_capacity(0)
+        g.reserve_capacity(-100)
+        self.assertEqual(g._capacity_hint, 1000)
+
+    def test_graph_deepcopy_with_capacity(self):
+        """Test that deepcopy uses capacity hint from source graph."""
+        g = Graph()
+        x = g.placeholder("x")
+        for _ in range(50):
+            x = g.call_function(torch.relu, (x,))
+        g.output(x)
+
+        g_copy = copy.deepcopy(g)
+        self.assertEqual(g_copy._capacity_hint, g._len)
+        self.assertEqual(len(list(g_copy.nodes)), len(list(g.nodes)))
+
     def test_remove_uses(self):
         g: torch.fx.Graph = Graph()
         x: torch.fx.Node = g.placeholder("x")

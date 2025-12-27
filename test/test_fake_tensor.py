@@ -1127,6 +1127,57 @@ class FakeTensorTest(TestCase):
         self.assertEqual(out[1].dtype, eye.dtype)
         self.assertEqual(out[2].dtype, eye.dtype)
 
+    def test_metadata_only_ops_shortcircuit(self):
+        import time
+
+        with FakeTensorMode() as mode:
+            fake = mode.from_tensor(torch.randn(1000, 1000))
+
+            start = time.perf_counter()
+            for _ in range(10000):
+                _ = fake.shape
+                _ = fake.dtype
+                _ = fake.device
+                _ = fake.size()
+                _ = fake.stride()
+                _ = fake.storage_offset()
+                _ = fake.dim()
+                _ = fake.numel()
+            metadata_time = time.perf_counter() - start
+
+        self.assertLess(
+            metadata_time,
+            0.5,
+            f"Metadata access took {metadata_time:.3f}s for 80k accesses, "
+            "expected < 0.5s with short-circuit dispatch",
+        )
+
+    def test_metadata_ops_correctness(self):
+        real_tensor = torch.randn(32, 64)
+        channels_last_tensor = torch.randn(2, 3, 4, 5).contiguous(
+            memory_format=torch.channels_last
+        )
+
+        with FakeTensorMode() as mode:
+            fake = mode.from_tensor(real_tensor)
+            fake_cl = mode.from_tensor(channels_last_tensor)
+
+            self.assertEqual(fake.size(), real_tensor.size())
+            self.assertEqual(fake.stride(), real_tensor.stride())
+            self.assertEqual(fake.storage_offset(), real_tensor.storage_offset())
+            self.assertEqual(fake.dim(), real_tensor.dim())
+            self.assertEqual(fake.numel(), real_tensor.numel())
+            self.assertEqual(fake.device.type, "cpu")
+
+            self.assertEqual(fake.is_contiguous(), real_tensor.is_contiguous())
+            self.assertEqual(
+                fake_cl.is_contiguous(), channels_last_tensor.is_contiguous()
+            )
+            self.assertEqual(
+                fake_cl.is_contiguous(memory_format=torch.channels_last),
+                channels_last_tensor.is_contiguous(memory_format=torch.channels_last),
+            )
+
 
 instantiate_parametrized_tests(FakeTensorTest)
 

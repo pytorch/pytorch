@@ -383,6 +383,9 @@ skip_tensor_guards_with_matching_dict_tags = True
 # Skips guards on func.__defaults__ if the element to be guarded is a constant
 skip_guards_on_constant_func_defaults = True
 
+# Skip size/stride guards on tensors with static shapes (e.g. parameters).
+skip_size_stride_guards_on_static_tensors = True
+
 
 # The recursive-dict-tag guard relies on the class/function identity staying
 # stable.  We therefore assume that the following function dunder attributes

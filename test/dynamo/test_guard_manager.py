@@ -954,6 +954,55 @@ user_stack=None)
             foo = (10.0, 11)
             opt_fn(x, foo, bar)
 
+    def test_skip_size_stride_guards_on_static_tensors(self):
+        guard_manager = RootGuardManager()
+        x = torch.randn(4, 4)
+
+        guard_manager.add_tensor_match_guard(
+            x,
+            [None, None],
+            [None, None],
+            "x",
+            ["check_tensor_no_size_stride(x)"],
+            None,
+            type(x),
+            torch._C._dispatch_keys(x),
+        )
+
+        self.assertTrue(guard_manager.check(x))
+        self.assertTrue(guard_manager.check_verbose(x).result)
+        self.assertTrue(guard_manager.check(torch.randn(4, 4)))
+        self.assertTrue(guard_manager.check(torch.randn(8, 8)))
+        self.assertTrue(guard_manager.check(torch.randn(2, 16)))
+        self.assertFalse(guard_manager.check(torch.randn(4, 4, 4)))
+        self.assertFalse(guard_manager.check(torch.randn(4, 4, dtype=torch.float64)))
+        if torch.cuda.is_available():
+            self.assertFalse(guard_manager.check(torch.randn(4, 4, device="cuda")))
+
+    def test_skip_size_stride_guards_config_integration(self):
+        import torch.nn as nn
+
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = nn.Linear(32, 64)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = SimpleModel()
+        x = torch.randn(4, 32)
+
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(skip_size_stride_guards_on_static_tensors=True):
+            compiled_model = torch.compile(model, backend="eager")
+            self.assertEqual(compiled_model(x).shape, (4, 64))
+
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(skip_size_stride_guards_on_static_tensors=False):
+            compiled_model = torch.compile(model, backend="eager")
+            self.assertEqual(compiled_model(x).shape, (4, 64))
+
 
 class TypePropagationTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(skip_tensor_guards_with_matching_dict_tags=True)

@@ -278,6 +278,45 @@ class LocalCache(CacheBase):
 
 
 class PersistentCache(CacheBase):
+    @staticmethod
+    def _bucket_size(size: int, bucket_size: int) -> int:
+        """Round a size up to the nearest bucket boundary."""
+        if bucket_size <= 0 or size <= 0:
+            return size
+        return ((size + bucket_size - 1) // bucket_size) * bucket_size
+
+    @staticmethod
+    def _make_bucketed_key(inputs: str, bucket_size: int) -> str | None:
+        """Convert an inputs key to a bucketed version. Returns None if disabled or fails."""
+        if bucket_size <= 0:
+            return None
+
+        try:
+            import ast
+
+            parsed = ast.literal_eval(inputs)
+            if not isinstance(parsed, list):
+                return None
+
+            bucketed = []
+            for item in parsed:
+                if isinstance(item, tuple):
+                    bucketed_item = []
+                    for val in item:
+                        if isinstance(val, int) and val > 0:
+                            bucketed_item.append(
+                                PersistentCache._bucket_size(val, bucket_size)
+                            )
+                        else:
+                            bucketed_item.append(val)
+                    bucketed.append(tuple(bucketed_item))
+                else:
+                    bucketed.append(item)
+
+            return repr(bucketed)
+        except (ValueError, SyntaxError):
+            return None
+
     def lookup(
         self,
         choices: list[ChoiceCaller],
@@ -298,36 +337,55 @@ class PersistentCache(CacheBase):
         """
         precision = torch.get_float32_matmul_precision()
         cache_key = f"{inputs}_{hint_override}" if hint_override is not None else inputs
+        bucketed_cache_key = self._make_bucketed_key(inputs, config.autotune_cache_size_bucket)
+        if hint_override is not None and bucketed_cache_key:
+            bucketed_cache_key = f"{bucketed_cache_key}_{hint_override}"
 
-        timings = {}
+        timings: dict[ChoiceCaller, float] = {}
 
-        def check_cache(cache: dict[str, Any]) -> bool:
+        def check_cache(cache: dict[str, Any], key: str) -> bool:
             """Check if `cache` contains data for all the choices"""
             hit = True
             for choice in choices:
                 choice_hash = choice.hash_key()
-                if choice_hash in cache.get(op, {}).get(cache_key, {}).get(
-                    precision, {}
-                ):
-                    # cache hit
-                    timings[choice] = cache[op][cache_key][precision][choice_hash]
+                if choice_hash in cache.get(op, {}).get(key, {}).get(precision, {}):
+                    timings[choice] = cache[op][key][precision][choice_hash]
                 else:
-                    # cache miss
                     hit = False
                     break
             return hit
 
         local_cache = self.get_local_cache() if config.autotune_local_cache else {}
-        if (not check_cache(local_cache)) and (benchmark is not None):
-            # re-benchmark everything to try to get consistent numbers from the same machine
-            timings = benchmark(choices)
-            assert all(choice in timings for choice in choices)
-            local_cache.setdefault(op, {})
-            local_cache[op].setdefault(cache_key, {}).setdefault(precision, {})
-            for choice, timing in timings.items():
-                local_cache[op][cache_key][precision][choice.hash_key()] = timing
 
-            self.update_local_cache(local_cache)
+        if not check_cache(local_cache, cache_key):
+            if bucketed_cache_key and bucketed_cache_key != cache_key:
+                timings.clear()
+                if check_cache(local_cache, bucketed_cache_key):
+                    log.debug(
+                        "Autotune cache: bucketed hit for %s -> %s",
+                        cache_key[:50],
+                        bucketed_cache_key[:50],
+                    )
+                    return timings
+
+            if benchmark is not None:
+                timings = benchmark(choices)
+                assert all(choice in timings for choice in choices)
+                local_cache.setdefault(op, {})
+                local_cache[op].setdefault(cache_key, {}).setdefault(precision, {})
+                for choice, timing in timings.items():
+                    local_cache[op][cache_key][precision][choice.hash_key()] = timing
+
+                if bucketed_cache_key and bucketed_cache_key != cache_key:
+                    local_cache[op].setdefault(bucketed_cache_key, {}).setdefault(
+                        precision, {}
+                    )
+                    for choice, timing in timings.items():
+                        local_cache[op][bucketed_cache_key][precision][
+                            choice.hash_key()
+                        ] = timing
+
+                self.update_local_cache(local_cache)
 
         return timings
 

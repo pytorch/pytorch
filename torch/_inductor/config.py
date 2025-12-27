@@ -150,6 +150,10 @@ autotune_remote_cache: Optional[bool] = autotune_remote_cache_default()
 # None: Not set -- Off for OSS, JustKnobs based for internal
 bundled_autotune_remote_cache: Optional[bool] = bundled_autotune_remote_cache_default()
 
+# Bucket similar sizes together for autotuning cache hits.
+# 0 = disabled, otherwise sizes are rounded up to this multiple.
+autotune_cache_size_bucket: int = 0
+
 # See torch.compiler.config.force_disable_caches
 force_disable_caches: bool = Config(alias="torch.compiler.config.force_disable_caches")
 

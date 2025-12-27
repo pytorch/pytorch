@@ -30,6 +30,7 @@ from ..lowering import lowerings as L
 from ..pattern_matcher import (
     _return_true,
     Arg,
+    BatchedPatternMatcherPass,
     CallFunction,
     CallFunctionVarArgs,
     filter_nodes,
@@ -170,10 +171,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "remove_assert_ops").apply_graph_pass(
             remove_assert_ops
         )
-        for i, patterns in enumerate(pass_patterns):
-            GraphTransformObserver(gm, f"pass_pattern_{i}").apply_graph_pass(
-                patterns.apply
-            )
+        batched_pass = BatchedPatternMatcherPass(
+            pass_patterns,
+            pass_name="batched_pass_patterns",
+            subsystem="post_grad_passes",
+        )
+        GraphTransformObserver(gm, "batched_pass_patterns").apply_graph_pass(
+            batched_pass.apply
+        )
         for pass_name in config.post_grad_fusion_options:
             # skip all patterns for group batch fusions or quantization patterns
             if pass_name in POST_GRAD_FUSIONS or pass_name in OPTIMUS_EXCLUDE_POST_GRAD:

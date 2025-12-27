@@ -3149,6 +3149,39 @@ class TestAutotuneCache(TestCase):
 
                 self.assertEqual(res1, res2)
 
+    def test_autotune_cache_size_bucketing(self):
+        from torch._inductor.codecache import PersistentCache
+
+        self.assertEqual(PersistentCache._bucket_size(1, 64), 64)
+        self.assertEqual(PersistentCache._bucket_size(64, 64), 64)
+        self.assertEqual(PersistentCache._bucket_size(65, 64), 128)
+        self.assertEqual(PersistentCache._bucket_size(128, 64), 128)
+        self.assertEqual(PersistentCache._bucket_size(129, 64), 192)
+        self.assertEqual(PersistentCache._bucket_size(512, 64), 512)
+        self.assertEqual(PersistentCache._bucket_size(513, 64), 576)
+        self.assertEqual(PersistentCache._bucket_size(100, 0), 100)
+
+        self.assertEqual(
+            PersistentCache._make_bucketed_key("[('cuda', 'torch.float32', 512, 512, 1, 0)]", 64),
+            "[('cuda', 'torch.float32', 512, 512, 64, 0)]",
+        )
+        self.assertEqual(
+            PersistentCache._make_bucketed_key("[('cuda', 'torch.float32', 513, 513, 1, 0)]", 64),
+            "[('cuda', 'torch.float32', 576, 576, 64, 0)]",
+        )
+        self.assertEqual(
+            PersistentCache._make_bucketed_key("[('cuda', 'torch.float32', 520, 520, 1, 0)]", 64),
+            "[('cuda', 'torch.float32', 576, 576, 64, 0)]",
+        )
+        self.assertIsNone(PersistentCache._make_bucketed_key("[('cuda', 'torch.float32', 512, 512, 1, 0)]", 0))
+        self.assertIsNone(PersistentCache._make_bucketed_key("not_a_valid_list", 64))
+        self.assertEqual(
+            PersistentCache._make_bucketed_key(
+                "[('cuda', 'torch.float32', 512, 256, 1, 0), ('cuda', 'torch.float32', 1024, 128, 1, 0)]", 64
+            ),
+            "[('cuda', 'torch.float32', 512, 256, 64, 0), ('cuda', 'torch.float32', 1024, 128, 64, 0)]",
+        )
+
 
 class TestRemoteAOTAutogradCache(TestCase):
     @requires_gpu()

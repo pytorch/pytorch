@@ -3035,6 +3035,7 @@ class PermuteView(BaseView):
     def _map_neg_dims(cls, dims: Sequence[int]) -> list[int]:
         return [dim if dim >= 0 else len(dims) + dim for dim in dims]
 
+    @cache_on_self
     def get_size(self) -> Sequence[Expr]:
         assert OrderedSet(self._map_neg_dims(self.dims)) == OrderedSet(
             range(len(self.dims))
@@ -3380,9 +3381,11 @@ class ReinterpretView(BaseView):
     def dtype(self) -> torch.dtype:
         return self.layout.dtype
 
+    @cache_on_self
     def get_size(self) -> Sequence[Expr]:
         return list(self.layout.size)
 
+    @cache_on_self
     def get_stride(self) -> Sequence[Expr]:
         return list(self.layout.stride)
 
@@ -3463,6 +3466,7 @@ class DtypeView(BaseView):
     def dtype(self) -> torch.dtype:
         return self.target_dtype
 
+    @cache_on_self
     def get_size(self) -> Sequence[Expr]:
         return self.data.get_size()
 

@@ -397,6 +397,58 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
             1,
         )
 
+    @make_settings_test("torch._dynamo.utils")
+    def test_compile_allocations(self, records):
+        from torch._dynamo.utils import (
+            compile_allocations,
+            compilation_memory_metrics,
+            dump_compile_allocations,
+            dynamo_memory_tracked,
+            enable_memory_tracking,
+        )
+
+        compilation_memory_metrics.clear()
+
+        with dynamo_memory_tracked("disabled_test"):
+            _ = [i for i in range(1000)]
+
+        self.assertEqual(len(compilation_memory_metrics), 0)
+
+        with enable_memory_tracking():
+            with dynamo_memory_tracked("test_phase"):
+                _ = [i for i in range(10000)]
+
+        self.assertIn("test_phase", compilation_memory_metrics)
+        self.assertEqual(len(compilation_memory_metrics["test_phase"]), 1)
+
+        current, peak, num_allocs = compilation_memory_metrics["test_phase"][0]
+        self.assertIsInstance(current, int)
+        self.assertIsInstance(peak, int)
+        self.assertIsInstance(num_allocs, int)
+        self.assertGreaterEqual(current, 0)
+        self.assertGreaterEqual(peak, 0)
+
+        output = compile_allocations(repr="str")
+        self.assertIn("test_phase", output)
+        self.assertIn("TorchDynamo memory allocation metrics", output)
+
+        headers, values = compile_allocations(repr="csv")
+        self.assertIn("test_phase", headers)
+
+        dump_compile_allocations()
+        self.assertEqual(
+            len(
+                [
+                    r
+                    for r in records
+                    if "TorchDynamo memory allocation metrics" in str(r.msg)
+                ]
+            ),
+            1,
+        )
+
+        compilation_memory_metrics.clear()
+
     @make_logging_test(dynamo=logging.INFO)
     def test_custom_format_exc(self, records):
         dynamo_log = logging.getLogger(torch._dynamo.__name__)

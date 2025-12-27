@@ -1,16 +1,12 @@
 import functools
 import hashlib
+import importlib.util
 from typing import Any
 
 
 @functools.cache
 def has_triton_package() -> bool:
-    try:
-        import triton  # noqa: F401
-
-        return True
-    except ImportError:
-        return False
+    return importlib.util.find_spec("triton") is not None
 
 
 @functools.cache

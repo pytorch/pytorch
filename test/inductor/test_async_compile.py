@@ -1,4 +1,6 @@
 # Owner(s): ["module: inductor"]
+import multiprocessing
+import os
 from unittest.mock import patch
 
 import torch
@@ -152,6 +154,51 @@ def triton_fused_fake_name(in_ptr0, out_ptr0, xnumel, r0_numel, XBLOCK : tl.cons
         self.assertEqual(args[1].kwargs, autotune_config.kwargs)
         self.assertEqual(args[1].num_warps, autotune_config.num_warps)
         self.assertEqual(args[1].num_stages, autotune_config.num_stages)
+
+    def test_lazy_pool_initialization_single_thread(self):
+        shutdown_compile_workers()
+
+        initial_processes = len(multiprocessing.active_children())
+
+        with config.patch(compile_threads=1):
+            torch._dynamo.reset()
+
+            def model(x):
+                return x * 2
+
+            compiled_model = torch.compile(model)
+            compiled_model(torch.randn(10))
+
+        final_processes = len(multiprocessing.active_children())
+        delta = final_processes - initial_processes
+        self.assertLessEqual(
+            delta,
+            1,
+            f"Spawned {delta} extra processes in single-thread mode, expected <= 1",
+        )
+
+    @requires_gpu()
+    @requires_triton()
+    def test_lazy_pool_initialization_no_eager_warming(self):
+        shutdown_compile_workers()
+
+        old_eager = os.environ.get("TORCH_WARM_POOL_EAGER")
+        os.environ.pop("TORCH_WARM_POOL_EAGER", None)
+
+        try:
+            from torch._inductor.async_compile import maybe_warm_pool
+
+            maybe_warm_pool()
+
+            cache_info = AsyncCompile.process_pool.cache_info()
+            self.assertEqual(
+                cache_info.hits + cache_info.misses,
+                0,
+                "Pool should not be created after maybe_warm_pool with lazy init",
+            )
+        finally:
+            if old_eager is not None:
+                os.environ["TORCH_WARM_POOL_EAGER"] = old_eager
 
 
 if __name__ == "__main__":

@@ -2062,6 +2062,105 @@ class PatternMatcherPass:
         self.patterns.clear()
 
 
+class BatchedPatternMatcherPass:
+    def __init__(
+        self,
+        passes: Sequence[PatternMatcherPass],
+        pass_name: Optional[str] = None,
+        subsystem: Optional[str] = None,
+    ) -> None:
+        super().__init__()
+        self.passes = list(passes)
+        self.pass_name = pass_name or "batched_pattern_matcher"
+        self.subsystem = subsystem
+
+    def apply(self, gm: Union[torch.fx.GraphModule, torch.fx.Graph]) -> int:
+        if not any(p.patterns for p in self.passes):
+            return 0
+
+        if isinstance(gm, torch.fx.GraphModule):
+            graph = gm.graph
+        elif isinstance(gm, torch.fx.Graph):
+            graph = gm
+            gm = graph.owning_module
+        else:
+            raise RuntimeError(
+                f"The input to BatchedPatternMatcherPass must be a GraphModule or a Graph, but got {type(gm)}"
+            )
+
+        if should_compute_mutation_region_ids(graph):
+            compute_mutation_region_ids(graph)
+        get_mutation_region_id_partial = functools.partial(
+            get_mutation_region_id, graph
+        )
+
+        unified_patterns: defaultdict[
+            tuple[str, torch.fx.node.Target], list[tuple[int, list[PatternEntry]]]
+        ] = defaultdict(list)
+        has_call_module = False
+
+        for pass_idx, pattern_pass in enumerate(self.passes):
+            if not pattern_pass.patterns:
+                continue
+            for op_target, entries in pattern_pass.patterns.items():
+                op, target = op_target
+                if op == "call_module":
+                    has_call_module = True
+                unified_patterns[op_target].append((pass_idx, entries))
+
+        nodes = []
+        for op, target in unified_patterns:
+            if op == "call_module":
+                continue
+            nodes.append(graph.find_nodes(op=op, target=target, sort=False))
+        if has_call_module:
+            nodes.append(graph.find_nodes(op="call_module", sort=False))
+
+        count = 0
+        assert isinstance(gm, torch.fx.GraphModule)
+        with GraphTransformObserver(gm, self.pass_name, self.subsystem):
+            for node in sorted(itertools.chain.from_iterable(nodes), reverse=True):
+                target = extract_target(node)
+
+                if node.op == "call_module":
+                    if (node.op, target) not in unified_patterns:
+                        continue
+
+                if fallback_node_due_to_unsupported_type(node, allow_cpu_inputs=False):
+                    continue
+
+                for _, entries in unified_patterns[(node.op, target)]:
+                    for entry in entries:
+                        if node._erased:
+                            break
+                        m = entry.pattern.match(node)
+                        # pattern match crosses mutation barrier - discard
+                        if (
+                            is_match(m)
+                            and len(
+                                OrderedSet(map(get_mutation_region_id_partial, m.nodes))
+                            )
+                            != 1
+                        ):
+                            continue
+                        if os.environ.get("TORCHINDUCTOR_PATTERN_MATCH_DEBUG") == node.name:
+                            log.warning("%s%s %s %s", node, node.args, m, entry.pattern)
+
+                        if is_match(m) and guard_or_false(entry.extra_check(m)):
+                            count += 1
+                            entry.apply(m, graph, node)
+                            counters[backend]["pattern_matcher_count"] += 1
+                            counters[backend]["pattern_matcher_nodes"] += len(m.nodes)
+                    if node._erased:
+                        break
+
+        return count
+
+    def clear(self) -> None:
+        for p in self.passes:
+            p.clear()
+
+
 def _not_implemented(*args: Any, **kwargs: Any) -> NoReturn:
     raise NotImplementedError
 

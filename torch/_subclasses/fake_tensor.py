@@ -3291,7 +3291,7 @@ def _check_for_subclass_arg(x: object) -> bool:
     )
 
 
-_DISPATCH_META_HANDLERS = {
+_DISPATCH_META_HANDLERS: dict[torch._ops.OpOverload, Callable[[Sequence[object]], object]] = {
     torch.ops.prim.device.default: _device_handler,
     torch.ops.aten.size.default: lambda args: tuple(
         int(s) for s in cast(Tensor, args[0]).size()
@@ -3302,6 +3302,14 @@ _DISPATCH_META_HANDLERS = {
     torch.ops.aten.storage_offset.default: lambda args: int(
         cast(Tensor, args[0]).storage_offset()
     ),
+    torch.ops.aten.dim.default: lambda args: cast(Tensor, args[0]).dim(),
+    torch.ops.aten.numel.default: lambda args: cast(Tensor, args[0]).numel(),
+    torch.ops.aten.sym_size.default: lambda args: cast(Tensor, args[0]).size(),
+    torch.ops.aten.sym_stride.default: lambda args: cast(Tensor, args[0]).stride(),
+    torch.ops.aten.sym_storage_offset.default: lambda args: cast(
+        Tensor, args[0]
+    ).storage_offset(),
+    torch.ops.aten.sym_numel.default: lambda args: cast(Tensor, args[0]).numel(),
 }
 
 _DISPATCH_HANDLE_DIRECTLY = ordered_set(
@@ -3311,6 +3319,10 @@ _DISPATCH_HANDLE_DIRECTLY = ordered_set(
     # _RecordFunction doesn't support __eq__ so make sure not to attempt to
     # cache it.
     torch.ops.profiler._record_function_exit._RecordFunction,
+    torch.ops.aten.is_contiguous.default,
+    torch.ops.aten.is_contiguous.memory_format,
+    torch.ops.aten.is_strides_like_format.default,
+    torch.ops.aten.is_non_overlapping_and_dense.default,
 )
 
 from torch._subclasses.fake_impls import (  # noqa: F401
