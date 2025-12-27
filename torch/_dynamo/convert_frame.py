@@ -60,6 +60,7 @@ from torch._dynamo.distributed import get_compile_pg
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
+from torch._tempdir import get_temp_path
 from torch._utils_internal import (
     compile_time_strobelight_meta,
     justknobs_check,
@@ -473,7 +474,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         trace_id = CompileContext.current_trace_id()
         assert trace_id, "Trace id is None"
         profile_path = Path(
-            f"/tmp/{func.__name__}_{str(trace_id).replace('/', '_')}.profile"
+            get_temp_path(filename=f"{func.__name__}_{str(trace_id).replace('/', '_')}.profile")
         )
         prof = cProfile.Profile()
         try:

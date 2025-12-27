@@ -25,6 +25,7 @@ from torch._dynamo.utils import get_debug_dir
 from torch._inductor import utils
 from torch._logging import getArtifactLogger
 from torch._logging._internal import trace_structured
+from torch._tempdir import get_temp_path
 from torch._utils_internal import signpost_event
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
@@ -1190,7 +1191,7 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     with the saved arguments using load_args_and_run_compile_fx_inner.
     """
 
-    folder = "/tmp/inductor_saved_args"
+    folder = get_temp_path(subdirectory="inductor_saved_args")
     if not os.path.exists(folder):
         os.mkdir(folder)
 

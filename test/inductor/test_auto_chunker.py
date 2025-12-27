@@ -1,5 +1,6 @@
 # Owner(s): ["module: inductor"]
 import os
+import tempfile
 
 import torch
 from torch import nn
@@ -164,7 +165,7 @@ class AutoChunkerTest(TestCase):
                 for step in range(5):
                     with torch.profiler.record_function(f"Step {step}"):
                         opt_f(x, y)
-            path = "/tmp/trace.json"
+            path = os.path.join(tempfile.gettempdir(), "trace.json")
             print(f"Write the chrome trace to {path}")
             p.export_chrome_trace(path)
 

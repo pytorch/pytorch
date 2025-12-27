@@ -387,7 +387,7 @@ class TestCheckpointProcess(TestCase):
 
         # Attempting to write should raise an error
         with self.assertRaises(RuntimeError) as cm:
-            future = checkpoint_process.write(self.test_state_dict, "/tmp/test")
+            future = checkpoint_process.write(self.test_state_dict, os.path.join(tempfile.gettempdir(), "test"))
             future.result()
 
         self.assertIn("Child process terminated unexpectedly", str(cm.exception))

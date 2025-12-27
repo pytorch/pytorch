@@ -16,6 +16,7 @@ from typing_extensions import final, override, Self
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 import torch.fx
 from torch._inductor.codecache import BypassFxGraphCache, FxGraphCache
+from torch._tempdir import get_temp_path
 from torch._inductor.metrics import CachedMetricsDeltas, CachedMetricsHelper
 from torch._inductor.output_code import (
     CompiledFxGraph,
@@ -662,19 +663,20 @@ class _DebugFileFxCompile(_SerializedFxCompile):
         idx = _DebugFileFxCompile.file_index
         _DebugFileFxCompile.file_index += 1
 
-        name = f"/tmp/aorenste/pytorch_compile_fx_tmp_input_{idx}.bin"
+        name = get_temp_path(subdirectory="pytorch_compile_fx_debug", filename=f"input_{idx}.bin")
+        os.makedirs(os.path.dirname(name), exist_ok=True)
         with open(name, "wb") as f:
             f.write(pickled_input.value)
         print(f"Wrote to {name}")
 
         if False:
-            name = f"/tmp/aorenste/pytorch_compile_fx_tmp_actual_{idx}.bin"
+            name = get_temp_path(subdirectory="pytorch_compile_fx_debug", filename=f"actual_{idx}.bin")
             actual = self._run_in_child(pickled_input)
             with open(name, "wb") as f:
                 f.write(actual.value)
             return actual
         elif False:
-            name = f"/tmp/aorenste/pytorch_compile_fx_tmp_output_{idx}.bin"
+            name = get_temp_path(subdirectory="pytorch_compile_fx_debug", filename=f"output_{idx}.bin")
             with open(name, "rb") as f:
                 result = _WireProtocolPickledOutput(f.read())
                 print(f"Read from {name}")
