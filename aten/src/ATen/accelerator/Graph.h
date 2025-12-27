@@ -36,7 +36,6 @@ struct TORCH_API Graph {
   }
 
  private:
-  c10::DeviceType device_type_;
   std::unique_ptr<at::GraphImplInterface> impl_;
 };
 
