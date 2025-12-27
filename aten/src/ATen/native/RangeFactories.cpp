@@ -3,6 +3,7 @@
 #include <ATen/native/RangeUtils.h>
 #include <ATen/AccumulateType.h>
 #include <ATen/Dispatch.h>
+#include <ATen/Dispatch_v2.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
 #include <c10/util/irange.h>
@@ -190,7 +191,7 @@ Tensor& range_out_no_step(const Scalar& start, const Scalar& end, Tensor& result
 }
 
 Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, Tensor& result) {
-  AT_DISPATCH_ALL_TYPES_AND2(kHalf, kBFloat16, result.scalar_type(), "arange_cpu", [&]() {
+  AT_DISPATCH_V2(result.scalar_type(), "arange_cpu", AT_WRAP([&] {
     int64_t size = compute_arange_size<scalar_t>(start, end, step);
     int64_t numel = result.numel();
 
@@ -214,7 +215,7 @@ Tensor& arange_out(const Scalar& start, const Scalar& end, const Scalar& step, T
     if (!result.is_contiguous()) {
       result.copy_(r);
     }
-  });
+  }), AT_EXPAND(AT_ALL_TYPES), kHalf, kBFloat16, kUInt16, kUInt32);
 
   return result;
 }
