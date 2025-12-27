@@ -47,14 +47,40 @@ def get_pytorch_tmpdir() -> str:
             f"{_PYTORCH_TMPDIR_ENV} is set to '{env_value}', "
             "but this path is not a directory."
         )
+    The directory specified via the ``PYTORCH_TMPDIR`` environment variable
+    must already exist, be a directory, and be writable by the current
+    process. If it is not set, this falls back to ``tempfile.gettempdir()``.
+
+    Returns:
+        str: Path to temp directory.
+
+    Raises:
+        RuntimeError: If ``PYTORCH_TMPDIR`` is set to a path that does not
+            exist, is not a directory, or is not writable/executable.
+    """
+    # Reason: Fallback to tempfile.gettempdir() ensures cross-platform
+    # compatibility (Windows, Linux, macOS) without hardcoding paths
+    env_value = os.environ.get(_PYTORCH_TMPDIR_ENV)
+    if not env_value:
+        return tempfile.gettempdir()
+
+    # Validate that the custom temp directory exists, is a directory, and is
+    # usable (writable and traversable) by the current process. This avoids
+    # opaque downstream I/O errors when the path is misconfigured.
+    if not os.path.exists(env_value):
+        raise RuntimeError(
+            f"{_PYTORCH_TMPDIR_ENV} is set to '{env_value}', but this path does not exist."
+        )
+    if not os.path.isdir(env_value):
+        raise RuntimeError(
+            f"{_PYTORCH_TMPDIR_ENV} is set to '{env_value}', but this path is not a directory."
+        )
     if not os.access(env_value, os.W_OK | os.X_OK):
         raise RuntimeError(
-            f"{_PYTORCH_TMPDIR_ENV} is set to '{env_value}', "
-            "but this directory is not writable/executable."
+            f"{_PYTORCH_TMPDIR_ENV} is set to '{env_value}', but this directory is not writable/executable."
         )
+
     return env_value
-
-
 def get_temp_path(
     subdirectory: Optional[str] = None, filename: Optional[str] = None
 ) -> str:
