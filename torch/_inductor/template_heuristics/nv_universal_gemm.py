@@ -32,6 +32,11 @@ class HeuristicConfig:
     tile_k: int
     cluster_m: int
     cluster_n: int
+    stages: int
+    split_k: int
+    warp_tile_m: int
+    warp_tile_n: int
+    warp_tile_k: int
     estimated_runtime: float
 
 
@@ -115,7 +120,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         # Build map from config key to estimated runtime
         config_key_to_runtime: dict[tuple, float] = {}
         for cfg in heuristic_configs:
-            key = (cfg.tile_m, cfg.tile_n, cfg.cluster_m, cfg.cluster_n)
+            key = (cfg.tile_m, cfg.tile_n, cfg.tile_k, cfg.cluster_m, cfg.cluster_n)
             if key not in config_key_to_runtime:
                 config_key_to_runtime[key] = cfg.estimated_runtime
 
@@ -130,6 +135,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 key = (
                     tile_shape[0],
                     tile_shape[1],
+                    tile_shape[2],
                     cluster_shape[0],
                     cluster_shape[1],
                 )
@@ -335,6 +341,11 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                     tile_k=kernel.cta_tile_k,
                     cluster_m=kernel.cluster_m,
                     cluster_n=kernel.cluster_n,
+                    stages=kernel.stages,
+                    split_k=kernel.split_k,
+                    warp_tile_m=kernel.warp_tile_m,
+                    warp_tile_n=kernel.warp_tile_n,
+                    warp_tile_k=kernel.warp_tile_k,
                     estimated_runtime=cfg["runtime"],
                 )
             )
@@ -357,6 +368,7 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             runtime_us = cfg.estimated_runtime * 1e6
             autotuning_log.info(
                 "  Config %d: tile=(%d, %d, %d), cluster=(%d, %d), "
+                "stages=%d, split_k=%d, warp_tile=(%d, %d, %d), "
                 "estimated_runtime=%.2f us",
                 i,
                 cfg.tile_m,
@@ -364,6 +376,11 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 cfg.tile_k,
                 cfg.cluster_m,
                 cfg.cluster_n,
+                cfg.stages,
+                cfg.split_k,
+                cfg.warp_tile_m,
+                cfg.warp_tile_n,
+                cfg.warp_tile_k,
                 runtime_us,
             )
 
