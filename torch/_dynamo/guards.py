@@ -2830,7 +2830,6 @@ class GuardBuilder(GuardBuilderBase):
                 if float_symbols_str:
                     float_symbols_str = f"double {float_symbols_str};"
 
-                # Use StringIO for efficient large guard code string assembly
                 func_buf = io.StringIO()
                 func_buf.write(
                     "#include <algorithm>\n"

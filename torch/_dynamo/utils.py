@@ -66,7 +66,6 @@ from typing_extensions import ParamSpec, TypeIs
 
 import torch
 import torch._functorch.config
-import torch.fx.experimental.symbolic_shapes
 import torch.utils._pytree as pytree
 from torch import fx
 from torch._C import (
@@ -743,8 +742,6 @@ def dynamo_timed(
       that support it.
     - log_waitcounter: If set, we'll log a waitcounter of the form "pytorch.dynamo_timed.{key}"
     """
-    # Fast path: when instrumentation is disabled and no optional logging requested,
-    # skip all context manager creation overhead
     if (
         not log_pt2_compile_event
         and not log_waitcounter
@@ -752,15 +749,13 @@ def dynamo_timed(
         and not torch.autograd.profiler._is_profiler_enabled
         and not chromium_event_log_active()
     ):
-        # Still record to compilation_time_metrics for compile_times() utility
         if key not in compilation_time_metrics:
             compilation_time_metrics[key] = []
-        metrics = compilation_time_metrics[key]
         start = time.time_ns()
         try:
             yield
         finally:
-            metrics.append((time.time_ns() - start) / 1e9)
+            compilation_time_metrics[key].append((time.time_ns() - start) / 1e9)
         return
 
     if phase_name:

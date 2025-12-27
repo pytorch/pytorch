@@ -431,12 +431,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
     node_order: dict[Any, int] = {}
-    # Collect inplaceable ops during the first pass to avoid a second iteration
     inplaceable_op_nodes: list[torch.fx.Node] = []
     for i, node in enumerate(reversed(graph.nodes)):
         node_order[node] = len(graph.nodes) - i - 1
         storage_to_nodes[get_node_storage(node)].append(node)
-        # Collect nodes that may be inplaceable for later processing
         if (
             node.target in inplaceable_ops
             or node.target is torch.ops.higher_order.auto_functionalized_v2
@@ -680,10 +678,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         )
         return tensors_to_clone
 
-    # Reverse to process in forward order (nodes were collected in reverse order)
     inplaceable_op_nodes.reverse()
 
-    # Process inplaceable ops collected from the first pass, maintaining original order
     for node in inplaceable_op_nodes:
         if (inplaceable_op := inplaceable_ops.get(node.target)) is not None:
             mutated_arg = node.args[inplaceable_op.mutated_arg]

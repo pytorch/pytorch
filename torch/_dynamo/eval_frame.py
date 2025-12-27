@@ -84,12 +84,6 @@ from torch.fx.experimental._dynamism import (
     track_dynamism_across_examples,
 )
 from torch.fx.experimental.proxy_tensor import make_fx
-from torch.fx.experimental.symbolic_shapes import (
-    ConstraintViolationError,
-    DimDynamic,
-    ShapeEnv,
-    StatelessSymbolicContext,
-)
 from torch.fx.graph import _PyTreeCodeGen, _PyTreeInfo
 
 from . import config, convert_frame, distributed, external_utils, trace_rules, utils
@@ -1632,6 +1626,11 @@ class FlattenInputOutputSignature(torch.fx.Transformer):
         flat_args_dynamic_dims: list[set[int]],
         fake_mode: Optional[fake_tensor.FakeTensorMode] = None,
     ) -> None:
+        from torch.fx.experimental.symbolic_shapes import (
+            DimDynamic,
+            StatelessSymbolicContext,
+        )
+
         super().__init__(m)
 
         assert len(flat_args_dynamic_dims) == len(flat_args)
@@ -2004,6 +2003,12 @@ def export(
     _constraints = constraints
 
     def inner(*args: Any, **kwargs: Any) -> ExportResult:
+        from torch.fx.experimental.symbolic_shapes import (
+            ConstraintViolationError,
+            DimDynamic,
+            ShapeEnv,
+        )
+
         if not _constraints:
             combined_args = _combine_args(_f, args, kwargs)
             constraints = _process_dynamic_shapes(combined_args, dynamic_shapes)

@@ -52,7 +52,6 @@ import torch._logging
 from torch._dynamo.exc import ObservedException, TensorifyScalarRestartAnalysis
 from torch._guards import tracing, TracingContext
 from torch._logging.structured import dump_file
-from torch.fx.experimental.symbolic_shapes import guard_bool
 from torch.utils._functools import cache_method
 
 from . import (
@@ -805,6 +804,8 @@ def generic_jump(
                 if isinstance(value.sym_num, torch.SymBool):
                     eval_result = value.evaluate_expr(self.output)
                 else:
+                    from torch.fx.experimental.symbolic_shapes import guard_bool
+
                     eval_result = guard_bool(value.sym_num != 0)
             except exc.UserError as e:
                 if self.should_compile_partial_graph():

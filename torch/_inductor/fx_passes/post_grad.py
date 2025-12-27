@@ -1456,7 +1456,6 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
-    # Single pass to collect both get_attr targets and view nodes
     subgraph_names: OrderedSet[str] = OrderedSet()
     view_nodes = []
     for node in gm.graph.nodes:

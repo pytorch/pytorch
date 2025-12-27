@@ -983,8 +983,6 @@ def compiled_fx_graph_hash(
     # cache in this module.
     key = "f" + pickler.get_hash(details)
     debug_lines = pickler.debug_lines(details)
-    # Only format debug string when debug logging is enabled to avoid
-    # expensive string operations during normal compilation
     if log.isEnabledFor(logging.DEBUG):
         debug_str = "\n".join(debug_lines)
         log.debug("FX graph cache hash details for key %s:\n%s", key, debug_str)

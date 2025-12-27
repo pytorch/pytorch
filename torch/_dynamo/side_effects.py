@@ -193,30 +193,7 @@ class SideEffects:
             return None
 
     def clone(self) -> "SideEffects":
-        """Create a shallow copy for speculation/rollback during tracing.
-
-        Mutation pattern analysis - why shallow copies are safe:
-
-        - id_to_variable: dict[int, VariableTracker]
-          Shallow copy via dict.copy() is SAFE. New entries are added via
-          id_to_variable[id(item)] = variable, which only affects the copied dict.
-          The VariableTracker values are intentionally shared as they represent
-          the same tracked objects across original and clone.
-
-        - store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
-          REQUIRES deep copy of inner dicts. The store_attr() method mutates
-          inner dicts via self.store_attr_mutations[item][name] = value.
-          Without copying inner dicts, mutations in clone would affect original.
-
-        - keepalive: list[Any]
-          Shallow copy via list.copy() is SAFE. Objects are appended but never
-          modified. The contained objects are intentionally shared to prevent
-          garbage collection of the same underlying objects.
-
-        - save_for_backward, tensor_hooks:
-          Shared by reference (no copy). These are typically only read after
-          cloning, and any mutations are intentional cross-clone state sharing.
-        """
+        """Create a shallow copy"""
         ref = self.output_graph_weakref()
         assert ref is not None
         return self.__class__(
@@ -677,25 +654,12 @@ class SideEffects:
         # the .closures field, from which we will see if we need to keep
         # any mutations to cell variables alive.
 
-        # Optimization: use in-place deletion when filtering removes minority of items.
-        # This avoids allocating new dicts when only a few items are dead.
-        dead_keys_itv = [k for k, v in self.id_to_variable.items() if not is_live(v)]
-        if len(dead_keys_itv) < len(self.id_to_variable) // 2:
-            for k in dead_keys_itv:
-                del self.id_to_variable[k]
-        else:
-            self.id_to_variable = {
-                k: v for k, v in self.id_to_variable.items() if is_live(v)
-            }
-
-        dead_keys_sam = [k for k, v in self.store_attr_mutations.items() if not is_live(k)]
-        if len(dead_keys_sam) < len(self.store_attr_mutations) // 2:
-            for k in dead_keys_sam:
-                del self.store_attr_mutations[k]
-        else:
-            self.store_attr_mutations = {
-                k: v for k, v in self.store_attr_mutations.items() if is_live(k)
-            }
+        self.id_to_variable = {
+            k: v for k, v in self.id_to_variable.items() if is_live(v)
+        }
+        self.store_attr_mutations = {
+            k: v for k, v in self.store_attr_mutations.items() if is_live(k)
+        }
 
     def mutation(self, var: VariableTracker) -> None:
         if var in self.ignore_mutation_on_these_variables:
