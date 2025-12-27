@@ -261,7 +261,7 @@ def collapse_fusion_regions(
     # Build new_region_of by finding the call_module nodes
     new_region_of: dict[fx.Node, FusionRegion] = {}
 
-    for region_idx, (nodes, _) in enumerate(unique_regions):
+    for region_idx in range(len(unique_regions)):
         subgraph_name = f"_fusion_region_{region_idx}"
 
         # Find the call_module node
