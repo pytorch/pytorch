@@ -1060,7 +1060,6 @@ from user code:
                     buffer_placements=buffer_placements,
                 )
 
-        # --- Test setup ---
         fake_store = FakeStore()
         c10d.init_process_group(backend="fake", store=fake_store, rank=0, world_size=1)
 
@@ -1069,7 +1068,6 @@ from user code:
             device = torch.device(f"cuda:{rank}")
             torch.cuda.set_device(device)
 
-            # Hyperparameters (smaller for testing)
             vocab_size = 1000
             embed_dim = 64
             num_heads = 4
@@ -1104,7 +1102,6 @@ from user code:
 
             model.eval()
 
-            # Capture and compile
             fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             with fake_mode, torch._dynamo.config.patch(install_free_tensors=True):
                 local_input_ids = torch.randint(
@@ -1150,8 +1147,6 @@ from user code:
                         bw_compiler=bwd_compile,
                     )
 
-                # Serialize outside the export_stack context to avoid issues
-                # with dynamically created functions from regional_inductor
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as f:
                     serialization_path = f.name
                     f.write(
@@ -1160,7 +1155,6 @@ from user code:
                         )
                     )
 
-            # Load and run
             with open(serialization_path, "rb") as f:
                 loaded_fn = BundledAOTAutogradSerializableCallable.deserialize_compile_artifacts(
                     f.read()
@@ -1182,7 +1176,6 @@ from user code:
             loss = F.cross_entropy(logits.view(-1, vocab_size), targets.view(-1))
             loss.backward()
 
-            # Cleanup temp file
             import os
 
             os.unlink(serialization_path)
