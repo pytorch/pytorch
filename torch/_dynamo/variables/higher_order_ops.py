@@ -4199,7 +4199,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
     _ALLOW_FALLBACK_TO_EAGER = True
 
     def __init__(
-        self, fwd_fn: Any, bwd_fn: Any, parent_source: Source, **kwargs: Any
+        self, fwd_fn: Any, bwd_fn: Any, parent_source: Source | None, **kwargs: Any
     ) -> None:
         super().__init__(**kwargs)
         self.fwd_fn = fwd_fn
@@ -4374,8 +4374,11 @@ class AutogradFunctionApplyVariable(VariableTracker):
             proxy = tx.output.create_proxy(
                 "call_function", torch.autograd.function.FunctionCtx, (), {}
             )
+            # type: ignore[attr-defined]
             set_example_value(proxy.node, ctx.value)
+            # type: ignore[attr-defined]
             ctx.proxy = proxy
+        # pyrefly: ignore[bad-return]
         return ctx
 
     def trace_forward_graph(
