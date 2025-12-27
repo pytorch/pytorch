@@ -112,6 +112,7 @@ Indexing, Slicing, Joining, Mutating Ops
     narrow
     narrow_copy
     nonzero
+    nonzero_static
     permute
     reshape
     row_stack
