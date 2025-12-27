@@ -976,7 +976,19 @@ class PallasKernel(SIMDKernel):
                     # Contiguous access with no offset
                     return "..."
                 else:
-                    # Offset slice: offset::stride (e.g., a[1:10] -> "1::1")
+                    # Check if offset could be negative - if so, fall back to explicit indexing
+                    # because JAX interprets negative indices as wrapping from the end
+                    # which gives wrong results for padding patterns
+                    try:
+                        offset_val = int(offset)
+                        if offset_val < 0:
+                            # Negative offset - use explicit indexing
+                            return self.kexpr(index)
+                    except (TypeError, ValueError):
+                        # Symbolic offset - can't determine sign, use explicit indexing
+                        # to be safe (e.g., padding with unknown pad size)
+                        return self.kexpr(index)
+                    # Positive offset slice: offset::stride (e.g., a[1:10] -> "1::1")
                     offset_str = self.kexpr(offset)
                     stride_str = self.kexpr(stride)
                     return f"{offset_str}::{stride_str}"
