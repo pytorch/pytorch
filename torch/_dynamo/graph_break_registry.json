@@ -142,6 +142,15 @@
       "Context": "str(value)",
       "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
       "Hints": [
+        "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Attempted to wrap RNN, GRU, or LSTM",
+      "Context": "str(value)",
+      "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

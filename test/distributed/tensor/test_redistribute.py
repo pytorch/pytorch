@@ -1273,15 +1273,26 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
 
 
-class DistributeWithStridedShardTest(DistributeWithDeviceOrderTest):
+class DistributeWithStridedShardTest(DTensorTestBase):
     @property
     def world_size(self) -> int:
         return 8
 
+    def _extract_redistribute_trace_from_debug_mode(self, s: str) -> str:
+        import re
+
+        match = re.search(r"trace:\s*(.*)\)", s)
+        if match:
+            trace_str = match.group(1)
+            return trace_str
+        else:
+            return ""
+
     @with_comms
     def test_strided_shard_redistribution(self):
         torch.manual_seed(21)
-        mesh = init_device_mesh(self.device_type, (2, 2, 2))
+        with maybe_disable_local_tensor_mode():
+            mesh = init_device_mesh(self.device_type, (2, 2, 2))
         input_data = torch.randn((31, 13, 11), device=self.device_type)
         sharding_src_dst_pairs_with_expected_trace = [
             (
