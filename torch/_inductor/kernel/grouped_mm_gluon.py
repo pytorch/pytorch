@@ -1,13 +1,12 @@
 import argparse
 import itertools
+import os
 import pandas as pd
 import pytest
 import torch
 import triton
 
 from functools import cache
-
-from torch._inductor.utils import get_num_sms
 
 from triton.experimental import gluon
 from triton.experimental.gluon import language as gl
@@ -243,7 +242,7 @@ def grouped_mm(
         order=[1, 0],
     )
 
-    num_sms = get_num_sms()
+    num_sms = torch._inductor.utils.get_num_sms()
     NUM_BLOCKS = num_sms
 
     kernel[[NUM_BLOCKS]](
@@ -569,8 +568,8 @@ if __name__ == "__main__":
     align = 16 // dtype.itemsize
 
     # fixme: uncomment this!
-    # os.environ["CUTEDSL_ENABLE_AUTOTUNING"] = "1"
-    # os.environ["TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE"] = "EXHAUSTIVE"
+    #os.environ["CUTEDSL_ENABLE_AUTOTUNING"] = "1"
+    #os.environ["TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE"] = "EXHAUSTIVE"
 
     results = []
     for M, G, N, K in [
@@ -668,10 +667,6 @@ if __name__ == "__main__":
             )
         except:
             us_cute = None
-            pass
-
-        # fixme: remove this!
-        us_cute = None
 
         print("Autotuning Gluon grouped_mm (default)...")
         best_ms_default, best_config_default, best_fn_default = autotune_grouped_mm(
