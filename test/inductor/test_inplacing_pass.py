@@ -135,6 +135,53 @@ class TestReinplacingPassCorrectness(InductorTestCase):
 
         self._test(f)
 
+    def test_view_index_put_should_reinplace(self):
+        """
+        Test that view + index_put pattern is properly reinplaced.
+        See https://github.com/pytorch/pytorch/issues/137416
+
+        The pattern:
+            view_1 = reshape(input)
+            result = index_put(view_1, indices, val)
+            view_2 = reshape(result)
+            copy_(input, view_2)
+
+        Should be optimized to do in-place index_put without extra clones.
+        """
+        ReinplaceCounters.clear()
+
+        def f(input_pos, val, cache):
+            cache.view(4, -1)[input_pos] = val.view(-1)
+            return cache
+
+        cache = torch.randn(4, 3, 4, device=device)
+        val = torch.randn(3, 4, device=device)
+        input_pos = torch.tensor([1], device=device)
+
+        cache_copy = cache.clone()
+        expected = f(input_pos, val.clone(), cache_copy)
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            compiled_f = torch.compile(f)
+            cache_compiled = cache.clone()
+            result = compiled_f(input_pos, val.clone(), cache_compiled)
+
+        post_grad_graphs = log_stream.getvalue()
+
+        # Verify correctness
+        self.assertEqual(expected, result)
+        self.assertEqual(cache_copy, cache_compiled)
+
+        # Verify reinplacing succeeded (no failures)
+        self.assertEqual(num_reinplacing_failures(), 0)
+
+        # Verify the fix converted index_put to index_put_ (inplace)
+        # and eliminated unnecessary clones
+        self.assertIn("index_put_", post_grad_graphs)
+
     def test_counters_functionalize_old(self):
         ReinplaceCounters.clear()
 

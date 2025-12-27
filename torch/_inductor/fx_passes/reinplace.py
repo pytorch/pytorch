@@ -406,6 +406,20 @@ META_ONLY_OPS = OrderedSet(
 )
 
 
+def _get_view_base(node: torch.fx.Node) -> torch.fx.Node:
+    """
+    Get the base tensor that a node is a view of by tracing through view ops.
+    Returns the node itself if it's not a view.
+
+    This is used to find the actual inplaceable op when the copy_ source
+    is a view of an inplaceable op result, and to find the base tensor
+    when the mutated_arg is a view.
+    """
+    while _is_view_op(node.target) and node.args:
+        node = node.args[0]  # type: ignore[assignment]
+    return node
+
+
 def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     """
     Reinplaces in-placeable operations.
@@ -428,6 +442,8 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
     copy_args_to_copy_nodes = {}
     # maps argument to the first copy_ node that mutates it.
     copy_nodes = {}
+    # maps (base_input, inplaceable_op_node) -> copy_node for view+inplace patterns
+    copy_args_to_copy_nodes_via_views: dict[tuple[Any, Any], Any] = {}
     mutated_inputs = OrderedSet[Any]()
     storage_to_nodes = defaultdict(list)
     node_order: dict[Any, int] = {}
@@ -456,6 +472,23 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             copy_nodes[dst] = node
 
             mutated_inputs.add(node.args[0])
+
+            # Also trace through views to find the underlying inplaceable op.
+            # This handles patterns like:
+            #   view_1 = reshape(input)
+            #   index_put_result = index_put(view_1, indices, val)
+            #   view_2 = reshape(index_put_result)
+            #   copy_(input, view_2)
+            # We want to map (input, index_put_result) -> copy_node
+            underlying_src = _get_view_base(src)
+            if underlying_src is not src:
+                # Check if the underlying op is inplaceable and its mutated_arg
+                # is a view of dst
+                if (inplaceable_op := inplaceable_ops.get(underlying_src.target)) is not None:
+                    mutated_arg = underlying_src.args[inplaceable_op.mutated_arg]
+                    mutated_arg_base = _get_view_base(mutated_arg)
+                    if mutated_arg_base is dst:
+                        copy_args_to_copy_nodes_via_views[(dst, underlying_src)] = node
 
     def any_use_of_views_after_node(node, shared_view_nodes, *, copy_node, mutated_arg):
         node_loc = node_order[node]
@@ -538,12 +571,24 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
             return True
         elif any(view.op in ("placeholder", "get_attr") for view in shared_view_nodes):
-            # This should never happen in auto_functionalize_v2 non-inference mode,
-            # since all mutated_arg are bases.
-
-            # If mutated arg is view of any of the inputs of the graph,
-            # do not allow for inplacing.
-            # This would require more sophisticated algorithm to handle
+            # mutated_arg is a view of a graph input. Check if there's a copy_
+            # back to the base input from a view of this op's result.
+            # This handles patterns like:
+            #   view_1 = reshape(input)
+            #   result = index_put(view_1, indices, val)
+            #   view_2 = reshape(result)
+            #   copy_(input, view_2)
+            mutated_arg_base = _get_view_base(mutated_arg)
+            if mutated_arg_base.op in ("placeholder", "get_attr"):
+                copy_node = copy_args_to_copy_nodes_via_views.get((mutated_arg_base, node))
+                if copy_node is not None:
+                    # There's a copy_ back to the base input from a view of this result.
+                    # We can reinplace if there are no other uses of views after this node.
+                    if not any_use_of_views_after_node(
+                        node, shared_view_nodes, copy_node=copy_node, mutated_arg=mutated_arg_base
+                    ):
+                        return True
+            # Fall back to not allowing inplacing for other cases
             return False
         else:
             return not any_use_of_views_after_node(
@@ -678,6 +723,12 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
                 if copy_node is not None:
                     replace_dict[copy_node] = copy_node.args[0]
+                else:
+                    # Check if there's a copy_ via views (for view+inplace patterns)
+                    mutated_arg_base = _get_view_base(mutated_arg)
+                    copy_node = copy_args_to_copy_nodes_via_views.get((mutated_arg_base, node))
+                    if copy_node is not None:
+                        replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
         elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
