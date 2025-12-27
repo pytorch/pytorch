@@ -4260,7 +4260,6 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
         torch.fx.proxy.TracerBase.check_mutable_operations = orig_tracer_mutable_flag
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @skipIfRocm
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_stack_trace_augmentation(self):
         """
@@ -4298,8 +4297,31 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
             result = compiled_model(torch.randn(10, 10, device="cuda"))
 
         actual_traces = _enrich_profiler_traces(prof)
-
-        self.assertExpectedInline(actual_traces, """\
+        if torch.version.hip:
+            # Expected traces for ROCm backend
+            expected_traces = """\
+event=aten::t node=t stack_trace=x = self.linear1(x)
+event=aten::transpose node=t stack_trace=x = self.linear1(x)
+event=aten::as_strided node=t stack_trace=x = self.linear1(x)
+event=aten::addmm node=addmm stack_trace=x = self.linear1(x)
+event=hipExtModuleLaunchKe node=addmm stack_trace=x = self.linear1(x)
+event=aten::relu node=relu stack_trace=x = self.relu(x)
+event=aten::clamp_min node=relu stack_trace=x = self.relu(x)
+event=hipLaunchKernel node=relu stack_trace=x = self.relu(x)
+event=aten::t node=t_1 stack_trace=x = self.linear2(x)
+event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
+event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
+event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
+event=hipExtModuleLaunchKe node=addmm_1 stack_trace=x = self.linear2(x)"""
+            # Filter out all hipGetDeviceProperties* events.
+            # Reason:
+            # - They are internal ROCm runtime calls, often invoked by hipBLASLt.
+            # - They may occur multiple times before hipExtModuleLaunchKernel, and may depend
+            #   on versions/environments. Filter them out for test stability.
+            actual_traces = "\n".join(line for line in actual_traces.splitlines() if not line.startswith("event=hipGetDeviceProperti"))
+        else:
+            # Expected traces for CUDA backend
+            expected_traces = """\
 event=aten::t node=t stack_trace=x = self.linear1(x)
 event=aten::transpose node=t stack_trace=x = self.linear1(x)
 event=aten::as_strided node=t stack_trace=x = self.linear1(x)
@@ -4313,7 +4335,8 @@ event=aten::transpose node=t_1 stack_trace=x = self.linear2(x)
 event=aten::as_strided node=t_1 stack_trace=x = self.linear2(x)
 event=aten::addmm node=addmm_1 stack_trace=x = self.linear2(x)
 event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
-            )
+
+        self.assertExpectedInline(actual_traces, expected_traces)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @skipIfRocm
