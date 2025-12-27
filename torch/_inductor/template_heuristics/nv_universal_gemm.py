@@ -7,6 +7,7 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch._inductor.utils import ensure_nvmatmul_heuristics_available
+from torch._logging import getArtifactLogger
 
 from .gemm import GemmMaxAutotuneTemplateConfigHeuristics
 
@@ -16,6 +17,9 @@ if TYPE_CHECKING:
 
 
 log = logging.getLogger(__name__)
+# Use autotuning artifact logger for detailed nvMatmulHeuristics logging
+# Enable with TORCH_LOGS="+autotuning"
+autotuning_log = getArtifactLogger(__name__, "autotuning")
 
 
 @dataclass
@@ -145,6 +149,25 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         log.debug(
             "Heuristic filtered to %d kernels from %d total", len(result), len(kernels)
         )
+
+        # Log kernel matching results
+        autotuning_log.info(
+            "nvMatmulHeuristics kernel filtering: %d heuristic configs matched %d "
+            "of %d available kernels, returning top %d",
+            len(config_key_to_runtime), len(matched), len(kernels), len(result),
+        )
+        for i, (kernel, runtime) in enumerate(matched[:count]):
+            meta = kernel.metadata
+            if hasattr(meta, "design"):
+                design = meta.design
+                autotuning_log.info(
+                    "  Selected kernel %d: tile=(%d, %d, %d), cluster=(%d, %d), "
+                    "estimated_runtime=%.2f us",
+                    i, design.tile_shape[0], design.tile_shape[1], design.tile_shape[2],
+                    design.cluster_shape[0], design.cluster_shape[1],
+                    runtime * 1e6,
+                )
+
         return result
 
     def _extract_valid_configs_from_kernels(
@@ -283,6 +306,11 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         lh.destroyBackend(backend)
 
         if not raw_configs:
+            autotuning_log.info(
+                "nvMatmulHeuristics returned 0 configs for M=%d, N=%d, K=%d, "
+                "dtype=%s, layout=(%s, %s), precision=%s",
+                m, n, k, dtype_a, layout_a, layout_b, precision,
+            )
             return []
 
         configs = []
@@ -300,6 +328,22 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             )
 
         configs.sort(key=lambda c: c.estimated_runtime)
+
+        # Log the configs returned by nvMatmulHeuristics
+        autotuning_log.info(
+            "nvMatmulHeuristics for M=%d, N=%d, K=%d, dtype=%s, layout=(%s, %s), "
+            "precision=%s: %d configs returned",
+            m, n, k, dtype_a, layout_a, layout_b, precision, len(configs),
+        )
+        for i, cfg in enumerate(configs):
+            runtime_us = cfg.estimated_runtime * 1e6  # Convert to microseconds
+            autotuning_log.info(
+                "  Config %d: tile=(%d, %d, %d), cluster=(%d, %d), "
+                "estimated_runtime=%.2f us",
+                i, cfg.tile_m, cfg.tile_n, cfg.tile_k,
+                cfg.cluster_m, cfg.cluster_n, runtime_us,
+            )
+
         return configs
 
 
