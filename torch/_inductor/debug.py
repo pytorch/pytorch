@@ -1192,8 +1192,7 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     """
 
     folder = get_temp_path(subdirectory="inductor_saved_args")
-    if not os.path.exists(folder):
-        os.mkdir(folder)
+    os.makedirs(folder, exist_ok=True)
 
     def handle_tensor(x: Any) -> Any:
         """
