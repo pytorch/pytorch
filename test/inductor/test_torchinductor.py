@@ -1880,6 +1880,8 @@ class CommonTemplate:
             # is fixed.
             elif is_mps_backend(self.device):
                 pass  # no device asserts in MPS
+            elif is_pallas_backend(self.device):
+                pass  # Pallas generates Python/JAX code, not C++/Triton
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
                 self.assertTrue(("TORCH_CHECK" in code) is has_assert)
@@ -16483,10 +16485,17 @@ if RUN_GPU:
             output = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
 
             result, code = run_and_get_code(torch.compile(fn), output, indices, values)
-            self.assertTrue(
-                "tl.atomic_add" in code[0],
-                "bf16 should generate tl.atomic_add",
-            )
+            if output.device.type == "xpu":
+                # xpu fallback bf16 atomic add for better performance
+                self.assertFalse(
+                    "tl.atomic_add" in code[0],
+                    "bf16 should not generate tl.atomic_add on xpu",
+                )
+            else:
+                self.assertTrue(
+                    "tl.atomic_add" in code[0],
+                    "bf16 should generate tl.atomic_add",
+                )
             expected = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
             torch.testing.assert_close(result, fn(expected, indices, values))
 
