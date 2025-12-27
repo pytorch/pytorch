@@ -35,6 +35,7 @@ def _ops_filter_safe(name: str) -> bool:
         (
             "torch.ops.aten",
             "torch.ops.fbgemm",
+            "torch.ops",
         )
     )
 

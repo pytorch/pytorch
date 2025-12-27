@@ -117,6 +117,7 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 from torch.utils import _pytree as pytree
+from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
@@ -2192,7 +2193,11 @@ class GuardBuilder(GuardBuilderBase):
 
     def TENSOR_SUBCLASS_METADATA_MATCH(self, guard: Guard) -> None:
         value = self.get(guard)
-        original_metadata = deepcopy(self.get(guard).__tensor_flatten__()[1])
+        # Use no_dispatch to avoid FakeTensorMode intercepting tensor operations
+        # during deepcopy. This is needed for cross-compilation scenarios where
+        # tensors are created outside FakeTensorMode (e.g., DeviceMesh in DTensor).
+        with no_dispatch():
+            original_metadata = deepcopy(self.get(guard).__tensor_flatten__()[1])
         if hasattr(value, "__metadata_guard__"):
             verify_guard_fn_signature(value)
             cls = type(value)
@@ -2217,7 +2222,14 @@ class GuardBuilder(GuardBuilderBase):
     def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
         # Copied from DTensor __metadata_guard__
         # TODO - Consider moving this to C++ if stable
-        value = deepcopy(self.get(guard))
+        # Use unset_fake_temporarily() to handle fake tensors during cross-compilation.
+        # The deepcopy can fail when FakeTensorMode is active because it tries to
+        # clone storage on mismatched devices. no_dispatch() is not sufficient
+        # since it doesn't properly disable FakeTensorMode's dispatch.
+        from torch._subclasses.fake_tensor import unset_fake_temporarily
+
+        with unset_fake_temporarily():
+            value = deepcopy(self.get(guard))
 
         def guard_fn(x: Any) -> bool:
             return x._check_equals(value, skip_shapes=True)
@@ -2899,6 +2911,14 @@ class GuardBuilder(GuardBuilderBase):
             if isinstance(value, torch._subclasses.FakeTensor):
                 if value.pytype is not None:
                     pytype = value.pytype
+                elif torch._dynamo.config.enable_aot_compile:
+                    # Default to torch.Tensor when aot precompiling to add cross-compilation support.
+                    # When precompiling with fake tensors, we expect real tensors at runtime.
+                    pytype = torch.Tensor
+                    # Skip guards check since we're cross-compiling with fake tensors.
+                    # The guards will expect real tensor types but inputs are fake.
+                    if self.check_fn_manager.output_graph is not None:
+                        self.check_fn_manager.output_graph.skip_guards_check = True
                 if value.dispatch_keys is not None:
                     dispatch_keys = value.dispatch_keys
 
@@ -3471,7 +3491,16 @@ class GuardsStatePickler(pickle.Pickler):
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
-                type(obj),
+                # For FakeTensors, use the expected runtime type (torch.Tensor)
+                # rather than the compile-time type (FakeTensor) for cross-compilation support.
+                obj.pytype
+                if isinstance(obj, torch._subclasses.FakeTensor)
+                and obj.pytype is not None
+                else (
+                    torch.Tensor
+                    if isinstance(obj, torch._subclasses.FakeTensor)
+                    else type(obj)
+                ),
                 torch._C._dispatch_keys(obj).raw_repr(),
                 obj.grad,
             )

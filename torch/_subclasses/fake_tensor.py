@@ -365,6 +365,56 @@ class FakeTensorConverter:
         symbolic_context: Optional[SymbolicContext] = None,
         trace: bool = True,
     ) -> FakeTensor:
+        # Handle FakeTensors from a different fake mode (e.g., in cross-compilation
+        # where the user creates tensors under their own FakeTensorMode). We need to
+        # re-fakeify them under the target fake mode.
+        if isinstance(t, FakeTensor) and t.fake_mode is not fake_mode:
+            # For FakeTensors from a different mode, we convert them by creating
+            # a new FakeTensor in the target mode. We need to access the underlying
+            # meta tensor, which requires setting in_kernel_invocation to True.
+            outer_fake_mode = t.fake_mode
+            fake_device = t.fake_device
+            constant = t.constant if hasattr(t, "constant") else None
+
+            # Use in_kernel_invocation to make the FakeTensor report its true
+            # meta device, so we can pass it to from_meta_and_device
+            with in_kernel_invocation_manager(outer_fake_mode):
+                new_fake = self.from_meta_and_device(fake_mode, t, fake_device)
+
+            self.set_tensor_memo(t, new_fake)
+            return new_fake
+
+        # Handle traceable wrapper subclasses (e.g., DTensor) that contain FakeTensors
+        # from a different fake mode. We need to re-fakeify the inner tensors.
+        if is_traceable_wrapper_subclass(t):
+            inner_fake_mode = maybe_get_fake_mode(t)
+            if inner_fake_mode is not None and inner_fake_mode is not fake_mode:
+                # Get inner tensors and context from the subclass
+                inner_tensor_names, ctx = t.__tensor_flatten__()
+
+                # Re-fakeify each inner tensor under the target fake_mode
+                new_inner_tensors = {}
+                for name in inner_tensor_names:
+                    inner_t = getattr(t, name)
+                    # Recursively call from_real_tensor for inner tensors
+                    new_inner_tensors[name] = self.from_real_tensor(
+                        fake_mode,
+                        inner_t,
+                        make_constant=make_constant,
+                        shape_env=shape_env,
+                        source=source,
+                        symbolic_context=symbolic_context,
+                        trace=trace,
+                    )
+
+                # Unflatten the subclass with the new fake inner tensors
+                subclass_type = type(t)
+                out = subclass_type.__tensor_unflatten__(  # type: ignore[attr-defined]
+                    new_inner_tensors, ctx, t.size(), t.stride()
+                )
+                self.set_tensor_memo(t, out)
+                return out
+
         # see note [Tensor Fakification and Symbol Caching]
         if not symbolic_context and not source and shape_env:
             if tracing_context := torch._guards.TracingContext.try_get():

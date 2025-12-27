@@ -2106,6 +2106,11 @@ class VariableBuilder:
             return result
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor):
+        # Skip this check when reusing an outer fake mode for cross-compilation.
+        # In this case, input fake tensors were created under the outer mode
+        # and should be allowed as graph inputs.
+        if getattr(self.tx.output, "reusing_outer_fake_mode", False):
+            return
         if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
             raise InternalTorchDynamoError(
                 "Cannot wrap a Tensor that has already been",

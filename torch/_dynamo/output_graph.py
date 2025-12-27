@@ -49,6 +49,7 @@ from torch import fx, Tensor
 from torch._C._dynamo import guards
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
+    active_fake_mode,
     CompileContext,
     CompileId,
     GlobalContextCheckpointState,
@@ -606,12 +607,28 @@ class OutputGraph(OutputGraphCommon):
         import torch._functorch.config as _config
 
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            fake_mode = torch._subclasses.FakeTensorMode(
-                shape_env=shape_env,
-                # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-                allow_non_fake_inputs=bool(self.export),
-                export=self.export,
-            )
+            # Check if there's an outer fake mode active (e.g., for cross-compilation
+            # with fake CUDA tensors). If so, reuse it to avoid conflicts in detect_fake_mode.
+            outer_fake_mode = active_fake_mode()
+            if outer_fake_mode is not None:
+                # Reuse the outer fake mode
+                if outer_fake_mode.shape_env is None:
+                    outer_fake_mode.shape_env = shape_env
+                # Update static_shapes since we now have a ShapeEnv
+                if outer_fake_mode.shape_env is not None:
+                    outer_fake_mode.static_shapes = False
+                fake_mode = outer_fake_mode
+                # Flag that we're reusing an outer fake mode for cross-compilation.
+                # This allows input fake tensors created under the outer mode to be used.
+                self.reusing_outer_fake_mode = True
+            else:
+                fake_mode = torch._subclasses.FakeTensorMode(
+                    shape_env=shape_env,
+                    # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+                    allow_non_fake_inputs=bool(self.export),
+                    export=self.export,
+                )
+                self.reusing_outer_fake_mode = False
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.tracing_context.traced_code.append(f_code)
         self.traced_code = self.tracing_context.traced_code
@@ -2232,16 +2249,40 @@ class OutputGraph(OutputGraphCommon):
                     # from scratch when we go to AOTAutograd. But the ShapeEnv must be preserved as
                     # Dynamo made decisions about what is dynamic or not / guards from the user code
                     # that is not in graph.
-                    backend_fake_mode = torch._subclasses.FakeTensorMode(
-                        shape_env=old_fake_mode.shape_env,
-                    )
+                    #
+                    # However, if there's already an outer fake mode active (e.g., for cross-compilation
+                    # with fake CUDA tensors), we should reuse it to avoid conflicts in detect_fake_mode.
+                    outer_fake_mode = active_fake_mode()
+                    if outer_fake_mode is not None:
+                        # Reuse the outer fake mode, ensuring it has the ShapeEnv
+                        if outer_fake_mode.shape_env is None:
+                            outer_fake_mode.shape_env = old_fake_mode.shape_env
+                        # Update static_shapes since we now have a ShapeEnv
+                        if outer_fake_mode.shape_env is not None:
+                            outer_fake_mode.static_shapes = False
+                        backend_fake_mode = outer_fake_mode
+                        # Skip guards check since we're cross-compiling with fake tensors.
+                        # The guards will expect real tensor types but inputs are fake.
+                        self.skip_guards_check = True
+                    else:
+                        backend_fake_mode = torch._subclasses.FakeTensorMode(
+                            shape_env=old_fake_mode.shape_env,
+                        )
                 # TODO(voz): Ostensibly, this should be scoped and
                 # restore back to old_fake_mode, but doing so currently violates
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
+                # Transfer example_inputs to the new backend_fake_mode
+                # This is needed for cross-compilation where inputs are FakeTensors
+                example_inputs = self._transfer_example_inputs_to_mode(
+                    self.example_inputs(), backend_fake_mode
+                )
+            else:
+                example_inputs = self.example_inputs()
+
             with self.restore_global_state():
-                compiled_fn = self.call_user_compiler(gm, self.example_inputs())
+                compiled_fn = self.call_user_compiler(gm, example_inputs)
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -2488,8 +2529,70 @@ class OutputGraph(OutputGraphCommon):
         return next_name
 
     def example_inputs(self) -> list[torch.Tensor]:
-        result = [arg.example for arg in self.graphargs]
+        # For cross-compilation (when user creates tensors under their own
+        # FakeTensorMode), we need to pass the properly fakeified tensors
+        # (in the tracing mode) to the backend compiler, not the original
+        # tensors (which may be FakeTensors from a different mode).
+        # GraphArg.fake_tensor contains the fakeified version in tracing mode,
+        # while GraphArg.example contains the original input.
+        result = []
+        for arg in self.graphargs:
+            if arg.fake_tensor is not None:
+                result.append(arg.fake_tensor)
+            else:
+                result.append(arg.example)
         return result
+
+    def _transfer_example_inputs_to_mode(
+        self,
+        example_inputs: list[torch.Tensor],
+        target_mode: torch._subclasses.FakeTensorMode,
+    ) -> list[torch.Tensor]:
+        """
+        Transfer example_inputs from their current fake mode to target_mode.
+
+        This is needed when a new backend_fake_mode is created before passing
+        inputs to the backend compiler. The inputs may be FakeTensors from
+        the original tracing mode (or from the user's mode in cross-compilation),
+        and they need to be transferred to the new mode to avoid fake mode
+        mismatch errors in detect_fake_mode.
+        """
+        from torch._subclasses.fake_tensor import is_fake
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        def transfer_tensor(t: torch.Tensor) -> torch.Tensor:
+            if not isinstance(t, torch.Tensor):
+                return t
+
+            # For traceable wrapper subclasses (like DTensor), recursively
+            # transfer inner tensors
+            if is_traceable_wrapper_subclass(t):
+                attrs, ctx = t.__tensor_flatten__()
+                inner_tensors = {}
+                for attr in attrs:
+                    inner = getattr(t, attr)
+                    inner_tensors[attr] = transfer_tensor(inner)
+                # Reconstruct the subclass with transferred inner tensors
+                return type(t).__tensor_unflatten__(  # type: ignore[attr-defined]
+                    inner_tensors, ctx, t.shape, t.stride()
+                )
+
+            # Transfer FakeTensors to the target mode
+            if is_fake(t):
+                fake_t = t  # type: FakeTensor
+                if fake_t.fake_mode is target_mode:  # type: ignore[attr-defined]
+                    # Already in target mode
+                    return t
+                # Transfer to target mode using from_tensor
+                return target_mode.from_tensor(
+                    t,
+                    static_shapes=True,  # Preserve current shapes
+                )
+
+            # Non-fake tensors pass through unchanged
+            return t
+
+        return [transfer_tensor(t) for t in example_inputs]
 
     def remove_unused_get_attr_nodes(self) -> None:
         for node in sorted(self.graph.find_nodes(op="get_attr"), reverse=True):

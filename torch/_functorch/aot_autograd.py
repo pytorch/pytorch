@@ -1324,13 +1324,48 @@ def aot_compile_joint_with_descriptors(
 
     TODO: Consider if we should allow_in_graph the result by default.
     """
-    compiled_fn, _ = aot_stage2_compile(
-        jd._aot_state,
-        jd._aot_graph_capture,
-        partition_fn,
-        fw_compiler,
-        bw_compiler,
+    import random
+    import time
+
+    from torch._dynamo.aot_compile_types import (
+        BundledAOTAutogradSerializableCallable,
+        SerializableCallable,
     )
+    from torch._functorch._aot_autograd.schemas import AOTAutogradCacheInfo
+    from torch._inductor.output_code import OutputCode
+
+    fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
+
+    cache_ctx = nullcontext()
+    if torch._dynamo.config.enable_aot_compile:
+        # For AOT Precompile we need to set the cache info here so that
+        # we still generate an entry that we can then save to disk.
+        jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
+            str(random.random()),
+            time.time_ns(),
+            forward_symints=[],
+        )
+        cache_ctx = torch._functorch.config.patch(
+            {
+                "bundled_autograd_cache": True,
+                "force_non_lazy_backward_lowering": True,
+                "bypass_autograd_cache_key": True,
+            }
+        )
+
+    with cache_ctx:
+        compiled_fn, _ = aot_stage2_compile(
+            jd._aot_state,
+            jd._aot_graph_capture,
+            partition_fn,
+            fw_compiler,
+            bw_compiler,
+        )
+
+    if not isinstance(compiled_fn, SerializableCallable) and hasattr(
+        compiled_fn, "serialize"
+    ):
+        compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn)
 
     # Cribbed from torch/export/pt2_archive/_package.py
     @simple_wraps(compiled_fn)

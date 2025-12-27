@@ -3275,6 +3275,19 @@ def clone_preserve_strides(x: torch.Tensor) -> torch.Tensor:
     return torch.as_strided(buffer, x.size(), x.stride())
 
 
+def _is_aligned(tensor: torch.Tensor) -> bool:
+    """
+    Check if a tensor is aligned. Returns True for FakeTensors since they don't
+    have valid data pointers (we assume aligned for cross-compilation scenarios).
+    """
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    if isinstance(tensor, FakeTensor):
+        # FakeTensors don't have valid data pointers, assume aligned
+        return True
+    return (tensor.data_ptr() % ALIGNMENT) == 0
+
+
 def copy_misaligned_inputs(
     new_inputs: list[InputType],
     check_inputs_idxs: Sequence[int],
@@ -3295,7 +3308,7 @@ def copy_misaligned_inputs(
         assert isinstance(_inp, torch.Tensor), (
             f"Expected tensors only, but got: {type(_inp)}"
         )
-        if _inp.data_ptr() % ALIGNMENT:
+        if not _is_aligned(_inp):
             new_inputs[i] = clone_preserve_strides(_inp)
 
             if ret_pair_defined and i in return_pair_idxs:  # type: ignore[operator]
@@ -3316,7 +3329,7 @@ def remove_unaligned_input_idxs(
     aligned_static_input_idxs = []
     for idx in static_input_idxs:
         input = inputs[idx]
-        if isinstance(input, torch.Tensor) and (input.data_ptr() % ALIGNMENT) == 0:
+        if isinstance(input, torch.Tensor) and _is_aligned(input):
             aligned_static_input_idxs.append(idx)
     if len(aligned_static_input_idxs) != len(static_input_idxs):
         return aligned_static_input_idxs
