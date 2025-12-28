@@ -81,7 +81,7 @@ class ForeachFuncWrapper:
 
         # Skip profiler check for CUDA 12.6, 12.8 as the upgrade makes profiler results flaky
         # https://github.com/pytorch/pytorch/issues/148681. TODO: ADD IT BACK!!!
-        skip_profiler_check = _get_torch_cuda_version() in [(12, 6), (12, 8)]
+        skip_profiler_check = _get_torch_cuda_version() in [(12, 6), (12, 8)] or torch.version.hip
         if (
             is_cuda
             and not skip_profiler_check
