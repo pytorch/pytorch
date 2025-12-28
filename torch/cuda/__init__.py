@@ -1346,9 +1346,10 @@ def _get_amdsmi_memory_usage(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     try:
         return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
-    except amdsmi.AmdSmiLibraryException:
+    except amdsmi.AmdSmiLibraryException as e:
         # Some GPU architectures (e.g., MI300X) may return
         # AMDSMI_STATUS_UNEXPECTED_DATA for activity queries
+        warnings.warn(f"Unable to get memory usage via AMDSMI: {e}", stacklevel=2)
         return 0
 
 
@@ -1356,9 +1357,10 @@ def _get_amdsmi_utilization(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     try:
         return amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
-    except amdsmi.AmdSmiLibraryException:
+    except amdsmi.AmdSmiLibraryException as e:
         # Some GPU architectures (e.g., MI300X) may return
         # AMDSMI_STATUS_UNEXPECTED_DATA for activity queries
+        warnings.warn(f"Unable to get GPU utilization via AMDSMI: {e}", stacklevel=2)
         return 0
 
 
