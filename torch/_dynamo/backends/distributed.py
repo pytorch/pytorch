@@ -167,7 +167,7 @@ def propagate_dynamo_source(orig_gm: fx.GraphModule, split_gm: fx.GraphModule) -
         if "." not in name and len(name):
             for node in module.graph.find_nodes(op="placeholder"):
                 # non-placeholder in original_gm may become placeholder in submodules
-                node._dynamo_source = name_to_dynamo_source.get(node.name, None)
+                node._dynamo_source = name_to_dynamo_source.get(node.name)
 
 
 class DDPOptimizerContext:

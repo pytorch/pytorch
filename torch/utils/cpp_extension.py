@@ -464,7 +464,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
 
     # First check if the compiler is one of the expected ones for the particular platform.
     if not check_compiler_ok_for_platform(compiler):
-        logger.warning(WRONG_COMPILER_WARNING, compiler, _accepted_compilers_for_platform()[0], sys.platform, _accepted_compilers_for_platform()[0])
+        logger.warning(WRONG_COMPILER_WARNING, compiler, _accepted_compilers_for_platform()[0], sys.platform, _accepted_compilers_for_platform()[0], compiler, compiler)
         return (False, TorchVersion('0.0.0'))
 
     if IS_MACOS:
@@ -2623,10 +2623,18 @@ def _get_build_directory(name: str, verbose: bool) -> str:
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
-        cu_str = ('cpu' if torch.version.cuda is None else
-                  f'cu{torch.version.cuda.replace(".", "")}')
+        # Determine GPU accelerator prefix based on available accelerators. Fallback to CPU.
+        # Priority: ROCm/HIP > CUDA > CPU
+        # Note: torch.backends.cuda.is_built() returns True for both CUDA and ROCm,
+        # so we need to check torch.version.hip to distinguish them
+        if torch.version.hip is not None:
+            accelerator_str = f'rocm{torch.version.hip.replace(".", "")}'
+        elif torch.version.cuda is not None:
+            accelerator_str = f'cu{torch.version.cuda.replace(".", "")}'
+        else:
+            accelerator_str = 'cpu'
         python_version = f'py{sys.version_info.major}{sys.version_info.minor}{getattr(sys, "abiflags", "")}'
-        build_folder = f'{python_version}_{cu_str}'
+        build_folder = f'{python_version}_{accelerator_str}'
 
         root_extensions_directory = os.path.join(
             root_extensions_directory, build_folder)
