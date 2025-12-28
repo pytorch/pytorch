@@ -39,6 +39,46 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
+def _reorder_parameters_to_match_model(
+    gm: torch.fx.GraphModule, original_model: torch.nn.Module
+) -> None:
+    """
+    Reorder gm._parameters to match original_model.parameters() order.
+    """
+    import re
+
+    flat_name_to_fqn = gm.meta.get("dynamo_flat_name_to_original_fqn", {})
+    fqn_to_gm_name: dict[str, str] = {}
+
+    def normalize_name(name: str) -> str:
+        for prefix in ["getattr_", "L__self___"]:
+            name = name.removeprefix(prefix)
+        return re.sub(r"___(\d+)___", r"_\1_", name)
+
+    normalized_to_gm_name = {
+        normalize_name(gm_param_name): gm_param_name
+        for gm_param_name in gm._parameters
+    }
+
+    for gm_flat_name, orig_fqn in flat_name_to_fqn.items():
+        normalized_flat = normalize_name(gm_flat_name)
+        if normalized_flat in normalized_to_gm_name:
+            fqn_to_gm_name[orig_fqn] = normalized_to_gm_name[normalized_flat]
+
+    original_param_order = [name for name, _ in original_model.named_parameters()]
+    current_params = dict(gm._parameters)
+    new_ordered_params: dict[str, Any] = {}
+
+    for orig_fqn in original_param_order:
+        gm_name = fqn_to_gm_name.get(orig_fqn)
+        if gm_name is not None and gm_name in current_params:
+            new_ordered_params[gm_name] = current_params.pop(gm_name)
+
+    new_ordered_params.update(current_params)
+    gm._parameters.clear()
+    gm._parameters.update(new_ordered_params)
+
+
 def post_process_error_msg(
     constraint_violation_error: ConstraintViolationError,
     func: Callable[..., Any],
@@ -273,23 +313,28 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                             placeholder.node.meta[key] = value
 
             # Always ensure we have proper "val" metadata from fake tensor
+            from torch._subclasses.fake_tensor import is_fake
+
             if self.fake_mode is not None and isinstance(
                 self.flat_inputs[i], torch.Tensor
             ):
-                placeholder.node.meta["val"] = self.fake_mode.from_tensor(
-                    self.flat_inputs[i],
-                    symbolic_context=StatelessSymbolicContext(
-                        dynamic_sizes=[
-                            (
-                                DimDynamic.DYNAMIC
-                                if d in self.flat_args_dynamic_dims[i]
-                                else DimDynamic.STATIC
-                            )
-                            for d in range(len(self.flat_inputs[i].shape))
-                        ],
-                        constraint_sizes=[None] * len(self.flat_inputs[i].shape),
-                    ),
-                )
+                if is_fake(self.flat_inputs[i]):
+                    placeholder.node.meta["val"] = self.flat_inputs[i]
+                else:
+                    placeholder.node.meta["val"] = self.fake_mode.from_tensor(
+                        self.flat_inputs[i],
+                        symbolic_context=StatelessSymbolicContext(
+                            dynamic_sizes=[
+                                (
+                                    DimDynamic.DYNAMIC
+                                    if d in self.flat_args_dynamic_dims[i]
+                                    else DimDynamic.STATIC
+                                )
+                                for d in range(len(self.flat_inputs[i].shape))
+                            ],
+                            constraint_sizes=[None] * len(self.flat_inputs[i].shape),
+                        ),
+                    )
             elif hasattr(self.flat_inputs[i], "val"):  # _IntWrapper case
                 placeholder.node.meta["val"] = self.flat_inputs[i].val
             else:
@@ -703,20 +748,7 @@ def _dynamo_graph_capture_for_export(
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
 ) -> Callable[..., torch.fx.GraphModule]:
     """
-    Improved dynamo graph capture using transformer approach with proper fake tensor handling.
-
-    This function creates a capture instance that handles:
-    1. PyTree flattening/unflattening with proper input ordering
-    2. Dynamo graph capture with export-specific context
-    3. FX graph transformation for export compatibility
-    4. Proper fake tensor metadata preservation
-    5. Dynamic dimension constraint handling
-
-    Notable improvements over manual approach:
-    - Uses FX Transformer for cleaner graph manipulation
-    - Properly handles fake tensor metadata and dynamic dimensions
-    - Preserves all necessary metadata for export
-    - More robust error handling and edge case management
+    Dynamo graph capture using transformer approach with proper fake tensor handling.
 
     TODO:
     1. Are we actually gonna run the bytecode?
@@ -726,7 +758,11 @@ def _dynamo_graph_capture_for_export(
     _dynamic_shapes = dynamic_shapes
     _constraints = constraints
 
-    def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
+    def inner(
+        args: tuple[Any, ...], kwargs: Optional[dict[str, Any]] = None
+    ) -> torch.fx.GraphModule:
+        if kwargs is None:
+            kwargs = {}
         # This sets the is_exporting flag when building guards.
         with _compiling_state_context():
             flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
@@ -850,6 +886,9 @@ def _dynamo_graph_capture_for_export(
                 transformed_graph, torch._dynamo.config.inline_inbuilt_nn_modules
             )
             clean_export_root(transformed_graph)
+
+            if isinstance(mod, torch.nn.Module):
+                _reorder_parameters_to_match_model(transformed_graph, mod)
 
             transformed_graph.meta["module_call_specs"] = module_call_spec
             transformed_graph.meta["fake_mode"] = fake_mode

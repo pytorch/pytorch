@@ -92,9 +92,15 @@ def _compile_submod(gm, prefix):
                         f"Available config keys can be found in torch._inductor.config"
                     )
 
+            try:
+                torch._guards.TracingContext.get()
+                dynamic_shapes = "from_tracing_context"
+            except RuntimeError:
+                dynamic_shapes = "from_graph"
+
             with inductor_config.patch(inductor_options):
                 compiled_fn = torch._inductor.standalone_compile(
-                    submod, fake_inputs, dynamic_shapes="from_tracing_context", aot=True
+                    submod, fake_inputs, dynamic_shapes=dynamic_shapes, aot=True
                 )
             assert isinstance(compiled_fn, AOTCompiledArtifact)
             # _dummy_wrapper is to make call_function happy
