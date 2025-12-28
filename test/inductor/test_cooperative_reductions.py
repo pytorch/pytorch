@@ -237,26 +237,27 @@ class CooperativeReductionTests(TestCase):
             torch.rand(20, 20, device=GPU_TYPE),
         ]
         self.run_and_check(fn, inps, expect_kernel_count=2)
+    
     @unittest.skipIf(not HAS_GPU, "requires CUDA")
     def test_quantile_inductor_cuda_dynamic(self):
-    # Regression test for https://github.com/pytorch/pytorch/issues/163759
-    import torch
-    from torch._inductor import config
+        # Regression test for https://github.com/pytorch/pytorch/issues/163759
+        import torch
+        from torch._inductor import config
 
-    class Model(torch.nn.Module):
-        def forward(self, x):
-            return torch.quantile(x, 0.75)
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.quantile(x, 0.75)
 
-    model = Model().cuda()
-    x = torch.randn(10, device=GPU_TYPE)
+        model = Model().cuda()
+        x = torch.randn(10, device=GPU_TYPE)
 
-    with config.patch({"fallback_random": True}), torch.no_grad():
-        eager_out = model(x)
+        with config.patch({"fallback_random": True}), torch.no_grad():
+            eager_out = model(x)
 
-        compiled_model = torch.compile(model, backend="inductor", dynamic=True)
-        compiled_out = compiled_model(x)
+            compiled_model = torch.compile(model, backend="inductor", dynamic=True)
+            compiled_out = compiled_model(x)
 
-    assert_close(eager_out, compiled_out)
+        assert_close(eager_out, compiled_out)
 
 
 

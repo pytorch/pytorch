@@ -471,9 +471,7 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
     def profile_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         trace_id = CompileContext.current_trace_id()
         assert trace_id, "Trace id is None"
-        profile_path = Path(
-            f"/tmp/{func.__name__}_{str(trace_id).replace('/', '_')}.profile"
-        )
+        profile_path = Path(tempfile.gettempdir()) / f"{func.__name__}_{str(trace_id).replace('/', '_')}.profile"
         prof = cProfile.Profile()
         try:
             start_ts = time.time()

@@ -170,7 +170,8 @@ class LocalElasticAgent(SimpleElasticAgent):
         watchdog_file_path = os.getenv(watchdog_file_env_name)
         if watchdog_enabled is not None and str(watchdog_enabled) == "1":
             if watchdog_file_path is None:
-                watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
+                import tempfile
+                watchdog_file_path = os.path.join(tempfile.gettempdir(), f"watchdog_timer_{uuid.uuid4()}")
             logger.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
             if not envs:
                 logger.warning(
