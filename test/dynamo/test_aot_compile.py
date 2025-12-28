@@ -908,24 +908,25 @@ from user code:
         )
         from torch._subclasses.fake_tensor import FakeTensorMode
 
-        def fn(x):
-            return x * 2 + 1
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x * 2 + 1
 
         def simple_compiler(gm, example_inputs):
             return gm
 
+        mod = SimpleModule().cuda()
         fake_mode = FakeTensorMode()
         with fake_mode:
             fake_input = torch.randn(3, 4, device="cuda")
-            with torch._dynamo.config.patch(enable_aot_compile=True):
-                with ExitStack() as stack:
-                    jd = aot_export_joint_with_descriptors(stack, fn, (fake_input,))
-                    compiled_fn = aot_compile_joint_with_descriptors(
-                        jd,
-                        fw_compiler=simple_compiler,
-                        bw_compiler=simple_compiler,
-                    )
-                    self.assertTrue(callable(compiled_fn))
+            with ExitStack() as stack:
+                jd = aot_export_joint_with_descriptors(stack, mod, (fake_input,))
+                compiled_fn = aot_compile_joint_with_descriptors(
+                    jd,
+                    fw_compiler=simple_compiler,
+                    bw_compiler=simple_compiler,
+                )
+                self.assertTrue(callable(compiled_fn))
 
 
 if __name__ == "__main__":
