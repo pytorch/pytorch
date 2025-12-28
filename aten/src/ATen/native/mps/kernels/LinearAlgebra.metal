@@ -49,6 +49,54 @@ inline c10::metal::opmath_t<T> matmul_inner(
   return sum;
 }
 
+template <typename T, uint N>
+inline c10::metal::opmath_t<T> batched_matmul_inner(
+    constant T* mat1Data,
+    constant T* mat2Data,
+    uint batch,
+    constant array<ulong, N>& strides,
+    constant uint4& sizes,
+    threadgroup T A_tile[TILE_DIM][TILE_DIM],
+    threadgroup T B_tile[TILE_DIM][TILE_DIM],
+    uint3 tid,
+    uint row,
+    uint col) {
+  c10::metal::opmath_t<T> sum = 0;
+
+  // Compute batch offsets
+  uint batch1Offset = batch * strides[2];
+  uint batch2Offset = batch * strides[5];
+
+  uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
+  for (uint t = 0; t < numTiles; t++) {
+    uint tiledCol = t * TILE_DIM + tid.x;
+    if (row < sizes.x && tiledCol < sizes.y) {
+      A_tile[tid.y][tid.x] =
+          mat1Data[batch1Offset + row * strides[1] + tiledCol * strides[0]];
+    } else {
+      A_tile[tid.y][tid.x] = 0;
+    }
+
+    uint tiledRow = t * TILE_DIM + tid.y;
+    if (tiledRow < sizes.y && col < sizes.z) {
+      B_tile[tid.y][tid.x] =
+          mat2Data[batch2Offset + tiledRow * strides[4] + col * strides[3]];
+    } else {
+      B_tile[tid.y][tid.x] = 0;
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+
+    for (uint k = 0; k < TILE_DIM; k++) {
+      sum += c10::metal::mul(A_tile[tid.y][k], B_tile[k][tid.x]);
+    }
+
+    threadgroup_barrier(mem_flags::mem_threadgroup);
+  }
+
+  return sum;
+}
+
 template <typename T>
 kernel void matmul(
     constant T* mat1Data [[buffer(0)]],
@@ -115,45 +163,88 @@ kernel void naive_bmm(
   uint col = group_id.x * TILE_DIM + tid.x;
   uint row = group_id.y * TILE_DIM + tid.y;
 
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
+
+  auto sum = batched_matmul_inner<T, 9>(
+      mat1Data, mat2Data, batch, strides, sizes, A_tile, B_tile, tid, row, col);
+
+  if (row < sizes.x && col < sizes.z) {
+    outputData[batch * strides[8] + col * strides[6] + row * strides[7]] =
+        static_cast<T>(sum);
+  }
+}
+
+template <typename T>
+kernel void naive_baddbmm(
+    constant T* mat1Data [[buffer(0)]],
+    constant T* mat2Data [[buffer(1)]],
+    device T* outputData [[buffer(2)]],
+    constant T* biasData [[buffer(3)]],
+    constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
+    constant array<ulong, 12>& strides [[buffer(5)]],
+    constant uint4& sizes [[buffer(6)]],
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 group_id [[threadgroup_position_in_grid]]) {
+  uint batch = group_id.z;
+  uint col = group_id.x * TILE_DIM + tid.x;
+  uint row = group_id.y * TILE_DIM + tid.y;
+
+  threadgroup T A_tile[TILE_DIM][TILE_DIM];
+  threadgroup T B_tile[TILE_DIM][TILE_DIM];
+
+  auto sum = batched_matmul_inner<T, 12>(
+      mat1Data, mat2Data, batch, strides, sizes, A_tile, B_tile, tid, row, col);
+
+  if (row < sizes.x && col < sizes.z) {
+    uint biasOffset = batch * strides[11];
+    auto bias = biasData[biasOffset + row * strides[10] + col * strides[9]];
+    outputData[batch * strides[8] + col * strides[6] + row * strides[7]] =
+        static_cast<T>(
+            c10::metal::mul(alpha_beta[0], sum) +
+            c10::metal::mul(alpha_beta[1], bias));
+  }
+}
+
+template <typename T>
+kernel void naive_addbmm(
+    constant T* mat1Data [[buffer(0)]],
+    constant T* mat2Data [[buffer(1)]],
+    device T* outputData [[buffer(2)]],
+    constant T* biasData [[buffer(3)]],
+    constant array<c10::metal::opmath_t<T>, 2>& alpha_beta [[buffer(4)]],
+    constant array<ulong, 12>& strides [[buffer(5)]],
+    constant uint4& sizes [[buffer(6)]],
+    uint3 tid [[thread_position_in_threadgroup]],
+    uint3 group_id [[threadgroup_position_in_grid]]) {
+  uint col = group_id.x * TILE_DIM + tid.x;
+  uint row = group_id.y * TILE_DIM + tid.y;
+
   c10::metal::opmath_t<T> sum = 0;
 
   threadgroup T A_tile[TILE_DIM][TILE_DIM];
   threadgroup T B_tile[TILE_DIM][TILE_DIM];
 
-  // batch offsets for both matrices
-  uint batch1Offset = batch * strides[2];
-  uint batch2Offset = batch * strides[5];
-
-  uint numTiles = (sizes.y + TILE_DIM - 1) / TILE_DIM;
-  for (uint t = 0; t < numTiles; t++) {
-    uint tiledCol = t * TILE_DIM + tid.x;
-    if (row < sizes.x && tiledCol < sizes.y) {
-      A_tile[tid.y][tid.x] =
-          mat1Data[batch1Offset + row * strides[1] + tiledCol * strides[0]];
-    } else {
-      A_tile[tid.y][tid.x] = 0;
-    }
-
-    uint tiledRow = t * TILE_DIM + tid.y;
-    if (tiledRow < sizes.y && col < sizes.z) {
-      B_tile[tid.y][tid.x] =
-          mat2Data[batch2Offset + tiledRow * strides[4] + col * strides[3]];
-    } else {
-      B_tile[tid.y][tid.x] = 0;
-    }
-
-    threadgroup_barrier(mem_flags::mem_threadgroup);
-
-    for (uint k = 0; k < TILE_DIM; k++) {
-      sum += A_tile[tid.y][k] * B_tile[k][tid.x];
-    }
-
-    threadgroup_barrier(mem_flags::mem_threadgroup);
+  // Iterate through all batches and accumulate
+  for (uint batch = 0; batch < sizes.w; batch++) {
+    sum += batched_matmul_inner<T, 12>(
+        mat1Data,
+        mat2Data,
+        batch,
+        strides,
+        sizes,
+        A_tile,
+        B_tile,
+        tid,
+        row,
+        col);
   }
 
   if (row < sizes.x && col < sizes.z) {
-    outputData[batch * strides[8] + col * strides[6] + row * strides[7]] =
-        static_cast<T>(sum);
+    auto bias = biasData[row * strides[10] + col * strides[9]];
+    outputData[row * strides[7] + col * strides[6]] = static_cast<T>(
+        c10::metal::mul(alpha_beta[0], sum) +
+        c10::metal::mul(alpha_beta[1], bias));
   }
 }
 
@@ -849,7 +940,31 @@ kernel void unpack_pivots(
       constant array<ulong2, 4> & strides [[buffer(5)]],                    \
       constant uint3 & sizes [[buffer(6)]],                                 \
       uint2 tid [[thread_position_in_threadgroup]],                         \
-      uint2 group_id [[threadgroup_position_in_grid]])
+      uint2 group_id [[threadgroup_position_in_grid]]);                     \
+  template [[host_name("naive_baddbmm_" #DTYPE)]]                           \
+  kernel void naive_baddbmm<DTYPE>(                                         \
+      constant DTYPE * mat1Data [[buffer(0)]],                              \
+      constant DTYPE * mat2Data [[buffer(1)]],                              \
+      device DTYPE * outputData [[buffer(2)]],                              \
+      constant DTYPE * biasData [[buffer(3)]],                              \
+      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
+          alpha_beta [[buffer(4)]],                                         \
+      constant array<ulong, 12> & strides [[buffer(5)]],                    \
+      constant uint4 & sizes [[buffer(6)]],                                 \
+      uint3 tid [[thread_position_in_threadgroup]],                         \
+      uint3 group_id [[threadgroup_position_in_grid]]);                     \
+  template [[host_name("naive_addbmm_" #DTYPE)]]                            \
+  kernel void naive_addbmm<DTYPE>(                                          \
+      constant DTYPE * mat1Data [[buffer(0)]],                              \
+      constant DTYPE * mat2Data [[buffer(1)]],                              \
+      device DTYPE * outputData [[buffer(2)]],                              \
+      constant DTYPE * biasData [[buffer(3)]],                              \
+      constant array<c10::metal::opmath_t<DTYPE>, 2> &                      \
+          alpha_beta [[buffer(4)]],                                         \
+      constant array<ulong, 12> & strides [[buffer(5)]],                    \
+      constant uint4 & sizes [[buffer(6)]],                                 \
+      uint3 tid [[thread_position_in_threadgroup]],                         \
+      uint3 group_id [[threadgroup_position_in_grid]])
 
 INSTANTIATE_MM_OPS(float);
 INSTANTIATE_MM_OPS(half);
