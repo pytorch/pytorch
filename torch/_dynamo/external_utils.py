@@ -285,3 +285,10 @@ def insert_const_values_with_mask(
             out.append(tup[idx])
             idx += 1
     return tuple(out)
+
+
+def get_state_dict_values(mod):
+    # dest is used to avoid any _metadata field read or write
+    dest = dict()
+    mod.state_dict(destination=dest)
+    return list(dest.values())
