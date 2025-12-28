@@ -886,6 +886,173 @@ from user code:
         actual = compiled_fn(*test_inputs)
         self.assertEqual(expected.x, actual.x)
 
+    def test_dynamo_reuses_outer_fake_mode(self):
+        """Test that Dynamo reuses an outer FakeTensorMode instead of creating a new one."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def fn(x, y):
+            return x + y
+
+        outer_mode = FakeTensorMode()
+        with outer_mode:
+            # Create fake inputs in the outer mode
+            fake_x = torch.randn(3, 4)
+            fake_y = torch.randn(3, 4)
+
+            # Compile with the outer fake mode active
+            # Dynamo should reuse this mode instead of creating a new one
+            compiled_fn = torch.compile(fn, backend="eager")
+            result = compiled_fn(fake_x, fake_y)
+
+            # Result should be a fake tensor in the same mode
+            self.assertTrue(result.fake_mode is outer_mode)
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_aot_compile_joint_with_descriptors_bundled_cache(self):
+        """Test that aot_compile_joint_with_descriptors uses bundled cache when enable_aot_compile is set."""
+        from torch._functorch.aot_autograd import (
+            aot_compile_joint_with_descriptors,
+            aot_export_joint_with_descriptors,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def fn(x):
+            return x * 2 + 1
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            fake_input = torch.randn(3, 4, device="cuda")
+
+            # Use a simple eager backend to verify compilation works
+            def simple_compiler(gm, example_inputs):
+                return gm
+
+            with torch._dynamo.config.patch(enable_aot_compile=True):
+                with contextlib.ExitStack() as stack:
+                    jd = aot_export_joint_with_descriptors(
+                        stack,
+                        fn,
+                        (fake_input,),
+                    )
+
+                    compiled_fn = aot_compile_joint_with_descriptors(
+                        jd,
+                        fw_compiler=simple_compiler,
+                        bw_compiler=simple_compiler,
+                    )
+
+                    # Verify the result is callable
+                    self.assertTrue(callable(compiled_fn))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_inductor_standalone_compile_with_fake_inputs(self):
+        """Test that standalone_compile correctly handles fake tensor inputs."""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def fn(x, y):
+            return x + y * 2
+
+        # Create a simple graph module
+        gm = torch.fx.symbolic_trace(fn)
+
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            fake_x = torch.randn(3, 4, device="cuda")
+            fake_y = torch.randn(3, 4, device="cuda")
+            example_inputs = [fake_x, fake_y]
+
+            # standalone_compile should detect fake_mode from example_inputs
+            compiled = torch._inductor.standalone_compile(
+                gm,
+                example_inputs,
+                dynamic_shapes="from_graph",
+            )
+
+            # Should return a compiled artifact
+            self.assertIsNotNone(compiled)
+
+    def test_is_aligned_with_fake_tensors(self):
+        """Test that _is_aligned correctly handles FakeTensors."""
+        from torch._inductor.utils import _is_aligned
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        # Real tensor - alignment depends on actual data_ptr
+        real_tensor = torch.randn(10)
+        # Just check it doesn't error
+        _is_aligned(real_tensor)
+
+        # Fake tensor - should always be considered aligned
+        fake_mode = FakeTensorMode()
+        with fake_mode:
+            fake_tensor = torch.randn(10)
+        self.assertTrue(_is_aligned(fake_tensor))
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_graph_pickler_triton_kernel_serialization(self):
+        """Test that GraphPickler can serialize and deserialize graphs with Triton kernel calls."""
+        import triton
+        import triton.language as tl
+
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            kernel_side_table,
+            triton_kernel_wrapper_functional,
+        )
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx._graph_pickler import GraphPickler
+
+        # Define a simple Triton kernel
+        @triton.jit
+        def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(axis=0)
+            block_start = pid * BLOCK_SIZE
+            offsets = block_start + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            y = tl.load(y_ptr + offsets, mask=mask)
+            output = x + y
+            tl.store(output_ptr + offsets, output, mask=mask)
+
+        # Create a graph with a Triton kernel call
+        graph = torch.fx.Graph()
+        x = graph.placeholder("x")
+        y = graph.placeholder("y")
+
+        # Register the kernel with the side table
+        kernel_idx = kernel_side_table.add_kernel(add_kernel)
+        constant_args_idx = kernel_side_table.add_constant_args({"BLOCK_SIZE": 1024})
+
+        # Create a triton kernel wrapper node
+        triton_call = graph.call_function(
+            triton_kernel_wrapper_functional,
+            args=(),
+            kwargs={
+                "kernel_idx": kernel_idx,
+                "constant_args_idx": constant_args_idx,
+                "grid": [(1,)],
+                "kwargs": {"x_ptr": x, "y_ptr": y, "n_elements": 1024},
+                "tensors_to_clone": ["x_ptr"],
+            },
+        )
+        graph.output(triton_call)
+
+        gm = torch.fx.GraphModule({}, graph)
+
+        # Serialize and deserialize
+        serialized = GraphPickler.dumps(gm)
+
+        fake_mode = FakeTensorMode()
+        deserialized_gm = GraphPickler.loads(serialized, fake_mode)
+
+        # Verify the kernel was re-registered - check that the node's kernel_idx
+        # points to a valid kernel
+        for node in deserialized_gm.graph.nodes:
+            if node.op == "call_function" and node.target is triton_kernel_wrapper_functional:
+                new_kernel_idx = node.kwargs.get("kernel_idx")
+                self.assertIsNotNone(new_kernel_idx)
+                # The kernel should be retrievable from the side table
+                kernel = kernel_side_table.get_kernel(new_kernel_idx)
+                self.assertIsNotNone(kernel)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

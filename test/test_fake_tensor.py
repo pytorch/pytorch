@@ -1381,6 +1381,47 @@ class FakeTensorConverterTest(TestCase):
         assert mode_weak() is None
         assert y_weak() is None
 
+    def test_cross_mode_fake_tensor_transfer(self):
+        """Test transferring FakeTensors from one FakeTensorMode to another."""
+        # Create a fake tensor in one mode
+        mode1 = FakeTensorMode()
+        with mode1:
+            x = torch.randn(3, 4)
+        self.assertTrue(isinstance(x, FakeTensor))
+        self.assertIs(x.fake_mode, mode1)
+
+        # Transfer to a different mode using from_real_tensor
+        mode2 = FakeTensorMode()
+        converter = mode2.fake_tensor_converter
+        x_transferred = converter.from_real_tensor(mode2, x)
+
+        # Should be a FakeTensor in the new mode
+        self.assertTrue(isinstance(x_transferred, FakeTensor))
+        self.assertIs(x_transferred.fake_mode, mode2)
+        self.assertEqual(x_transferred.shape, x.shape)
+        self.assertEqual(x_transferred.dtype, x.dtype)
+
+    def test_cross_mode_wrapper_subclass_transfer(self):
+        """Test transferring wrapper subclasses with FakeTensors across modes."""
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        # Create tensors in the first mode
+        mode1 = FakeTensorMode()
+        with mode1:
+            a = torch.randn(2, 3)
+            b = torch.randn(2, 3)
+        two_tensor = TwoTensor(a, b)
+
+        # Transfer to a different mode
+        mode2 = FakeTensorMode()
+        converter = mode2.fake_tensor_converter
+        transferred = converter.from_real_tensor(mode2, two_tensor)
+
+        # Should preserve the subclass structure with new mode
+        self.assertTrue(isinstance(transferred, TwoTensor))
+        self.assertIs(transferred.a.fake_mode, mode2)
+        self.assertIs(transferred.b.fake_mode, mode2)
+
 
 make_propagate_real_tensors_cls(FakeTensorConverterTest)
 
