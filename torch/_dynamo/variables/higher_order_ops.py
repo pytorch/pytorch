@@ -1000,7 +1000,11 @@ def validate_args_and_maybe_create_graph_inputs(
         # lift them.
         return sub_args
     elif set_subgraph_inputs == "flatten_automatic":
+<<<<<<< HEAD
+        from torch._dynamo.external_utils import get_state_dict_values
+=======
         from torch._dynamo.external_utils import get_params_and_buffers_list
+>>>>>>> 5ebd13e448b ([wip][invoke_subgraph] Prototype no retracing for is_pure)
 
         # The goal of flatten_automatic is to extract all tensor variables from the
         # inputs, in the order of *args and **kwargs, and immediately lift them as
@@ -1013,6 +1017,14 @@ def validate_args_and_maybe_create_graph_inputs(
         #     ordering of subgraph inputs for a simpler implementation.
         for arg in sub_args:
             if isinstance(arg, variables.UnspecializedNNModuleVariable):
+<<<<<<< HEAD
+                states = _make_inlined(tx, get_state_dict_values)(
+                    arg
+                ).unpack_var_sequence(tx)
+                for state in states:
+                    if isinstance(state, variables.TensorVariable):
+                        tracer.maybe_lift_tracked_freevar_to_input(state.proxy)
+=======
                 params_and_buffers = _make_inlined(tx, get_params_and_buffers_list)(
                     arg
                 ).unpack_var_sequence(tx)
@@ -1021,6 +1033,7 @@ def validate_args_and_maybe_create_graph_inputs(
                         tracer.maybe_lift_tracked_freevar_to_input(
                             param_or_buffer.proxy
                         )
+>>>>>>> 5ebd13e448b ([wip][invoke_subgraph] Prototype no retracing for is_pure)
 
         flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
             ListVariable(list(sub_args))

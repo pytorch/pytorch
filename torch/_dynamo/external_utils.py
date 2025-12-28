@@ -287,11 +287,8 @@ def insert_const_values_with_mask(
     return tuple(out)
 
 
-def get_params_and_buffers_list(mod):
-    params = dict(mod.named_parameters(remove_duplicate=False))
-    buffers = dict(mod.named_buffers(remove_duplicate=False))
-    params_and_buffers = {
-        **dict(params),
-        **dict(buffers),
-    }
-    return list(params_and_buffers.values())
+def get_state_dict_values(mod):
+    # dest is used to avoid any _metadata field read or write
+    dest = dict()
+    mod.state_dict(destination=dest)
+    return list(dest.values())
