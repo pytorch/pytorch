@@ -8,20 +8,12 @@ This module generates Python code that calls cutlass_api to execute GEMM operati
 import logging
 from typing import Any, Optional, Union
 
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-from torch._inductor.codegen.common import IndentedBuffer, Kernel
-=======
 from torch._inductor.codegen.common import (
     IndentedBuffer,
     Kernel,
     WorkspaceArg,
     WorkspaceZeroMode,
 )
->>>>>>> Stashed changes
-=======
-from torch._inductor.codegen.common import IndentedBuffer, Kernel, WorkspaceArg, WorkspaceZeroMode
->>>>>>> 2e159d7b382 ([Inductor][NV Universal Gemm] Support kernels with workspaces)
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
 from torch._inductor.ir import (
     BaseView,
