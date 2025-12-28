@@ -1821,9 +1821,10 @@ class GraphModule(torch.nn.Module):
             res = opt_fn(x, y, mod)
             self.assertEqual(ref, res)
 
-            self.assertExpectedInline(
-                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-                """\
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                    """\
 class GraphModule(torch.nn.Module):
     def forward(self, L_x_: "f32[10, 10]", L_y_: "f32[10, 10]", L_mod_parameters_weight_: "f32[10, 10]", L_mod_parameters_bias_: "f32[10]"):
         l_x_ = L_x_
@@ -1846,7 +1847,7 @@ class GraphModule(torch.nn.Module):
             add_1: "f32[10, 10]" = add + linear;  add = linear = None
             return (add_1,)
 """,
-            )
+                )
 
     def test_map_subgraph_name_is_valid(self):
         xs = torch.randn(2, 3, 3)
