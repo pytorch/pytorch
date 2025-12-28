@@ -11,6 +11,7 @@ import random
 from typing import Any, Optional, Union
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -41,47 +42,6 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         self.kernel = kernel
         self.accumulator_type = accumulator_type
         self._compiled_artifact = None
-
-    def do_bench(
-        self,
-        fn,
-        *input_tensors: torch.Tensor,
-        out: Optional[torch.Tensor] = None,
-    ) -> float:
-        """Benchmark the cutlass_api kernel with proper stream handling.
-
-        The default benchmarker uses CUDA events on the current PyTorch stream to
-        measure kernel execution time. However, if the kernel runs on a different
-        stream (e.g., the CUDA default/null stream), the events won't capture the
-        actual kernel execution - they'll just measure the time to enqueue the
-        kernel, resulting in artificially fast times (~0.002ms instead of ~0.02ms).
-
-        This override ensures benchmarking happens on a dedicated stream where both
-        the CUDA events and kernel execution occur on the same stream, giving
-        accurate timing measurements.
-        """
-        # Use a dedicated stream for benchmarking to ensure CUDA events
-        # correctly measure kernel execution time
-        benchmark_stream = torch.cuda.Stream()
-        with torch.cuda.stream(benchmark_stream):
-            torch.cuda.synchronize()
-
-            # Warmup
-            fn()
-            torch.cuda.synchronize()
-
-            # Benchmark with CUDA events
-            n_iter = 10
-            start_event = torch.cuda.Event(enable_timing=True)
-            end_event = torch.cuda.Event(enable_timing=True)
-
-            start_event.record()
-            for _ in range(n_iter):
-                fn()
-            end_event.record()
-            torch.cuda.synchronize()
-
-            return start_event.elapsed_time(end_event) / n_iter
 
     def benchmark(
         self,
@@ -125,12 +85,39 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         artifact = self._compiled_artifact
         kernel = self.kernel
 
+<<<<<<< Updated upstream
         def run_kernel():
             # Get current stream at run time, not at closure creation time.
             # This ensures the kernel runs on the same stream as the CUDA events
             # used for benchmarking, giving accurate timing measurements.
             stream = torch.cuda.current_stream()
             kernel.run(args, artifact, stream=stream, assume_supported_args=True)
+=======
+        # Allocate workspace if needed
+        if self.workspace_size > 0:
+            self._workspace = torch.empty(
+                self.workspace_size, device=out.device, dtype=torch.int8
+            )
+        else:
+            self._workspace = None
+
+        workspace = self._workspace
+
+        # Capture stream at closure creation time, like Triton does.
+        # This ensures the kernel runs on the same stream where CUDA events
+        # are recorded for benchmarking, giving accurate timing measurements.
+        device_interface = get_interface_for_device(out.device.type)
+        stream = device_interface.get_raw_stream(out.device.index)
+
+        def run_kernel():
+            kernel.run(
+                args,
+                artifact,
+                stream=stream,
+                workspace=workspace,
+                assume_supported_args=True,
+            )
+>>>>>>> Stashed changes
 
         return run_kernel
 
