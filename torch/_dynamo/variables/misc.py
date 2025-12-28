@@ -2006,7 +2006,7 @@ class StringFormatVariable(VariableTracker):
             return False
         return False
 
-    def try_peek_constant(self) -> tuple[bool, bool, any]:
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
         """Peek at the formatted string value without triggering realization.
 
         Returns (can_peek, is_unrealized, value).
