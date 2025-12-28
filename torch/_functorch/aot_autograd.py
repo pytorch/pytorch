@@ -1333,10 +1333,9 @@ def aot_compile_joint_with_descriptors(
     from torch._functorch._aot_autograd.schemas import AOTAutogradCacheInfo
     from torch._inductor.output_code import OutputCode
 
-    fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
-
     cache_ctx = nullcontext()
     if torch._dynamo.config.enable_aot_compile:
+        fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
         jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
             str(random.random()),
             time.time_ns(),
