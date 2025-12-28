@@ -47,6 +47,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     TEST_XPU,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.logging_utils import logs_to_string
@@ -3450,6 +3451,7 @@ class TestUnbacked(TestCase):
 
     @pytest.mark.xfail(reason="https://github.com/pytorch/pytorch/issues/163785")
     @skipIfTorchDynamo("mark_unbacked is not traceable")
+    @unittest.skipIf(torch.version.hip, "Skipped on ROCm")
     def test_do_not_guard_unbacked_inputs(self):
         @torch.compile(fullgraph=True, dynamic=True, backend="inductor")
         def func(a, b):
