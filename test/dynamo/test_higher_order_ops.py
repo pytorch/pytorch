@@ -1803,15 +1803,15 @@ class GraphModule(torch.nn.Module):
         # Patch the default value of set_subgraph_inputs to flatten_automatic
         from torch._dynamo.variables import higher_order_ops
 
-        original_fn = higher_order_ops.speculate_subgraph_with_auto_output_flattening
+        original_fn = higher_order_ops.WrapHigherOrderVariable.create_wrapped_node
 
-        def patched_fn(*args, **kwargs):
+        def patched_fn(self, *args, **kwargs):
             kwargs.setdefault("set_subgraph_inputs", "flatten_automatic")
-            return original_fn(*args, **kwargs)
+            return original_fn(self, *args, **kwargs)
 
         with mock.patch.object(
-            higher_order_ops,
-            "speculate_subgraph_with_auto_output_flattening",
+            higher_order_ops.WrapHigherOrderVariable,
+            "create_wrapped_node",
             patched_fn,
         ):
             backend = EagerAndRecordGraphs()
