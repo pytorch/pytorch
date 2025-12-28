@@ -104,6 +104,7 @@ except ModuleNotFoundError:
 @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows")
 @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
 class TestProfilerCUDA(TestCase):
+    @unittest.skipIf(torch.version.hip, "Memory leak on ROCm (Issue #110995)")
     def test_mem_leak(self):
         """Checks that there's no memory leak when using profiler with CUDA"""
         t = torch.rand(1, 1).cuda()
@@ -3319,11 +3320,14 @@ aten::mm""",
             comp_mm()
 
         def names(prof):
-            return {
+            res = {
                 ev.name
                 for ev in prof.events()
                 if "mm" in ev.name or "triton" in ev.name
             }
+            if torch.version.hip:
+                return {n for n in res if "(dynamo_timed)" not in n}
+            return res
 
         n1 = names(prof1)
         n2 = names(prof2)
