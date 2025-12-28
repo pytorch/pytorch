@@ -9,7 +9,7 @@ import os
 import pickle
 import tempfile
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from unittest.mock import patch
 
 import torch
@@ -1025,7 +1025,7 @@ from user code:
         with fake_mode:
             fake_input = torch.randn(3, 4, device="cuda")
             with torch._dynamo.config.patch(enable_aot_compile=True):
-                with contextlib.ExitStack() as stack:
+                with ExitStack() as stack:
                     jd = aot_export_joint_with_descriptors(stack, fn, (fake_input,))
                     compiled_fn = aot_compile_joint_with_descriptors(
                         jd,
@@ -1120,12 +1120,12 @@ from user code:
     def test_dynamo_graph_capture_reorders_parameters(self):
         from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 
-        class SimpleModel(nn.Module):
+        class SimpleModel(torch.nn.Module):
             def __init__(self):
                 super().__init__()
-                self.linear1 = nn.Linear(10, 20)
-                self.linear2 = nn.Linear(20, 30)
-                self.linear3 = nn.Linear(30, 10)
+                self.linear1 = torch.nn.Linear(10, 20)
+                self.linear2 = torch.nn.Linear(20, 30)
+                self.linear3 = torch.nn.Linear(30, 10)
 
             def forward(self, x):
                 return self.linear3(self.linear2(self.linear1(x)))
