@@ -46,6 +46,7 @@ from .variables.functions import (
     ContextlibContextManagerLocalGeneratorObjectVariable,
     LocalGeneratorObjectVariable,
 )
+from .variables.lazy import ComputedLazyConstantVariable
 from .variables.nn_module import NNModuleVariable
 from .variables.tensor import (
     NumpyNdarrayVariable,
@@ -279,7 +280,16 @@ class PyCodegen:
             ):
                 return self(value.source)
 
-        if value.is_python_constant() and is_safe_constant(value.as_python_constant()):
+        # ComputedLazyConstantVariable with a non-trivial reconstruct_fn should
+        # use reconstruct() to generate bytecode that recomputes the value.
+        # This allows the function to be called with different input values
+        # without recompiling.
+        if isinstance(value, ComputedLazyConstantVariable) and not value.is_realized():
+            self.uses[value] += 1
+            self.call_reconstruct(value)
+        elif value.is_python_constant() and is_safe_constant(
+            value.as_python_constant()
+        ):
             output.append(self.create_load_const(value.as_python_constant()))
         elif isinstance(value, TensorWithTFOverrideVariable):
             graph_outputs_key = self.add_graph_output(value)

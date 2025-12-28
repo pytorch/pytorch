@@ -383,6 +383,24 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """Try to peek at the constant value without triggering realization.
+
+        Returns a tuple of (can_peek, is_unrealized, value):
+        - can_peek: True if this variable can be peeked as a constant
+        - is_unrealized: True if this is an unrealized lazy constant (guards not yet installed)
+        - value: The constant value (only valid if can_peek is True)
+
+        Default implementation for non-lazy variables: returns (is_python_constant, False, value).
+        LazyConstantVariable and ComputedLazyConstantVariable override this to peek without
+        realizing. Container types (TupleVariable, ListVariable) override this to recursively
+        peek at their contents.
+        """
+        try:
+            return (True, False, self.as_python_constant())
+        except NotImplementedError:
+            return (False, False, None)
+
     def is_constant_match(self, *values: Any) -> bool:
         """
         Check if this variable is a python constant matching one of the given values.

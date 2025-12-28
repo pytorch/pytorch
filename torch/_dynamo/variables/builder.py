@@ -2105,12 +2105,12 @@ class VariableBuilder:
                     )
                     return ConstantVariable.create(value=value, source=self.source)
 
-                return self._wrap_lazy_constant(value, self.wrap_symint)
+                return self.wrap_symint(value)
 
             return self._wrap_lazy_constant(value)
         elif type(value) is float:
             if not config.specialize_float:
-                return self._wrap_lazy_constant(value, self.wrap_symfloat)
+                return self.wrap_symfloat(value)
 
             return self._wrap_lazy_constant(value)
         elif type(value) in (bool, str):
@@ -2125,12 +2125,9 @@ class VariableBuilder:
     def _wrap_lazy_constant(
         self,
         value: Union[int, float, bool, str],
-        wrap_fn: Optional[Callable[[Union[int, float]], VariableTracker]] = None,
     ) -> VariableTracker:
         """Wrap a primitive constant, deferring guard installation if allowed."""
         if not self.allow_lazy_constant:
-            if wrap_fn is not None:
-                return wrap_fn(value)
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             return ConstantVariable.create(value=value, source=self.source)
         return LazyConstantVariable.create(value, source=self.source)
