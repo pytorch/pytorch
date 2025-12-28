@@ -11361,8 +11361,8 @@ class TestNNDeviceType(NNTestCase):
         self.assertEqual(out_ref, out)
 
     @unittest.expectedFailure
-    @skipIfRocm
     @onlyCUDA
+    @skipCUDAIfRocm  # ROCm succeeds where CUDA fails - see test_upsamplingNearest2d_launch_rocm
     def test_upsamplingNearest2d_launch_fail(self, device):
         m = nn.Upsample(scale_factor=2)
         # launch grid_y == 2**16 (larger than maximum y-dimension limit 65535)
