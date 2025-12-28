@@ -4060,7 +4060,7 @@ class TestTorchDeviceType(TestCase):
 
     # FIXME: find a test suite for the pdist operator
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "sandcastle OOM with current tpx gpu/re configuration")
-    @skipIfRocm
+    @skipIfRocm(msg="Test needs validation on ROCm - original skip from 2020 PR #31593")
     @onlyCUDA
     @largeTensorTest('32GB', device='cpu')
     @largeTensorTest('5GB', device='cuda')
