@@ -37,42 +37,51 @@ class _tempTensorSamplerForQualName:
         self.prob = prob
 
     @classmethod
-    def from_tensor(cls, x):
+    def class_method_that_is_used(cls, x):
         prob = torch.sigmoid(x)
         thresh = torch.rand(1, device=x.device)
         mask = (prob > thresh).to(torch.bool)
         return cls(x, mask, prob)
 
     @classmethod
-    def from_tensor_fake_fn(cls, x):
+    def class_method_that_is_not_used(cls, x):
         prob = torch.sigmoid(x)
         thresh = torch.rand(1, device=x.device)
         mask = (prob > thresh).to(torch.bool)
         return cls(x, mask, prob)
 
-    def __add__(self, other):
-        return _tempTensorSamplerForQualName.from_tensor(self.val + other.val)
-
-    def __sub__(self, other):
-        return _tempTensorSamplerForQualName.from_tensor(self.val - other.val)
+    def instance_method_that_is_used(self, x):
+        return x / 2
 
 
 class _tempNetForQualName(torch.nn.Module):
     def __init__(self):
         super().__init__()
 
-    def _prepare_extra_input(self):
+    def instance_method_without_args(self):
         shape = [1, 2, 3, 4]
         x = torch.randn(shape)
         return x
 
+    def instance_method_with_args(self, x):
+        return x + 1
+
     def forward(self, x):
         x *= x
         with torch.device(x.device):
-            y = self._prepare_extra_input()
-        sampler = _tempTensorSamplerForQualName.from_tensor(x)
+            y = self.instance_method_without_args()
+        # test classmethod called from class
+        sampler = _tempTensorSamplerForQualName.class_method_that_is_used(x)
         x = torch.where(torch.rand_like(x) < sampler.prob, sampler.val, x) + y.sum()
+        # test instance method called from instance
+        x = sampler.instance_method_that_is_used(x)
+        # test classmethod called from instance
+        another_sampler = sampler.class_method_that_is_not_used(x)
+        # test instance method called from instance
+        x = another_sampler.instance_method_that_is_used(x)
+        # test classmethod called from instance
         x += y.sum()
+        x = self.instance_method_with_args(x)
         return x
 
 @functorch_config.patch("bundled_autograd_cache", True)
@@ -736,6 +745,7 @@ def add(x, y):
             model.forward,
             options=dict(guard_filter_fn=torch.compiler.skip_guard_on_globals_unsafe),
         )
+        compiled_fn(x)
 
 
 if __name__ == "__main__":
