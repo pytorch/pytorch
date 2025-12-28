@@ -994,7 +994,6 @@ from user code:
         self.assertEqual(expected.x, actual.x)
 
     def test_dynamo_reuses_outer_fake_mode(self):
-        """Test that Dynamo reuses an outer FakeTensorMode instead of creating a new one."""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         def fn(x, y):
@@ -1002,21 +1001,14 @@ from user code:
 
         outer_mode = FakeTensorMode()
         with outer_mode:
-            # Create fake inputs in the outer mode
             fake_x = torch.randn(3, 4)
             fake_y = torch.randn(3, 4)
-
-            # Compile with the outer fake mode active
-            # Dynamo should reuse this mode instead of creating a new one
             compiled_fn = torch.compile(fn, backend="eager")
             result = compiled_fn(fake_x, fake_y)
-
-            # Result should be a fake tensor in the same mode
             self.assertTrue(result.fake_mode is outer_mode)
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_aot_compile_joint_with_descriptors_bundled_cache(self):
-        """Test that aot_compile_joint_with_descriptors uses bundled cache when enable_aot_compile is set."""
         from torch._functorch.aot_autograd import (
             aot_compile_joint_with_descriptors,
             aot_export_joint_with_descriptors,
@@ -1026,69 +1018,47 @@ from user code:
         def fn(x):
             return x * 2 + 1
 
+        def simple_compiler(gm, example_inputs):
+            return gm
+
         fake_mode = FakeTensorMode()
         with fake_mode:
             fake_input = torch.randn(3, 4, device="cuda")
-
-            # Use a simple eager backend to verify compilation works
-            def simple_compiler(gm, example_inputs):
-                return gm
-
             with torch._dynamo.config.patch(enable_aot_compile=True):
                 with contextlib.ExitStack() as stack:
-                    jd = aot_export_joint_with_descriptors(
-                        stack,
-                        fn,
-                        (fake_input,),
-                    )
-
+                    jd = aot_export_joint_with_descriptors(stack, fn, (fake_input,))
                     compiled_fn = aot_compile_joint_with_descriptors(
                         jd,
                         fw_compiler=simple_compiler,
                         bw_compiler=simple_compiler,
                     )
-
-                    # Verify the result is callable
                     self.assertTrue(callable(compiled_fn))
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_inductor_standalone_compile_with_fake_inputs(self):
-        """Test that standalone_compile correctly handles fake tensor inputs."""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         def fn(x, y):
             return x + y * 2
 
-        # Create a simple graph module
         gm = torch.fx.symbolic_trace(fn)
-
         fake_mode = FakeTensorMode()
         with fake_mode:
-            fake_x = torch.randn(3, 4, device="cuda")
-            fake_y = torch.randn(3, 4, device="cuda")
-            example_inputs = [fake_x, fake_y]
-
-            # standalone_compile should detect fake_mode from example_inputs
+            example_inputs = [
+                torch.randn(3, 4, device="cuda"),
+                torch.randn(3, 4, device="cuda"),
+            ]
             compiled = torch._inductor.standalone_compile(
-                gm,
-                example_inputs,
-                dynamic_shapes="from_graph",
+                gm, example_inputs, dynamic_shapes="from_graph"
             )
-
-            # Should return a compiled artifact
             self.assertIsNotNone(compiled)
 
     def test_is_aligned_with_fake_tensors(self):
-        """Test that _is_aligned correctly handles FakeTensors."""
         from torch._inductor.utils import _is_aligned
         from torch._subclasses.fake_tensor import FakeTensorMode
 
-        # Real tensor - alignment depends on actual data_ptr
-        real_tensor = torch.randn(10)
-        # Just check it doesn't error
-        _is_aligned(real_tensor)
+        _is_aligned(torch.randn(10))
 
-        # Fake tensor - should always be considered aligned
         fake_mode = FakeTensorMode()
         with fake_mode:
             fake_tensor = torch.randn(10)
@@ -1096,7 +1066,6 @@ from user code:
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_graph_pickler_triton_kernel_serialization(self):
-        """Test that GraphPickler can serialize and deserialize graphs with Triton kernel calls."""
         import triton
         import triton.language as tl
 
@@ -1107,7 +1076,6 @@ from user code:
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx._graph_pickler import GraphPickler
 
-        # Define a simple Triton kernel
         @triton.jit
         def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
             pid = tl.program_id(axis=0)
@@ -1116,19 +1084,13 @@ from user code:
             mask = offsets < n_elements
             x = tl.load(x_ptr + offsets, mask=mask)
             y = tl.load(y_ptr + offsets, mask=mask)
-            output = x + y
-            tl.store(output_ptr + offsets, output, mask=mask)
+            tl.store(output_ptr + offsets, x + y, mask=mask)
 
-        # Create a graph with a Triton kernel call
         graph = torch.fx.Graph()
         x = graph.placeholder("x")
         y = graph.placeholder("y")
-
-        # Register the kernel with the side table
         kernel_idx = kernel_side_table.add_kernel(add_kernel)
         constant_args_idx = kernel_side_table.add_constant_args({"BLOCK_SIZE": 1024})
-
-        # Create a triton kernel wrapper node
         triton_call = graph.call_function(
             triton_kernel_wrapper_functional,
             args=(),
@@ -1141,27 +1103,21 @@ from user code:
             },
         )
         graph.output(triton_call)
-
         gm = torch.fx.GraphModule({}, graph)
 
-        # Serialize and deserialize
         serialized = GraphPickler.dumps(gm)
+        deserialized_gm = GraphPickler.loads(serialized, FakeTensorMode())
 
-        fake_mode = FakeTensorMode()
-        deserialized_gm = GraphPickler.loads(serialized, fake_mode)
-
-        # Verify the kernel was re-registered - check that the node's kernel_idx
-        # points to a valid kernel
         for node in deserialized_gm.graph.nodes:
-            if node.op == "call_function" and node.target is triton_kernel_wrapper_functional:
+            if (
+                node.op == "call_function"
+                and node.target is triton_kernel_wrapper_functional
+            ):
                 new_kernel_idx = node.kwargs.get("kernel_idx")
                 self.assertIsNotNone(new_kernel_idx)
-                # The kernel should be retrievable from the side table
-                kernel = kernel_side_table.get_kernel(new_kernel_idx)
-                self.assertIsNotNone(kernel)
+                self.assertIsNotNone(kernel_side_table.get_kernel(new_kernel_idx))
 
     def test_dynamo_graph_capture_reorders_parameters(self):
-        """Test that _dynamo_graph_capture_for_export reorders parameters to match original model."""
         from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
 
         class SimpleModel(nn.Module):
@@ -1172,29 +1128,13 @@ from user code:
                 self.linear3 = nn.Linear(30, 10)
 
             def forward(self, x):
-                x = self.linear1(x)
-                x = self.linear2(x)
-                x = self.linear3(x)
-                return x
+                return self.linear3(self.linear2(self.linear1(x)))
 
         model = SimpleModel()
-        example_input = torch.randn(5, 10)
-
-        # Capture the graph
-        capture_fn = _dynamo_graph_capture_for_export(model)
-        gm = capture_fn((example_input,))
-
-        # Get original parameter order
-        original_param_names = [name for name, _ in model.named_parameters()]
-
-        # The GraphModule should have parameters in a consistent order
-        # that can be mapped back to the original model's parameter order
-        self.assertIsNotNone(gm._parameters)
-        # Verify the gm has parameters registered
+        gm = _dynamo_graph_capture_for_export(model)((torch.randn(5, 10),))
         self.assertGreater(len(list(gm.parameters())), 0)
 
     def test_dynamo_graph_capture_preserves_fake_tensor_val(self):
-        """Test that _dynamo_graph_capture_for_export preserves fake tensor as val metadata."""
         from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
         from torch._subclasses.fake_tensor import FakeTensorMode, is_fake
 
@@ -1204,21 +1144,15 @@ from user code:
         fake_mode = FakeTensorMode()
         with fake_mode:
             fake_input = torch.randn(3, 4)
-
-            capture_fn = _dynamo_graph_capture_for_export(fn)
-            gm = capture_fn((fake_input,))
-
-            # Check that placeholder nodes have the fake tensor as "val"
+            gm = _dynamo_graph_capture_for_export(fn)((fake_input,))
             for node in gm.graph.nodes:
                 if node.op == "placeholder":
                     val = node.meta.get("val")
                     if val is not None and isinstance(val, torch.Tensor):
-                        # The val should be the same fake tensor we passed in
                         self.assertTrue(is_fake(val))
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_cross_aot_compile(self):
-        """Test cross-compilation using fake cuda tensors"""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         def fn(x, y):
@@ -1229,10 +1163,9 @@ from user code:
                 torch.randn(3, 4, device="cuda"),
                 torch.randn(3, 4, device="cuda"),
             )
-            compiled_fn = torch.compile(
-                fn,
-                fullgraph=True,
-            ).aot_compile((fake_inputs, {}))
+            compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+                (fake_inputs, {})
+            )
 
         compiled_fn.save_compiled_function(self.path())
         torch._dynamo.reset()
@@ -1248,8 +1181,6 @@ from user code:
     @unittest.skipIf(not c10d.is_available(), "requires c10d")
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_cross_compile_dtensor_transformer(self):
-        """Test cross-compilation with DTensor transformer using compiler toolkit"""
-
         def dtensorify_module(
             module: nn.Module,
             device_mesh,
