@@ -394,6 +394,44 @@ class _NodePickleData:
         # self.meta = node.meta
         self.meta = node.meta
 
+        # Handle Triton kernel nodes - save kernel info for later restoration
+        # We store module path and name so we can re-import the kernel on load.
+        # We don't store the kernel object directly since Triton JIT functions
+        # are often not directly picklable.
+        self.triton_kernel_module = None
+        self.triton_kernel_name = None
+        self.triton_constant_args = None
+        if self._is_triton_kernel_node(node):
+            from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+            kernel_idx = node.kwargs.get("kernel_idx")
+            constant_args_idx = node.kwargs.get("constant_args_idx")
+            if kernel_idx is not None:
+                kernel = kernel_side_table.get_kernel(kernel_idx)
+                # Store kernel reference info for re-importing on load
+                if hasattr(kernel, "__module__") and hasattr(kernel, "__name__"):
+                    self.triton_kernel_module = kernel.__module__
+                    self.triton_kernel_name = kernel.__name__
+            # Only get constant_args if the index is valid (exists in the table)
+            if constant_args_idx is not None and constant_args_idx in kernel_side_table.constant_args:
+                self.triton_constant_args = kernel_side_table.get_constant_args(
+                    constant_args_idx
+                )
+
+    def _is_triton_kernel_node(self, node: torch.fx.Node) -> bool:
+        """Check if this node is a Triton kernel wrapper call."""
+        if node.op != "call_function":
+            return False
+        from torch._higher_order_ops.triton_kernel_wrap import (
+            triton_kernel_wrapper_functional,
+            triton_kernel_wrapper_mutation,
+        )
+
+        return node.target in (
+            triton_kernel_wrapper_mutation,
+            triton_kernel_wrapper_functional,
+        )
+
     def unpickle(
         self,
         graph: torch.fx.Graph,
@@ -404,6 +442,33 @@ class _NodePickleData:
         kwargs = pytree.tree_map_only(
             _NodePickleData, lambda n: mapping[n], self.kwargs
         )
+
+        # Restore Triton kernel to kernel_side_table and update kernel_idx
+        # Re-import the kernel by module path and name
+        if self.triton_kernel_module is not None and self.triton_kernel_name is not None:
+            try:
+                module = importlib.import_module(self.triton_kernel_module)
+                kernel_to_register = getattr(module, self.triton_kernel_name)
+            except (ImportError, AttributeError) as e:
+                raise RuntimeError(
+                    f"Failed to re-import Triton kernel {self.triton_kernel_module}.{self.triton_kernel_name}: {e}"
+                )
+
+            from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
+
+            # Re-register the kernel and get a new kernel_idx
+            new_kernel_idx = kernel_side_table.add_kernel(kernel_to_register)
+            # Update kwargs with the new kernel_idx
+            kwargs = dict(kwargs)
+            kwargs["kernel_idx"] = new_kernel_idx
+
+            # Also restore constant_args if present
+            if self.triton_constant_args is not None:
+                new_constant_args_idx = kernel_side_table.add_constant_args(
+                    self.triton_constant_args
+                )
+                kwargs["constant_args_idx"] = new_constant_args_idx
+
         target = self.target.unpickle(unpickle_state)
         assert callable(target) or isinstance(target, str)
         node = graph.create_node(self.op, target, args, kwargs, self.name, self.type)
