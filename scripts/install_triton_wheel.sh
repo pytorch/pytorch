@@ -1,7 +1,7 @@
 #!/bin/bash
 # Updates Triton to the pinned version for this copy of PyTorch
-PYTHON="python3"
-PIP="$PYTHON -m pip"
+PYTHON="${PYTHON:-python3}"
+PIP="${PIP:-$PYTHON -m pip}"
 BRANCH=$(git rev-parse --abbrev-ref HEAD)
 DOWNLOAD_PYTORCH_ORG="https://download.pytorch.org/whl"
 
