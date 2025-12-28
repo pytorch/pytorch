@@ -887,7 +887,6 @@ from user code:
         self.assertEqual(expected.x, actual.x)
 
     def test_dynamo_reuses_outer_fake_mode(self):
-        """Test that Dynamo reuses an outer FakeTensorMode instead of creating a new one."""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         def fn(x, y):
@@ -895,16 +894,10 @@ from user code:
 
         outer_mode = FakeTensorMode()
         with outer_mode:
-            # Create fake inputs in the outer mode
             fake_x = torch.randn(3, 4)
             fake_y = torch.randn(3, 4)
-
-            # Compile with the outer fake mode active
-            # Dynamo should reuse this mode instead of creating a new one
             compiled_fn = torch.compile(fn, backend="eager")
             result = compiled_fn(fake_x, fake_y)
-
-            # Result should be a fake tensor in the same mode
             self.assertTrue(result.fake_mode is outer_mode)
 
 
