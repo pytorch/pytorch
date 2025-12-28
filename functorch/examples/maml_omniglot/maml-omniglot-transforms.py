@@ -29,6 +29,8 @@ https://github.com/bamos/HowToTrainYourMAMLPytorch
 
 import argparse
 import functools
+import os
+import tempfile
 import time
 
 import matplotlib as mpl
@@ -76,7 +78,7 @@ def main():
     # Set up the Omniglot loader.
     device = args.device
     db = OmniglotNShot(
-        "/tmp/omniglot-data",
+        os.path.join(tempfile.gettempdir(), "omniglot-data"),
         batchsz=args.task_num,
         n_way=args.n_way,
         k_shot=args.k_spt,

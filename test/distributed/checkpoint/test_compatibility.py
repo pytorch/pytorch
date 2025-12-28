@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: distributed"]
 
+import os
+import tempfile
 from unittest.mock import patch
 
 import torch
@@ -50,12 +52,12 @@ class TestDCPCompatbility(TestCase):
         with patch("torch.distributed.checkpoint.metadata.TensorProperties", stp):
             dcp.save(
                 {"a": torch.zeros(4, 4)},
-                dcp.FileSystemWriter("/tmp/dcp_testing"),
+                dcp.FileSystemWriter(os.path.join(tempfile.gettempdir(), "dcp_testing")),
             )
 
         dcp.load(
             {"a": torch.zeros(4, 4)},
-            dcp.FileSystemReader("/tmp/dcp_testing"),
+            dcp.FileSystemReader(os.path.join(tempfile.gettempdir(), "dcp_testing")),
         )
 
     @with_temp_dir

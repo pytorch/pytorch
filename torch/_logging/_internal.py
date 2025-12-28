@@ -713,8 +713,9 @@ Examples:
   Valid keys are "levelname", "message", "pathname", "levelno", "lineno",
   "filename" and "name".
 
-  TORCH_LOGS_OUT=/tmp/output.txt will output the logs to /tmp/output.txt as
-  well. This is useful when the output is long.
+  TORCH_LOGS_OUT can be set to a file path to output the logs to that file as
+  well. This is useful when the output is long. For example:
+  TORCH_LOGS_OUT=/path/to/output.txt
 """
     msg = f"""
 TORCH_LOGS Info

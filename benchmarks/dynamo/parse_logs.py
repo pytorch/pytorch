@@ -2,6 +2,7 @@ import csv
 import os
 import re
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -172,7 +173,7 @@ for name, name2, log in chunker(entries, 3):
 
     # Temporary file names are meaningless, report it's generated code in this
     # case
-    if "/tmp/" in component:
+    if tempfile.gettempdir() in component:
         component = "generated code"
         context = ""
 

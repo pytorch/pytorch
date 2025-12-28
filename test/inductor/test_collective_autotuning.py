@@ -1,6 +1,7 @@
 # Owner(s): ["module: inductor"]
 
 import sys
+import tempfile
 
 import torch
 import torch.distributed as dist
@@ -38,7 +39,7 @@ class TestCollectiveAutotuning2Ranks(MultiProcessTestCase):
         """
         dist.init_process_group(
             backend="nccl",
-            init_method=f"file:///tmp/test_equiv_allreduce_{self.id()}",
+            init_method=f"file://{tempfile.gettempdir()}/test_equiv_allreduce_{self.id()}",
             world_size=self.world_size,
             rank=self.rank,
         )

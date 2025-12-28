@@ -69,7 +69,9 @@ def redirect(std: str, to_file: str):
     ::
 
      # syntactic-sugar for redirect("stdout", "tmp/stdout.log")
-     with redirect_stdout("/tmp/stdout.log"):
+     import tempfile
+     log_file = os.path.join(tempfile.gettempdir(), "stdout.log")
+     with redirect_stdout(log_file):
         print("python stdouts are redirected")
         libc = ctypes.CDLL("libc.so.6")
         libc.printf(b"c stdouts are also redirected"

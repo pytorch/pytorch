@@ -4,9 +4,11 @@ Multi-process fuzzer library that uses worker processes to execute fuzzer.py wit
 """
 
 import multiprocessing as mp
+import os
 import re
 import subprocess
 import sys
+import tempfile
 import time
 from collections import defaultdict
 from dataclasses import dataclass
@@ -37,10 +39,9 @@ def persist_print(msg):
         else:
             print(msg, file=sys.stderr, flush=True)
     except BrokenPipeError:
-        import os
-
-        os.makedirs("/tmp/torchfuzz", exist_ok=True)
-        with open("/tmp/torchfuzz/crash.log", "a") as f:
+        torchfuzz_dir = os.path.join(tempfile.gettempdir(), "torchfuzz")
+        os.makedirs(torchfuzz_dir, exist_ok=True)
+        with open(os.path.join(torchfuzz_dir, "crash.log"), "a") as f:
             f.write(f"BrokenPipeError: {msg}\n")
 
 

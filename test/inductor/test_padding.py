@@ -2,6 +2,7 @@
 import copy
 import functools
 import os
+import tempfile
 import unittest
 
 import torch
@@ -167,7 +168,7 @@ class TestCaseBase(TestCase):
                     f_rhs(*args, **kwargs)
             device_interface.synchronize()
 
-        profile_path = "/tmp/chrome.json"
+        profile_path = os.path.join(tempfile.gettempdir(), "chrome.json")
         p.export_chrome_trace(profile_path)
         print(f"Chrome trace is written to {profile_path}")
 

@@ -3,6 +3,7 @@
 
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 
@@ -11,7 +12,7 @@ def run_fuzzer_with_seed(seed):
     cmd = [sys.executable, "fuzzer.py", "--seed", str(seed), "--template", "unbacked"]
 
     # Clear the output directory first
-    torchfuzz_dir = Path("/tmp/torchfuzz")
+    torchfuzz_dir = Path(tempfile.gettempdir()) / "torchfuzz"
     if torchfuzz_dir.exists():
         for f in torchfuzz_dir.glob("*.py"):
             f.unlink()

@@ -603,7 +603,7 @@ class TestAsyncCheckpointerSpecific(TestCase):
 
         try:
             # This should not raise immediately
-            stage_future, write_future = checkpointer.save("/tmp/test", self.state_dict)
+            stage_future, write_future = checkpointer.save(os.path.join(tempfile.gettempdir(), "test"), self.state_dict)
 
             # But waiting for the write future should raise the error
             with self.assertRaises(RuntimeError) as cm:
