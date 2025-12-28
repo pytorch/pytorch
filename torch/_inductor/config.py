@@ -201,6 +201,10 @@ cpp_cache_precompile_headers: bool = not is_fbcode()
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
+apply_gumbel_max_trick = (
+    os.environ.get("TORCHINDUCTOR_APPLY_GUMBEL_MAX_TRICK", "1") == "1"
+)
+
 # dead code elimination
 dce = False
 
@@ -997,6 +1001,11 @@ class aten_distributed_optimizations:
     # Bucket exposed collectives first
     bucket_exposed_first: bool = True
 
+    # Enable fusion region detection for overlap scheduling cost estimation.
+    # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
+    # as atomic units with memory-bound runtime estimates.
+    enable_fusion_regions: Optional[bool] = None
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
@@ -1277,6 +1286,22 @@ torchinductor_worker_logpath: str = Config(
     env_name_force="TORCHINDUCTOR_WORKER_LOGPATH",
     default="",
 )
+
+
+class auto_chunker:
+    enable = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
+
+    # Don't chunk from a node if the output size is not large enough
+    output_size_threshold = 1024 * 1024
+
+    # Don't chunk from a node if it does not 'amplify' the inputs a lot
+    amplify_ratio_threshold = 8
+
+    num_chunk = (
+        int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS"))  # type: ignore[arg-type]
+        if os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS") is not None
+        else None
+    )  # If not None, use this to force number of chunks
 
 
 # config specific to codegen/cpp.py
@@ -1620,7 +1645,7 @@ class triton:
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
-    spill_threshold: int = 16
+    spill_threshold: int = 32 if torch.version.hip else 16
 
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
@@ -1696,6 +1721,10 @@ class triton:
     mix_order_reduction_autotune_split_size = (
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
         == "1"
+    )
+
+    enable_tlx_templates: bool = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
     )
 
 
@@ -1928,6 +1957,10 @@ class cuda:
     # By default it's None, so that all CUTLASS configs are tuned.
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
+
+    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
+    # By default it's 5, to keep compile time to a reasonable level.
+    nvgemm_max_profiling_configs: Optional[int] = 5
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
