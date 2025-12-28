@@ -349,6 +349,23 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
         logger.info("hi")
         self.assertEqual(len(records), 1)
 
+    @make_settings_test("torch._logging")
+    def test_directory_based_logging(self, records):
+        # Test that the package itself can log
+        logger = logging.getLogger("torch._logging")
+        logger.info("package log")
+
+        # Test that submodules can also log
+        sublogger = logging.getLogger("torch._logging._internal")
+        sublogger.info("submodule log")
+
+        # We should have at least 2 records (one from package, one from submodule)
+        self.assertGreaterEqual(len(records), 2)
+
+        # Verify both loggers are registered and have handlers
+        self.assertTrue(len(logger.handlers) > 0 or logger.propagate)
+        self.assertTrue(len(sublogger.handlers) > 0 or sublogger.propagate)
+
     @make_logging_test(all=logging.DEBUG, dynamo=logging.INFO)
     def test_all(self, _):
         registry = torch._logging._internal.log_registry
@@ -1059,12 +1076,14 @@ exclusions = {
     "benchmarking",
     "loop_ordering",
     "loop_tiling",
+    "auto_chunker",
     "autotuning",
     "graph_region_expansion",
     "hierarchical_compile",
     "compute_dependencies",
     "annotation",
     "node_runtime_estimation",
+    "caching",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

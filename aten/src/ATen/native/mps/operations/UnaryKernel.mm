@@ -29,7 +29,7 @@ static void pow_tensor_scalar_kernel(TensorIteratorBase& iter, const Scalar& exp
   if (!exp_scalar.isComplex() && exp_scalar.to<float>() == 2.0) {
     return lib.exec_unary_kernel(iter, "sqr");
   }
-  if (c10::isIntegralType(iter.common_dtype())) {
+  if (c10::isIntegralType(iter.common_dtype(), true)) {
     return lib.exec_unary_kernel(iter, "pow_scalar", exp_scalar, kInt);
   }
   if (!exp_scalar.isComplex() && exp_scalar.to<float>() == -1.0) {

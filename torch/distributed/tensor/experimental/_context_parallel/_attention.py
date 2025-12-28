@@ -892,7 +892,7 @@ def _sdpa_handler(
 ) -> object:
     # extract local tensor and sharding infos to a OpInfo
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
-    logger.debug("Dispatching op_call: %s", op_info.schema)
+    logger.debug("Dispatching op_call: %s", op_info.schema or op_call)
 
     # sharding propagation
     # TODO: remove the context parallel strategy from the default propagation
