@@ -1344,12 +1344,24 @@ def _get_amdsmi_device_memory_used(device: Device = None) -> int:
 
 def _get_amdsmi_memory_usage(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
+    try:
+        return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
+    except amdsmi.AmdSmiLibraryException as e:
+        # Some GPU architectures (e.g., MI300X) may return
+        # AMDSMI_STATUS_UNEXPECTED_DATA for activity queries
+        warnings.warn(f"Unable to get memory usage via AMDSMI: {e}", stacklevel=2)
+        return 0
 
 
 def _get_amdsmi_utilization(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
+    try:
+        return amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
+    except amdsmi.AmdSmiLibraryException as e:
+        # Some GPU architectures (e.g., MI300X) may return
+        # AMDSMI_STATUS_UNEXPECTED_DATA for activity queries
+        warnings.warn(f"Unable to get GPU utilization via AMDSMI: {e}", stacklevel=2)
+        return 0
 
 
 def _get_amdsmi_temperature(device: Device = None) -> int:
@@ -1376,7 +1388,13 @@ def _get_amdsmi_power_draw(device: Device = None) -> int:
 
 def _get_amdsmi_clock_rate(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
-    clock_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
+    try:
+        clock_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
+    except amdsmi.AmdSmiLibraryException as e:
+        # Some GPU architectures (e.g., MI300X) may return
+        # AMDSMI_STATUS_UNEXPECTED_DATA for clock info queries
+        warnings.warn(f"Unable to get clock rate via AMDSMI: {e}", stacklevel=2)
+        return 0
     if "cur_clk" in clock_info:  # ROCm 6.2 deprecation
         clock_rate = clock_info["cur_clk"]
     else:
