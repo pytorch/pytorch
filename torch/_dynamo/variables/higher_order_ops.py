@@ -1469,13 +1469,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # order they are see while tracing). This is useful for autograd.Function
     # backward where we do need to account for all the inputs of the backwards
     # to be lifted as inputs for making the fwd-bwd graph consistent.
-    set_subgraph_inputs: Literal[
-        "automatic",
-        "automatic_with_forced_inputs",
-        "flatten_manual",
-        "manual",
-        "flatten_automatic",
-    ] = "automatic",
+    set_subgraph_inputs: str = "automatic",
     # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
     # access intermediates from the subgraph, this is useful for mutation
     allow_side_effects: bool = False,
