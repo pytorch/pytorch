@@ -8,7 +8,7 @@ import os
 import pickle
 import tempfile
 import unittest
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from unittest.mock import patch
 
 import torch
@@ -918,7 +918,7 @@ from user code:
         with fake_mode:
             fake_input = torch.randn(3, 4, device="cuda")
             with torch._dynamo.config.patch(enable_aot_compile=True):
-                with contextlib.ExitStack() as stack:
+                with ExitStack() as stack:
                     jd = aot_export_joint_with_descriptors(stack, fn, (fake_input,))
                     compiled_fn = aot_compile_joint_with_descriptors(
                         jd,
