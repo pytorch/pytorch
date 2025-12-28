@@ -128,9 +128,11 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         artifact = self._compiled_artifact
         kernel = self.kernel
 
-        # Allocate workspace if needed (workspace_size is pre-computed)
+        # Allocate workspace if needed
         if self.workspace_size > 0:
-            self._workspace = torch.empty(self.workspace_size, device=out.device, dtype=torch.int8)
+            self._workspace = torch.empty(
+                self.workspace_size, device=out.device, dtype=torch.int8
+            )
         else:
             self._workspace = None
 
@@ -141,7 +143,13 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             # This ensures the kernel runs on the same stream as the CUDA events
             # used for benchmarking, giving accurate timing measurements.
             stream = torch.cuda.current_stream()
-            kernel.run(args, artifact, stream=stream, workspace=workspace, assume_supported_args=True)
+            kernel.run(
+                args,
+                artifact,
+                stream=stream,
+                workspace=workspace,
+                assume_supported_args=True,
+            )
 
         return run_kernel
 
