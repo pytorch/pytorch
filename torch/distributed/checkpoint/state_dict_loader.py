@@ -303,8 +303,9 @@ def _load_state_dict(
     tensor_fqns_to_broadcast: list[str] = []
     if experimental_broadcast_replication:
         try:
+            # TODO: Support mixed meshes
+            # Currently we assume all parameters in a model share the same Mesh topology
             # Find the first DTensor to infer the DeviceMesh
-            # We assume all parameters in a model share the same Mesh topology
             def _path_to_fqn(path):
                 fqn: list[str] = []
                 for entry in path:
