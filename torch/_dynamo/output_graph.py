@@ -49,6 +49,7 @@ from torch import fx, Tensor
 from torch._C._dynamo import guards
 from torch._dynamo.exc import ShortenTraceback, TensorifyScalarRestartAnalysis
 from torch._guards import (
+    active_fake_mode,
     CompileContext,
     CompileId,
     GlobalContextCheckpointState,
@@ -606,12 +607,22 @@ class OutputGraph(OutputGraphCommon):
         import torch._functorch.config as _config
 
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            fake_mode = torch._subclasses.FakeTensorMode(
-                shape_env=shape_env,
-                # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
-                allow_non_fake_inputs=bool(self.export),
-                export=self.export,
-            )
+            outer_fake_mode = active_fake_mode()
+            if outer_fake_mode is not None:
+                if outer_fake_mode.shape_env is None:
+                    outer_fake_mode.shape_env = shape_env
+                if outer_fake_mode.shape_env is not None:
+                    outer_fake_mode.static_shapes = False
+                fake_mode = outer_fake_mode
+                self.reusing_outer_fake_mode = True
+            else:
+                fake_mode = torch._subclasses.FakeTensorMode(
+                    shape_env=shape_env,
+                    # TODO (tmanlaibaatar) Remove this once we always lift params and buffers
+                    allow_non_fake_inputs=bool(self.export),
+                    export=self.export,
+                )
+                self.reusing_outer_fake_mode = False
         self.tracing_context: TracingContext = TracingContext(fake_mode)
         self.tracing_context.traced_code.append(f_code)
         self.traced_code = self.tracing_context.traced_code
@@ -2232,16 +2243,31 @@ class OutputGraph(OutputGraphCommon):
                     # from scratch when we go to AOTAutograd. But the ShapeEnv must be preserved as
                     # Dynamo made decisions about what is dynamic or not / guards from the user code
                     # that is not in graph.
-                    backend_fake_mode = torch._subclasses.FakeTensorMode(
-                        shape_env=old_fake_mode.shape_env,
-                    )
+                    outer_fake_mode = active_fake_mode()
+                    if outer_fake_mode is not None:
+                        if outer_fake_mode.shape_env is None:
+                            outer_fake_mode.shape_env = old_fake_mode.shape_env
+                        if outer_fake_mode.shape_env is not None:
+                            outer_fake_mode.static_shapes = False
+                        backend_fake_mode = outer_fake_mode
+                        self.skip_guards_check = True
+                    else:
+                        backend_fake_mode = torch._subclasses.FakeTensorMode(
+                            shape_env=old_fake_mode.shape_env,
+                        )
                 # TODO(voz): Ostensibly, this should be scoped and
                 # restore back to old_fake_mode, but doing so currently violates
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
+                example_inputs = self._transfer_example_inputs_to_mode(
+                    self.example_inputs(), backend_fake_mode
+                )
+            else:
+                example_inputs = self.example_inputs()
+
             with self.restore_global_state():
-                compiled_fn = self.call_user_compiler(gm, self.example_inputs())
+                compiled_fn = self.call_user_compiler(gm, example_inputs)
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
 
@@ -2488,8 +2514,40 @@ class OutputGraph(OutputGraphCommon):
         return next_name
 
     def example_inputs(self) -> list[torch.Tensor]:
-        result = [arg.example for arg in self.graphargs]
-        return result
+        return [
+            arg.fake_tensor if arg.fake_tensor is not None else arg.example
+            for arg in self.graphargs
+        ]
+
+    def _transfer_example_inputs_to_mode(
+        self,
+        example_inputs: list[torch.Tensor],
+        target_mode: torch._subclasses.FakeTensorMode,
+    ) -> list[torch.Tensor]:
+        from torch._subclasses.fake_tensor import is_fake
+        from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+        def transfer_tensor(t: torch.Tensor) -> torch.Tensor:
+            if not isinstance(t, torch.Tensor):
+                return t
+
+            if is_traceable_wrapper_subclass(t):
+                attrs, ctx = t.__tensor_flatten__()
+                inner_tensors = {
+                    attr: transfer_tensor(getattr(t, attr)) for attr in attrs
+                }
+                return type(t).__tensor_unflatten__(  # type: ignore[attr-defined]
+                    inner_tensors, ctx, t.shape, t.stride()
+                )
+
+            if is_fake(t):
+                if t.fake_mode is target_mode:
+                    return t
+                return target_mode.from_tensor(t, static_shapes=True)
+
+            return t
+
+        return [transfer_tensor(t) for t in example_inputs]
 
     def remove_unused_get_attr_nodes(self) -> None:
         for node in sorted(self.graph.find_nodes(op="get_attr"), reverse=True):
