@@ -394,20 +394,24 @@ class _NodePickleData:
         # self.meta = node.meta
         self.meta = node.meta
 
-        self.triton_kernel_module = None
-        self.triton_kernel_name = None
-        self.triton_constant_args = None
+        self.triton_kernel_module: Optional[str] = None
+        self.triton_kernel_name: Optional[str] = None
+        self.triton_constant_args: Optional[dict[str, Any]] = None
         if self._is_triton_kernel_node(node):
             from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
             kernel_idx = node.kwargs.get("kernel_idx")
             constant_args_idx = node.kwargs.get("constant_args_idx")
-            if kernel_idx is not None:
+            if kernel_idx is not None and isinstance(kernel_idx, int):
                 kernel = kernel_side_table.get_kernel(kernel_idx)
                 if hasattr(kernel, "__module__") and hasattr(kernel, "__name__"):
                     self.triton_kernel_module = kernel.__module__
                     self.triton_kernel_name = kernel.__name__
-            if constant_args_idx is not None and constant_args_idx in kernel_side_table.constant_args:
+            if (
+                constant_args_idx is not None
+                and isinstance(constant_args_idx, int)
+                and constant_args_idx in kernel_side_table.constant_args
+            ):
                 self.triton_constant_args = kernel_side_table.get_constant_args(
                     constant_args_idx
                 )
@@ -436,7 +440,10 @@ class _NodePickleData:
             _NodePickleData, lambda n: mapping[n], self.kwargs
         )
 
-        if self.triton_kernel_module is not None and self.triton_kernel_name is not None:
+        if (
+            self.triton_kernel_module is not None
+            and self.triton_kernel_name is not None
+        ):
             try:
                 module = importlib.import_module(self.triton_kernel_module)
                 kernel_to_register = getattr(module, self.triton_kernel_name)
