@@ -1281,12 +1281,13 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         get_plain_tensors,
     )
 
-    fake_modes = []
-
+    # Prefer the tracing context's fake mode if available.
     if context := TracingContext.try_get():
         fake_mode = context.fake_mode
         if fake_mode is not None:
-            fake_modes.append((fake_mode, "tracing context", 0))
+            return fake_mode
+
+    fake_modes = []
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
