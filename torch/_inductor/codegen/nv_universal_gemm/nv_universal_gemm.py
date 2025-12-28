@@ -85,24 +85,6 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         artifact = self._compiled_artifact
         kernel = self.kernel
 
-<<<<<<< Updated upstream
-        def run_kernel():
-            # Get current stream at run time, not at closure creation time.
-            # This ensures the kernel runs on the same stream as the CUDA events
-            # used for benchmarking, giving accurate timing measurements.
-            stream = torch.cuda.current_stream()
-            kernel.run(args, artifact, stream=stream, assume_supported_args=True)
-=======
-        # Allocate workspace if needed
-        if self.workspace_size > 0:
-            self._workspace = torch.empty(
-                self.workspace_size, device=out.device, dtype=torch.int8
-            )
-        else:
-            self._workspace = None
-
-        workspace = self._workspace
-
         # Capture stream at closure creation time, like Triton does.
         # This ensures the kernel runs on the same stream where CUDA events
         # are recorded for benchmarking, giving accurate timing measurements.
@@ -110,14 +92,7 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         stream = device_interface.get_raw_stream(out.device.index)
 
         def run_kernel():
-            kernel.run(
-                args,
-                artifact,
-                stream=stream,
-                workspace=workspace,
-                assume_supported_args=True,
-            )
->>>>>>> Stashed changes
+            kernel.run(args, artifact, stream=stream, assume_supported_args=True)
 
         return run_kernel
 
