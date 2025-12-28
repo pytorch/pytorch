@@ -20,7 +20,11 @@ from copy import deepcopy
 from itertools import product
 from random import randint
 
-import psutil
+try:
+    import psutil
+    HAS_PSUTIL = True
+except ImportError:
+    HAS_PSUTIL = False
 
 import torch
 import torch.cuda
@@ -36,12 +40,15 @@ from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestA
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
     _get_torch_cuda_version,
-    PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM70OrLater,
     TEST_CUDNN,
     TEST_MULTIGPU,
     tf32_on_and_off,
 )
+try:
+    from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_GREEN_CONTEXT
+except ImportError:
+    PLATFORM_SUPPORTS_GREEN_CONTEXT = False
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     largeTensorTest,
@@ -178,6 +185,7 @@ class TestCuda(TestCase):
             thread.join()
 
     @serialTest()
+    @unittest.skipIf(torch.version.hip, "Host memory stats not supported on ROCm")
     def test_host_memory_stats(self):
         # Helper functions
         def empty_stats():
@@ -6639,6 +6647,7 @@ class TestGreenContext(TestCase):
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
+@unittest.skipIf(not HAS_PSUTIL, "psutil not found")
 class TestGDS(TestCase):
     def _get_tmp_dir_fs_type(self):
         my_path = os.path.realpath(tempfile.gettempdir())
