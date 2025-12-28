@@ -2524,7 +2524,6 @@ class OutputGraph(OutputGraphCommon):
         example_inputs: list[torch.Tensor],
         target_mode: torch._subclasses.FakeTensorMode,
     ) -> list[torch.Tensor]:
-        from torch._subclasses.fake_tensor import is_fake
         from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
         def transfer_tensor(t: torch.Tensor) -> torch.Tensor:
@@ -2540,7 +2539,7 @@ class OutputGraph(OutputGraphCommon):
                     inner_tensors, ctx, t.shape, t.stride()
                 )
 
-            if is_fake(t):
+            if isinstance(t, FakeTensor):
                 if t.fake_mode is target_mode:
                     return t
                 return target_mode.from_tensor(t, static_shapes=True)
