@@ -1880,6 +1880,8 @@ class CommonTemplate:
             # is fixed.
             elif is_mps_backend(self.device):
                 pass  # no device asserts in MPS
+            elif is_pallas_backend(self.device):
+                pass  # Pallas generates Python/JAX code, not C++/Triton
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
                 self.assertTrue(("TORCH_CHECK" in code) is has_assert)
