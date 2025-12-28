@@ -358,7 +358,7 @@ class PyCodegen:
             self.uses[value] += 1
             try:
                 self.call_reconstruct(value)
-            except NotImplementedError:
+            except NotImplementedError as e:
                 unimplemented(
                     gb_type="Reconstruction failure",
                     context=str(value),
@@ -370,6 +370,7 @@ class PyCodegen:
                         "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have "
                         "reconstruction rules may be fundamentally unreconstructable.",
                     ],
+                    from_exc=e,
                 )
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())
