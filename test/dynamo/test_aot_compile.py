@@ -49,6 +49,23 @@ MY_LAMBDA = lambda x: x + 1  # noqa: E731
 
 EPS = torch.tensor(1e-7)
 
+try:
+    import triton
+    import triton.language as tl
+
+    @triton.jit
+    def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(x_ptr + offsets, mask=mask)
+        y = tl.load(y_ptr + offsets, mask=mask)
+        tl.store(output_ptr + offsets, x + y, mask=mask)
+
+except ImportError:
+    add_kernel = None
+
 
 class MooType:
     def __init__(self, x):
@@ -1015,24 +1032,25 @@ from user code:
         )
         from torch._subclasses.fake_tensor import FakeTensorMode
 
-        def fn(x):
-            return x * 2 + 1
+        class SimpleModule(torch.nn.Module):
+            def forward(self, x):
+                return x * 2 + 1
 
         def simple_compiler(gm, example_inputs):
             return gm
 
+        mod = SimpleModule().cuda()
         fake_mode = FakeTensorMode()
         with fake_mode:
             fake_input = torch.randn(3, 4, device="cuda")
-            with torch._dynamo.config.patch(enable_aot_compile=True):
-                with ExitStack() as stack:
-                    jd = aot_export_joint_with_descriptors(stack, fn, (fake_input,))
-                    compiled_fn = aot_compile_joint_with_descriptors(
-                        jd,
-                        fw_compiler=simple_compiler,
-                        bw_compiler=simple_compiler,
-                    )
-                    self.assertTrue(callable(compiled_fn))
+            with ExitStack() as stack:
+                jd = aot_export_joint_with_descriptors(stack, mod, (fake_input,))
+                compiled_fn = aot_compile_joint_with_descriptors(
+                    jd,
+                    fw_compiler=simple_compiler,
+                    bw_compiler=simple_compiler,
+                )
+                self.assertTrue(callable(compiled_fn))
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_inductor_standalone_compile_with_fake_inputs(self):
@@ -1066,25 +1084,12 @@ from user code:
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_graph_pickler_triton_kernel_serialization(self):
-        import triton
-        import triton.language as tl
-
         from torch._higher_order_ops.triton_kernel_wrap import (
             kernel_side_table,
             triton_kernel_wrapper_functional,
         )
         from torch._subclasses.fake_tensor import FakeTensorMode
         from torch.fx._graph_pickler import GraphPickler
-
-        @triton.jit
-        def add_kernel(x_ptr, y_ptr, output_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-            pid = tl.program_id(axis=0)
-            block_start = pid * BLOCK_SIZE
-            offsets = block_start + tl.arange(0, BLOCK_SIZE)
-            mask = offsets < n_elements
-            x = tl.load(x_ptr + offsets, mask=mask)
-            y = tl.load(y_ptr + offsets, mask=mask)
-            tl.store(output_ptr + offsets, x + y, mask=mask)
 
         graph = torch.fx.Graph()
         x = graph.placeholder("x")
