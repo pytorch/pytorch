@@ -1259,3 +1259,31 @@ def conv1d_to_conv2d(
 
     # Squeeze dummy dimension back out: (N,C_out,L_out,1) -> (N,C_out,L_out)
     return out_2d.squeeze(-1)
+
+# index_add_ correctly accumulates overlapping unfold windows
+@register_decomposition(torch.ops.aten.unfold_backward)
+def unfold_backward(
+    grad_in: torch.Tensor, 
+    input_sizes: List[int], 
+    dim: int, 
+    size: int, 
+    step: int
+) -> torch.Tensor:
+    out = grad_in.new_zeros(input_sizes)
+    
+    if dim < 0:
+        dim += len(input_sizes)
+    
+    num_windows = grad_in.size(dim)
+    
+    if num_windows == 0:
+        return out
+
+    indices = torch.arange(0, num_windows, device=grad_in.device)
+    
+    for i in range(size):
+        target_indices = indices.mul(step).add_(i)
+        source_grad = grad_in.select(-1, i)
+        out.index_add_(dim, target_indices, source_grad)
+        
+    return out
