@@ -34,7 +34,6 @@ import operator
 import random
 import re
 import sys
-import traceback
 import types
 import weakref
 from collections.abc import Callable, MutableMapping
@@ -207,7 +206,6 @@ from .functions import (
     FunctoolsPartialVariable,
     FunctoolsWrapsVariable,
     SysFunctionVariable,
-    TracebackVariable,
     TritonKernelVariable,
     UserFunctionVariable,
     UserMethodVariable,
@@ -1312,8 +1310,6 @@ class VariableBuilder:
         elif is_lru_cache_wrapped_function(value):
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
-        elif value is traceback.clear_frames:
-            return TracebackVariable(source=self.source)
         elif value is sys.exc_info or (
             sys.version_info >= (3, 11) and value is sys.exception
         ):
@@ -1933,7 +1929,10 @@ class VariableBuilder:
                 gb_type="Attempted to wrap RNN, GRU, or LSTM",
                 context=str(value),
                 explanation="Dynamo does not support RNN, GRU, or LSTM.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[
+                    "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         if getattr(value, "_is_fsdp_managed_module", False):

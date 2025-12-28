@@ -201,7 +201,7 @@ class TestEmbeddingOp(DTensorTestBase):
         sharded_emb1 = self._apply_sharding(emb1, 0, mesh)
         output1 = sharded_emb1(replicated_inp)
 
-        emb2 = torch.nn.Embedding(10, 29, device=self.device_type)
+        emb2 = torch.nn.Embedding(10, 23, device=self.device_type)
         sharded_emb2 = self._apply_sharding(emb2, 0, mesh)
         output2 = sharded_emb2(replicated_inp)
 
@@ -213,7 +213,7 @@ class TestEmbeddingOp(DTensorTestBase):
         self.assertIsInstance(partial_placement2, _MaskPartial)
         output2.full_tensor()
 
-        self.assertTrue(id(partial_placement1), id(partial_placement2))
+        self.assertEqual(id(partial_placement1), id(partial_placement2))
 
         # case 2: two embeddings with the same logical_dim_size, but different logical_shape
         # thus they will have different _MaskPartial placements (with no cache hit)
@@ -223,7 +223,7 @@ class TestEmbeddingOp(DTensorTestBase):
         output3 = sharded_emb3(replicated_inp)
         partial_placement3 = output3.placements[0]
         self.assertIsInstance(partial_placement3, _MaskPartial)
-        output2.full_tensor()
+        output3.full_tensor()
 
         # not equal because of different logical_shape, despite of same logical_dim_size
         self.assertNotEqual(partial_placement1, partial_placement3)
