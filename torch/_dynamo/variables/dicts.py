@@ -204,6 +204,21 @@ class ConstDictVariable(VariableTracker):
         self.original_items = items.copy()
         self.user_cls = user_cls
 
+    def is_python_constant(self) -> bool:
+        # Avoid realizing lazy entries when checking for constant-ness.
+        for key_tracker, value in self.items.items():
+            if (
+                isinstance(key_tracker.vt, variables.LazyVariableTracker)
+                and not key_tracker.vt.is_realized()
+            ):
+                return False
+            if (
+                isinstance(value, variables.LazyVariableTracker)
+                and not value.is_realized()
+            ):
+                return False
+        return super().is_python_constant()
+
     def _get_dict_cls_from_user_cls(self, user_cls: type) -> type:
         accepted_dict_types = (dict, collections.OrderedDict, collections.defaultdict)
 
