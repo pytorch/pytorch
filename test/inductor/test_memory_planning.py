@@ -135,11 +135,9 @@ class TestMemoryPlanning(TestCase):
         # check allocation is done after the unbacked symint is computed
         # NOTE: the exact `int_array_N` numbering is not stable across codegen
         # changes; match the shape expression itself and its ordering.
-        FileCheck().check("auto u0 = u0_raw;").check(
-            "{10L, 8L*u0, 32L};"
-        ).check("AtenTensorHandle pool0_handle;").check(
-            "aoti_torch_empty_strided(3,"
-        ).run(code)
+        FileCheck().check("auto u0 = u0_raw;").check("{10L, 8L*u0, 32L};").check(
+            "AtenTensorHandle pool0_handle;"
+        ).check("aoti_torch_empty_strided(3,").run(code)
 
         # all AtenTensorHandle allocated using aoti_torch__alloc_from_pool are wrapped with RAIIAtenTensorHandle
         # otherwise we'll have memory leak
