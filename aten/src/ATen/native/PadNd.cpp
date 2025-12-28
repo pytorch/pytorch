@@ -204,7 +204,7 @@ static std::string_view padding_mode_string(padding_mode m) {
 }
 
 
-Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mode_int, std::optional<double> value) {
+Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mode_int, const std::optional<Scalar>& value) {
   const auto input_dim = self.dim();
   TORCH_CHECK(pad.size() % 2 == 0, "Padding length must be divisible by 2");
   TORCH_CHECK(static_cast<int64_t>(pad.size()) <= input_dim * 2,
@@ -212,9 +212,9 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
   auto mode = static_cast<at::padding_mode>(mode_int);
 
   if (mode == at::padding_mode::constant) {
-    return at::constant_pad_nd_symint(self, pad, value.value_or(0.0));
+    return at::constant_pad_nd_symint(self, pad, value.value_or(0));
   }
-  TORCH_CHECK(!value.has_value() || *value == 0,
+  TORCH_CHECK(!value.has_value() || value->equal(0),
               "Padding mode \"", padding_mode_string(mode),
               "\" doesn't take in value argument");
 
@@ -251,7 +251,7 @@ Tensor _pad_enum_symint(const Tensor &self, c10::SymIntArrayRef pad, int64_t mod
   C10_THROW_ERROR(NotImplementedError, error_msg.str());
 }
 
-Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, std::string_view mode, std::optional<double> value) {
+Tensor pad_symint(const Tensor &self, c10::SymIntArrayRef pad, std::string_view mode, const std::optional<Scalar>& value) {
   const auto mode_enum = [&] {
     if (mode == "reflect") {
       return at::padding_mode::reflect;
