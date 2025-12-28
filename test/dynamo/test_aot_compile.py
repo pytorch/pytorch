@@ -887,7 +887,6 @@ from user code:
         self.assertEqual(expected.x, actual.x)
 
     def test_dynamo_reuses_outer_fake_mode(self):
-        """Test that Dynamo reuses an outer FakeTensorMode instead of creating a new one."""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         def fn(x, y):
@@ -895,21 +894,14 @@ from user code:
 
         outer_mode = FakeTensorMode()
         with outer_mode:
-            # Create fake inputs in the outer mode
             fake_x = torch.randn(3, 4)
             fake_y = torch.randn(3, 4)
-
-            # Compile with the outer fake mode active
-            # Dynamo should reuse this mode instead of creating a new one
             compiled_fn = torch.compile(fn, backend="eager")
             result = compiled_fn(fake_x, fake_y)
-
-            # Result should be a fake tensor in the same mode
             self.assertTrue(result.fake_mode is outer_mode)
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_aot_compile_joint_with_descriptors_bundled_cache(self):
-        """Test that aot_compile_joint_with_descriptors uses bundled cache when enable_aot_compile is set."""
         from torch._functorch.aot_autograd import (
             aot_compile_joint_with_descriptors,
             aot_export_joint_with_descriptors,
@@ -919,29 +911,20 @@ from user code:
         def fn(x):
             return x * 2 + 1
 
+        def simple_compiler(gm, example_inputs):
+            return gm
+
         fake_mode = FakeTensorMode()
         with fake_mode:
             fake_input = torch.randn(3, 4, device="cuda")
-
-            # Use a simple eager backend to verify compilation works
-            def simple_compiler(gm, example_inputs):
-                return gm
-
             with torch._dynamo.config.patch(enable_aot_compile=True):
                 with contextlib.ExitStack() as stack:
-                    jd = aot_export_joint_with_descriptors(
-                        stack,
-                        fn,
-                        (fake_input,),
-                    )
-
+                    jd = aot_export_joint_with_descriptors(stack, fn, (fake_input,))
                     compiled_fn = aot_compile_joint_with_descriptors(
                         jd,
                         fw_compiler=simple_compiler,
                         bw_compiler=simple_compiler,
                     )
-
-                    # Verify the result is callable
                     self.assertTrue(callable(compiled_fn))
 
 
