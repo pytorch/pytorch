@@ -1378,9 +1378,10 @@ def _get_amdsmi_clock_rate(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     try:
         clock_info = amdsmi.amdsmi_get_clock_info(handle, amdsmi.AmdSmiClkType.GFX)
-    except amdsmi.AmdSmiLibraryException:
+    except amdsmi.AmdSmiLibraryException as e:
         # Some GPU architectures (e.g., MI300X) may return
         # AMDSMI_STATUS_UNEXPECTED_DATA for clock info queries
+        warnings.warn(f"Unable to get clock info via AMDSMI: {e}", stacklevel=2)
         return 0
     if "cur_clk" in clock_info:  # ROCm 6.2 deprecation
         clock_rate = clock_info["cur_clk"]
