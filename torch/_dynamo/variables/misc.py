@@ -1833,16 +1833,6 @@ class StringFormatVariable(VariableTracker):
         codegen.extend_output(create_call_function_ex(True, False))
 
 
-class ObjectVariable(VariableTracker):
-    # placeholder for unknown / opaque values
-    def __init__(self, value: object, **kwargs):
-        super().__init__(**kwargs)
-        self.value = value
-
-    def python_type(self):
-        return object
-
-
 class DebuggingVariable(VariableTracker):
     """
     Represents a call to a debugging function like print(), or something
