@@ -892,7 +892,7 @@ class TensorVariable(VariableTracker):
         return None
 
     def method_is_contiguous(
-        self, memory_format: VariableTracker | None = None
+        self, tx: "InstructionTranslator", memory_format: VariableTracker | None = None
     ) -> ConstantVariable | None:
         memory_format_const = (
             memory_format.as_python_constant()
