@@ -3,4 +3,4 @@
 from . import aten, base, contiguous_mm, decompose_k, registry, tlx, triton
 
 # expose the entry function
-from .registry import get_template_heuristic
+from .registry import get_template_heuristic, with_fixed_template_config

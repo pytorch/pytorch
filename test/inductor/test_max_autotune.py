@@ -1722,6 +1722,100 @@ class TestMaxAutotune(TestCase):
                 self.assertEqual(len(configs), 1)
                 self.assertEqual(configs[0], expected_config)
 
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+    )
+    def test_with_fixed_template_config(self):
+        """
+        Test that with_fixed_template_config correctly overrides heuristics
+        to yield exactly one fixed config while preserving get_extra_kwargs
+        and adjust_kernel_inputs from the real heuristic.
+        """
+        from torch._inductor.kernel.mm import MMKernelInputs
+        from torch._inductor.template_heuristics.params import DictKernelTemplateParams
+        from torch._inductor.template_heuristics.registry import (
+            get_template_heuristic,
+            with_fixed_template_config,
+        )
+
+        template_uid = torch._inductor.kernel.mm.mm_template.uid
+
+        # Create a dummy graph for the GraphLowering context
+        gm = make_fx(lambda: torch.zeros(2, 3))()
+        graph = GraphLowering(gm)
+
+        # The graph handler is needed to create IR nodes and use V.graph.sizevars
+        with V.set_graph_handler(graph), config.patch({"max_autotune": True}):
+            # Create IR Buffer nodes for testing (not actual tensors)
+            mat1 = Buffer(
+                name="mat1",
+                layout=FixedLayout(
+                    torch.device(GPU_TYPE),
+                    dtype=torch.float32,
+                    size=(64, 64),
+                ),
+            )
+            mat2 = Buffer(
+                name="mat2",
+                layout=FixedLayout(
+                    torch.device(GPU_TYPE),
+                    dtype=torch.float32,
+                    size=(64, 64),
+                ),
+            )
+            kernel_inputs = MMKernelInputs([mat1, mat2])
+
+            # Get the real heuristic to compare behavior
+            real_heuristic = get_template_heuristic(template_uid, GPU_TYPE, "mm")
+
+            # Define a fixed config as KernelTemplateParams
+            fixed_config_dict = {
+                "BLOCK_M": 64,
+                "BLOCK_N": 64,
+                "BLOCK_K": 32,
+                "num_stages": 2,
+                "num_warps": 4,
+            }
+            fixed_config = DictKernelTemplateParams(fixed_config_dict)
+
+            with with_fixed_template_config(
+                device_type=GPU_TYPE,
+                template_op_pairs=[(template_uid, "mm")],
+                config=fixed_config,
+            ):
+                # Get the heuristic within the context (same instance, patched method)
+                heuristic = get_template_heuristic(template_uid, GPU_TYPE, "mm")
+
+                # Verify get_template_configs yields exactly one config with our fixed values
+                configs = list(heuristic.get_template_configs(kernel_inputs, "mm"))
+                self.assertEqual(len(configs), 1)
+                # Verify the config contains our fixed values
+                config_kwargs = configs[0].to_kwargs()
+                for key, value in fixed_config_dict.items():
+                    self.assertEqual(
+                        config_kwargs[key],
+                        value,
+                        f"Expected {key}={value}, got {config_kwargs[key]}",
+                    )
+
+                # Verify get_extra_kwargs is still delegated to the real heuristic
+                extra_kwargs = heuristic.get_extra_kwargs(kernel_inputs, "mm")
+                real_extra_kwargs = real_heuristic.get_extra_kwargs(kernel_inputs, "mm")
+                self.assertEqual(extra_kwargs, real_extra_kwargs)
+
+                # Verify adjust_kernel_inputs is still delegated to the real heuristic
+                adjusted = heuristic.adjust_kernel_inputs(kernel_inputs, "mm")
+                real_adjusted = real_heuristic.adjust_kernel_inputs(kernel_inputs, "mm")
+                self.assertEqual(type(adjusted), type(real_adjusted))
+
+            # Verify the original behavior is restored after exiting the context
+            restored_configs = list(
+                real_heuristic.get_template_configs(kernel_inputs, "mm")
+            )
+            # Should have more than 1 config after restoration
+            self.assertGreater(len(restored_configs), 1)
+
     @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     @unittest.skipIf(TEST_WITH_ROCM, "out_dtype override only available on NVIDIA")
     def test_bmm_out_dtype(self):
