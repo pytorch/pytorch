@@ -604,7 +604,7 @@ def view_copy_dtype(
     self: torch.Tensor,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    return self.to(dtype).clone()
+    return self.clone().view(dtype)
 
 
 def _get_shape_permutation_like(
