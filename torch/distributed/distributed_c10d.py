@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 """Distributed Collective Communication (c10d)."""
 
-import collections.abc
 import contextlib
 import copy
 import ctypes
@@ -15,7 +14,7 @@ import sys
 import time
 import warnings
 from collections import namedtuple
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import timedelta
 from typing import Any, NewType, TYPE_CHECKING
 from typing_extensions import deprecated
@@ -1191,7 +1190,7 @@ def _check_not_self_rank(group: ProcessGroup, rank: int, rank_type: str):
         )
 
 
-def _as_iterable(obj) -> collections.abc.Iterable:
+def _as_iterable(obj) -> Iterable:
     return obj if isinstance(obj, list) else (obj,)
 
 
@@ -2001,8 +2000,9 @@ def _new_process_group_helper(
         if Backend.NCCL in backend_config.device_backend_map.values():
             pg._set_default_backend(ProcessGroup.BackendType.NCCL)
         elif Backend._plugins.keys():
-            custom_backend = next(iter(Backend._plugins.keys()))
-            if custom_backend in backend_config.device_backend_map.values():
+            # Set custom as default if backend config contains at least one custom backend
+            custom_backends: Iterable[str] = Backend._plugins.keys() and backend_config.device_backend_map.values()
+            if len(custom_backends) > 0:
                 pg._set_default_backend(ProcessGroup.BackendType.CUSTOM)
         else:
             pg._set_default_backend(ProcessGroup.BackendType.GLOO)
