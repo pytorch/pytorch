@@ -972,7 +972,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
                 else:
                     raise ValueError(f"Unsupported op: {op}")
 
-                for output, out_size in zip(outputs, out_sizes):
+                for output, out_size in zip(outputs, out_sizes, strict=True):
                     expect = torch.full((out_size,), expected_val)
                     self.assertTrue(
                         torch.allclose(output, expect),
