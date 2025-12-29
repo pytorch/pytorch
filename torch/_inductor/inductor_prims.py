@@ -118,28 +118,22 @@ def _reserve_rng_state(device: torch.device, used_offset):
         dev_index = torch.cuda.current_device()
 
     gen = torch.cuda.default_generators[dev_index]
-    seed = gen.initial_seed()
-    old_off = gen.get_offset()
-    new_offset = old_off + used_offset
-    try:
-        concrete_offset = int(new_offset)
-        gen.set_offset(concrete_offset)
-    except Exception:
-        pass
-    base = old_off // 4  # convert raw offset to Philox-4x32 counter units
-    return seed, base
+    seed_base, offset_base, internal_offset = torch.ops.aten.inductor_reserve_rng_state(gen, int(used_offset))
+    offset_val = internal_offset.item()
+    final_offset = offset_base + offset_val
+    base = final_offset.div(4, rounding_mode='floor')
+
+    return seed_base, base
 
 
 def _rand_eager_offset_impl(offset, device: torch.device) -> Tensor:
     """
     Reserve `offset` 32-bit Philox samples and return a 1-element int64 tensor
     with packed (seed, base) in the lower 64 bits:
-
+        should not enter this, this is just placeholder
         packed = (seed << 32) | (base & 0xFFFFFFFF).
     """
-    seed, base = _reserve_rng_state(device, int(offset))
-    packed = (seed << 32) | (base & 0xFFFFFFFF)
-    return torch.tensor([packed], dtype=torch.int64, device=device)
+    return torch.empty(1, dtype=torch.int64, device=device)
 
 
 def _rand_eager_offsets_impl(offsets, device: torch.device) -> Tensor:
@@ -149,13 +143,13 @@ def _rand_eager_offsets_impl(offsets, device: torch.device) -> Tensor:
     containing the packed (seed, base) values for each reservation.
     """
     states = [_reserve_rng_state(device, int(off)) for off in offsets]
-    packed = [(seed << 32) | (base & 0xFFFFFFFF) for seed, base in states]
-
-    # Keep the same host->device pattern as your original version:
-    cpu = torch.tensor(packed, dtype=torch.int64).pin_memory()
-    out = torch.empty_like(cpu, device=device)
-    out.copy_(cpu, non_blocking=True)
-    return out
+    seeds = [s for s, b in states]
+    bases = [b for s, b in states]
+    seeds_tensor = torch.stack(seeds).view(-1)
+    bases_tensor = torch.stack(bases).view(-1)
+    i64 = torch.int64
+    packed = (seeds_tensor.to(dtype=i64) << 32) | (bases_tensor.to(dtype=i64) & 0xFFFFFFFF)
+    return packed
 
 
 def _rand_eager_offsets_meta(offsets, device: torch.device):
@@ -169,7 +163,7 @@ rand_eager_offset = make_prim(
         "Reserve `offset` 32-bit Philox samples on `device` and return a "
         "1-element int64 tensor containing packed (seed, base)."
     ),
-    tags=(torch.Tag.nondeterministic_seeded, torch.Tag.cudagraph_unsafe),
+    tags=(torch.Tag.nondeterministic_seeded,),
 )
 
 
@@ -183,7 +177,7 @@ rand_eager_offsets = _prims._make_prim(
         "`offsets`, reserves that many 32-bit Philox samples and returns "
         "packed (seed, base) values."
     ),
-    tags=(torch.Tag.nondeterministic_seeded, torch.Tag.cudagraph_unsafe),
+    tags=(torch.Tag.nondeterministic_seeded,),
 )
 
 

@@ -162,6 +162,8 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   std::pair<uint64_t, uint64_t> philox_engine_inputs(uint64_t increment);
 
   static c10::DeviceType device_type();
+  friend std::tuple<Tensor, Tensor, Tensor> at::native::inductor_reserve_rng_state(
+    const Generator& gen, int64_t increment);
 
  private:
   CUDAGeneratorImpl* clone_impl() const override;

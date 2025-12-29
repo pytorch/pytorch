@@ -21,30 +21,31 @@ patterns = PatternMatcherPass(subsystem="joint_graph_passes")
 aten = torch.ops.aten
 
 
-def _shape_to_offset(size, device: torch.device) -> int:
+def _shape_to_offset(shape, device: torch.device):
+    # Modified from torch/_prims/rng_prims.py:philox_rand_offset
     nelem = 1
-    for s in size:
+    for s in shape:
         nelem *= s
-    # Normalize device
+
     if device is None:
         device = torch.device("cpu")
-    elif not isinstance(device, torch.device):
+    elif isinstance(device, str):
         device = torch.device(device)
-    # CPU or non-CUDA builds: skip alignment, no CUDA queries
+
     if device.type != "cuda":
         return 0
 
-    UNROLL = 4
-    prop = torch.cuda.get_device_properties(device)
+    block_size = 256
+    unroll = 4
+    curand4_engine_calls = 4
 
-    threads_per_round = (
-        prop.multi_processor_count * prop.max_threads_per_multi_processor
-    )
-    rounds_per_thread = (nelem + threads_per_round * UNROLL - 1) // (
-        threads_per_round * UNROLL
-    )
-    used_offset = rounds_per_thread * UNROLL
-    return used_offset
+    device_property = torch.cuda.get_device_properties(device)
+
+    blocks_per_sm = device_property.max_threads_per_multi_processor // block_size
+    grid_size = (nelem + block_size - 1) // block_size
+    grid_size = min(grid_size, device_property.multi_processor_count * blocks_per_sm)
+
+    return ((nelem - 1) // (block_size * grid_size * unroll) + 1) * curand4_engine_calls
 
 
 def replace_random_passes(gm: torch.fx.GraphModule):
