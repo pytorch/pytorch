@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/xpu/XPUContext.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
+#include <ATen/xpu/XPUGraphsUtils.h>
 #include <c10/xpu/XPUCachingAllocator.h>
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
@@ -445,7 +446,7 @@ static void initXpuMethodBindings(PyObject* module) {
   });
   m.def("_xpu_setMemoryFraction", [](double fraction, c10::DeviceIndex device) {
     c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
-  });
+      });
 }
 
 // Callback for python part. Used for additional initialization of python
@@ -481,6 +482,18 @@ static PyObject* THXPModule_initExtension(PyObject* self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THXPModule_isCurrentStreamCapturing_wrap(
+    PyObject* self,
+    PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  if (at::xpu::currentStreamCaptureStatus() == at::xpu::CaptureStatus::Executing) {
+    Py_RETURN_FALSE;
+  } else {
+    Py_RETURN_TRUE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // NOLINTNEXTLINE(*-c-arrays*, *-global-variables)
 static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_init", THXPModule_initExtension, METH_NOARGS, nullptr},
@@ -504,6 +517,10 @@ static struct PyMethodDef _THXPModule_methods[] = {
     {"_xpu_getCurrentRawStream",
      THXPModule_getCurrentStream_raw,
      METH_O,
+     nullptr},
+    {"_xpu_isCurrentStreamCapturing",
+     THXPModule_isCurrentStreamCapturing_wrap,
+     METH_NOARGS,
      nullptr},
     {"_xpu_setStream",
      castPyCFunctionWithKeywords(THXPModule_setStream_wrap),
