@@ -201,6 +201,10 @@ cpp_cache_precompile_headers: bool = not is_fbcode()
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
+apply_gumbel_max_trick = (
+    os.environ.get("TORCHINDUCTOR_APPLY_GUMBEL_MAX_TRICK", "1") == "1"
+)
+
 # dead code elimination
 dce = False
 
@@ -241,6 +245,7 @@ use_fast_math = os.environ.get("TORCHINDUCTOR_USE_FAST_MATH") == "1"
 # - "intermediates": all non-outputs share storage, outputs each get unique storage
 # - "outputs": two pools, one for intermediates (freed on return) and one for outputs
 # - "combined": a single pool for both intermediates and outputs
+# pyrefly: ignore [bad-assignment]
 memory_pool: Literal["none", "intermediates", "outputs", "combined"] = os.environ.get(
     "TORCHINDUCTOR_MEMORY_POOL", "intermediates"
 )  # type: ignore[assignment]
@@ -461,6 +466,11 @@ distributed_max_autotune_gemm = (
     os.environ.get("TORCHINDUCTOR_DISTRIBUTED_MAX_AUTOTUNE_GEMM") == "1"
 )
 
+# Pipeline autotuning for max-autotune-gemm. Overlap lowering and benchmarking on GPU
+pipeline_max_autotune_gemm = (
+    os.environ.get("TORCHINDUCTOR_PIPELINE_GEMM_AUTOTUNING") == "1"
+)
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -469,6 +479,13 @@ max_autotune_pointwise = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_POINTWISE") 
 
 # enable slow autotuning passes to select gemm algorithms
 max_autotune_gemm = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_GEMM") == "1"
+
+inductor_default_autotune_warmup = int(
+    os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_WARMUP", 25)
+)
+inductor_default_autotune_rep = int(
+    os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_REP", 100)
+)
 
 # Modifies the number of autotuning choices displayed, set to None for all
 autotune_num_choices_displayed: Optional[int] = 10
@@ -544,6 +561,7 @@ max_autotune_conv_backends = os.environ.get(
 # Specify the size of the search space for GEMM autotuning.
 # DEFAULT     - balance between compile time overhead and performance
 # EXHAUSTIVE  - maximize performance
+# pyrefly: ignore [bad-assignment]
 max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
@@ -551,6 +569,7 @@ max_autotune_gemm_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.ge
 # Specify the size of the search space for flex attention autotuning.
 # DEFAULT     - balance between compile time overhead and performance
 # EXHAUSTIVE  - maximize performance
+# pyrefly: ignore [bad-assignment]
 max_autotune_flex_search_space: Literal["DEFAULT", "EXHAUSTIVE"] = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_FLEX_SEARCH_SPACE", "DEFAULT"
 ).upper()  # type: ignore[assignment]
@@ -977,6 +996,15 @@ class aten_distributed_optimizations:
 
     # Maximum prefetch or bucketing candidates. Mainly intended for compile time.
     max_coll_distance: Optional[int] = None
+    log_final_collectives_estimations: bool = False
+
+    # Bucket exposed collectives first
+    bucket_exposed_first: bool = True
+
+    # Enable fusion region detection for overlap scheduling cost estimation.
+    # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
+    # as atomic units with memory-bound runtime estimates.
+    enable_fusion_regions: Optional[bool] = None
 
 
 def parallel_compile_enabled_internally() -> bool:
@@ -1260,6 +1288,22 @@ torchinductor_worker_logpath: str = Config(
 )
 
 
+class auto_chunker:
+    enable = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
+
+    # Don't chunk from a node if the output size is not large enough
+    output_size_threshold = 1024 * 1024
+
+    # Don't chunk from a node if it does not 'amplify' the inputs a lot
+    amplify_ratio_threshold = 8
+
+    num_chunk = (
+        int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS"))  # type: ignore[arg-type]
+        if os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS") is not None
+        else None
+    )  # If not None, use this to force number of chunks
+
+
 # config specific to codegen/cpp.py
 class cpp:
     """
@@ -1417,6 +1461,9 @@ class triton:
     # TODO - need to debug why this prevents cleanup
     cudagraph_trees_history_recording = False
 
+    # Emit objgraph backref dumps for leaked cudagraph pool tensors
+    cudagraph_trees_objgraph = False
+
     # Enable cudagraph support for mutated inputs from prior cudagraph pool
     cudagraph_support_input_mutation = not is_fbcode()
 
@@ -1572,6 +1619,7 @@ class triton:
     # 1/True: enable, use tuning to pick between different subkernels
     # 2: enable, force using persistent reduction (for debugging)
     # 3: enable, force using non-persistent reduction (for debugging)
+    # pyrefly: ignore [bad-assignment]
     multi_kernel: Literal[0, 1, 2, 3] = int(
         os.environ.get("TORCHINDUCTOR_MULTI_KERNEL", "0")
     )  # type: ignore[assignment]
@@ -1597,7 +1645,7 @@ class triton:
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
-    spill_threshold: int = 16
+    spill_threshold: int = 32 if torch.version.hip else 16
 
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
@@ -1675,6 +1723,10 @@ class triton:
         == "1"
     )
 
+    enable_tlx_templates: bool = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
+    )
+
 
 class aot_inductor:
     """
@@ -1703,6 +1755,7 @@ class aot_inductor:
     # 1: enable saving intermediate tensor values
     # 2: enable printing intermediate tensor values
     # 3: enable printing kernel names only (useful for pinpointing troublesome kernels)
+    # pyrefly: ignore [bad-assignment]
     debug_intermediate_value_printer: Literal["0", "1", "2", "3"] = os.environ.get(
         "AOT_INDUCTOR_DEBUG_INTERMEDIATE_VALUE_PRINTER", "0"
     )  # type: ignore[assignment]
@@ -1904,6 +1957,10 @@ class cuda:
     # By default it's None, so that all CUTLASS configs are tuned.
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
+
+    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
+    # By default it's 5, to keep compile time to a reasonable level.
+    nvgemm_max_profiling_configs: Optional[int] = 5
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]

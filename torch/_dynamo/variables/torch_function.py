@@ -579,7 +579,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         tx: "InstructionTranslator",
         tensor_var: VariableTracker,
         class_type: type,
-        cls_source: Source,
+        cls_source: Source | None,
     ) -> "TensorWithTFOverrideVariable":
         # [Note: __torch_function__] coerce `tensor_var` into a
         # TensorWithTFOverrideVariable. In eager, this is just a type change.
@@ -588,7 +588,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
         input_tensor_type = kwargs.pop("class_type")
-        assert input_tensor_type in (torch.Tensor, torch.nn.Parameter), (
+        assert input_tensor_type in (torch.Tensor, torch.nn.Parameter) or issubclass(
+            input_tensor_type, torch.Tensor
+        ), (
             f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
         )
         var = cls(class_type=class_type, **kwargs)
