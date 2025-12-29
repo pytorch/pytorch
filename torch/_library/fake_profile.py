@@ -58,6 +58,7 @@ def _generate_fake_kernel(op_name: str, op_profile: set[OpProfile]) -> Callable:
             fake_strides = [-1] * t.rank
             expected = 1
             fake_stride = expected
+            # pyrefly: ignore [bad-assignment]
             for i in range(t.rank):
                 fake_strides[i] = fake_stride  # type: ignore[assignment]
                 fake_stride = fake_stride * fake_shape[i]  # type: ignore[assignment]

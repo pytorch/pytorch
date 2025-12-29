@@ -1,818 +1,929 @@
-from __future__ import annotations
+# pyre-strict
+
+"""Public interfaces for PyTorch Inductor runtime caching.
+
+This module provides high-level caching interfaces for memoization and
+result caching functionality.
+"""
 
 import atexit
+import functools
 import json
-import os
-from abc import ABC, abstractmethod
-from ast import literal_eval
-from enum import Enum
-from functools import partial, wraps
-from logging import DEBUG, getLogger, INFO, Logger
+import logging
+import pickle
+import shutil
+from collections.abc import Callable
+from dataclasses import dataclass
+from hashlib import sha256
 from os import PathLike
 from pathlib import Path
-from threading import Lock
-from time import time
-from typing import Any, TYPE_CHECKING, TypeAlias
-from typing_extensions import override
+from typing import cast, TypedDict
+from typing_extensions import ParamSpec, TypeVar
 
-from . import config, context, exceptions, implementations as impls, locks
+from filelock import FileLock
 
+import torch
+from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._inductor.utils import clear_on_fresh_cache
 
-if TYPE_CHECKING:
-    from collections.abc import Callable
-
-    from .utils import P, R
+from . import config, implementations, locks
 
 
-# ideally we could annotate this as tuple[P.args, P.kwargs] but
-# functionally that doesn't work as P is defined in a specific
-# scope and P.args/P.kwargs are only valid in that scope
-Params: TypeAlias = tuple[Any, Any]
+logger = torch._logging.getArtifactLogger(__name__, "caching")
 
-logger: Logger = getLogger(__name__)
-
-
-class _IntfCallbackOrigin(Enum):
-    RECORD = "record"
-    GET = "get"
-    INSERT = "insert"
+# Type variable for function parameters
+_P = ParamSpec("_P")
+# Type variable for function return type
+_R = TypeVar("_R")
+# Type variable for encoded result type
+_EncodedR = TypeVar("_EncodedR")
 
 
-class _IntfCallbackAction(Enum):
-    REPLAY = "replay"
-    RECORD_INSERTED = "record_inserted"
-    RECORD_NOT_INSERTED = "record_not_inserted"
-    RECORD_NOT_INSERTED_REPLAY = "record_not_inserted_replay"
-    HIT = "hit"
-    MISS = "miss"
-    INSERTED = "inserted"
-    NOT_INSERTED = "not_inserted"
+class CacheDumpEntry(TypedDict):
+    """A single cache entry in the dump format.
+
+    Attributes:
+        params: The encoded function parameters.
+        result: The encoded function result.
+    """
+
+    params: object
+    result: object
 
 
-def _intf_callback(
-    origin: _IntfCallbackOrigin,
-    action: _IntfCallbackAction,
-    dur: float,
-    fn: Callable[P, R],
-    params: Params,
-    *args: Any,
-) -> None:
-    if origin == _IntfCallbackOrigin.RECORD:
-        result: R = args[0]
-        if action == _IntfCallbackAction.REPLAY:
-            logger.log(
-                DEBUG,
-                "[RECORD] for fn %s with params %r cached, "
-                "returned result %r in %f seconds.",
-                fn.__name__,
-                params,
-                result,
-                dur,
-            )
-        elif action == _IntfCallbackAction.RECORD_INSERTED:
-            fn_dur: float = args[1]
-            logger.log(
-                DEBUG,
-                "[RECORD] for fn %s with params %r not cached, "
-                "calculated and cached result %r in %f seconds "
-                "of which %f seconds was spent on the function call.",
-                fn.__name__,
-                params,
-                result,
-                dur,
-                fn_dur,
-            )
-        elif action == _IntfCallbackAction.RECORD_NOT_INSERTED:
-            fn_dur = args[1]
-            logger.log(
-                DEBUG,
-                "[RECORD] for fn %s with params %r not cached, "
-                "calculated result %r but was not able to "
-                "insert it into the cache as a matching "
-                "entry already exists; returned calculated result in %f seconds "
-                "of which %f seconds was spent on the function call.",
-                fn.__name__,
-                params,
-                result,
-                dur,
-                fn_dur,
-            )
-        elif action == _IntfCallbackAction.RECORD_NOT_INSERTED_REPLAY:
-            fn_dur = args[1]
-            cached_result: R = args[2]
-            logger.log(
-                DEBUG,
-                "[RECORD] for fn %s with params %r not cached, "
-                "calculated result %r but was not able to "
-                "insert it into the synchronization cache as a matching "
-                "entry already exists; returned cached result %r in %f seconds "
-                "of which %f seconds was spent on the function call.",
-                fn.__name__,
-                params,
-                result,
-                cached_result,
-                dur,
-                fn_dur,
-            )
-        else:
-            raise NotImplementedError
-    elif origin == _IntfCallbackOrigin.GET:
-        if action == _IntfCallbackAction.HIT:
-            result = args[0]
-            logger.log(
-                DEBUG,
-                "[GET] for fn %s with params %r cached, "
-                "returned result %r in %f seconds.",
-                fn.__name__,
-                params,
-                result,
-                dur,
-            )
-        elif action == _IntfCallbackAction.MISS:
-            logger.log(
-                DEBUG,
-                "[GET] for fn %s with params %r not cached, "
-                "returned nothing in %f seconds.",
-                fn.__name__,
-                params,
-                dur,
-            )
-        else:
-            raise NotImplementedError
-    elif origin == _IntfCallbackOrigin.INSERT:
-        result = args[0]
-        if action == _IntfCallbackAction.INSERTED:
-            logger.log(
-                DEBUG,
-                "[INSERT] for fn %s with params %r and "
-                "result %r inserted in %f seconds.",
-                fn.__name__,
-                params,
-                result,
-                dur,
-            )
-        elif action == _IntfCallbackAction.NOT_INSERTED:
-            logger.log(
-                DEBUG,
-                "[INSERT] for fn %s with params %r and "
-                "result %r not inserted in %f seconds as there is "
-                "already has a matching entry.",
-                fn.__name__,
-                params,
-                result,
-                dur,
-            )
-        else:
-            raise NotImplementedError
-    else:
-        raise NotImplementedError
+class CacheDump(TypedDict):
+    """The structure of the memoizer cache dump file.
+
+    The cache_entries field contains either:
+    - Direct entries: {cache_key: CacheDumpEntry} when no sub_key is used
+    - Nested entries: {sub_key: {cache_key: CacheDumpEntry}} when sub_key is set
+
+    Multiple Memoizer instances with different sub_keys can coexist in the same file.
+
+    Attributes:
+        cache_entries: Dictionary mapping cache keys (or sub_keys) to cache entries.
+        cache_size: The total number of cache entries. When sub_keys are used,
+            this is the sum of entries across all sub_keys.
+    """
+
+    cache_entries: dict[str, CacheDumpEntry | dict[str, CacheDumpEntry]]
+    cache_size: int
 
 
-class _CacheIntf(ABC):
-    def __init__(self) -> None:
-        self._lock: Lock = Lock()
+@dataclass
+class CacheEntry:
+    """A cache entry containing encoded parameters and result.
 
+    This dataclass stores the encoded form of function parameters and
+    the (possibly encoded) result for human-readable cache dumps.
+
+    Attributes:
+        encoded_params: The encoded function parameters used for debugging/inspection.
+        encoded_result: The (possibly encoded) result of the function call.
+    """
+
+    encoded_params: object
+    encoded_result: object
+
+
+class _BaseMemoizer:
+    """Base class for memoization interfaces.
+
+    This class provides the common memoize method that orchestrates
+    record and replay functionality.
+    """
+
+    @staticmethod
     def _make_key(
-        self,
-        fn: Callable[P, R],
-        params: Params,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-    ) -> Any:
-        callee: str = fn.__name__
-        fkey: Any = (
-            (callee, params)
-            if not custom_params_encoder
-            # pyrefly: ignore [invalid-param-spec]
-            else (callee, custom_params_encoder(*params[0], **params[1]))
-        )
-        ikey: Any = context._isolation_key(
-            ischema if ischema is not None else context._DEFAULT_ISOLATION_SCHEMA
-        )
-        return (fkey, ikey)
-
-    def _make_dummy_record_wrapper(self, fn: Callable[P, R]) -> Callable[P, R]:
-        @wraps(fn)
-        def dummy_wrapper(*args: Any, **kwargs: Any) -> R:
-            # pyrefly: ignore [invalid-param-spec]
-            return fn(*args, **kwargs)
-
-        # pyrefly: ignore [bad-return]
-        return dummy_wrapper
-
-    @abstractmethod
-    def _make_record_wrapper(
-        self,
-        fn: Callable[P, R],
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
-    ) -> Callable[P, R]:
-        pass
-
-    @abstractmethod
-    def _get(
-        self,
-        fn: Callable[P, R],
-        params: Params,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
-    ) -> impls.Hit | None:
-        pass
-
-    @abstractmethod
-    def _insert(
-        self,
-        fn: Callable[P, R],
-        params: Params,
-        result: R,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-    ) -> bool:
-        pass
-
-    @property
-    def lock(self) -> locks._LockProtocol:
-        """Get a context manager for acquiring the file lock.
-
-        Uses file locking to ensure thread safety across processes.
+        custom_params_encoder: Callable[..., object] | None,
+        *args: object,
+        **kwargs: object,
+    ) -> str:
+        """Generate a cache key from function parameters.
 
         Args:
-            timeout: Optional timeout in seconds (float) for acquiring the file lock.
+            custom_params_encoder: Optional encoder to apply to function parameters.
+                                  If None, params are pickled directly.
+            *args: Positional arguments to encode.
+            **kwargs: Keyword arguments to encode.
 
         Returns:
-            A callable that returns a context manager for the file lock.
+            A 32-character hex string suitable for use as a cache key.
         """
+        if custom_params_encoder is None:
+            # Pickle the parameters directly
+            pickled_params: bytes = pickle.dumps((args, kwargs))
+        else:
+            # Encode the parameters using the custom encoder
+            encoded_params = custom_params_encoder(*args, **kwargs)
+            # Pickle the encoded output
+            pickled_params = pickle.dumps(encoded_params)
 
-        def _lock_with_timeout(
-            timeout: float | None = None,
-        ) -> locks._LockContextManager:
-            return locks._acquire_lock_with_timeout(self._lock, timeout)
+        # Hash the pickled bytes with SHA256
+        hash_obj = sha256(pickled_params)
 
-        return _lock_with_timeout
-
-    def get(
-        self,
-        fn: Callable[P, R],
-        params: Params,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
-    ) -> impls.Hit | None:
-        if not config.IS_CACHING_MODULE_ENABLED():
-            return None
-
-        start_t: float = time()
-        with self.lock():  # type: ignore[call-arg]
-            result: impls.Hit | None = self._get(
-                fn,
-                params,
-                ischema=ischema,
-                custom_params_encoder=custom_params_encoder,
-                custom_result_decoder=custom_result_decoder,
-            )
-        dur: float = time() - start_t
-
-        _intf_callback(
-            _IntfCallbackOrigin.GET,
-            _IntfCallbackAction.HIT if result else _IntfCallbackAction.MISS,
-            dur,
-            fn,
-            params,
-            *((result.value,) if result else ()),
-        )
-
-        return result
-
-    def insert(
-        self,
-        fn: Callable[P, R],
-        params: Params,
-        result: R,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-    ) -> bool:
-        if not config.IS_CACHING_MODULE_ENABLED():
-            return False
-
-        start_t: float = time()
-        with self.lock():  # type: ignore[call-arg]
-            inserted: bool = self._insert(
-                fn,
-                params,
-                result,
-                ischema=ischema,
-                custom_params_encoder=custom_params_encoder,
-                custom_result_encoder=custom_result_encoder,
-            )
-        dur: float = time() - start_t
-
-        _intf_callback(
-            _IntfCallbackOrigin.INSERT,
-            _IntfCallbackAction.INSERTED
-            if inserted
-            else _IntfCallbackAction.NOT_INSERTED,
-            dur,
-            fn,
-            params,
-            result,
-        )
-
-        return inserted
+        # Get hex digest and truncate to 32 characters
+        return hash_obj.hexdigest()[:32]
 
     def record(
         self,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[..., Any] | None = None,
-        custom_result_encoder: Callable[..., Any] | None = None,
-        custom_result_decoder: Callable[..., ...] | None = None,
-    ) -> Callable[[Callable[..., ...]], Callable[..., ...]]:
-        if custom_result_encoder and not custom_result_decoder:
-            raise exceptions.CustomResultDecoderRequiredError(
-                "Custom result encoder provided without custom result decoder."
-            )
-        elif not custom_result_encoder and custom_result_decoder:
-            raise exceptions.CustomResultEncoderRequiredError(
-                "Custom result decoder provided without custom result encoder."
-            )
-        elif not config.IS_CACHING_MODULE_ENABLED():
-            return self._make_dummy_record_wrapper
-        else:
-            return partial(
-                self._make_record_wrapper,
-                ischema=ischema,
-                custom_params_encoder=custom_params_encoder,
-                custom_result_encoder=custom_result_encoder,
-                custom_result_decoder=custom_result_decoder,
-            )
+        custom_params_encoder: Callable[_P, object] | None = None,
+        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
+    ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+        """Record a function call result. Must be implemented by subclasses.
 
+        This can be used standalone to cache results without necessarily
+        replaying them, for example for logging or analytics purposes.
 
-class _FastCacheIntf(_CacheIntf):
-    def __init__(self) -> None:
-        super().__init__()
-        self._imc: impls._InMemoryCacheImpl = impls._InMemoryCacheImpl()
-        self._callee_to_odc: dict[str, impls._OnDiskCacheImpl] = {}
+        See memoize() for a description of the arguments.
+        """
+        raise NotImplementedError
 
-    def _get_odc_from_callee(self, callee: str) -> impls._OnDiskCacheImpl:
-        if not (odc := self._callee_to_odc.get(callee)):
-            callee_sub_dir: PathLike[str] = Path(callee)
-            odc = impls._OnDiskCacheImpl(sub_dir=callee_sub_dir)
-            self._callee_to_odc[callee] = odc
-        # pyrefly: ignore [unbound-name]
-        return odc
-
-    @override
-    def _make_record_wrapper(
+    def replay(
         self,
-        fn: Callable[P, R],
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
-    ) -> Callable[P, R]:
-        @wraps(fn)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            start_t: float = time()
-            params = (
-                args,
-                kwargs,
-            )
-            with self.lock():
-                get: impls.Hit | None = self._get(
-                    fn,
-                    params,
-                    ischema=ischema,
-                    custom_params_encoder=custom_params_encoder,
-                    custom_result_decoder=custom_result_decoder,
-                )
+        custom_params_encoder: Callable[_P, object] | None = None,
+        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+    ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+        """Replay a cached function result. Must be implemented by subclasses.
 
-                if get:
-                    dur: float = time() - start_t
-                    _intf_callback(
-                        _IntfCallbackOrigin.RECORD,
-                        _IntfCallbackAction.REPLAY,
-                        dur,
-                        fn,
-                        params,
-                        get.value,
-                    )
-                    return get.value
-                else:
-                    fn_start_t: float = time()
-                    result: R = fn(*args, **kwargs)
-                    fn_dur: float = time() - fn_start_t
-                    inserted: bool = self._insert(
-                        fn,
-                        params,
-                        result,
-                        ischema=ischema,
-                        custom_params_encoder=custom_params_encoder,
-                        custom_result_encoder=custom_result_encoder,
-                    )
-                    dur = time() - start_t
-                    _intf_callback(
-                        _IntfCallbackOrigin.RECORD,
-                        _IntfCallbackAction.RECORD_INSERTED
-                        if inserted
-                        else _IntfCallbackAction.RECORD_NOT_INSERTED,
-                        dur,
-                        fn,
-                        params,
-                        result,
-                        fn_dur,
-                    )
-                    return result
+        This can be used standalone to use cached values that are otherwise
+        too hard to automatically record.
 
-        return wrapper
+        See memoize() for a description of the arguments.
+        """
+        raise NotImplementedError
 
-    @override
-    def _get(
+    def memoize(
         self,
-        fn: Callable[P, R],
-        params: Params,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
-    ) -> impls.Hit | None:
-        key: Any = self._make_key(
-            fn, params, ischema=ischema, custom_params_encoder=custom_params_encoder
-        )
-        odc: impls._OnDiskCacheImpl = self._get_odc_from_callee(fn.__name__)
-        with locks._acquire_many_impl_locks_with_timeout(self._imc, odc):
-            try:
-                # we'll check the memoization first, since that is much faster
-                # than checking the on-disk cache (and the two should be consistent
-                # regardless)
-                imc_get: impls.Hit | None = self._imc.get(key)
-                if imc_get:
-                    if custom_result_decoder:
-                        return impls.Hit(value=custom_result_decoder(imc_get.value))
-                    else:
-                        return imc_get
-                else:
-                    odc_get: impls.Hit | None = odc.get(key)
-                    if odc_get:
-                        if custom_result_decoder:
-                            return impls.Hit(value=custom_result_decoder(odc_get.value))
-                        return odc_get
-                return None
-            except exceptions.KeyEncodingError as err:
-                raise exceptions.CustomParamsEncoderRequiredError(fn, params) from err
+        custom_params_encoder: Callable[_P, object] | None = None,
+        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
+        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+    ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+        """Memoize a function with record and replay functionality.
 
-    @override
-    def _insert(
-        self,
-        fn: Callable[P, R],
-        params: Params,
-        result: R,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-    ) -> bool:
-        key: Any = self._make_key(
-            fn, params, ischema=ischema, custom_params_encoder=custom_params_encoder
-        )
-        odc: impls._OnDiskCacheImpl = self._get_odc_from_callee(fn.__name__)
-        with locks._acquire_many_impl_locks_with_timeout(self._imc, odc):
-            try:
-                encoded_result: Any = (
-                    result
-                    if not custom_result_encoder
-                    else custom_result_encoder(result)
-                )
-                # reverse order of get, as we don't want to memoize values
-                # if we haven't actually inserted them into the on-disk cache
-                # so that the memoization and the on-disk cache remain consistent
-                if odc.insert(key, encoded_result):
-                    assert self._imc.insert(key, encoded_result)
-                    return True
-                return False
-            except exceptions.KeyEncodingError as err:
-                raise exceptions.CustomParamsEncoderRequiredError(fn, params) from err
-            except exceptions.ValueEncodingError as err:
-                raise exceptions.CustomResultEncoderRequiredError(
-                    f"Custom result encoder required for function {fn} with parameters {params} and result {result}."
-                ) from err
+        This is a decorator that attempts to replay cached results first.
+        If a cache miss occurs, it records the result by executing the wrapped function.
 
+        Args:
+            custom_params_encoder: Optional encoder for function parameters.
+                                  If None, parameters are pickled directly.
+            custom_result_encoder: Optional encoder factory for function results.
+                                  Takes function parameters and returns an encoder
+                                  function that converts R -> _EncodedR.
+            custom_result_decoder: Optional decoder factory for cached results.
+                                  Takes function parameters and returns a decoder
+                                  function that converts _EncodedR -> R.
 
-class _DeterministicCacheIntf(_CacheIntf):
-    def __init__(self) -> None:
-        super().__init__()
-        self._imc: impls._InMemoryCacheImpl = impls._InMemoryCacheImpl()
+        Returns:
+            A decorator function that can be applied to functions.
 
-        if fpath_str := os.environ.get(
-            "TORCHINDUCTOR_PRE_POPULATE_DETERMINISTIC_CACHE"
-        ):
-            fpath: Path = Path(fpath_str)
-            fpath_parent: PathLike[str] = fpath.parent
-            if fpath.is_file():
-                odc: impls._OnDiskCacheImpl = impls._OnDiskCacheImpl(
-                    sub_dir=fpath_parent
-                )
-                with odc.lock():
-                    with open(fpath) as fp:
-                        dump_for_pre_population: dict[str, str] = json.load(fp)
-                    for key_r, value_r in dump_for_pre_population.items():
-                        key: bytes = literal_eval(key_r)
-                        value: bytes = literal_eval(value_r)
-                        self._imc._memory[key] = value
-
-        if config.STRICTLY_PRE_POPULATED_DETERMINISM:
-            # we'll never need a synchronization cache if we're in strictly pre-populated mode,
-            # as we'll only ever be checking the memoized pre-population
-            self._get_sc_from_callee: Callable[
-                [str], None | impls._OnDiskCacheImpl | impls._RemoteCacheImpl
-            ] = lambda callee: None
-        elif config.GLOBAL_DETERMINISM:
-            # if we want global determinism we need to use a remote cache with strong
-            # consistency as the synchronization cache
-            self._rc: impls._RemoteCacheImpl = impls._RemoteCacheImpl()
-            if not self._rc.has_strong_consistency:
-                raise exceptions.DeterministicCachingRequiresStrongConsistencyError
-            self._get_sc_from_callee = lambda callee: self._rc
-        elif config.LOCAL_DETERMINISM:
-            # local determinism can use the on-disk cache as the synchronization cache,
-            # for cleanliness of the on-disk cache we subdir based on the callee
-            self._callee_to_odc: dict[str, impls._OnDiskCacheImpl] = {}
-            self._get_sc_from_callee = self._get_odc_from_callee
-        else:
-            raise exceptions.DeterministicCachingInvalidConfigurationError(
-                "Deterministic caching must specify at least one of STRICTLY_PRE_POPULATED_DETERMINISM, "
-                "GLOBAL_DETERMINISM, or LOCAL_DETERMINISM."
+        Example:
+            @memoizer.memoize(
+                custom_params_encoder=my_param_encoder,
+                custom_result_encoder=my_result_encoder_factory,
+                custom_result_decoder=my_result_decoder_factory,
             )
+            def expensive_function(x, y):
+                return x + y
+        """
 
-        atexit.register(self._dump_imc_to_disk)
+        def wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+            """Wrap the function to enable memoization with replay and record.
 
-    def __del__(self) -> None:
-        atexit.unregister(self._dump_imc_to_disk)
-        del self
+            Args:
+                fn: The function to wrap.
 
-    def _get_odc_from_callee(self, callee: str) -> impls._OnDiskCacheImpl:
-        if not (odc := self._callee_to_odc.get(callee)):
-            callee_sub_dir: PathLike[str] = Path(callee)
-            odc = impls._OnDiskCacheImpl(sub_dir=callee_sub_dir)
-            self._callee_to_odc[callee] = odc
-        # pyrefly: ignore [unbound-name]
-        return odc
+            Returns:
+                A wrapped version of the function.
+            """
+            # If caching is disabled, return the original function unchanged
+            if not config.IS_CACHING_MODULE_ENABLED():
+                return fn
 
-    def _dump_imc_to_disk(self) -> Path | None:
-        with self.lock():  # type: ignore[call-arg]
-            to_dump: dict[str, str] = {
-                repr(key): repr(value) for key, value in self._imc._memory.items()
-            }
-            if not to_dump:
-                return None
+            # Create decorated versions using record and replay
+            replay_fn = self.replay(
+                custom_params_encoder,
+                custom_result_decoder,
+            )(fn)
+            record_fn = self.record(
+                custom_params_encoder,
+                custom_result_encoder,
+            )(fn)
 
-            odc: impls._OnDiskCacheImpl = impls._OnDiskCacheImpl(
-                sub_dir=Path("dcache_dump")
-            )
-            fpath: Path = odc._cache_dir / "imc.save"
-            with odc.lock():
-                r_fp, w_fp = None, None
+            @functools.wraps(fn)
+            def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+                """Attempt to replay from cache, or record on cache miss.
+
+                Args:
+                    *args: Positional arguments to pass to the function.
+                    **kwargs: Keyword arguments to pass to the function.
+
+                Returns:
+                    The result from cache (if hit) or from executing the function (if miss).
+                """
+                # Try to replay first
                 try:
-                    w_fp = open(fpath, "x")
-                except FileExistsError:
-                    with open(fpath) as r_fp:
-                        existing_dump = json.load(r_fp)
+                    return replay_fn(*args, **kwargs)
+                except KeyError:
+                    # Cache miss - record the result
+                    return record_fn(*args, **kwargs)
 
-                    for key, value in existing_dump.items():
-                        if key not in to_dump:
-                            to_dump[key] = value
-                        elif to_dump[key] != value:
-                            raise exceptions.DeterministicCachingIMCDumpConflictError from None
-
-                    w_fp = open(fpath, "w")
-                finally:
-                    assert w_fp is not None
-                    try:
-                        json.dump(to_dump, w_fp, indent=4)
-                        logger.log(
-                            INFO, "Dumped deterministic cache memoization to %s", fpath
-                        )
-                    finally:
-                        w_fp.close()
-
-        return fpath
-
-    @override
-    def _make_record_wrapper(
-        self,
-        fn: Callable[P, R],
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
-    ) -> Callable[P, R]:
-        @wraps(fn)
-        def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
-            if not config.IS_DETERMINISTIC_CACHING_ENABLED():
-                raise exceptions.DeterministicCachingDisabledError
-            start_t: float = time()
-            params = (
-                args,
-                kwargs,
-            )
-            with self.lock():
-                get: impls.Hit | None = self._get(
-                    fn,
-                    params,
-                    ischema=ischema,
-                    custom_params_encoder=custom_params_encoder,
-                    custom_result_decoder=custom_result_decoder,
-                )
-
-                if get:
-                    dur: float = time() - start_t
-                    _intf_callback(
-                        _IntfCallbackOrigin.RECORD,
-                        _IntfCallbackAction.REPLAY,
-                        dur,
-                        fn,
-                        params,
-                        get.value,
-                    )
-                    return get.value
-                else:
-                    fn_start_t: float = time()
-                    result: R = fn(*args, **kwargs)
-                    fn_dur: float = time() - fn_start_t
-                    if not self._insert(
-                        fn,
-                        params,
-                        result,
-                        ischema,
-                        custom_params_encoder,
-                        custom_result_encoder,
-                    ):
-                        # if we couldn't insert that means that some other callee has populated
-                        # the key entry in the remote cache within the time between our first get
-                        # and the insert attempt; in that case, to be deterministic, we should
-                        # call get again and return that value as the assumption is that other
-                        # compile workers will also use that value
-                        get = self._get(
-                            fn,
-                            params,
-                            ischema,
-                            custom_params_encoder=custom_params_encoder,
-                            custom_result_decoder=custom_result_decoder,
-                        )
-                        assert get is not None, (
-                            "remote cache should get(key) if insert(key, _) failed"
-                        )
-                        dur = time() - start_t
-                        _intf_callback(
-                            _IntfCallbackOrigin.RECORD,
-                            _IntfCallbackAction.RECORD_NOT_INSERTED_REPLAY,
-                            dur,
-                            fn,
-                            params,
-                            fn_dur,
-                            get.value,
-                        )
-                        return get.value
-                    dur = time() - start_t
-                    _intf_callback(
-                        _IntfCallbackOrigin.RECORD,
-                        _IntfCallbackAction.RECORD_INSERTED,
-                        dur,
-                        fn,
-                        params,
-                        result,
-                        fn_dur,
-                    )
-                    return result
+            return inner
 
         return wrapper
 
-    @override
-    def _get(
-        self,
-        fn: Callable[P, R],
-        params: Params,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
-    ) -> impls.Hit | None:
-        key: Any = self._make_key(
-            fn, params, ischema=ischema, custom_params_encoder=custom_params_encoder
-        )
-        sc: impls._OnDiskCacheImpl | impls._RemoteCacheImpl | None = (
-            self._get_sc_from_callee(fn.__name__)
-        )
-        with locks._acquire_many_impl_locks_with_timeout(
-            *([self._imc, sc] if sc else [self._imc])
-        ):
-            try:
-                # we'll check the memoization first, since that is much faster
-                # than checking the remote cache and the two should be consistent
-                imc_get: impls.Hit | None = self._imc.get(key)
-                if imc_get:
-                    if custom_result_decoder:
-                        return impls.Hit(value=custom_result_decoder(imc_get.value))
-                    else:
-                        return imc_get
-                elif not sc:
-                    raise exceptions.StrictDeterministicCachingKeyNotFoundError
-                else:
-                    sc_get: impls.Hit | None = sc.get(key)
-                    if sc_get:
-                        if custom_result_decoder:
-                            return impls.Hit(value=custom_result_decoder(sc_get.value))
-                        return sc_get
-                    elif config.STRICTLY_CACHED_DETERMINISM:
-                        raise exceptions.StrictDeterministicCachingKeyNotFoundError
-                return None
-            except exceptions.KeyEncodingError as err:
-                raise exceptions.CustomParamsEncoderRequiredError(fn, params) from err
 
-    @override
-    def _insert(
-        self,
-        fn: Callable[P, R],
-        params: Params,
-        result: R,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-    ) -> bool:
-        if (
-            config.STRICTLY_PRE_POPULATED_DETERMINISM
-            or config.STRICTLY_CACHED_DETERMINISM
-        ):
-            raise exceptions.StrictDeterministicCachingInsertionError
+class Memoizer(_BaseMemoizer):
+    """In-memory memoization interface for caching function results.
 
-        key: Any = self._make_key(
-            fn, params, ischema=ischema, custom_params_encoder=custom_params_encoder
+    This class provides methods for recording, retrieving, and managing
+    cached function results in memory with custom encoding/decoding logic.
+
+    Cache entries are stored as CacheEntry objects containing both the encoded
+    parameters and the encoded result. This makes debugging easier since entries
+    can be inspected with full context about what inputs produced each result.
+
+    On memoizer destruction, the cache is automatically dumped to a shared JSON file
+    in the cache directory for debugging and inspection purposes. Multiple Memoizer
+    instances contribute to the same file additively.
+
+    Note: Use this over functools.cache when you need to support parameters
+    that functools.cache cannot handle, or when you need custom encoding/decoding
+    of results.
+    """
+
+    def __init__(self, sub_key: str | None = None) -> None:
+        """Initialize the Memoizer instance with an in-memory cache.
+
+        Args:
+            sub_key: Optional key for organizing cache entries in the JSON dump.
+                    If provided, cache entries are stored under cache_entries[sub_key].
+                    If None, cache entries are merged directly into root cache_entries.
+        """
+        self._cache: implementations._InMemoryCacheImpl = (
+            implementations._InMemoryCacheImpl()
         )
-        sc: impls._OnDiskCacheImpl | impls._RemoteCacheImpl | None = (
-            self._get_sc_from_callee(fn.__name__)
-        )
-        assert sc, (
-            "sc should be either an on-disk cache or a remote cache if we're inserting"
-        )
-        with locks._acquire_many_impl_locks_with_timeout(self._imc, sc):
-            try:
-                encoded_result: Any = (
-                    result
-                    if not custom_result_encoder
-                    else custom_result_encoder(result)
+        # Optional sub_key for nested cache structure
+        self._sub_key: str | None = sub_key
+        # Register atexit handler to dump cache on program exit
+        if config.IS_DUMP_MEMOIZER_CACHE_ENABLED():
+            atexit.register(self._dump_to_disk)
+        # Pre-populate cache from dump file if configured (with sub_key now set)
+        self._maybe_prepopulate_from_dump()
+        # Register with clear_on_fresh_cache for fresh_cache() integration
+        clear_on_fresh_cache(self)
+
+    def cache_clear(self) -> None:
+        """Clear the in-memory cache.
+
+        This method resets the in-memory cache to empty. It is called by
+        the fresh_cache() context manager via clear_on_fresh_cache registration.
+        """
+        self._cache._memory.clear()
+
+    @functools.cached_property
+    def _shared_cache_filepath(self) -> Path:
+        """Get the shared cache filepath for memoizer cache dumps.
+
+        Returns:
+            The path to the shared memoizer cache JSON file.
+        """
+        return Path(cache_dir()) / "memoizer_cache.json"
+
+    @functools.cached_property
+    def _shared_cache_lockfile(self) -> Path:
+        """Get the lock file path for the shared memoizer cache.
+
+        Returns:
+            The path to the lock file for the shared cache.
+        """
+        return Path(cache_dir()) / "memoizer_cache.lock"
+
+    def _read_dump_from_disk(self, filepath: Path | None = None) -> CacheDump | None:
+        """Read a cache dump from disk.
+
+        Attempts to read and parse a cache JSON file.
+
+        Args:
+            filepath: Path to the dump file to read. If None, uses the
+                     shared cache filepath (self._shared_cache_filepath).
+
+        Returns:
+            The cache dump if the file exists and is valid JSON, None otherwise.
+        """
+        target_path = filepath if filepath is not None else self._shared_cache_filepath
+        try:
+            with open(target_path) as f:
+                data = json.load(f)
+                return cast(CacheDump, data)
+        except FileNotFoundError:
+            return None
+        except json.JSONDecodeError:
+            return None
+
+    def _write_dump_to_disk(self, dump: CacheDump) -> None:
+        """Write the cache dump to disk.
+
+        Writes the provided dump to the shared cache JSON file and logs the result.
+
+        Args:
+            dump: The cache dump to write.
+        """
+        try:
+            with open(self._shared_cache_filepath, "w") as f:
+                json.dump(dump, f, indent=2)
+
+            # Log the filepath
+            if self._sub_key:
+                logger.log(
+                    logging.INFO,
+                    "Memoizer cache (sub_key=%s) dumped to: %s",
+                    self._sub_key,
+                    self._shared_cache_filepath,
                 )
-                # reverse order of get, as we don't want to memoize values
-                # if we haven't actually inserted them into the remote cache
-                # so that the memoization and the remote cache remain consistent
-                if sc.insert(key, encoded_result):
-                    if not self._imc.insert(key, encoded_result):
-                        # imc might have the mapping already, if pre-populated
-                        assert self._imc.get(key) == encoded_result
-                    return True
-                return False
-            except exceptions.KeyEncodingError as err:
-                raise exceptions.CustomParamsEncoderRequiredError(fn, params) from err
-            except exceptions.ValueEncodingError as err:
-                raise exceptions.CustomResultEncoderRequiredError(
-                    f"Custom result encoder required for function {fn} with parameters {params} and result {result}."
-                ) from err
+            else:
+                logger.log(
+                    logging.INFO,
+                    "Memoizer cache dumped to: %s",
+                    self._shared_cache_filepath,
+                )
+        except Exception as e:
+            # If dumping fails, just log it and don't crash the program
+            logger.log(
+                logging.WARNING,
+                "Warning: Failed to dump memoizer cache: %s",
+                e,
+            )
 
-    @override
-    def get(
-        self,
-        fn: Callable[P, R],
-        params: Params,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_decoder: Callable[[Any], R] | None = None,
-    ) -> impls.Hit | None:
-        if not config.IS_DETERMINISTIC_CACHING_ENABLED():
-            raise exceptions.DeterministicCachingDisabledError
-        return super().get(
-            fn,
-            params,
-            ischema=ischema,
-            custom_params_encoder=custom_params_encoder,
-            custom_result_decoder=custom_result_decoder,
-        )
+    def _prepare_dump(self, existing_dump: CacheDump | None) -> CacheDump:
+        """Prepare a cache dump from the current Memoizer state.
 
-    @override
-    def insert(
+        Takes the existing dump (if any) and merges it with the current
+        in-memory cache entries.
+
+        Args:
+            existing_dump: The existing dump to merge with, or None if starting fresh.
+
+        Returns:
+            The prepared cache dump ready to be written to disk.
+        """
+        # Start with existing data or empty structure
+        if existing_dump is not None:
+            dump = existing_dump
+        else:
+            dump: CacheDump = {"cache_entries": {}, "cache_size": 0}
+
+        # Ensure cache_entries exists
+        if "cache_entries" not in dump:
+            dump["cache_entries"] = {}
+
+        # Format cache entries as {"params": ..., "result": ...}
+        formatted_cache: dict[str, CacheDumpEntry] = {}
+        for key, value in self._cache._memory.items():
+            entry = cast(CacheEntry, value)
+            formatted_cache[key] = CacheDumpEntry(
+                params=entry.encoded_params,
+                result=entry.encoded_result,
+            )
+
+        # Merge based on sub_key
+        if self._sub_key:
+            # Store under sub_key
+            dump["cache_entries"][self._sub_key] = formatted_cache
+        else:
+            # Merge directly into cache_entries
+            dump["cache_entries"].update(formatted_cache)
+
+        # Calculate total cache size across all entries
+        total_size = 0
+        for value in dump["cache_entries"].values():
+            if isinstance(value, dict):
+                # Check if it's a CacheDumpEntry (has 'params' and 'result') or a sub_key dict
+                if "params" in value and "result" in value:
+                    # Direct entry
+                    total_size += 1
+                else:
+                    # Sub_key with nested entries
+                    total_size += len(value)
+            else:
+                total_size += 1
+        dump["cache_size"] = total_size
+
+        return dump
+
+    def _dump_to_disk(self) -> None:
+        """Dump the in-memory cache to a shared JSON file.
+
+        This method is automatically called on program exit via atexit.
+        It reads any existing cache data, merges it with this instance's cache,
+        and writes the combined result back. Multiple Memoizer instances
+        contribute to the same file additively.
+
+        If self._sub_key is set and non-empty, cache entries are stored under
+        cache_entries[sub_key]. Otherwise, they're merged directly into cache_entries.
+
+        Cache entries are formatted as {"params": <encoded_params>, "result": <encoded_result>}
+        for better human readability.
+
+        The filepath where the cache was dumped is logged.
+        """
+        # Skip if cache is empty
+        if not self._cache._memory:
+            return
+
+        # Ensure parent directory exists
+        self._shared_cache_filepath.parent.mkdir(parents=True, exist_ok=True)
+
+        # Acquire file lock to ensure thread/process safety
+        flock = FileLock(str(self._shared_cache_lockfile))
+        with locks._acquire_flock_with_timeout(flock):
+            existing_dump = self._read_dump_from_disk()
+            dump = self._prepare_dump(existing_dump)
+            self._write_dump_to_disk(dump)
+
+    def _maybe_prepopulate_from_dump(self) -> None:
+        """Pre-populate cache entries from a dump file if configured.
+
+        Checks the CACHE_DUMP_FILE_PATH config option for a path to a JSON dump file
+        produced by IS_DUMP_MEMOIZER_CACHE_ENABLED. If a valid path is provided and
+        the file exists, loads cache entries from it into the in-memory cache.
+
+        For Memoizer instances without a sub_key, loads entries from the root cache_entries.
+        For Memoizer instances with a sub_key, loads entries from cache_entries[sub_key].
+
+        This method is called during __init__ to pre-populate the cache.
+        """
+        dump_file_path = config.CACHE_DUMP_FILE_PATH()
+
+        # Skip if no dump file configured
+        if not dump_file_path:
+            return
+
+        # Read the dump file using the helper method
+        dump = self._read_dump_from_disk(Path(dump_file_path))
+        if dump is None:
+            return
+
+        # Extract entries to load from the dump
+        entries_to_load = self._extract_entries_from_dump(dump)
+        if not entries_to_load:
+            return
+
+        # Populate the cache
+        self._populate_cache_from_entries(entries_to_load)
+
+        # Log the result
+        if self._sub_key:
+            logger.log(
+                logging.INFO,
+                "Loaded %d cache entries from %s (sub_key=%s)",
+                len(entries_to_load),
+                dump_file_path,
+                self._sub_key,
+            )
+        else:
+            logger.log(
+                logging.INFO,
+                "Loaded %d cache entries from %s",
+                len(entries_to_load),
+                dump_file_path,
+            )
+
+    def _extract_entries_from_dump(self, dump: CacheDump) -> dict[str, CacheDumpEntry]:
+        """Extract cache entries from a dump based on sub_key.
+
+        Args:
+            dump: The cache dump to extract entries from.
+
+        Returns:
+            Dictionary of cache entries to load.
+        """
+        cache_entries = dump.get("cache_entries", {})
+
+        if self._sub_key:
+            # Load from nested structure
+            entries = cache_entries.get(self._sub_key, {})
+            return cast(dict[str, CacheDumpEntry], entries)
+        else:
+            # Load from root level (but skip any nested structures)
+            return {
+                k: cast(CacheDumpEntry, v)
+                for k, v in cache_entries.items()
+                if isinstance(v, dict) and "params" in v and "result" in v
+            }
+
+    def _populate_cache_from_entries(self, entries: dict[str, CacheDumpEntry]) -> None:
+        """Populate the in-memory cache from dump entries.
+
+        Args:
+            entries: Dictionary of cache entries to load.
+        """
+        for key, entry in entries.items():
+            cache_entry = CacheEntry(
+                encoded_params=entry["params"],
+                encoded_result=entry["result"],
+            )
+            self._cache.insert(key, cache_entry)
+
+    def record(
         self,
-        fn: Callable[P, R],
-        params: Params,
-        result: R,
-        ischema: context.IsolationSchema | None = None,
-        custom_params_encoder: Callable[P, Any] | None = None,
-        custom_result_encoder: Callable[[R], Any] | None = None,
-    ) -> bool:
-        if not config.IS_DETERMINISTIC_CACHING_ENABLED():
-            raise exceptions.DeterministicCachingDisabledError
-        return super().insert(
-            fn,
-            params,
-            result,
-            ischema=ischema,
-            custom_params_encoder=custom_params_encoder,
-            custom_result_encoder=custom_result_encoder,
+        custom_params_encoder: Callable[_P, object] | None = None,
+        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
+    ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+        """Record a function call result with custom encoding.
+
+        This is a decorator that wraps a function to enable memoization
+        with custom encoding/decoding logic.
+
+        Args:
+            custom_params_encoder: Optional encoder for function parameters.
+                                  If None, parameters are pickled directly.
+            custom_result_encoder: Optional encoder factory for function results.
+                                  Takes function parameters and returns an encoder
+                                  function that converts R -> _EncodedR.
+
+        Returns:
+            A decorator function that can be applied to functions.
+
+        Example:
+            @memoizer.record(
+                custom_params_encoder=my_param_encoder,
+                custom_result_encoder=my_result_encoder_factory,
+            )
+            def expensive_function(x, y):
+                return x + y
+        """
+
+        def wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+            """Wrap the function to enable memoization.
+
+            Args:
+                fn: The function to wrap.
+
+            Returns:
+                A wrapped version of the function.
+            """
+            # If caching is disabled, return the original function unchanged
+            if not config.IS_CACHING_MODULE_ENABLED():
+                return fn
+
+            def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+                """Call the original function and cache the result.
+
+                Args:
+                    *args: Positional arguments to pass to the function.
+                    **kwargs: Keyword arguments to pass to the function.
+
+                Returns:
+                    The result of calling the original function.
+                """
+                # Call the function to compute the result
+                result = fn(*args, **kwargs)
+
+                # Generate cache key from parameters
+                cache_key = self._make_key(custom_params_encoder, *args, **kwargs)
+
+                # Encode params for human-readable dump
+                if custom_params_encoder is not None:
+                    encoded_params = custom_params_encoder(*args, **kwargs)
+                else:
+                    encoded_params = {
+                        "args": args,
+                        "kwargs": kwargs,
+                    }
+
+                # Encode the result if encoder is provided
+                if custom_result_encoder is not None:
+                    # Get the encoder function by calling the factory with params
+                    encoder_fn = custom_result_encoder(*args, **kwargs)
+                    encoded_result = encoder_fn(result)
+                else:
+                    encoded_result = result
+
+                # Store CacheEntry in cache
+                cache_entry = CacheEntry(
+                    encoded_params=encoded_params,
+                    encoded_result=encoded_result,
+                )
+                self._cache.insert(cache_key, cache_entry)
+
+                # Return the original result (not the encoded version)
+                return result
+
+            return inner
+
+        return wrapper
+
+    def replay(
+        self,
+        custom_params_encoder: Callable[_P, object] | None = None,
+        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+    ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+        """Replay a cached function result without executing the function.
+
+        This is a decorator that retrieves cached results instead of executing
+        the function. Raises an exception if no cached result exists.
+
+        Args:
+            custom_params_encoder: Optional encoder for function parameters.
+                                  If None, parameters are pickled directly.
+            custom_result_decoder: Optional decoder factory for cached results.
+                                  Takes function parameters and returns a decoder
+                                  function that converts _EncodedR -> R.
+
+        Returns:
+            A decorator function that can be applied to functions.
+
+        Example:
+            @memoizer.replay(
+                custom_params_encoder=my_param_encoder,
+                custom_result_decoder=my_result_decoder_factory,
+            )
+            def expensive_function(x, y):
+                return x + y
+        """
+
+        def wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+            """Wrap the function to retrieve from cache.
+
+            Args:
+                fn: The function to wrap (not actually called).
+
+            Returns:
+                A wrapped version of the function.
+            """
+            # If caching is disabled, always raise KeyError (cache miss)
+            if not config.IS_CACHING_MODULE_ENABLED():
+
+                def always_miss(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+                    raise KeyError("Caching is disabled")
+
+                return always_miss
+
+            def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+                """Retrieve the cached result without calling the function.
+
+                Args:
+                    *args: Positional arguments to generate the cache key.
+                    **kwargs: Keyword arguments to generate the cache key.
+
+                Returns:
+                    The cached result (decoded if decoder is provided).
+
+                Raises:
+                    KeyError: If no cached result exists for the given parameters.
+                """
+                # Generate cache key from parameters
+                cache_key = self._make_key(custom_params_encoder, *args, **kwargs)
+
+                # Check if result is cached
+                cached_hit = self._cache.get(cache_key)
+                if cached_hit is None:
+                    raise KeyError(f"No cached result found for key: {cache_key}")
+
+                # Extract the cached value
+                cache_entry = cast(CacheEntry, cached_hit.value)
+
+                # Decode and return the cached result
+                if custom_result_decoder is not None:
+                    # Get the decoder function by calling the factory with params
+                    decoder_fn = custom_result_decoder(*args, **kwargs)
+                    return decoder_fn(cast(_EncodedR, cache_entry.encoded_result))
+                return cast(_R, cache_entry.encoded_result)
+
+            return inner
+
+        return wrapper
+
+
+class PersistentMemoizer(_BaseMemoizer):
+    """Persistent memoization interface for caching function results to disk.
+
+    This class provides methods for recording, retrieving, and managing
+    cached function results using a two-level cache strategy:
+    1. In-memory cache (fast, checked first) - via Memoizer instance
+    2. On-disk cache (persistent, checked on memory miss)
+
+    Results are persisted across process restarts.
+
+    On program exit, the in-memory cache entries are automatically dumped to
+    the shared JSON file. If sub_dir is non-empty, entries are stored under
+    a nested structure based on the sub_dir. If sub_dir is empty, entries are
+    merged directly into the root cache_entries.
+
+    Note: Use this over functools.cache when you need to support parameters
+    that functools.cache cannot handle, custom result encoding and/or decoding,
+    or when you need disk caching to persist results across program boundaries.
+    """
+
+    def __init__(self, sub_dir: PathLike[str] | None = None) -> None:
+        """Initialize the PersistentMemoizer with two-level caching.
+
+        Args:
+            sub_dir: Optional subdirectory within the cache directory for
+                    organizing cached results. Defaults to empty string if not specified.
+                    If non-empty, cache entries will be stored under cache_entries[sub_dir].
+                    If empty, cache entries are merged into root cache_entries.
+        """
+        # Use a Memoizer instance for in-memory caching
+        self._memoizer: Memoizer = Memoizer(sub_key=str(sub_dir) if sub_dir else None)
+        # Store on-disk cache as a separate attribute
+        self._disk_cache: implementations._OnDiskCacheImpl = (
+            implementations._OnDiskCacheImpl(sub_dir=sub_dir)
         )
+        # Register with clear_on_fresh_cache for fresh_cache() integration
+        clear_on_fresh_cache(self)
+
+    def cache_clear(self) -> None:
+        """Clear the on-disk cache.
+
+        This method removes the on-disk cache directory. The in-memory cache
+        is cleared automatically by the underlying Memoizer instance, which
+        registers itself with clear_on_fresh_cache.
+
+        This is called by the fresh_cache() context manager via clear_on_fresh_cache
+        registration.
+        """
+        # Clear on-disk cache by removing the cache directory
+        # Note: in-memory cache is cleared by the Memoizer's own cache_clear
+        if self._disk_cache._cache_dir.exists():
+            shutil.rmtree(self._disk_cache._cache_dir, ignore_errors=True)
+
+    def record(
+        self,
+        custom_params_encoder: Callable[_P, object] | None = None,
+        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
+    ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+        """Record a function call result with custom encoding to both caches.
+
+        This is a decorator that wraps a function to enable memoization
+        with custom encoding/decoding logic. Results are stored in both
+        the in-memory cache and the on-disk cache.
+
+        Args:
+            custom_params_encoder: Optional encoder for function parameters.
+                                  If None, parameters are pickled directly.
+            custom_result_encoder: Optional encoder factory for function results.
+                                  Takes function parameters and returns an encoder
+                                  function that converts R -> _EncodedR.
+
+        Returns:
+            A decorator function that can be applied to functions.
+
+        Example:
+            @persistent_memoizer.record(
+                custom_params_encoder=my_param_encoder,
+                custom_result_encoder=my_result_encoder_factory,
+            )
+            def expensive_function(x, y):
+                return x + y
+        """
+
+        def wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+            """Wrap the function to enable memoization.
+
+            Args:
+                fn: The function to wrap.
+
+            Returns:
+                A wrapped version of the function.
+            """
+            # If caching is disabled, return the original function unchanged
+            if not config.IS_CACHING_MODULE_ENABLED():
+                return fn
+
+            # Get the memory-cached version from the memoizer
+            memory_record_fn = self._memoizer.record(
+                custom_params_encoder, custom_result_encoder
+            )(fn)
+
+            def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+                """Call the original function and cache the result in both caches.
+
+                Args:
+                    *args: Positional arguments to pass to the function.
+                    **kwargs: Keyword arguments to pass to the function.
+
+                Returns:
+                    The result of calling the original function.
+                """
+                # Call the memory-cached version (which calls fn and caches in memory)
+                result = memory_record_fn(*args, **kwargs)
+
+                # Also store in disk cache
+                cache_key = self._make_key(custom_params_encoder, *args, **kwargs)
+
+                # Get the cache entry from memory cache
+                # We know it must be there since memory_record_fn just cached it
+                cached_hit = self._memoizer._cache.get(cache_key)
+                assert cached_hit, "Cache entry must exist in memory cache"
+                cache_entry = cast(CacheEntry, cached_hit.value)
+
+                # Store the full CacheEntry in disk cache for easier debugging
+                pickled_entry: bytes = pickle.dumps(cache_entry)
+                self._disk_cache.insert(cache_key, pickled_entry)
+
+                return result
+
+            return inner
+
+        return wrapper
+
+    def replay(
+        self,
+        custom_params_encoder: Callable[_P, object] | None = None,
+        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+    ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+        """Replay a cached function result without executing the function.
+
+        This is a decorator that retrieves cached results using a two-level
+        cache strategy. It checks the in-memory cache first (fast), then
+        falls back to the on-disk cache. If found on disk, the result is
+        cached in memory for future access.
+
+        Args:
+            custom_params_encoder: Optional encoder for function parameters.
+                                  If None, parameters are pickled directly.
+            custom_result_decoder: Optional decoder factory for cached results.
+                                  Takes function parameters and returns a decoder
+                                  function that converts _EncodedR -> R.
+
+        Returns:
+            A decorator function that can be applied to functions.
+
+        Example:
+            @persistent_memoizer.replay(
+                custom_params_encoder=my_param_encoder,
+                custom_result_decoder=my_result_decoder_factory,
+            )
+            def expensive_function(x, y):
+                return x + y
+        """
+
+        def wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+            """Wrap the function to retrieve from cache.
+
+            Args:
+                fn: The function to wrap (not actually called).
+
+            Returns:
+                A wrapped version of the function.
+            """
+            # If caching is disabled, always raise KeyError (cache miss)
+            if not config.IS_CACHING_MODULE_ENABLED():
+
+                def always_miss(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+                    raise KeyError("Caching is disabled")
+
+                return always_miss
+
+            # Get the memory replay function
+            memory_replay_fn = self._memoizer.replay(
+                custom_params_encoder, custom_result_decoder
+            )(fn)
+
+            def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+                """Retrieve the cached result without calling the function.
+
+                Checks memory cache first, then disk cache. Populates memory
+                cache from disk on a disk hit.
+
+                Args:
+                    *args: Positional arguments to generate the cache key.
+                    **kwargs: Keyword arguments to generate the cache key.
+
+                Returns:
+                    The cached result (decoded if decoder is provided).
+
+                Raises:
+                    KeyError: If no cached result exists for the given parameters.
+                """
+                # Try memory cache first via memoizer
+                try:
+                    return memory_replay_fn(*args, **kwargs)
+                except KeyError:
+                    pass  # Memory miss, check disk
+
+                # Memory miss - check disk cache
+                cache_key = self._make_key(custom_params_encoder, *args, **kwargs)
+                disk_hit = self._disk_cache.get(cache_key)
+                if disk_hit is not None:
+                    # Disk cache hit - unpickle the CacheEntry
+                    pickled_value = disk_hit.value
+                    cache_entry = cast(CacheEntry, pickle.loads(pickled_value))
+
+                    # Populate memory cache for future access
+                    self._memoizer._cache.insert(cache_key, cache_entry)
+
+                    # Decode and return
+                    if custom_result_decoder is not None:
+                        decoder_fn = custom_result_decoder(*args, **kwargs)
+                        return decoder_fn(cast(_EncodedR, cache_entry.encoded_result))
+                    return cast(_R, cache_entry.encoded_result)
+
+                # Complete miss
+                raise KeyError(f"No cached result found for key: {cache_key}")
+
+            return inner
+
+        return wrapper

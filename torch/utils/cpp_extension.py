@@ -464,7 +464,7 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
 
     # First check if the compiler is one of the expected ones for the particular platform.
     if not check_compiler_ok_for_platform(compiler):
-        logger.warning(WRONG_COMPILER_WARNING, compiler, _accepted_compilers_for_platform()[0], sys.platform, _accepted_compilers_for_platform()[0])
+        logger.warning(WRONG_COMPILER_WARNING, compiler, _accepted_compilers_for_platform()[0], sys.platform, _accepted_compilers_for_platform()[0], compiler, compiler)
         return (False, TorchVersion('0.0.0'))
 
     if IS_MACOS:
@@ -832,7 +832,10 @@ class BuildExtension(build_ext):
             extra_cc_cflags = self.compiler.compiler_so[1:]
             with_cuda = any(map(_is_cuda_file, sources))
             with_sycl = any(map(_is_sycl_file, sources))
-            assert not (with_sycl and with_cuda)
+            if with_sycl and with_cuda:
+                raise AssertionError(
+                    "cannot have both SYCL and CUDA files in the same extension"
+                )
 
             # extra_postargs can be either:
             # - a dict mapping cxx/nvcc/sycl to extra flags
@@ -1041,7 +1044,10 @@ class BuildExtension(build_ext):
                 common_cflags.extend(COMMON_MSVC_FLAGS)
             with_cuda = any(map(_is_cuda_file, sources))
             with_sycl = any(map(_is_sycl_file, sources))
-            assert not (with_sycl and with_cuda)
+            if with_sycl and with_cuda:
+                raise AssertionError(
+                    "cannot have both SYCL and CUDA files in the same extension"
+                )
 
             # extra_postargs can be either:
             # - a dict mapping cxx/nvcc to extra flags
@@ -1551,7 +1557,7 @@ def SyclExtension(name, sources, *args, **kwargs):
     kwargs["libraries"] = libraries
 
     include_dirs = kwargs.get("include_dirs", [])
-    include_dirs += include_paths()
+    include_dirs += include_paths(device_type="xpu")
     kwargs["include_dirs"] = include_dirs
 
     kwargs["language"] = "c++"
@@ -2159,7 +2165,10 @@ def _jit_compile(name,
     with_cudnn = any('cudnn' in f for f in extra_ldflags or [])
     if with_sycl is None:
         with_sycl = any(map(_is_sycl_file, sources))
-    assert not (with_sycl and with_cuda)
+    if with_sycl and with_cuda:
+        raise AssertionError(
+            "cannot have both SYCL and CUDA files in the same extension"
+        )
     old_version = JIT_EXTENSION_VERSIONER.get_version(name)
     version = JIT_EXTENSION_VERSIONER.bump_version_if_changed(
         name,
@@ -2264,7 +2273,10 @@ def _write_ninja_file_and_compile_objects(
         with_cuda = any(map(_is_cuda_file, sources))
     if with_sycl is None:
         with_sycl = any(map(_is_sycl_file, sources))
-    assert not (with_sycl and with_cuda)
+    if with_sycl and with_cuda:
+        raise AssertionError(
+            "cannot have both SYCL and CUDA files in the same extension"
+        )
     build_file_path = os.path.join(build_directory, 'build.ninja')
     if verbose:
         logger.debug('Emitting ninja build file %s...', build_file_path)
@@ -2324,7 +2336,10 @@ def _write_ninja_file_and_build_library(
         with_cuda = any(map(_is_cuda_file, sources))
     if with_sycl is None:
         with_sycl = any(map(_is_sycl_file, sources))
-    assert not (with_sycl and with_cuda)
+    if with_sycl and with_cuda:
+        raise AssertionError(
+            "cannot have both SYCL and CUDA files in the same extension"
+        )
     extra_ldflags = _prepare_ldflags(
         extra_ldflags or [],
         with_cuda,
@@ -2388,12 +2403,16 @@ def _prepare_ldflags(extra_ldflags, with_cuda, with_sycl, verbose, is_standalone
         extra_ldflags.append('c10.lib')
         if with_cuda:
             extra_ldflags.append('c10_hip.lib' if IS_HIP_EXTENSION else 'c10_cuda.lib')
+        if with_sycl:
+            extra_ldflags.append('c10_xpu.lib')
         extra_ldflags.append('torch_cpu.lib')
         if with_cuda:
             extra_ldflags.append('torch_hip.lib' if IS_HIP_EXTENSION else 'torch_cuda.lib')
             # /INCLUDE is used to ensure torch_cuda is linked against in a project that relies on it.
             # Related issue: https://github.com/pytorch/pytorch/issues/31611
             extra_ldflags.append('-INCLUDE:?warp_size@cuda@at@@YAHXZ')
+        if with_sycl:
+            extra_ldflags.append('torch_xpu.lib')
         extra_ldflags.append('torch.lib')
         extra_ldflags.append(f'/LIBPATH:{TORCH_LIB_PATH}')
         if not is_standalone:
@@ -2405,9 +2424,13 @@ def _prepare_ldflags(extra_ldflags, with_cuda, with_sycl, verbose, is_standalone
         extra_ldflags.append('-lc10')
         if with_cuda:
             extra_ldflags.append('-lc10_hip' if IS_HIP_EXTENSION else '-lc10_cuda')
+        if with_sycl:
+            extra_ldflags.append('-lc10_xpu')
         extra_ldflags.append('-ltorch_cpu')
         if with_cuda:
             extra_ldflags.append('-ltorch_hip' if IS_HIP_EXTENSION else '-ltorch_cuda')
+        if with_sycl:
+            extra_ldflags.append('-ltorch_xpu')
         extra_ldflags.append('-ltorch')
         if not is_standalone:
             extra_ldflags.append('-ltorch_python')
@@ -2443,10 +2466,11 @@ def _prepare_ldflags(extra_ldflags, with_cuda, with_sycl, verbose, is_standalone
                 extra_ldflags.append('-lamdhip64')
     if with_sycl:
         if IS_WINDOWS:
-            extra_ldflags.append('c10_xpu.lib')
-            extra_ldflags.append('torch_xpu.lib')
             extra_ldflags.append(f'/LIBPATH:{_join_sycl_home("lib")}')
             extra_ldflags.append('sycl.lib')
+        else:
+            extra_ldflags.append(f'-L{_join_sycl_home("lib")}')
+            extra_ldflags.append('-lsycl')
     return extra_ldflags
 
 
@@ -2599,10 +2623,18 @@ def _get_build_directory(name: str, verbose: bool) -> str:
     root_extensions_directory = os.environ.get('TORCH_EXTENSIONS_DIR')
     if root_extensions_directory is None:
         root_extensions_directory = get_default_build_root()
-        cu_str = ('cpu' if torch.version.cuda is None else
-                  f'cu{torch.version.cuda.replace(".", "")}')
+        # Determine GPU accelerator prefix based on available accelerators. Fallback to CPU.
+        # Priority: ROCm/HIP > CUDA > CPU
+        # Note: torch.backends.cuda.is_built() returns True for both CUDA and ROCm,
+        # so we need to check torch.version.hip to distinguish them
+        if torch.version.hip is not None:
+            accelerator_str = f'rocm{torch.version.hip.replace(".", "")}'
+        elif torch.version.cuda is not None:
+            accelerator_str = f'cu{torch.version.cuda.replace(".", "")}'
+        else:
+            accelerator_str = 'cpu'
         python_version = f'py{sys.version_info.major}{sys.version_info.minor}{getattr(sys, "abiflags", "")}'
-        build_folder = f'{python_version}_{cu_str}'
+        build_folder = f'{python_version}_{accelerator_str}'
 
         root_extensions_directory = os.path.join(
             root_extensions_directory, build_folder)
@@ -2754,6 +2786,8 @@ def _write_ninja_file_to_build_library(path,
     # TODO generalize with_cuda as specific device type.
     if with_cuda:
         system_includes = include_paths("cuda")
+    elif with_sycl:
+        system_includes = include_paths("xpu")
     else:
         system_includes = include_paths("cpu")
     # sysconfig.get_path('include') gives us the location of Python.h

@@ -561,6 +561,43 @@ def forward(self, tangents_1, tangents_2, tangents_token):
     return (clone, clone_1, tangents_1, tangents_2, getitem_6)""",
             )
 
+    def test_dce(self):
+        # If an operator is marked as side effectful, it should not get DCEd by
+        # FX's eliminate_dead_code
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            log3 = []
+
+            @torch.library.custom_op(
+                "mylib::my_logger3",
+                mutates_args=(),
+            )
+            def my_logger3(s: str, t: torch.Tensor) -> torch.Tensor:
+                log3.append(s)
+                return torch.zeros(1)
+
+            @my_logger3.register_fake
+            def my_logger3(s, t) -> torch.Tensor:
+                return torch.zeros(1)
+
+            # Registering an op as being effectful should also prevent FX DCE
+            from torch._library.effects import EffectType
+
+            torch.library._register_effectful_op(
+                "mylib::my_logger3", EffectType.ORDERED
+            )
+
+            def foo(x):
+                b = torch.scalar_tensor(x.shape[0])
+                torch.ops.mylib.my_logger3("moo", b)
+                return x + x
+
+            gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 3))
+            gm.graph.eliminate_dead_code()
+            gm.recompile()
+            gm(torch.ones(3, 3))
+            self.assertTrue(len(log3), 1)
+
     def test_effects_and_input_mutation_return(self):
         def fn(a, b):
             torch.ops.aten._print("effect")
@@ -1011,6 +1048,11 @@ def forward(self, arg1_1, arg2_1, arg3_1, arg4_1, arg5_1):
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem]);  getitem = _sink_tokens_default = None
     return (addmm_1,)""",  # noqa: B950
                 )
+
+        recorded_list.clear()
+        out2 = torch.compile(model)(x)
+        self.assertEqual(len(recorded_list), 4)
+        self.assertTrue(torch.allclose(model(x)[0], out2[0], atol=1e-7, rtol=1e-4))
 
 
 if __name__ == "__main__":

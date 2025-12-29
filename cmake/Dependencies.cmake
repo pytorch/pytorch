@@ -581,6 +581,12 @@ if(USE_XNNPACK AND NOT USE_SYSTEM_XNNPACK)
       "${XNNPACK_SOURCE_DIR}"
       "${CONFU_DEPENDENCIES_BINARY_DIR}/XNNPACK")
 
+    if(CMAKE_C_COMPILER_ID STREQUAL "GNU" AND CMAKE_C_COMPILER_VERSION VERSION_GREATER_EQUAL "14")
+      foreach(xnn_tgt IN ITEMS XNNPACK microkernels-prod microkernels-all)
+          target_compile_options(${xnn_tgt} PRIVATE -Wno-error=incompatible-pointer-types)
+      endforeach()
+    endif()
+
     # Revert to whatever it was before
     set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE_FLAG})
   endif()
@@ -1015,7 +1021,6 @@ if(USE_ROCM)
     list(APPEND HIP_CXX_FLAGS -Wno-shift-count-overflow)
     list(APPEND HIP_CXX_FLAGS -DCAFFE2_USE_MIOPEN)
     list(APPEND HIP_CXX_FLAGS -DTHRUST_DEVICE_SYSTEM=THRUST_DEVICE_SYSTEM_HIP)
-    list(APPEND HIP_CXX_FLAGS -std=c++17)
     list(APPEND HIP_CXX_FLAGS -DHIPBLAS_V2)
     list(APPEND HIP_CXX_FLAGS -DHIP_ENABLE_WARP_SYNC_BUILTINS)
     if(HIPBLASLT_OUTER_VEC)
@@ -1028,6 +1033,15 @@ if(USE_ROCM)
       list(APPEND HIP_CXX_FLAGS -DUSE_ROCM_CK_GEMM)
     endif()
     list(APPEND HIP_HIPCC_FLAGS --offload-compress)
+    list(APPEND HIP_HIPCC_FLAGS -std=c++17)
+    # Pass device library path for theRock nightly builds
+    if(DEFINED ENV{HIP_DEVICE_LIB_PATH})
+      file(TO_CMAKE_PATH "$ENV{HIP_DEVICE_LIB_PATH}" _hip_device_lib_path)
+      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=${_hip_device_lib_path})
+    elseif(EXISTS "${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
+      file(TO_CMAKE_PATH "${ROCM_PATH}/lib/llvm/amdgcn/bitcode" _rocm_device_lib_path)
+      list(APPEND HIP_HIPCC_FLAGS --rocm-device-lib-path=${_rocm_device_lib_path})
+    endif()
     if(WIN32)
       add_definitions(-DROCM_ON_WINDOWS)
       list(APPEND HIP_CXX_FLAGS -fms-extensions)
@@ -1059,6 +1073,7 @@ if(USE_ROCM)
     list(APPEND HIP_HIPCC_FLAGS -fclang-abi-compat=17)
 
     set(HIP_CLANG_FLAGS ${HIP_CXX_FLAGS})
+    set(CMAKE_HIP_FLAGS ${HIP_HIPCC_FLAGS})
     # Ask hcc to generate device code during compilation so we can use
     # host linker to link.
     list(APPEND HIP_CLANG_FLAGS -fno-gpu-rdc)
@@ -1163,6 +1178,12 @@ if(USE_DISTRIBUTED AND USE_TENSORPIPE)
     # Suppress warning to unblock libnop compilation by clang-17
     # See https://github.com/pytorch/pytorch/issues/151316
     target_compile_options_if_supported(tensorpipe -Wno-missing-template-arg-list-after-template-kw)
+    # Workaround for relocation truncated to fit: R_AARCH64_CALL26 against symbol __aarch64_swp4_relax'
+    # When compiling for ARMv8.0, build uv with embedded atomics, which are slightly slower
+    # But are used only once during shutdown
+    if(CMAKE_SYSTEM_PROCESSOR STREQUAL "aarch64")
+      target_compile_options_if_supported(tensorpipe_uv -mno-outline-atomics)
+    endif()
 
     list(APPEND Caffe2_DEPENDENCY_LIBS tensorpipe)
     list(APPEND Caffe2_DEPENDENCY_LIBS nlohmann)
@@ -1393,6 +1414,9 @@ if(NOT INTERN_BUILD_MOBILE)
   # use cub in a safe manner, see:
   # https://github.com/pytorch/pytorch/pull/55292
   string(APPEND CMAKE_CUDA_FLAGS " -DCUB_WRAPPED_NAMESPACE=at_cuda_detail")
+
+  # Suppress cusparse warnings
+  string(APPEND CMAKE_CUDA_FLAGS " -DDISABLE_CUSPARSE_DEPRECATED")
 
   message(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
   string(APPEND CMAKE_CUDA_FLAGS " -DCUDA_HAS_FP16=1"
