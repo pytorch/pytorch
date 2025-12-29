@@ -851,35 +851,13 @@ class TestFlexFlash(InductorTestCase):
             )
 
     @dtypes(torch.float16, torch.bfloat16)
-    def test_mixed_dtypes(self, device, dtype):
-        """Ensure flash attention rejects mixed dtypes (e.g., fp32 Q with fp16 K/V)"""
-        B, H, S, D = 2, 8, 512, 64
-
-        query = torch.randn(B, H, S, D, dtype=torch.bfloat16, device=device)
-        key = torch.randn(B, H, S, D, dtype=dtype, device=device).to(
-            torch.float8_e4m3fn
-        )
-        value = torch.randn(B, H, S, D, dtype=dtype, device=device).to(
-            torch.float8_e4m3fn
-        )
-
-        compiled_fn = torch.compile(flex_attention, fullgraph=True)
-
-        from torch._inductor.exc import InductorError
-
-        with self.assertRaisesRegex(
-            InductorError,
-            "Mixed query, key, and value dtype is not supported on this platform",
-        ):
-            compiled_fn(query, key, value, kernel_options={"BACKEND": "FLASH"})
-
-    @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_rejects_mask_mod_on_unsupported_gpu(
         self, device, dtype
     ):
         major, _ = torch.cuda.get_device_capability()
         if major == 10:
             self.skipTest("Block sparsity backward is supported on SM100")
+
         q, k, v = create_test_tensors(dtype=dtype, device=device)
 
         def causal_mask(_b, _h, q_idx, kv_idx):

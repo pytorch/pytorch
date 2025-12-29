@@ -1751,7 +1751,7 @@ test_executorch() {
 }
 
 test_linux_aarch64() {
-  python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
+  python test/run_test.py --include test_modules test_utils test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
         test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
         test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops profiler/test_memory_profiler \
         distributed/elastic/timer/api_test distributed/elastic/timer/local_timer_example distributed/elastic/timer/local_timer_test \
