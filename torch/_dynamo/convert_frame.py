@@ -1690,10 +1690,10 @@ def _compile(
 
             def raise_unimplemented_cache_limit_exceeded():
                 unimplemented(
-                    gb_type="Dynamo cache limit exceeded",
+                    gb_type="Dynamo recompile limit exceeded",
                     context=f"Limit type: {limit_type}",
                     explanation="Dynamo attempted to recompile the code object too many times, "
-                    f"exceeding the {limit_type} cache size limit. "
+                    f"exceeding the {limit_type} cache size limit (currently set to {getattr(config, limit_type)}). "
                     "Excessive recompilations can degrade "
                     "performance due to the compilation overhead of each recompilation.",
                     hints=[

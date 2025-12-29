@@ -388,9 +388,9 @@
   ],
   "GB0039": [
     {
-      "Gb_type": "Dynamo cache limit exceeded",
+      "Gb_type": "Dynamo recompile limit exceeded",
       "Context": "Limit type: {limit_type}",
-      "Explanation": "Dynamo attempted to recompile the code object too many times, exceeding the {limit_type} cache size limit. Excessive recompilations can degrade performance due to the compilation overhead of each recompilation.",
+      "Explanation": "Dynamo attempted to recompile the code object too many times, exceeding the {limit_type} cache size limit (currently set to {getattr(config, limit_type)}). Excessive recompilations can degrade performance due to the compilation overhead of each recompilation.",
       "Hints": [
         "To monitor recompilations, enable TORCH_LOGS=recompiles. ",
         "If recompilations are expected, consider ",
