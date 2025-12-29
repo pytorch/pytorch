@@ -4,11 +4,13 @@ from unittest.mock import patch
 
 import torch
 from torch._functorch.aot_autograd import aot_export_module
+from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    skipIfTorchDynamo,
     TestCase,
 )
 
@@ -187,7 +189,7 @@ x = add_1, y = add_2);  getitem = None
             """print(str format_str) -> ()""",
         )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_reorder_print_no_graph_break(self, backend):
         def f(x):
             x1 = x + x
@@ -221,7 +223,7 @@ x = add_1, y = add_2);  getitem = None
             f"moo {x_new * 2}\nmoo {x_new * 2 * x_new * 2}",
         )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_constant_mutation(self, backend):
         def f(x):
             alist = [x]
@@ -242,6 +244,42 @@ x = add_1, y = add_2);  getitem = None
 
         self.assertEqual(printed_output, "moo tensor([2])\nmoo tensor([1])")
         self.assertEqual(orig_out, opt_out)
+
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_inductor_python_wrapper_uses_python_print(self):
+        """Test that the Python wrapper uses builtins.print instead of HOP for print fallback.
+
+        This verifies that when compiling with inductor (Python wrapper), the generated
+        code uses builtins.print directly rather than calling torch.ops.higher_order.print,
+        which is more efficient and avoids unnecessary overhead.
+        """
+
+        def f(x):
+            torch._higher_order_ops.print("value: {val}", val=x)
+            res = x + x
+            return res
+
+        inputs = (torch.randn(2, 3),)
+
+        # Compile and get the generated code
+        compiled_f = torch.compile(f, backend="inductor")
+        _, codes = run_and_get_code(compiled_f, *inputs)
+
+        # Concatenate all generated code chunks to simplify assertions
+        merged_code = "\n".join(codes)
+
+        # Verify that the merged code uses python print
+        self.assertIn(
+            "print",
+            merged_code,
+            "Generated code should use python print for print HOP fallback",
+        )
+        # And does not call torch.ops.higher_order.print
+        self.assertNotIn(
+            "torch.ops.higher_order.print",
+            merged_code,
+            "Generated code should not call torch.ops.higher_order.print directly",
+        )
 
 
 if __name__ == "__main__":
