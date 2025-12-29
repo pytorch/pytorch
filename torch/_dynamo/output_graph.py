@@ -1216,6 +1216,7 @@ class OutputGraph(OutputGraphCommon):
                 return VariableTracker.build(
                     self,  # type: ignore[arg-type]
                     target,
+                    # pyrefly: ignore[unexpected-keyword]
                     ConstantSource(source_name=module_key),
                 )
 

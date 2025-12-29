@@ -916,6 +916,7 @@ class AutogradFunctionVariable(VariableTracker):
                 source = AttrSource(
                     tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
                 )
+            # pyrefly: ignore[unexpected-keyword]
             apply_source = source and AttrSource(source, member="apply")
             val = AutogradFunctionApplyVariable(
                 forward_fn,
