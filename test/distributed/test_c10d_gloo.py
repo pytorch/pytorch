@@ -823,13 +823,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         )
         torch.manual_seed(42)
 
-        for op in [
+        for op in (
             c10d.ReduceOp.SUM,
             c10d.ReduceOp.AVG,
             c10d.ReduceOp.MIN,
             c10d.ReduceOp.MAX,
             c10d.ReduceOp.PRODUCT,
-        ]:
+        ):
             with self.subTest(op=op):
                 inputs = [
                     torch.full((3,), float(self.rank + i + 1))
