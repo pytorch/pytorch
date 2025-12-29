@@ -1115,7 +1115,7 @@ from user code:
                     _dynamo_graph_capture_for_export,
                 )
 
-                gm = _dynamo_graph_capture_for_export(model)((input_ids_dt,))
+                gm = _dynamo_graph_capture_for_export(model)(input_ids_dt)
                 fake_mode = gm.meta["fake_mode"]
 
             with contextlib.ExitStack() as stack:

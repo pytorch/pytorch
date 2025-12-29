@@ -56,8 +56,7 @@ def _reorder_parameters_to_match_model(
         return re.sub(r"___(\d+)___", r"_\1_", name)
 
     normalized_to_gm_name = {
-        normalize_name(gm_param_name): gm_param_name
-        for gm_param_name in gm._parameters
+        normalize_name(gm_param_name): gm_param_name for gm_param_name in gm._parameters
     }
 
     for gm_flat_name, orig_fqn in flat_name_to_fqn.items():

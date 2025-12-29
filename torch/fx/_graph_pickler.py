@@ -398,22 +398,27 @@ class _NodePickleData:
         # We store module path and name so we can re-import the kernel on load.
         # We don't store the kernel object directly since Triton JIT functions
         # are often not directly picklable.
-        self.triton_kernel_module = None
-        self.triton_kernel_name = None
-        self.triton_constant_args = None
+        self.triton_kernel_module: str | None = None
+        self.triton_kernel_name: str | None = None
+        self.triton_constant_args: dict[str, object] | None = None
         if self._is_triton_kernel_node(node):
             from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 
             kernel_idx = node.kwargs.get("kernel_idx")
             constant_args_idx = node.kwargs.get("constant_args_idx")
             if kernel_idx is not None:
+                assert isinstance(kernel_idx, int)
                 kernel = kernel_side_table.get_kernel(kernel_idx)
                 # Store kernel reference info for re-importing on load
                 if hasattr(kernel, "__module__") and hasattr(kernel, "__name__"):
                     self.triton_kernel_module = kernel.__module__
                     self.triton_kernel_name = kernel.__name__
             # Only get constant_args if the index is valid (exists in the table)
-            if constant_args_idx is not None and constant_args_idx in kernel_side_table.constant_args:
+            if (
+                constant_args_idx is not None
+                and constant_args_idx in kernel_side_table.constant_args
+            ):
+                assert isinstance(constant_args_idx, int)
                 self.triton_constant_args = kernel_side_table.get_constant_args(
                     constant_args_idx
                 )
@@ -445,14 +450,17 @@ class _NodePickleData:
 
         # Restore Triton kernel to kernel_side_table and update kernel_idx
         # Re-import the kernel by module path and name
-        if self.triton_kernel_module is not None and self.triton_kernel_name is not None:
+        if (
+            self.triton_kernel_module is not None
+            and self.triton_kernel_name is not None
+        ):
             try:
                 module = importlib.import_module(self.triton_kernel_module)
                 kernel_to_register = getattr(module, self.triton_kernel_name)
             except (ImportError, AttributeError) as e:
                 raise RuntimeError(
                     f"Failed to re-import Triton kernel {self.triton_kernel_module}.{self.triton_kernel_name}: {e}"
-                )
+                ) from e
 
             from torch._higher_order_ops.triton_kernel_wrap import kernel_side_table
 

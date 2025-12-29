@@ -2542,7 +2542,7 @@ class OutputGraph(OutputGraphCommon):
                 )
 
             if is_fake(t):
-                if t.fake_mode is target_mode:
+                if t.fake_mode is target_mode:  # pyrefly: ignore[missing-attribute]
                     return t
                 return target_mode.from_tensor(t, static_shapes=True)
 
