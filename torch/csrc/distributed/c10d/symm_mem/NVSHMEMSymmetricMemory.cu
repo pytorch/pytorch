@@ -33,6 +33,12 @@ struct NVSHMEMAllocation {
   NVSHMEMAllocation(void* ptr, size_t buffer_size, int device_idx)
       : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
 
+  // Delete copy and move operations to prevent double-free
+  NVSHMEMAllocation(const NVSHMEMAllocation&) = delete;
+  NVSHMEMAllocation& operator=(const NVSHMEMAllocation&) = delete;
+  NVSHMEMAllocation(NVSHMEMAllocation&&) = delete;
+  NVSHMEMAllocation& operator=(NVSHMEMAllocation&&) = delete;
+
   ~NVSHMEMAllocation() {
     // Avoid calling CUDA functions after driver shutting down
     if (is_finalizing()) {
