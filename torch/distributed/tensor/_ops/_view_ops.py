@@ -457,18 +457,6 @@ def dim_view_as_real(shape: Shape) -> DimMap:
     return tuple(results)
 
 
-def dim_fliplr(ndim: int) -> DimMap:
-    if ndim < 2:
-        raise RuntimeError("Input must have at least 2 dimensions for fliplr")
-    return tuple(InputDim(i) for i in range(ndim))
-
-
-def dim_flipud(ndim: int) -> DimMap:
-    if ndim < 1:
-        raise RuntimeError("Input must have at least 1 dimension for flipud")
-    return tuple(InputDim(i) for i in range(ndim))
-
-
 def dim_reduction(ndim: int, dim_or_dims: DimsType | None, keepdim: bool) -> DimMap:
     """
     General fallback for reduction ops where Partial() does not apply.
@@ -494,9 +482,6 @@ dim_maps: dict[Callable[..., torch.Tensor], Callable[..., DimMap]] = {
     torch.broadcast_to: lambda input, shape: expand(input.shape, shape),
     Tensor.expand: lambda self, *sizes: expand(self.shape, normalize_sizes(sizes)),
     torch.flatten: lambda tensor: dim_flatten(tensor.ndim),
-    torch.flip: lambda input, dims: tuple(InputDim(i) for i in range(input.ndim)),
-    torch.fliplr: lambda input: dim_fliplr(input.ndim),
-    torch.flipud: lambda input: dim_flipud(input.ndim),
     torch.movedim: lambda input, source, destination: dim_movedim(
         input.ndim, source, destination
     ),
