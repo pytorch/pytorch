@@ -29,7 +29,7 @@ class EmptyDecomposeKConfigHeuristics(TemplateConfigHeuristics):
     op_name="mm",
 )
 # Register on CUDA (both NVIDIA and ROCm/HIP)
-# Runtime enablement is controlled by config.triton.enable_decompose_k
+# Runtime enablement is controlled by config.triton.num_decompose_k_splits (0 disables)
 @register_template_heuristic(
     decompose_k_subgraph_template.uid,
     "cuda",

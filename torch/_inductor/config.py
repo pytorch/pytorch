@@ -1670,19 +1670,10 @@ class triton:
     # Note: it may also need to be used with config.compile_threads = 1
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
-    # Enable decompose_k optimization. Disabled on ROCm by default pending performance validation.
-    # Set to True or use TORCHINDUCTOR_ENABLE_DECOMPOSE_K=1 to enable.
-    # Will be toggled on for unit tests.
-    enable_decompose_k = bool(
-        os.environ.get(
-            "TORCHINDUCTOR_ENABLE_DECOMPOSE_K", "0" if torch.version.hip else "1"
-        )
-        == "1"
-    )
-
     # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
+    # Disabled on ROCm by default pending performance validation.
     num_decompose_k_splits = int(
-        os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
+        os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "0" if torch.version.hip else "10")
     )
 
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
