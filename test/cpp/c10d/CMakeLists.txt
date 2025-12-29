@@ -16,6 +16,7 @@ function(c10d_add_test test_src)
 
   get_filename_component(test_name ${test_src} NAME_WE)
   add_executable(${test_name} "${test_src}")
+  torch_compile_options(${test_name})
   target_include_directories(${test_name} PRIVATE
       $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>
       $<TARGET_PROPERTY:fmt::fmt-header-only,INTERFACE_INCLUDE_DIRECTORIES>
