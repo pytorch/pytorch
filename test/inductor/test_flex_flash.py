@@ -1,11 +1,13 @@
 # Owner(s): ["module: inductor"]
 
+import functools
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
+from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 from torch._inductor.kernel.flex.flex_flash_attention import (
     _hierarchical_indexer_cute,
     ensure_flash_available,
@@ -1008,7 +1010,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         self, seq_lens, score_mod=None, block_mask_factory=None, requires_grad=False
     ):
         """Helper to run dynamic=True tests across multiple sequence lengths."""
-        torch._dynamo.reset()
 
         for seq_len in seq_lens:
             q, k, v = create_test_tensors(
@@ -1068,7 +1069,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
     def test_dynamic_batch_size(self):
         """Test dynamic batch sizes."""
-        torch._dynamo.reset()
         for batch_size in [1, 2, 4, 8]:
             q, k, v = create_test_tensors(
                 batch_size=batch_size, seq_len=256, device="cuda", dtype=torch.float16
@@ -1108,7 +1108,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
     def test_dynamic_gqa(self):
         """Test GQA with dynamic sequence lengths."""
-        torch._dynamo.reset()
         q_heads, kv_heads = 8, 2
         for seq_len in [128, 256, 512]:
             q = torch.randn(2, q_heads, seq_len, 64, device="cuda", dtype=torch.float16)
@@ -1122,7 +1121,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
     def test_dynamic_mqa(self):
         """Test MQA with dynamic sequence lengths."""
-        torch._dynamo.reset()
         q_heads, kv_heads = 8, 1
         for seq_len in [128, 256, 512]:
             q = torch.randn(2, q_heads, seq_len, 64, device="cuda", dtype=torch.float16)
@@ -1136,7 +1134,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
     def test_dynamic_non_divisible_seq_len(self):
         """Test non-block-divisible sequence lengths with dynamic shapes."""
-        torch._dynamo.reset()
         for seq_len in [127, 255, 383, 511, 513]:
             q, k, v = create_test_tensors(
                 seq_len=seq_len, device="cuda", dtype=torch.float16
@@ -1145,7 +1142,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
     def test_dynamic_asymmetric_qkv_lengths(self):
         """Test asymmetric Q and KV lengths with dynamic shapes."""
-        torch._dynamo.reset()
         test_cases = [(256, 512), (512, 256), (128, 1024)]
         for q_len, kv_len in test_cases:
             q = torch.randn(2, 4, q_len, 64, device="cuda", dtype=torch.float16)
@@ -1155,8 +1151,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
     def test_captured_float_fails_with_dynamic(self):
         """Test that captured Python float fails with dynamic=True (unbacked_bindings)."""
-        torch._dynamo.reset()
-
         val = 2.0  # Captured float
 
         def score_mod(score, _b, _h, _q, _k):
@@ -1172,8 +1166,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
     def test_captured_int_fails_with_dynamic(self):
         """Captured Python int should fail with dynamic=True (index_expr-style error)."""
-        torch._dynamo.reset()
-
         val = 2  # Captured int
 
         def score_mod(score, _b, _h, _q, _k):
@@ -1189,8 +1181,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
 
     def test_captured_float_works_with_static(self):
         """Test that captured Python float works with dynamic=False."""
-        torch._dynamo.reset()
-
         val = 2.0  # Captured float
 
         def score_mod(score, _b, _h, _q, _k):
@@ -1203,6 +1193,174 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
         )
         self.assertEqual(out.shape, q.shape)
+
+    def test_dynamic_mask_from_input_lengths_single_graph(self):
+        """Dynamic mask creation driven by input lengths should stay single-graph."""
+        counter = CompileCounterWithBackend("inductor")
+
+        def _flex_attention_mask(b, h, q_idx, kv_idx, input_lengths):
+            return (q_idx < input_lengths[b]) & (kv_idx < input_lengths[b])
+
+        class Model(torch.nn.Module):
+            def __init__(self, dim=128, heads=4):
+                super().__init__()
+                self.proj = torch.nn.Linear(dim, dim)
+                self.heads: int = int(heads)
+
+            def forward(self, x, input_lengths):
+                x = self.proj(x)
+                B, T, C = x.shape
+                head_dim = C // self.heads
+                x = x.view(B, T, self.heads, head_dim).permute(0, 2, 1, 3)
+
+                max_time = x.size(-2)
+                mask = torch.compile(create_block_mask, dynamic=True, fullgraph=False)(
+                    functools.partial(
+                        _flex_attention_mask, input_lengths=input_lengths
+                    ),
+                    B=B,
+                    H=None,
+                    Q_LEN=max_time,
+                    KV_LEN=max_time,
+                    device=x.device,
+                )
+
+                return torch.compile(
+                    flex_attention, dynamic=True, fullgraph=True, backend=counter
+                )(x, x, x, block_mask=mask, kernel_options={"BACKEND": "FLASH"})
+
+        model = Model().cuda().half()
+        B, T, F = 8, 64, 128
+        for _ in range(3):
+            x = torch.randn(B, T, F, device="cuda", dtype=torch.float16)
+            lens = torch.randint(1, T + 1, (B,), device="cuda")
+            model(x, lens)
+
+        self.assertEqual(
+            counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
+        )
+
+    def test_dynamic_free_symbol_mask_single_graph(self):
+        """Free-symbol dense mask under dynamic=True should not recompile."""
+        counter = CompileCounterWithBackend("inductor")
+
+        def make_mask(batch_shape, seq_len):
+            rand_mask = torch.randint(
+                0, 2, (batch_shape, seq_len), device="cuda"
+            ).bool()
+            return torch.compile(create_block_mask, dynamic=True)(
+                B=batch_shape,
+                BLOCK_SIZE=128,
+                mask_mod=lambda b, h, q_idx, kv_idx: ~rand_mask[b, q_idx],
+                H=None,
+                Q_LEN=seq_len,
+                KV_LEN=seq_len,
+                device="cuda",
+            )
+
+        @torch.compile(dynamic=True, fullgraph=True, backend=counter)
+        def run(q, k, v, block_mask):
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        seq_len = 128
+        for batch_shape in [2, 4, 8]:
+            q, k, v = create_test_tensors(
+                batch_shape, 4, seq_len, 64, device="cuda", dtype=torch.float16
+            )
+            block_mask = make_mask(batch_shape, seq_len)
+            run(q, k, v, block_mask)
+
+        self.assertEqual(
+            counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
+        )
+
+    def test_dynamic_max_autotune_with_block_mask(self):
+        """Dynamic=True with max-autotune should succeed for FLASH backend."""
+        q, k, v = create_test_tensors(
+            batch_size=2,
+            num_heads=4,
+            seq_len=256,
+            dim=64,
+            dtype=torch.bfloat16,
+            device="cuda",
+        )
+        block_mask = _create_block_mask_for_device(
+            _causal_mask, 2, 4, 256, 256, device="cuda"
+        )
+
+        compiled_fn = torch.compile(
+            flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
+        )
+        out = compiled_fn(
+            q,
+            k,
+            v,
+            block_mask=block_mask,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+        self.assertEqual(out.shape, q.shape)
+
+    def test_dynamic_captured_buffer_varying_heads(self):
+        """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
+        torch._dynamo.reset()
+
+        def run_with_head_count(head_count):
+            head_scale = torch.randn(
+                head_count, device="cuda", dtype=torch.float16, requires_grad=False
+            )
+
+            def score_mod(score, batch, head, token_q, token_kv):
+                return score * head_scale[head]
+
+            q, k, v = create_test_tensors(
+                batch_size=2,
+                num_heads=head_count,
+                seq_len=256,
+                dim=64,
+                dtype=torch.float16,
+                device="cuda",
+                requires_grad=True,
+            )
+            self._flash_triton_dynamic(q, k, v, score_mod=score_mod)
+
+        for head_count in [4, 8, 4, 16, 4]:
+            run_with_head_count(head_count)
+
+    def test_dynamic_symbol_closure_in_score_mod(self):
+        """Capturing a SymInt in score_mod should compile to one dynamic graph."""
+
+        class SimpleAttention(torch.nn.Module):
+            def __init__(self, dim=512, n_head=8):
+                super().__init__()
+                self.qkv = torch.nn.Linear(dim, 3 * dim)
+                self.n_head: int = int(n_head)
+                self.head_dim: int = int(dim // n_head)
+
+            def forward(self, x):
+                B, T, C = x.size()
+                qkv = self.qkv(x).view(B, T, 3, self.n_head, self.head_dim)
+                qkv = qkv.permute(2, 0, 3, 1, 4)
+                q, k, v = qkv
+                return flex_attention(
+                    q,
+                    k,
+                    v,
+                    score_mod=lambda s, b, h, q_idx, kv_idx: s + B,
+                    kernel_options={"BACKEND": "FLASH"},
+                )
+
+        model = SimpleAttention().cuda()
+        backend = EagerAndRecordGraphs()
+        model.compile(mode="default", dynamic=True, backend=backend)
+
+        torch._dynamo.reset()
+        for batch_shape in [2, 4, 8]:
+            x = torch.randn(batch_shape, 256, 512, device="cuda")
+            model(x)
+
+        self.assertEqual(len(backend.graphs), 1, "Expected a single dynamic graph")
 
 
 class TestHierarchicalIndex(InductorTestCase):
