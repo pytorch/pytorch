@@ -361,6 +361,7 @@ def conv_layout(
     groups: int,
 ) -> ir.Layout:
     """Determine output layout for a convolution"""
+    ndim = len(weight.get_size()) - 2
     with V.graph.fake_mode:
         output = torch.ops.aten.convolution(
             ir.ir_node_to_tensor(x, guard_shape=True),
@@ -374,7 +375,11 @@ def conv_layout(
             groups,
         )
         sizes = ir.convert_shape_to_inductor(output.size())
-        stride = ir.convert_shape_to_inductor(output.stride())  # type: ignore[assignment]
+        stride = (
+            ir.convert_shape_to_inductor(output.stride())
+            if ndim >= 2
+            else ir.FlexibleLayout.contiguous_strides(sizes)
+        )
 
     return ir.FixedLayout(
         x.get_device_or_error(),
