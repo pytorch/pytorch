@@ -23,7 +23,6 @@ class ExportableModule(torch.nn.Module, abc.ABC):
             def forward(self, x):
                 return x * 2
 
-
         class MyExportableModule(torch.onnx.ExportableModule):
             def __init__(self):
                 super().__init__()
