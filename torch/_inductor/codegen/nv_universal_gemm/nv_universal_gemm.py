@@ -242,7 +242,6 @@ def add_nv_universal_gemm_choices(
 
     max_configs = config.cuda.nvgemm_max_profiling_configs or len(kernels)
 
-    # Filter kernels using heuristics (handles should_run check internally)
     heuristics = get_nvgemm_heuristics()
     kernels = heuristics.filter_kernels(kernels, inputs, max_configs, accumulator_type)
 
