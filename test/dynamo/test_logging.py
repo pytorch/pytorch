@@ -221,13 +221,18 @@ class LoggingTests(LoggingTestCase):
 
         record_str = "\n".join(r.getMessage() for r in records)
 
+        # Normalize paths in the record string to just filenames for portability
+        record_str_normalized = re.sub(
+            r"#\s+[^\s#]*[/\\]([^/\\]+\.py:)", r"# \1", munge_exc(record_str)
+        )
+
         self.assertExpectedInline(
-            munge_exc(record_str).strip(),
+            record_str_normalized.strip(),
             """\
 Recompiling function outmost_fn in test_logging.py:N
     triggered by the following guard failure(s):
     - compile_id: 0/0, reason: len(ys) == 3                                             \
-# for y, z in zip(ys, zs):  # test/dynamo/test_logging.py:N in inner
+# for y, z in zip(ys, zs):  # test_logging.py:N in inner
     -   user_stack:
     -     frame 0: outmost_fn - return outer_fn(x, ys, zs)
     -     frame 1: outer_fn - return fn(x, ys, zs)
