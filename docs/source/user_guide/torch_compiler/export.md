@@ -56,7 +56,7 @@ Under the hood, `torch.export` leverages the following latest technologies:
   called the Frame Evaluation API to safely trace PyTorch graphs. This
   provides a massively improved graph capturing experience, with much fewer
   rewrites needed in order to fully trace the PyTorch code.
-- **AOT Autograd** ensures the graph is decomposed/lowered to the {term}`ATen` operator
+- **AOT Autograd** ensures the graph is decomposed or lowered to the {term}`ATen` operator
   set. When using `run_decompositions()`, it can also provide functionalization.
 - **Torch FX (torch.fx)** is the underlying representation of the graph,
   allowing flexible Python-based transformations.
