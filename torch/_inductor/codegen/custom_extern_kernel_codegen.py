@@ -67,7 +67,9 @@ def generate_print_python(
         writeline: A function that writes a line of code to the output buffer.
 
     Example generated code:
+        print('x = {}, y = {}'.format(buf0, buf1))
         print('x = {x}, y = {y}'.format(x=buf0, y=buf1))
+        print('x = {}, y = {y}'.format(buf0, y=buf1))
     """
     codegen_args: list[str] = node.codegen_args()
     codegen_kwargs: list[str] = node.codegen_kwargs()
@@ -79,11 +81,15 @@ def generate_print_python(
         )
     format_str: str = codegen_args[0]
 
-    if codegen_kwargs:
-        kwargs_str: str = ", ".join(codegen_kwargs)
-        writeline(f"print({format_str}.format({kwargs_str}))")
-    else:
-        writeline(f"print({format_str})")
+    # Remaining args are positional arguments for .format()
+    positional_args = codegen_args[1:]
+
+    args_str = ", ".join(positional_args + codegen_kwargs)
+    writeline(
+        f"print({format_str}.format({args_str}))"
+        if args_str
+        else f"print({format_str})"
+    )
 
 
 # Registry mapping operator names to their custom codegen implementations
