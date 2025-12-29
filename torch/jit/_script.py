@@ -1162,8 +1162,9 @@ def _script_impl(
         # the provide example inputs. This logs all the traces in type_trace_db
         type_trace_db = JitTypeTraceStore()
         if monkeytype_trace:
-            # pyrefly: ignore [bad-argument-count]
+            # pyrefly: ignore [bad-argument-count, bad-argument-type]
             monkeytype_config = JitTypeTraceConfig(type_trace_db)
+            # pyrefly: ignore [bad-argument-type]
             with monkeytype_trace(monkeytype_config):
                 if isinstance(example_inputs, dict):
                     # If the obj is an nn.Module or a class, then each method is
