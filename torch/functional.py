@@ -2,7 +2,7 @@
 import itertools
 import operator
 from collections.abc import Sequence
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 import torch.nn.functional as F
@@ -120,7 +120,7 @@ def broadcast_shapes(*shapes):
 
 def split(
     tensor: Tensor,
-    split_size_or_sections: Union[int, list[int]],
+    split_size_or_sections: int | list[int],
     dim: int = 0,
 ) -> tuple[Tensor, ...]:
     r"""Splits the tensor into chunks. Each chunk is a view of the original tensor.
@@ -387,13 +387,13 @@ def einsum(*args: Any) -> Tensor:
 if TYPE_CHECKING:
     # The JIT doesn't understand Union, so only add type annotation for mypy
     def meshgrid(
-        *tensors: Union[Tensor, list[Tensor]], indexing: Optional[str] = None
+        *tensors: Tensor | list[Tensor], indexing: str | None = None
     ) -> tuple[Tensor, ...]:
         return _meshgrid(*tensors, indexing=indexing)
 
 else:
 
-    def meshgrid(*tensors, indexing: Optional[str] = None) -> tuple[Tensor, ...]:
+    def meshgrid(*tensors, indexing: str | None = None) -> tuple[Tensor, ...]:
         r"""Creates grids of coordinates specified by the 1D inputs in `attr`:tensors.
 
         This is helpful when you want to visualize data over some
@@ -490,7 +490,7 @@ else:
         return _meshgrid(*tensors, indexing=indexing)
 
 
-def _meshgrid(*tensors, indexing: Optional[str]):
+def _meshgrid(*tensors, indexing: str | None):
     if has_torch_function(tensors):
         return handle_torch_function(meshgrid, tensors, *tensors, indexing=indexing)
     if len(tensors) == 1 and isinstance(tensors[0], (list, tuple)):
@@ -508,15 +508,15 @@ def _meshgrid(*tensors, indexing: Optional[str]):
 def stft(
     input: Tensor,
     n_fft: int,
-    hop_length: Optional[int] = None,
-    win_length: Optional[int] = None,
-    window: Optional[Tensor] = None,
+    hop_length: int | None = None,
+    win_length: int | None = None,
+    window: Tensor | None = None,
     center: bool = True,
     pad_mode: str = "reflect",
     normalized: bool = False,
-    onesided: Optional[bool] = None,
-    return_complex: Optional[bool] = None,
-    align_to_window: Optional[bool] = None,
+    onesided: bool | None = None,
+    return_complex: bool | None = None,
+    align_to_window: bool | None = None,
 ) -> Tensor:
     r"""Short-time Fourier transform (STFT).
 
@@ -788,7 +788,7 @@ def _unique_impl(
     sorted: bool = True,
     return_inverse: bool = False,
     return_counts: bool = False,
-    dim: Optional[int] = None,
+    dim: int | None = None,
 ) -> _unique_impl_out:
     r"""unique(input, sorted=True, return_inverse=False, return_counts=False, dim=None) -> tuple[Tensor, Tensor, Tensor]
 
@@ -956,7 +956,7 @@ def _unique_consecutive_impl(
     input: Tensor,
     return_inverse: bool = False,
     return_counts: bool = False,
-    dim: Optional[int] = None,
+    dim: int | None = None,
 ) -> _unique_impl_out:
     r"""Eliminates all but the first element from every consecutive group of equivalent elements.
 
@@ -1201,7 +1201,7 @@ else:
         a,
         b,
         dims: int = 2,
-        out: Optional[torch.Tensor] = None,
+        out: torch.Tensor | None = None,
     ):
         pass
 
@@ -1210,7 +1210,7 @@ else:
         a,
         b,
         dims: tuple[list[int], list[int]],
-        out: Optional[torch.Tensor] = None,
+        out: torch.Tensor | None = None,
     ):
         pass
 
@@ -1219,7 +1219,7 @@ else:
         a,
         b,
         dims: list[list[int]],
-        out: Optional[torch.Tensor] = None,
+        out: torch.Tensor | None = None,
     ):
         pass
 
@@ -1228,7 +1228,7 @@ else:
         a,
         b,
         dims: torch.Tensor,
-        out: Optional[torch.Tensor] = None,
+        out: torch.Tensor | None = None,
     ):
         pass
 
@@ -1237,7 +1237,7 @@ def tensordot(  # noqa: F811
     a,
     b,
     dims=2,
-    out: Optional[torch.Tensor] = None,
+    out: torch.Tensor | None = None,
 ):
     r"""Returns a contraction of a and b over multiple dimensions.
 
@@ -1309,7 +1309,10 @@ def tensordot(  # noqa: F811
     if isinstance(dims, torch.Tensor):
         num_elements = dims.numel()
         if num_elements > 1:
-            assert dims.size()[0] == 2
+            if dims.size()[0] != 2:
+                raise AssertionError(
+                    f"dims tensor must have size 2 in first dimension, got {dims.size()[0]}"
+                )
             dims_a = torch.jit.annotate(list[int], dims[0].tolist())
             dims_b = torch.jit.annotate(list[int], dims[1].tolist())
         else:
@@ -1659,7 +1662,7 @@ else:
 
 def norm(  # noqa: F811
     input,
-    p: Optional[Union[float, str]] = "fro",
+    p: float | str | None = "fro",
     dim=None,
     keepdim=False,
     out=None,
@@ -1882,7 +1885,7 @@ def norm(  # noqa: F811
 
 def unravel_index(
     indices: Tensor,
-    shape: Union[int, Sequence[int], torch.Size],
+    shape: int | Sequence[int] | torch.Size,
 ) -> tuple[Tensor, ...]:
     r"""Converts a tensor of flat indices into a tuple of coordinate tensors that
     index into an arbitrary tensor of the specified shape.
@@ -1938,7 +1941,7 @@ def unravel_index(
     return res_tensor.unbind(-1)
 
 
-def _unravel_index(indices: Tensor, shape: Union[int, Sequence[int]]) -> Tensor:
+def _unravel_index(indices: Tensor, shape: int | Sequence[int]) -> Tensor:
     torch._check_type(
         not indices.is_complex()
         and not indices.is_floating_point()

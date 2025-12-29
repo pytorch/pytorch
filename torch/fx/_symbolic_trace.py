@@ -18,7 +18,7 @@ import torch
 import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 from torch._library.fake_class_registry import FakeScriptObject
-from torch._library.opaque_object import is_opaque_type
+from torch._library.opaque_object import is_opaque_reference_type, is_opaque_type
 
 from ._compatibility import compatibility
 from ._lazy_graph_module import _make_graph_module
@@ -422,7 +422,9 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, _constant_attribute_types) or is_opaque_type(type(a)):
+        if isinstance(a, _constant_attribute_types) or (
+            is_opaque_reference_type(type(a))
+        ):
             qualname: Optional[str] = self.tensor_attrs.get(
                 a
             )  # pyrefly: ignore[no-matching-overload]
@@ -881,7 +883,7 @@ class Tracer(TracerBase):
 
             self.submodule_paths = None
         except RuntimeError as e:
-            if isinstance(e.args[0], str) and "data-dependent" in e.args[0]:
+            if e.args and isinstance(e.args[0], str) and "data-dependent" in e.args[0]:
                 partial_fx_graph = self.graph.python_code(
                     root_module="self",
                     verbose=True,

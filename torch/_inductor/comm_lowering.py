@@ -47,7 +47,7 @@ log = logging.getLogger(__name__)
 #
 # For eligible collective ops, we identify communication buffers at lowering
 # time and optionally choose to lower the op to a different kernel
-# (ommunication libraries like NCCL handle both registered and non-registered
+# (communication libraries like NCCL handle both registered and non-registered
 # buffers transparently within the same op, though some may require different
 # ops for different cases). Later, the codegen will perform "persistent
 # allocation" to satisfy the aforementioned constraints, and optionally,
@@ -75,7 +75,9 @@ def can_realize_as_comm_buffer(
 
 
 def realize_as_comm_buffer(
-    x: ir.TensorBox, comm_buffer_type: ir.CommBufferType, group_name: str
+    x: ir.TensorBox,
+    comm_buffer_type: ir.CommBufferType,
+    group_name: "torch.distributed.distributed_c10d.GroupName",
 ) -> None:
     """
     Realize an input as a comm buffer of the specified `comm_buffer_type`.
@@ -142,7 +144,9 @@ def should_skip_wait(x: ir.IRNode) -> bool:
 
 
 def _should_lower_as_one_shot_all_reduce(
-    inp: ir.TensorBox, reduce_op: str, group_name: str
+    inp: ir.TensorBox,
+    reduce_op: str,
+    group_name: "torch.distributed.distributed_c10d.GroupName",
 ):
     from torch.distributed._symmetric_memory import is_symm_mem_enabled_for_group
 
@@ -170,6 +174,9 @@ def _one_shot_all_reduce(inp: ir.TensorBox, reduce_op, group_name):
 
 
 def register_comm_lowerings():
+    """
+    Register lowerings for the comm subsystem.
+    """
     try:
         torch.ops._c10d_functional.all_reduce
     except AttributeError:
@@ -194,7 +201,11 @@ def register_comm_lowerings():
     c10d = torch.ops._c10d_functional
 
     @register_comm_lowering(c10d.all_reduce)  # type: ignore[misc]
-    def _all_reduce(inp: ir.TensorBox, reduce_op: str, group_name: str) -> ir.TensorBox:
+    def _all_reduce(
+        inp: ir.TensorBox,
+        reduce_op: str,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
+    ) -> ir.TensorBox:
         if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
             return _one_shot_all_reduce(inp, reduce_op, group_name)
 
@@ -222,7 +233,9 @@ def register_comm_lowerings():
 
     @register_comm_lowering(c10d.all_reduce_)  # type: ignore[misc]
     def _all_reduce_(
-        inp: ir.TensorBox, reduce_op: str, group_name: str
+        inp: ir.TensorBox,
+        reduce_op: str,
+        group_name: "torch.distributed.distributed_c10d.GroupName",
     ) -> ir.TensorBox:
         if _should_lower_as_one_shot_all_reduce(inp, reduce_op, group_name):
             ret = copy_(
@@ -310,6 +323,18 @@ def register_comm_lowerings():
             group_size,
             group_name,
         )
+
+    @register_comm_lowering(c10d.reduce_scatter_tensor_out)
+    def _reduce_scatter_tensor_out(inp, reduce_op, group_size, group_name, *, out):
+        ir._CollectiveKernel.create_inplace(
+            c10d.reduce_scatter_tensor_out.default,
+            inp,
+            reduce_op,
+            group_size,
+            group_name,
+            out=out,
+        )
+        return out
 
     @register_comm_lowering(c10d.reduce_scatter_tensor_coalesced)
     def _reduce_scatter_tensor_coalesced(inputs, reduce_op, group_size, group_name):

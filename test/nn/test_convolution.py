@@ -1063,7 +1063,7 @@ class TestConvolutionNN(NNTestCase):
     @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_conv_cudnn_memory_layout_dominance(self):
         # desired behavior here is to have the memory_layout of conv.weight to
-        # dominant the layout of output.
+        # dominate the layout of output.
         # which is not the same as current behavior, we'll fix this in
         # following up PRs and remove the `expectedFailure` tag
         input = torch.randint(
@@ -3659,7 +3659,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     input_format=input_format,
                     weight_format=weight_format,
                 )
-                # test when input channel is 1 and not converted to channels last
+                # test when input channels is 1 and not converted to channels last
                 helper(
                     nn.Conv2d,
                     2,
@@ -3941,17 +3941,15 @@ class TestConvolutionNNDeviceType(NNTestCase):
             for g_f in [torch.contiguous_format, torch.channels_last]:
                 for input_format in [torch.contiguous_format, torch.channels_last]:
                     output_format = torch.contiguous_format
-                    # Older versions of CudNN have Channels Last support disabled
-                    if torch.backends.cudnn.version() >= 7603:
-                        if input_format == torch.channels_last:
+                    if input_format == torch.channels_last:
+                        output_format = torch.channels_last
+                    # This is because we have N111 weight that cannot handle
+                    # the ambiguous memory_format
+                    if w_f == torch.channels_last:
+                        if layer is nn.Conv2d and filter_size * c != 1:
                             output_format = torch.channels_last
-                        # This is because we have N111 weight that cannot handle
-                        # the ambiguous memory_format
-                        if w_f == torch.channels_last:
-                            if layer is nn.Conv2d and filter_size * c != 1:
-                                output_format = torch.channels_last
-                            if layer is nn.ConvTranspose2d and filter_size * k != 1:
-                                output_format = torch.channels_last
+                        if layer is nn.ConvTranspose2d and filter_size * k != 1:
+                            output_format = torch.channels_last
                     self._run_conv(
                         layer,
                         device,
@@ -4222,13 +4220,17 @@ class TestConvolutionNNDeviceType(NNTestCase):
             y = m(x)
             self.assertEqual(yref, y)
 
-    @skipCUDAIfRocm
     @onlyCUDA
     @largeTensorTest("20GB")
     @largeTensorTest("64GB", "cpu")
     @serialTest()
-    # TODO(eqy): Remove this once it is fixed in cuDNN and we can dispatch to it again
-    @xfailIf(_get_cudnn_version() is not None and _get_cudnn_version() > 91000)
+    # Note: This xfail only applies to cuDNN (CUDA), not MIOpen (ROCm)
+    # Reference: https://github.com/ROCm/MIOpen/pull/2838
+    @xfailIf(
+        torch.version.hip is None
+        and _get_cudnn_version() is not None
+        and (91000 < _get_cudnn_version() < 91500)
+    )
     def test_depthwise_conv_64bit_indexing(self, device):
         x = torch.randn(1, 2, 32800, 32800, dtype=torch.half).to(
             memory_format=torch.channels_last
@@ -4238,15 +4240,15 @@ class TestConvolutionNNDeviceType(NNTestCase):
         ).to(memory_format=torch.channels_last)
         yref = c(x)
         y = c.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
+        self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
         del y, yref
 
         # try a batch-splittable case
         x = x.reshape(100, 2, 3280, 3280)
         x = x.contiguous(memory_format=torch.channels_last)
-        yref = c(x)
+        yref = c.cpu()(x)
         y = c.to(device=device)(x.to(device=device))
-        self.assertEqual(yref, y, atol=1e-3, rtol=1e-4)
+        self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
 
 
 instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)

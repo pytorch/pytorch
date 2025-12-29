@@ -193,8 +193,7 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
 
     def test_empty_local_tensors(self):
         """Test behavior with empty local tensors dict."""
-        # TODO: raise a better error here
-        with self.assertRaises(StopIteration):  # next() on empty iterator
+        with self.assertRaises(ValueError):
             LocalTensor({})
 
     def test_collectives_within_local_tensor_mode(self):
@@ -372,6 +371,117 @@ class TestLocalTensorWorld3(LocalTensorTestBase):
         self.assertEqual(tensor_list[0], different_tensors[0])
         self.assertEqual(tensor_list[1], different_tensors[1])
         self.assertEqual(tensor_list[2], different_tensors[2])
+
+    def test_reduce_scatter_tensor_collective(self):
+        """Test that reduce_scatter_tensor collective operation works correctly with LocalTensor."""
+        # Create different tensors for each rank
+        different_tensors = {
+            0: torch.tensor([[1.0, 2.0], [3.0, 4.0], [5.0, 6.0]]),
+            1: torch.tensor([[10.0, 20.0], [30.0, 40.0], [50.0, 60.0]]),
+            2: torch.tensor([[100.0, 200.0], [300.0, 400.0], [500.0, 600.0]]),
+        }
+
+        fake_pg = torch.distributed.distributed_c10d._get_default_group()
+
+        # Test reduce_scatter_tensor
+        with LocalTensorMode(self.world_size):
+            lt_reduce_scatter = LocalTensor(different_tensors)
+            lt_reduce_scatter_size = lt_reduce_scatter.size()
+            lt_output_tensor = torch.zeros(
+                lt_reduce_scatter_size[0] // fake_pg.size(),
+                *lt_reduce_scatter_size[1:],
+                dtype=lt_reduce_scatter.dtype,
+                device=lt_reduce_scatter.device,
+            )
+
+            dist.reduce_scatter_tensor(
+                lt_output_tensor, lt_reduce_scatter, group=fake_pg
+            )
+
+            expected_output = LocalTensor(
+                {
+                    0: torch.tensor([[111.0, 222.0]]),
+                    1: torch.tensor([[333.0, 444.0]]),
+                    2: torch.tensor([[555.0, 666.0]]),
+                }
+            )
+            print(lt_output_tensor)
+            self.assertEqual(lt_output_tensor, expected_output)
+
+    def test_all_gather_into_tensor_collective(self):
+        """Test that all_gather_into_tensor collective operation works correctly with LocalTensor."""
+        # Create different tensors for each rank
+        different_tensors = {
+            0: torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]]),
+            1: torch.tensor([[10.0, 20.0, 30.0], [40.0, 50.0, 60.0]]),
+            2: torch.tensor([[100.0, 200.0, 300.0], [400.0, 500.0, 600.0]]),
+        }
+
+        fake_pg = torch.distributed.distributed_c10d._get_default_group()
+
+        # Test all_gather_into_tensor
+        with LocalTensorMode(self.world_size):
+            lt_gather = LocalTensor(different_tensors)
+            lt_gather_size = lt_gather.size()
+            lt_output_tensor = torch.zeros(
+                lt_gather_size[0] * fake_pg.size(),
+                *lt_gather_size[1:],
+                dtype=lt_gather.dtype,
+                device=lt_gather.device,
+            )
+
+            dist.all_gather_into_tensor(lt_output_tensor, lt_gather, group=fake_pg)
+
+            expected_output = torch.cat(list(different_tensors.values()))
+
+            self.assertEqual(lt_output_tensor, expected_output)
+
+    def test_all_to_all_single_collective(self):
+        """Test that all_to_all_single collective operation works correctly with LocalTensor."""
+        from torch.distributed._functional_collectives import all_to_all_single
+
+        # Create different tensors for each rank
+        # Each rank will split its tensor and send parts to other ranks
+        different_tensors = {
+            0: torch.tensor(
+                [0.0, 0.0, 0.0, 0.0, 0.0, 0.0]
+            ),  # rank 0 sends [0,0], [0,0], [0,0] to ranks 0,1,2
+            1: torch.tensor(
+                [1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
+            ),  # rank 1 sends [1,1], [1,1], [1,1] to ranks 0,1,2
+            2: torch.tensor(
+                [2.0, 2.0, 2.0, 2.0, 2.0, 2.0]
+            ),  # rank 2 sends [2,2], [2,2], [2,2] to ranks 0,1,2
+        }
+
+        # Each rank splits its input into 3 parts of size 2 each
+        input_split_sizes = [2, 2, 2]
+        # Each rank receives 3 parts of size 2 each from all ranks
+        output_split_sizes = [2, 2, 2]
+
+        with LocalTensorMode(self.world_size):
+            lt_input = LocalTensor(different_tensors)
+
+            # Test all_to_all_single using functional collectives API
+            result = all_to_all_single(
+                lt_input,
+                output_split_sizes=output_split_sizes,
+                input_split_sizes=input_split_sizes,
+                group=torch.distributed.distributed_c10d._get_default_group(),
+            )
+
+            result = result.wait()
+            # Verify result is a LocalTensor
+            self.assertIsInstance(result, LocalTensor)
+
+            # After all_to_all_single:
+            # rank 0 receives: [0,0] from rank 0, [1,1] from rank 1, [2,2] from rank 2 = [0,0,1,1,2,2]
+            # rank 1 receives: [0,0] from rank 0, [1,1] from rank 1, [2,2] from rank 2 = [0,0,1,1,2,2]
+            # rank 2 receives: [0,0] from rank 0, [1,1] from rank 1, [2,2] from rank 2 = [0,0,1,1,2,2]
+            expected_output = torch.tensor([0.0, 0.0, 1.0, 1.0, 2.0, 2.0])
+
+            for rank in different_tensors:
+                self.assertEqual(result._local_tensors[rank], expected_output)
 
 
 class TestLocalTensorWorld4(LocalTensorTestBase):

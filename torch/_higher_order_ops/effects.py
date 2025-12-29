@@ -4,6 +4,7 @@ from typing import Any, Optional, Union
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
+from torch._higher_order_ops.print import print as hop_print
 from torch._higher_order_ops.torchbind import call_torchbind
 from torch._library.custom_ops import CustomOpDef
 from torch._library.effects import EffectType
@@ -58,9 +59,9 @@ def _get_effect(op: _op_identifier) -> Optional[_EffectType]:
 
 
 _register_effectful_op("aten::_print", _EffectType.ORDERED)
-_register_effectful_op("aten::_async_error", _EffectType.ORDERED)
 _register_effectful_op("profiler::_record_function_exit._RecordFunction", None)
 _register_effectful_op(call_torchbind, _EffectType.ORDERED)
+_register_effectful_op(hop_print, _EffectType.ORDERED)
 
 
 class WithEffects(HigherOrderOperator):
@@ -89,8 +90,8 @@ class WithEffects(HigherOrderOperator):
     ) -> tuple[Any, ...]:
         assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         assert not has_aliasing(op), "Ops with aliasing is not supported"
-        assert has_effects(op)
         assert isinstance(kwargs, dict)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(token, op, *args, **kwargs)
 
 
@@ -100,7 +101,7 @@ with_effects = WithEffects()
 def has_aliasing(op: OpType):
     # NOT FOR PUBLIC USE
     if isinstance(op, torch._ops.HigherOrderOperator):
-        return not _get_effect(op)
+        return False
 
     for arg in op._schema.arguments:
         if arg.alias_info is not None:
@@ -112,11 +113,6 @@ def has_aliasing(op: OpType):
 
 
 def has_effects(op) -> bool:
-    # Skip over the profiler's RecordFunction as they should not show up in the graph
-    _skip_ops = {torch.ops.profiler._record_function_exit._RecordFunction}
-    if op in _skip_ops:
-        return False
-
     return (
         isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
         and not has_aliasing(op)
@@ -196,11 +192,15 @@ with_effects.fallthrough(DispatchKey.AutogradCPU)
 with_effects.fallthrough(DispatchKey.AutogradCUDA)
 
 
-def _get_schema(op, args) -> torch.FunctionSchema:
+def _get_schema(op, args, kwargs: Optional[dict] = None) -> torch.FunctionSchema:
     if isinstance(op, torch._ops.OpOverload):
         return op._schema
     elif op == call_torchbind:
         return getattr(args[0], args[1]).schema
+    elif op == hop_print:
+        # hop_print currently expects (format_str, *kwargs) as its arguments
+        extra_kwargs = kwargs or {}
+        return op.gen_schema(*args, **extra_kwargs)
     else:
         raise RuntimeError(f"Unable to get schema for op {op}")
 
@@ -273,7 +273,7 @@ def handle_effects(
             unwrapped_token, op, *unwrapped_args, **unwrapped_kwargs
         )
 
-    schema = _get_schema(op, unwrapped_args)
+    schema = _get_schema(op, unwrapped_args, unwrapped_kwargs)
     if len(schema.returns) == 0:
         assert unwrapped_outs[0] is None
         unwrapped_outs = None  # type: ignore[assignment]

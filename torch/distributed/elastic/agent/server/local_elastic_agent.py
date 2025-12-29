@@ -15,7 +15,7 @@ import socket
 import time
 import uuid
 from string import Template
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch.distributed.elastic.timer as timer
 from torch.distributed.elastic import events
@@ -152,16 +152,16 @@ class LocalElasticAgent(SimpleElasticAgent):
         logs_specs: LogsSpecs,
         start_method="spawn",
         exit_barrier_timeout: float = 300,
-        log_line_prefix_template: Optional[str] = None,
+        log_line_prefix_template: str | None = None,
     ):
         super().__init__(spec, exit_barrier_timeout)
         self._start_method = start_method
-        self._pcontext: Optional[PContext] = None
+        self._pcontext: PContext | None = None
         self._rdzv_handler = spec.rdzv_handler
         self._log_line_prefix_template = log_line_prefix_template
-        self._worker_watchdog: Optional[timer.FileTimerServer] = None
+        self._worker_watchdog: timer.FileTimerServer | None = None
         self._logs_specs = logs_specs
-        self._health_check_server: Optional[HealthCheckServer] = None
+        self._health_check_server: HealthCheckServer | None = None
 
     def _setup_local_watchdog(self, envs: dict[int, dict[str, str]]) -> None:
         enable_watchdog_env_name = TORCHELASTIC_ENABLE_FILE_TIMER
@@ -244,7 +244,7 @@ class LocalElasticAgent(SimpleElasticAgent):
     def _log_watchdog_event(
         self,
         name: str,
-        request: Optional[timer.FileTimerRequest],
+        request: timer.FileTimerRequest | None,
     ) -> None:
         wg = self._worker_group
         spec = wg.spec
@@ -297,7 +297,7 @@ class LocalElasticAgent(SimpleElasticAgent):
 
         args: dict[int, tuple] = {}
         envs: dict[int, dict[str, str]] = {}
-        log_line_prefixes: Optional[dict[int, str]] = (
+        log_line_prefixes: dict[int, str] | None = (
             {} if self._log_line_prefix_template else None
         )
         for worker in worker_group.workers:

@@ -34,20 +34,6 @@ namespace c10 {
 // See [dtype Macros note] in torch/headeronly/core/ScalarType.h
 // regarding macros.
 
-template <typename T>
-struct CppTypeToScalarType;
-
-#define SPECIALIZE_CppTypeToScalarType(cpp_type, scalar_type)                  \
-  template <>                                                                  \
-  struct CppTypeToScalarType<cpp_type>                                         \
-      : std::                                                                  \
-            integral_constant<c10::ScalarType, c10::ScalarType::scalar_type> { \
-  };
-
-AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(SPECIALIZE_CppTypeToScalarType)
-
-#undef SPECIALIZE_CppTypeToScalarType
-
 #define DEFINE_CONSTANT(_, name) \
   constexpr ScalarType k##name = ScalarType::name;
 
@@ -104,13 +90,6 @@ inline bool isComplexType(ScalarType t) {
   return (
       t == ScalarType::ComplexHalf || t == ScalarType::ComplexFloat ||
       t == ScalarType::ComplexDouble);
-}
-
-inline bool isQIntType(ScalarType t) {
-  // Don't forget to extend this when adding new QInt types
-  return t == ScalarType::QInt8 || t == ScalarType::QUInt8 ||
-      t == ScalarType::QInt32 || t == ScalarType::QUInt4x2 ||
-      t == ScalarType::QUInt2x4;
 }
 
 inline bool isBitsType(ScalarType t) {
