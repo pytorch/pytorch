@@ -40,7 +40,8 @@ struct TORCH_API Graph {
   std::unique_ptr<at::GraphImplInterface> impl_;
 };
 
-// Return true if the current accelerator backend supports graph capture.
+// Return true if the current accelerator backend supports graph capture and
+// replay, false otherwise.
 inline bool isGraphAvailable() {
   c10::DeviceType device_type = at::accelerator::getAccelerator(true).value();
   return has_graph_impl(device_type);
