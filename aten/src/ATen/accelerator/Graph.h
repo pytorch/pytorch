@@ -1,4 +1,5 @@
 #pragma once
+#include <ATen/DeviceAccelerator.h>
 #include <ATen/core/GraphImplInterface.h>
 
 namespace at::accelerator {
@@ -38,5 +39,11 @@ struct TORCH_API Graph {
  private:
   std::unique_ptr<at::GraphImplInterface> impl_;
 };
+
+// Return true if the current accelerator backend supports graph capture.
+inline bool isGraphAvailable() {
+  c10::DeviceType device_type = at::accelerator::getAccelerator(true).value();
+  return has_graph_impl(device_type);
+}
 
 } // namespace at::accelerator

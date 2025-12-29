@@ -104,4 +104,15 @@ class Graph(_acceleratorGraph):
         self.capture_end()
 
 
-__all__ = ["Graph"]
+def is_graph_available() -> bool:
+    r"""
+    This function checks if the current :ref:`accelerator<accelerators>` supports graph capture and replay.
+
+    Returns:
+        bool: ``True`` if the current :ref:`accelerator<accelerators>` supports graph,
+        ``False`` otherwise.
+    """
+    return torch._C._accelerator_isGraphAvailable()
+
+
+__all__ = ["Graph", "is_graph_available"]

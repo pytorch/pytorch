@@ -1,4 +1,3 @@
-#include <ATen/DeviceAccelerator.h>
 #include <ATen/accelerator/Graph.h>
 
 namespace at::accelerator {
