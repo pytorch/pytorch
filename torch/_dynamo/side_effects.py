@@ -116,7 +116,7 @@ class SideEffects:
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     keepalive: list[Any]
     # Maps variable tracker to list of source locations (filename, lineno, source_line)
-    mutation_user_stack: dict[VariableTracker, OrderedSet[str]]
+    mutation_user_stacks: dict[VariableTracker, OrderedSet[str]]
 
     def __init__(
         self,
@@ -125,6 +125,7 @@ class SideEffects:
         store_attr_mutations: Optional[
             dict[VariableTracker, dict[str, VariableTracker]]
         ] = None,
+        mutation_user_stacks: dict[VariableTracker, OrderedSet[str]] | None = None,
         keepalive: Optional[list[Any]] = None,
         save_for_backward: Optional[
             list[tuple[AutogradFunctionContextVariable, list[VariableTracker]]]
@@ -145,10 +146,10 @@ class SideEffects:
         self.output_graph_weakref = weakref.ref(output_graph)
         self.id_to_variable = id_to_variable or {}
         self.store_attr_mutations = store_attr_mutations or {}
+        self.mutation_user_stacks = mutation_user_stacks or {}
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
-        self.mutation_user_stack = {}
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
         self._has_existing_dict_mutation = False
@@ -182,9 +183,9 @@ class SideEffects:
         )
         user_stack_collapsed = collapse_resume_frames(user_stack)
         user_stack_formatted = "".join(traceback.format_list(user_stack_collapsed))
-        if key not in self.mutation_user_stack:
-            self.mutation_user_stack[key] = OrderedSet()
-        self.mutation_user_stack[key].add(user_stack_formatted)
+        if key not in self.mutation_user_stacks:
+            self.mutation_user_stacks[key] = OrderedSet()
+        self.mutation_user_stacks[key].add(user_stack_formatted)
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -228,6 +229,7 @@ class SideEffects:
             store_attr_mutations={
                 k: dict(v) for k, v in self.store_attr_mutations.items()
             },
+            mutation_user_stacks=self.mutation_user_stacks,
             keepalive=list(self.keepalive),
             save_for_backward=self.save_for_backward,
             tensor_hooks=self.tensor_hooks,
@@ -900,14 +902,22 @@ class SideEffects:
 
     def _log_side_effects(self, var: VariableTracker) -> None:
         """Make a side effect log message with user stack."""
-        locations = self.mutation_user_stack[var]
+        # NOTE: a KeyError in self.mutation_user_stacks or a NotImplementedError from var.source.name is a bug
+        # and must be fixed!
+        locations = self.mutation_user_stacks[var]
         description = f"Mutating object of type {var.python_type_name()}"
         source_info = " (no source)"
         if var.source is not None:
             if isinstance(var.source, TempLocalSource):
                 source_info = " (source: created in torch.compile region)"
+            elif isinstance(var, variables.CellVariable) and var.local_name is not None:
+                source_info = f" (source: {var.local_name})"
+            elif isinstance(
+                var, variables.torch_function.TorchFunctionModeStackVariable
+            ):
+                source_info = " (source: torch function mode stack mutation)"
             else:
-                source_info = f" (source: {var.source.name})"
+                source_info = f" (source name: {var.source.name})"
 
         if locations:
             formatted_lines = "\n********\n\n".join(locations)
@@ -922,6 +932,7 @@ class SideEffects:
     def codegen_update_mutated(
         self, cg: PyCodegen, log_side_effects: bool = False
     ) -> None:
+        # NOTE: should only be called once per VT - only if a side effect actually gets codegen'd!
         def _maybe_log_side_effect(var: VariableTracker) -> None:
             if log_side_effects:
                 self._log_side_effects(var)
@@ -1110,7 +1121,7 @@ class SideEffects:
                             create_instruction("POP_TOP"),
                         ]
                     )
-                    _maybe_log_side_effect(var)
+                    _maybe_log_side_effect(var._dict_vt)
                 elif isinstance(
                     var,
                     variables.UserDefinedListVariable,
@@ -1151,7 +1162,7 @@ class SideEffects:
                             create_instruction("POP_TOP"),
                         ]
                     )
-                    _maybe_log_side_effect(var)
+                    _maybe_log_side_effect(var._list_vt)
 
                 # Applying mutations involves two steps: 1) Push all
                 # reconstructed objects onto the stack.  2) Call STORE_ATTR to
@@ -1169,6 +1180,7 @@ class SideEffects:
                 # the mutations of attributes in the reverse order.  To account
                 # for this reversal, we iterate through the mutable attributes
                 # in reverse order.
+                side_effect_occurred = False
                 for name, value in reversed(
                     self.store_attr_mutations.get(var, {}).items()
                 ):
@@ -1179,7 +1191,7 @@ class SideEffects:
                         suffixes.append(
                             [create_instruction("STORE_GLOBAL", argval=name)]
                         )
-                        _maybe_log_side_effect(var)
+                        side_effect_occurred = True
                     elif isinstance(value, variables.DeletedVariable):
                         if isinstance(
                             var.mutation_type, AttributeMutationExisting
@@ -1189,7 +1201,7 @@ class SideEffects:
                             suffixes.append(
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
-                            _maybe_log_side_effect(var)
+                            side_effect_occurred = True
                     elif isinstance(
                         var, variables.UserDefinedObjectVariable
                     ) and var.should_skip_descriptor_setter(name):
@@ -1207,7 +1219,7 @@ class SideEffects:
                                 create_instruction("POP_TOP"),
                             ]
                         )
-                        _maybe_log_side_effect(var)
+                        side_effect_occurred = True
                     elif (
                         isinstance(var, variables.UserDefinedObjectVariable)
                         and var.needs_slow_setattr()
@@ -1221,13 +1233,16 @@ class SideEffects:
                         suffixes.append(
                             [*create_call_method(3), create_instruction("POP_TOP")]
                         )
-                        _maybe_log_side_effect(var)
+                        side_effect_occurred = True
                     else:
                         cg.tx.output.update_co_names(name)
                         cg(value)
                         cg(var)
                         suffixes.append([create_instruction("STORE_ATTR", argval=name)])
-                        _maybe_log_side_effect(var)
+                        side_effect_occurred = True
+
+                if side_effect_occurred:
+                    _maybe_log_side_effect(var)
             elif isinstance(var, variables.ListIteratorVariable):
                 for _ in range(var.index):
                     cg.add_push_null(

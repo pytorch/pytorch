@@ -414,7 +414,7 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
         self.assertExpectedInline(
             munge_exc(records[0].getMessage()),
             """\
-Mutating object of type list (source: L['lst'])
+Mutating object of type list (source name: L['lst'])
 
       File "test_logging.py", line N, in test_side_effects
         fn(torch.ones(1), my_list)
@@ -443,7 +443,7 @@ Mutating object of type list (source: L['lst'])
         self.assertExpectedInline(
             munge_exc(records[0].getMessage()),
             """\
-Mutating object of type list (source: L['my_list'])
+Mutating object of type list (source name: L['my_list'])
 
       File "test_logging.py", line N, in test_side_effects_nested_calls
         outer(torch.ones(1), outer_list)
@@ -479,7 +479,7 @@ Mutating object of type list (source: L['my_list'])
         self.assertExpectedInline(
             munge_exc(records[0].getMessage()),
             """\
-Mutating object of type list (source: L['lst'])
+Mutating object of type list (source name: L['lst'])
 
       File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
         fn(torch.ones(1), my_list)
@@ -525,7 +525,7 @@ Mutating object of type list (source: L['lst'])
         self.assertExpectedInline(
             munge_exc(records[0].getMessage()),
             """\
-Mutating object of type dict (source: L['d'])
+Mutating object of type dict (source name: L['d'])
 
       File "test_logging.py", line N, in test_side_effects_dict_mutations
         fn(torch.ones(1), my_dict)
@@ -559,36 +559,11 @@ Mutating object of type dict (source: L['d'])
 
         fn(torch.ones(1), obj)
 
-        self.assertEqual(len(records), 2)
+        self.assertEqual(len(records), 1)
         self.assertExpectedInline(
             munge_exc(records[0].getMessage()),
             """\
-Mutating object of type MyClass (source: L['o'])
-
-      File "test_logging.py", line N, in test_side_effects_attribute_mutations
-        fn(torch.ones(1), obj)
-      File "test_logging.py", line N, in fn
-        o.value = 20
-
-    ********
-
-      File "test_logging.py", line N, in test_side_effects_attribute_mutations
-        fn(torch.ones(1), obj)
-      File "test_logging.py", line N, in fn
-        o.count = 1
-
-    ********
-
-      File "test_logging.py", line N, in test_side_effects_attribute_mutations
-        fn(torch.ones(1), obj)
-      File "test_logging.py", line N, in fn
-        o.count = 2
-""",
-        )
-        self.assertExpectedInline(
-            munge_exc(records[1].getMessage()),
-            """\
-Mutating object of type MyClass (source: L['o'])
+Mutating object of type MyClass (source name: L['o'])
 
       File "test_logging.py", line N, in test_side_effects_attribute_mutations
         fn(torch.ones(1), obj)
@@ -685,7 +660,7 @@ Mutating object of type MyClass (source: created in torch.compile region)
         self.assertExpectedInline(
             munge_exc(records[0].getMessage()),
             """\
-Mutating object of type dict (source: L['mod']._buffers)
+Mutating object of type dict (source name: L['mod']._buffers)
 
       File "test_logging.py", line N, in test_side_effects_nn_module_buffer
         fn(Mod(), torch.ones(1))
