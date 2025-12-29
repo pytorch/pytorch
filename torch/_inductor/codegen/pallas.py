@@ -39,6 +39,22 @@ class PallasPrinter(PythonPrinter):
         q = self.doprint(expr.args[2])
         return f"jnp.where({c}, {p}, {q})"
 
+    def _print_Min(self, expr: sympy.Expr) -> str:
+        """Convert sympy Min to jnp.minimum for JAX compatibility."""
+        args = [self.doprint(arg) for arg in expr.args]
+        result = args[0]
+        for arg in args[1:]:
+            result = f"jnp.minimum({result}, {arg})"
+        return result
+
+    def _print_Max(self, expr: sympy.Expr) -> str:
+        """Convert sympy Max to jnp.maximum for JAX compatibility."""
+        args = [self.doprint(arg) for arg in expr.args]
+        result = args[0]
+        for arg in args[1:]:
+            result = f"jnp.maximum({result}, {arg})"
+        return result
+
 
 # Use Pallas-specific printer for expression generation
 pallas_pexpr = PallasPrinter().doprint
