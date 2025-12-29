@@ -2158,6 +2158,7 @@ class TritonTemplate(KernelTemplate):
             workspace_arg=workspace_arg,
             allowed_prologue_inps=result.prologue_supported_inputs,
             hint_override=hint_override,
+            template_name=self.name,
         )
 
 
@@ -2270,10 +2271,12 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         workspace_arg: Optional[WorkspaceArg] = None,
         allowed_prologue_inps: Optional[OrderedSet[str]] = None,
         hint_override: Optional[int] = None,
+        template_name: Optional[str] = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
         self.make_kernel_render = make_kernel_render
         self.bmreq: TritonBenchmarkRequest = bmreq
+        self.template_name = template_name
         if log_info is None:
             log_info = {}
         self.log_info: dict[str, Any] = log_info
@@ -2471,6 +2474,7 @@ class ExternKernelCaller(ChoiceCaller):
                 ordered_kwargs_for_cpp_kernel=self.choice.ordered_kwargs_for_cpp_kernel,
                 op_overload=self.choice.op_overload,
                 kwargs=self.kwargs,
+                choice_uid=self.choice.uid,
             )
 
         return ir.TensorBox.create(inner)

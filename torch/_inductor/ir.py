@@ -6722,6 +6722,7 @@ class ExternKernelOut(ExternKernel):
         cpp_kernel_name: Optional[str] = None,
         ordered_kwargs_for_cpp_kernel: Sequence[Any] = (),
         op_overload: Optional[_OpOverloads] = None,
+        choice_uid: Optional[str] = None,
     ) -> None:
         unwrapped_inputs = self.unwrap_storage(inputs)
         assert isinstance(unwrapped_inputs, Sequence), type(unwrapped_inputs)
@@ -6737,6 +6738,7 @@ class ExternKernelOut(ExternKernel):
             ordered_kwargs_for_cpp_kernel,
             op_overload,
         )
+        self.choice_uid = choice_uid
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
 
@@ -6778,6 +6780,7 @@ class ExternKernelAlloc(ExternKernel):
         cpp_kernel_name: Optional[str] = None,
         ordered_kwargs_for_cpp_kernel: Sequence[Any] = (),
         op_overload: Optional[_OpOverloads] = None,
+        choice_uid: Optional[str] = None,
     ) -> None:
         unwrapped_inputs = self.unwrap_storage(inputs)
         assert all(isinstance(i, IRNode) for i in unwrapped_inputs)
@@ -6793,6 +6796,7 @@ class ExternKernelAlloc(ExternKernel):
             ordered_kwargs_for_cpp_kernel,
             op_overload,
         )
+        self.choice_uid = choice_uid
         # We need output buffers for generating kernel arguments in the
         # abi-compatible mode, where we retrieve outputs by pass each individual
         # output through the abi-compatible interface.
