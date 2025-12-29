@@ -97,8 +97,7 @@ class EtcdServer:
     Usage
     ::
 
-     import tempfile
-     server = EtcdServer("/usr/bin/etcd", 2379, os.path.join(tempfile.gettempdir(), "default.etcd"))
+     server = EtcdServer("/usr/bin/etcd", 2379, "/tmp/default.etcd")
      server.start()
      client = server.get_client()
      # use client
