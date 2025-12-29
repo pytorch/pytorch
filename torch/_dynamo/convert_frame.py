@@ -1265,7 +1265,7 @@ def _fullgraph_capture_frame(
             restart_reasons=set(),
         )
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/eval_frame.py#L831
-    except Unsupported as e:
+    except (Unsupported, UncapturedHigherOrderOpError) as e:
         augment_exc_message(e)
         if config.verbose:
             raise
@@ -1382,7 +1382,7 @@ def compile_frame(  # type: ignore[return]
             if failed_tracer_output:
                 failed_tracer_output._cleanup_output_graph()
             log.debug(  # noqa: G200
-                "Skipping frame %s %s \
+                "Received signal to skip frame (without graph break): %s %s \
                 %s %s",
                 e,
                 code.co_name,
@@ -1998,11 +1998,16 @@ class ConvertFrame:
 
             soft_fail = isinstance(e, Unsupported)
             code = frame.f_code
-            # This is a soft failure. In the sense, the code path reaches here
-            # when we do not support graph breaks on bytecodes like LOAD_ATTR,
-            # BUILD_SET etc. In such case, we can fallback to eager without
-            # scaring users.
-            if soft_fail and graph_break_log.isEnabledFor(logging.DEBUG):
+            # Log soft failure that was not already logged by symbolic_convert.
+            # This happens e.g. for graph breaks that are raised in convert_frame.py
+            # TODO(williamwen42) Unsupported exn's from tracing are handled and logged by symbolic_convert.py
+            # Unsupported exn's caught here should be from convert_frame.py - figure out a better way
+            # to log these.
+            if (
+                soft_fail
+                and not getattr(e, "logged", False)
+                and graph_break_log.isEnabledFor(logging.DEBUG)
+            ):
                 # Log this message in the graph break. Also use the string
                 # "skip: " to tell that the whole frame is falling back to
                 # eager.
