@@ -1431,7 +1431,9 @@ def flex_attention(
     *,
     return_aux: AuxRequest | None = None,
 ) -> Tensor | tuple[Tensor, Tensor] | tuple[Tensor, AuxOutput]:
-    r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
+    r"""This function implements scaled dot product attention with an arbitrary attention score modification function
+    described in the `Flex Attention <https://arxiv.org/abs/2412.05496>`_ paper. See also the
+    `blog post <https://pytorch.org/blog/flexattention/>`_.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
     attention score modification function. The attention score modification function will be applied after the attention
@@ -1495,7 +1497,7 @@ def flex_attention(
 
     """
     # Some basic input validation
-    _validate_sdpa_input(query, key, value)
+    _validate_sdpa_input(query, key, value, allow_lowp_kv=True)
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
     query, key, value = _enforce_mem_layouts(query, key, value)
