@@ -35,7 +35,6 @@ from torch._dynamo.external_utils import (
 )
 from torch._dynamo.source import GetItemSource, LocalSource
 from torch._dynamo.utils import (
-    compile_time_record_function,
     counters,
     get_chromium_event_logger,
     lazy_format_graph_code,
@@ -323,7 +322,9 @@ class AutogradCompilerInstance:
         self.nan_checker = NaNChecker(accumulate_grad) if check_nans else None
         self.start_time_ns = time.time_ns()
         # Start profiler event so compiled_autograd appears in stock profiler
-        self._profiler_record_function = None
+        self._profiler_record_function: (
+            torch._C._profiler._RecordFunctionFast | None
+        ) = None
         if torch.autograd.profiler._is_profiler_enabled:
             self._profiler_record_function = torch._C._profiler._RecordFunctionFast(
                 "compiled_autograd"
