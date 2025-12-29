@@ -93,9 +93,7 @@ from .exc import (
     augment_exc_message_with_hop_name,
     BackendCompilerFailed,
     collapse_resume_frames,
-    format_graph_break_message,
-    format_loop_skip_frame_message,
-    format_skip_frame_message,
+    format_frame_info,
     get_stack_above_dynamo,
     ResumePrologueTracingError,
     StepUnsupported,
@@ -578,16 +576,17 @@ explain = False
 def generic_jump(
     truth_fn: Callable[[object], bool], push: bool
 ) -> Callable[[InstructionTranslatorBase, Instruction], None]:
-    # graph break message fields for data dependent branching
-    _gb_type = "Data-dependent branching"
-    _explanation = (
-        "Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). "
-        "Dynamo does not support tracing dynamic control flow."
-    )
-    _hints = [
-        *graph_break_hints.FUNDAMENTAL,
-        "Use `torch.cond` to express dynamic control flow.",
-    ]
+    def raise_jump_graph_break(value: VariableTracker) -> NoReturn:
+        unimplemented(
+            gb_type="Data-dependent branching",
+            context=f"attempted to jump with {value}",
+            explanation="Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). "
+            "Dynamo does not support tracing dynamic control flow.",
+            hints=[
+                *graph_break_hints.FUNDAMENTAL,
+                "Use `torch.cond` to express dynamic control flow.",
+            ],
+        )
 
     def jump_graph_break(
         self: InstructionTranslatorBase,
@@ -596,23 +595,24 @@ def generic_jump(
         extra_msg: str = "",
     ) -> None:
         assert self.should_compile_partial_graph()
+
+        exc = None
+        try:
+            raise_jump_graph_break(value)
+        except Unsupported as e:
+            exc = e
+
+        assert exc is not None
+
+        # compile a partial subgraph prefix then skip the rest of user code
+        if self.maybe_has_backedge():
+            self.raise_loop_graph_break(self.f_code, exc)
+
         self.log_graph_break(
             self.code_options,
-            reason=format_graph_break_message(
-                gb_type=_gb_type,
-                context=f"attempted to jump with {value}",
-                explanation=_explanation,
-                hints=_hints,
-            ),
+            reason=str(exc),
+            exc=exc,
         )
-        # compile a partial subgraph prefix then jump into user code
-        if self.maybe_has_backedge():
-            msg = format_loop_skip_frame_message(
-                self.f_code,
-                "".join(traceback.format_list([self.frame_summary()])),
-            )
-            log.info(msg)
-            raise exc.SkipFrame(msg)
 
         self.push(value)
         log.debug("generic_jump triggered compile")
@@ -828,15 +828,7 @@ def generic_jump(
                         self.push(value)
                     self.jump(inst)
             else:
-                unimplemented(
-                    gb_type="Data-dependent branching",
-                    context=f"attempted to jump with {value}",
-                    explanation=_explanation,
-                    hints=[
-                        *graph_break_hints.FUNDAMENTAL,
-                        "Use `torch.cond` to express dynamic control flow.",
-                    ],
-                )
+                raise_jump_graph_break(value)
 
     return inner
 
@@ -885,25 +877,20 @@ def break_graph_if_unsupported(
                         from_exc=excp,
                     )
 
-                if isinstance(excp, exc.UncapturedHigherOrderOpError):
+                if excp.skip_frame:
                     raise
 
                 if not self.should_compile_partial_graph():
                     raise
+
+                if self.maybe_has_backedge():
+                    self.raise_loop_graph_break(self.f_code, excp)
 
                 self.log_graph_break(
                     self.code_options,
                     reason=f"{msg_prefix}:\n\n{str(excp)}",
                     exc=excp,
                 )
-
-                if self.maybe_has_backedge():
-                    msg = format_loop_skip_frame_message(
-                        self.f_code,
-                        "".join(traceback.format_list([self.frame_summary()])),
-                    )
-                    log.info(msg)
-                    raise exc.SkipFrame(msg) from excp
 
                 excp.remove_from_stats()
                 excp.add_to_stats("graph_break")
@@ -1173,7 +1160,7 @@ class InstructionTranslatorBase(
         # These heuristics can result in both false positives and negatives, but
         # in either case, the Dynamo code remains valid. For false positives
         # (where an edge is incorrectly marked as a backedge), Dynamo will
-        # perform a SkipFrame instead of potentially applying optimizations. For
+        # graph break with a frame skip instead of potentially applying optimizations. For
         # false negatives (where an edge that should be marked as a backedge
         # isn't), multiple graphs may be generated if there's a break in the
         # graph during a for loop. In general, its better to have fewer false
@@ -1353,6 +1340,7 @@ class InstructionTranslatorBase(
                 self.one_graph
                 or self.error_on_graph_break
                 or self.is_tracing_resume_prologue
+                or (isinstance(e, Unsupported) and e.skip_frame)
             ):
                 if isinstance(e, StepUnsupported):
                     unimplemented(
@@ -1381,7 +1369,10 @@ class InstructionTranslatorBase(
                             "line of code that is not in a try/with block, and has an empty Python stack.",
                             *graph_break_hints.DYNAMO_BUG,
                         ],
+                        skip_frame=True,
                     )
+                assert isinstance(e, Unsupported)
+                e.skip_frame = True
                 raise
             reason = (
                 "Encountered graph break that we cannot resume from. "
@@ -1667,6 +1658,28 @@ class InstructionTranslatorBase(
             except BackendCompilerFailed:
                 raise
             except RuntimeError as e:
+                # If the root tx fails to handle the graph break, then the caller (convert_frame)
+                # will skip the frame and fall back to eager.
+                # This code path happens e.g. for bytecodes we don't support
+                # or when we are unable to resume from a graph break.
+                if (
+                    isinstance(e, Unsupported)
+                    and isinstance(self, InstructionTranslator)
+                    and not self.error_on_graph_break
+                    and not self.one_graph
+                ):
+                    # log graph break if we won't error
+                    reason = (
+                        "Failed to handle graph break gracefully. "
+                        "Skipping the function and falling back to eager. "
+                        f"Graph break encountered:\n\n{str(e)}"
+                    )
+                    self.log_graph_break(
+                        self.code_options,
+                        reason=reason,
+                        exc=e,
+                    )
+
                 if hasattr(e, "msg") and "Data-dependent" in e.msg:
                     readable_graph = torch.fx.GraphModule(
                         self.output.nn_modules, self.output.graph
@@ -3629,6 +3642,9 @@ class InstructionTranslatorBase(
         ) as excp:  # object doesn't support __contains__
             # Use __iter__ as fallback
             if isinstance(excp, Unsupported):
+                if excp.skip_frame:
+                    # do not absorb graph break with skip_frame set
+                    raise
                 excp.remove_from_stats()
             self.push(
                 self.inline_user_function_return(
@@ -4237,12 +4253,13 @@ class InstructionTranslatorBase(
     def log_graph_break(
         self,
         code_options: dict[str, Any],
-        reason: str = "",
-        exc: Optional[Exception] = None,
+        reason: str,
+        exc: Unsupported | StepUnsupported,
     ) -> None:
-        user_stack = None
-        if exc is not None:
-            user_stack = getattr(exc, "real_stack", None)
+        if exc.logged:
+            return
+
+        user_stack = getattr(exc, "real_stack", None)
 
         if user_stack is None:
             user_stack = torch._guards.TracingContext.extract_stack()
@@ -4313,10 +4330,11 @@ class InstructionTranslatorBase(
 
         # torch._dynamo.explain() formats this a little nicer, and presents a slightly
         # more actionable user code pointer
+        gb_type = exc.gb_type if isinstance(exc, Unsupported) else type(exc)
         if (
             graph_break_log.isEnabledFor(logging.DEBUG)
             and not explain
-            and graph_break_dup_warning_checker.add(frame_loc_chain)  # type: ignore[arg-type]
+            and graph_break_dup_warning_checker.add((gb_type, frame_loc_chain))  # type: ignore[arg-type]
         ):
             # This log line MUST contain the string "Graph break in user code",
             # This log line is exercised from
@@ -4340,6 +4358,20 @@ class InstructionTranslatorBase(
                 frame_loc[1],
                 reason,
             )
+
+        exc.logged = True
+
+    @staticmethod
+    def raise_loop_graph_break(code: types.CodeType, exc: Unsupported) -> NoReturn:
+        unimplemented(
+            gb_type="graph break in loop",
+            context=f"frame skipped: {format_frame_info(code)}",
+            explanation="torch.compile detected a graph break in a for/while loop. "
+            "Skipping the frame and falling back to eager, as graph breaks in loops are not supported.",
+            hints=[*graph_break_hints.CAUSED_BY_EARLIER_GRAPH_BREAK],
+            from_exc=exc,
+            skip_frame=True,
+        )
 
     def __init__(
         self,
@@ -4717,9 +4749,12 @@ class InstructionTranslator(InstructionTranslatorBase):
             and not self.error_on_graph_break
             and not self.is_tracing_resume_prologue
         ):
+            # TODO graph break if one_graph is set - this might break things
             raise exc.SkipFrame(
-                format_skip_frame_message(self.f_code, "no content in function call")
+                "No ops traced for the FX graph. `torch.compile` will skip the frame and fall back to eager.\n"
+                f"Frame info: {format_frame_info(self.f_code)}"
             )
+
         self.instruction_pointer = None
         _step_logger()(
             logging.INFO,
@@ -4993,10 +5028,11 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             log.debug(msg)
             # bubble up the exception to the parent frame.
             raise
-        except exc.SkipFrame as e:
-            msg = f"SKIPPED INLINING {code}: {e}"
-            log.debug(msg)
-            raise Unsupported(msg) from e
+        except Unsupported as e:
+            # If this graph break has skip_frame set, unset it
+            # since it refers to the current frame and not the parent.
+            e.skip_frame = False
+            raise
         except Exception:
             log.debug("FAILED INLINING %s", code)
             raise
