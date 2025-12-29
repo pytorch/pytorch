@@ -3010,9 +3010,6 @@ class PythonWrapperCodegen(CodeGen):
                 assert len(raw_args) == len(call_args), (
                     "call_args and raw_args do not match"
                 )
-                # If raw_args is provided but raw_keys is not, fill with None
-                if raw_keys is None:
-                    raw_keys = [None] * len(call_args)
 
             reused_args = {}
             for i, (arg, arg_type, raw_key, raw_arg) in enumerate(
@@ -3025,7 +3022,7 @@ class PythonWrapperCodegen(CodeGen):
                     key, arg = arg.split("=")
 
                 triton_input: Optional[str] = None
-                if autotune_args and raw_key is not None and raw_key in autotune_args:
+                if autotune_args and raw_key in autotune_args:
                     triton_input = self.get_autotuning_input_name(  # type: ignore[attr-defined]
                         autotune_args[raw_key]
                     )
