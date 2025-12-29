@@ -190,6 +190,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     backendOpts->group_name = groupName;
     backendOpts->timeout =
         timeout.has_value() ? timeout.value() : backendOpts->timeout;
+    backendOpts->group_desc = groupDesc;
     auto splitBackend = parentBackend->split(store, sorted_ranks, backendOpts);
     if (splitBackend == nullptr) {
       continue;
