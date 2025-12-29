@@ -221,12 +221,12 @@ __all__ = [
 
 
 def TensorMeta(
-    tensorlike: Optional[Union[NumberType, torch.Tensor]] = None,
+    tensorlike: NumberType | torch.Tensor | None = None,
     *,
-    shape: Optional[ShapeType] = None,
-    strides: Optional[StrideType] = None,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[Union[torch.device, str]] = None,
+    shape: ShapeType | None = None,
+    strides: StrideType | None = None,
+    dtype: torch.dtype | None = None,
+    device: torch.device | str | None = None,
 ):
     if isinstance(tensorlike, Number):
         assert not shape and (shape is None or isinstance(shape, Sequence))
@@ -266,11 +266,11 @@ def TensorMeta(
 def _make_prim(
     *,
     schema: str,
-    return_type: Union[RETURN_TYPE, tuple[RETURN_TYPE, ...]],
+    return_type: RETURN_TYPE | tuple[RETURN_TYPE, ...],
     meta: Callable,
     impl_aten: Callable,
     doc: str,
-    tags: Optional[Sequence[torch.Tag]] = None,
+    tags: Sequence[torch.Tag] | None = None,
     use_old_custom_ops_api: bool = False,
     register_conj_neg_fallthrough: bool = False,
 ):
@@ -385,7 +385,7 @@ class ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND(Enum):
 def _prim_elementwise_meta(
     *args,
     type_promotion: ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND,
-    args_with_fixed_dtypes: Optional[tuple[TensorLikeType, ...]] = None,
+    args_with_fixed_dtypes: tuple[TensorLikeType, ...] | None = None,
 ) -> FakeTensor:
     """
     Meta function for elementwise operations that produce outputs in the same dtype
@@ -1115,7 +1115,7 @@ lt = _make_elementwise_binary_prim(
 
 # Note: the following impls are because torch.maximum and torch.minimum do not support scalar inputs
 def _maximum_aten(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+    a: TensorLikeType | NumberType, b: TensorLikeType | NumberType
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
@@ -1134,7 +1134,7 @@ maximum = _make_elementwise_binary_prim(
 
 
 def _minimum_aten(
-    a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberType]
+    a: TensorLikeType | NumberType, b: TensorLikeType | NumberType
 ) -> TensorLikeType:
     if isinstance(a, TensorLike) and isinstance(b, Number):
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
@@ -1396,8 +1396,8 @@ def _collapsed_shape(shape: ShapeType, start: int, end: int) -> tuple[int, ...]:
 #   str: Do a torch._check() to ensure the collapse is valid and if it isn't
 #   then fail with the provided string.
 def _collapse_view_helper(
-    a: TensorLikeType, start: int, end: int, must_be_valid: Optional[str]
-) -> tuple[Optional[ShapeType], Optional[StrideType]]:
+    a: TensorLikeType, start: int, end: int, must_be_valid: str | None
+) -> tuple[ShapeType | None, StrideType | None]:
     assert isinstance(a, TensorLike)
 
     from torch.fx.experimental.symbolic_shapes import (
@@ -1842,7 +1842,7 @@ def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     )
 
 
-def _cat_aten(tensors: Union[tuple[Tensor, ...], list[Tensor]], dim: int) -> Tensor:
+def _cat_aten(tensors: tuple[Tensor, ...] | list[Tensor], dim: int) -> Tensor:
     return torch.cat(tensors, dim)
 
 
@@ -1991,7 +1991,7 @@ convert_element_type = _make_prim(
 
 
 def _device_put_meta(
-    a: TensorLikeType, device: Union[str, torch.device], non_blocking=False
+    a: TensorLikeType, device: str | torch.device, non_blocking=False
 ) -> TensorLikeType:
     assert isinstance(a, TensorLike)
     assert isinstance(device, (str, torch.device))
@@ -2001,7 +2001,7 @@ def _device_put_meta(
 
 
 def _device_put_aten(
-    a: Tensor, device: Union[str, torch.device], non_blocking=False
+    a: Tensor, device: str | torch.device, non_blocking=False
 ) -> Tensor:
     return a.to(device, non_blocking=non_blocking)
 
@@ -2301,9 +2301,9 @@ sum = _make_reduction_prim(
 
 def _xor_sum_aten(
     inp: TensorLikeType,
-    dims: Optional[DimsSequenceType],
+    dims: DimsSequenceType | None,
     *,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> Tensor:
     raise NotImplementedError("xor_sum only implemented with inductor")
 
@@ -2317,9 +2317,9 @@ xor_sum = _make_reduction_prim(
 
 def _prod_aten(
     inp: TensorLikeType,
-    dims: Optional[DimsSequenceType],
+    dims: DimsSequenceType | None,
     *,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
 ) -> Tensor:
     if dims is not None:
         if len(dims) == 0:
@@ -2726,12 +2726,12 @@ svd = _make_prim(
 def _normal_meta(
     shape: ShapeType,
     *,
-    mean: Union[float, complex],
+    mean: float | complex,
     std: float,
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
-    generator: Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> TensorLikeType:
     torch._check(
         std >= 0.0,
@@ -2750,12 +2750,12 @@ def _normal_meta(
 def _normal_aten(
     shape: ShapeType,
     *,
-    mean: Union[float, complex],
+    mean: float | complex,
     std: float,
     dtype: torch.dtype,
     device: torch.device,
     requires_grad: bool,
-    generator: Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     a = torch.empty(shape, dtype=dtype, device=device, requires_grad=requires_grad)
     with torch.no_grad():
@@ -2789,7 +2789,7 @@ def _uniform_meta(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
-    generator: Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> TensorLikeType:
     strides = utils.make_contiguous_strides_for(shape)
     return TensorMeta(shape=shape, strides=strides, dtype=dtype, device=device)
@@ -2802,7 +2802,7 @@ def _uniform_aten(
     high: float,
     dtype: torch.dtype,
     device: torch.device,
-    generator: Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     a = torch.empty(shape, dtype=dtype, device=device)
     a.uniform_(low, high, generator=generator)

@@ -142,6 +142,15 @@
       "Context": "str(value)",
       "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
       "Hints": [
+        "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Attempted to wrap RNN, GRU, or LSTM",
+      "Context": "str(value)",
+      "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -389,6 +398,16 @@
     {
       "Gb_type": "Encountered aliasing during higher order op tracing",
       "Context": "context",
+      "Explanation": "Higher order ops do not support aliasing. Found in {name}",
+      "Hints": [
+        "Replace `return input` with `return input.clone()` to avoid aliasing.",
+        "Consider using the debug context to change user code to avoid aliasing.",
+        "Please open an issue."
+      ]
+    },
+    {
+      "Gb_type": "Encountered aliasing during higher order op tracing",
+      "Context": "context",
       "Explanation": "Higher order ops do not support aliasing. Found in {source_target.name}",
       "Hints": [
         "Replace `return input` with `return input.clone()` to avoid aliasing.",
@@ -398,6 +417,15 @@
     }
   ],
   "GB0041": [
+    {
+      "Gb_type": "Encountered input mutation during higher order op tracing",
+      "Context": "context",
+      "Explanation": "Higher order ops do not support input mutation. Found in {name}",
+      "Hints": [
+        "Consider using the debug context to change user code to avoid mutation.",
+        "Please open an issue."
+      ]
+    },
     {
       "Gb_type": "Encountered input mutation during higher order op tracing",
       "Context": "context",
@@ -487,6 +515,53 @@
       "Explanation": "`except ...` has unsupported type {expected_exc_types}.",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB9741": [
+    {
+      "Gb_type": "skip frame due to being in functorh mode",
+      "Context": "",
+      "Explanation": "torch.compile cannot be run in context: {functorch_subclass_name}. Skipping frame.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "skip frame due to being in functorch mode",
+      "Context": "",
+      "Explanation": "torch.compile cannot be run in context: {functorch_subclass_name}. Skipping frame.",
+      "Hints": []
+    }
+  ],
+  "GB7000": [
+    {
+      "Gb_type": "graph break in loop",
+      "Context": "frame skipped: {format_frame_info(code)}",
+      "Explanation": "torch.compile detected a graph break in a for/while loop. Skipping the frame and falling back to eager, as graph breaks in loops are not supported.",
+      "Hints": [
+        "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one."
+      ]
+    }
+  ],
+  "GB3326": [
+    {
+      "Gb_type": "invalid ptr argument for create_tma_descriptor",
+      "Context": "args = {args}, kwargs = {kwargs}",
+      "Explanation": "Expected `ptr` argument of `create_{self.rank}d_tma_descriptor`to be from a `.data_ptr()` call, represented internally by `DataPtrVariable`",
+      "Hints": [
+        "`torch.compile` may fail to internally represent result of `.data_ptr()` ",
+        "with `DataPtrVariable` due to a graph break between the `.data_ptr()` call and ",
+        "`create_{self.rank}d_tma_descriptor`. Please ensure there were no graph breaks ",
+        "between these two calls."
+      ]
+    }
+  ],
+  "GB4297": [
+    {
+      "Gb_type": "Call to `torch._dynamo.skip_frame()`",
+      "Context": "Called `torch._dynamo.skip_frame()` with args `{args}`, kwargs `{kwargs}`. Skipping frame {format_frame_info(tx.f_code)}.",
+      "Explanation": "User-inserted skip frame. Message: {skip_frame_msg}",
+      "Hints": [
+        "Remove the `torch._dynamo.skip_frame()` call."
       ]
     }
   ],
@@ -629,6 +704,16 @@
       "Hints": []
     }
   ],
+  "GB4636": [
+    {
+      "Gb_type": "Call to `torch._dynamo.step_unsupported()`",
+      "Context": "",
+      "Explanation": "User-inserted step_unsupported.",
+      "Hints": [
+        "Remove the `torch._dynamo.step_unsupported()` call."
+      ]
+    }
+  ],
   "GB0065": [
     {
       "Gb_type": "Graph break in inlined function",
@@ -649,6 +734,26 @@
     }
   ],
   "GB0067": [
+    {
+      "Gb_type": "HOP: Unsafe side effect",
+      "Context": "Attempted to mutate {item}",
+      "Explanation": "Mutating a variable from outside the scope of this HOP is not supported.",
+      "Hints": [
+        "If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a ",
+        "side effect in forward method. Eager activation checkpointing replays that side-effect while ",
+        "recomputing the forward in the backward. If you are ok with side-effect not replayed in the ",
+        "backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`"
+      ]
+    },
+    {
+      "Gb_type": "HOP: Unsafe side effect",
+      "Context": "Attempted to mutate {item}",
+      "Explanation": "Mutating a variable from outside the scope of this HOP is not supported.",
+      "Hints": [
+        "If the HOP is activation checkpointing, try setting ",
+        "`torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`"
+      ]
+    },
     {
       "Gb_type": "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
       "Context": "",
@@ -768,6 +873,16 @@
       "Explanation": "No handler implemented for CALL_INTRINSIC_1 {inst.argval} instruction.",
       "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7596": [
+    {
+      "Gb_type": "Indexing torch.Size with non-scalar tensor",
+      "Context": "get_item_dyn {self} {arg}",
+      "Explanation": "Attempted to index torch.Size with a tensor that is not a scalar constant.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
     }
   ],
@@ -1129,6 +1244,25 @@
       ]
     }
   ],
+  "GB4778": [
+    {
+      "Gb_type": "nested function with non-constructible closure in output",
+      "Context": "as_python_constant for out_spec {out_spec}",
+      "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo failed to construct the function defined in the compiled region with closure objects.",
+      "Hints": [
+        "Define the function at module scope instead of inside another function ",
+        "Ensure that all closure variables are constants."
+      ]
+    },
+    {
+      "Gb_type": "nested function with closure in output",
+      "Context": "as_python_constant for out_spec",
+      "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo cannot reconstruct the function.",
+      "Hints": [
+        "Define the function at module scope instead of inside another function"
+      ]
+    }
+  ],
   "GB0116": [
     {
       "Gb_type": "Unexpected type in sourceless builder",
@@ -1234,6 +1368,16 @@
       "Context": "call_method {self} resize_ {args} {kwargs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.resize_()`.",
       "Hints": []
+    }
+  ],
+  "GB9528": [
+    {
+      "Gb_type": "Attempted to reconstruct a nested function with closure which is not supported",
+      "Context": "str(self.fn_name)",
+      "Explanation": "Shouldn't reconstruct {str(self.fn_name)}, a nested function with closure",
+      "Hints": [
+        "Define the function at module level"
+      ]
     }
   ],
   "GB0127": [
@@ -1469,6 +1613,12 @@
     {
       "Gb_type": "Unsupported function call (delayed)",
       "Context": "source: {self.source}",
+      "Explanation": "Dynamo determined that a graph break should occur when calling `{name}`. Reason: {self.msg}",
+      "Hints": []
+    },
+    {
+      "Gb_type": "Unsupported function call (delayed)",
+      "Context": "source: {self.source}",
       "Explanation": "Dynamo determined that a graph break should occur when calling `{self.source.name}`. Reason: {self.msg}",
       "Hints": []
     }
@@ -1673,6 +1823,15 @@
     }
   ],
   "GB0170": [
+    {
+      "Gb_type": "Data-dependent branching",
+      "Context": "attempted to jump with {value}",
+      "Explanation": "Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.",
+      "Hints": [
+        "Use `torch.cond` to express dynamic control flow.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
     {
       "Gb_type": "Data-dependent branching",
       "Context": "attempted to jump with {value}",
@@ -2737,6 +2896,14 @@
       ]
     }
   ],
+  "GB6017": [
+    {
+      "Gb_type": "executorch_call_delegate: first arg not supported",
+      "Context": "args: {args}, kwargs: {kwargs}",
+      "Explanation": "executorch_call_delegate expects the first argument to be a nn.Module (got {args[0]})",
+      "Hints": []
+    }
+  ],
   "GB0269": [
     {
       "Gb_type": "Forced graph break on leaf function",
@@ -2973,6 +3140,14 @@
     }
   ],
   "GB0291": [
+    {
+      "Gb_type": "logging.Logger method not supported for non-export cases",
+      "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "logging.Logger methods are not supported for non-export cases.",
+      "Hints": [
+        "Add the logging method to `torch._dynamo.config.ignore_logging_functions`."
+      ]
+    },
     {
       "Gb_type": "logging.Logger method not supported for non-export cases",
       "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
@@ -3217,6 +3392,16 @@
       "Explanation": "Expected xs to be a list/tuple but got {xs.python_type()}",
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
+      ]
+    }
+  ],
+  "GB9625": [
+    {
+      "Gb_type": "traceback.tb_lasti not supported",
+      "Context": "{self} accessing 'tb_lasti'",
+      "Explanation": "Dynamo does not support accessing the tb_lasti attribute of traceback objects.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -3517,6 +3702,12 @@
   "GB0346": [
     {
       "Gb_type": "autograd.Function.apply: non-function or method forward",
+      "Context": "str(fn)",
+      "Explanation": "Expected {method_name} to be a function or method.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method forward",
       "Context": "str(self.fwd_graph)",
       "Explanation": "Expected forward function to be a function or method.",
       "Hints": []
@@ -3569,6 +3760,12 @@
     }
   ],
   "GB0352": [
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method backward (2)",
+      "Context": "str(self.bwd_fn)",
+      "Explanation": "Expected backward function to be a function or method.",
+      "Hints": []
+    },
     {
       "Gb_type": "autograd.Function.apply: non-function or method backward (2)",
       "Context": "str(self.bwd_graph)",
@@ -3670,8 +3867,17 @@
   ],
   "GB0363": [
     {
-      "Gb_type": "Opaque object were created in the middle of the program and passed to a custom op.",
-      "Context": "Opaque object types: {intermediate_opaques}. Function: {self.value}",
+      "Gb_type": "An opaque object was created in the middle of the program.",
+      "Context": "Opaque object type: {self.value}.",
+      "Explanation": "Opaque objects cannot be created inside the torch.compile region. They must be created before entering the compiled function.",
+      "Hints": [
+        "Please create the opaque object before calling torch.compile ",
+        "and pass it in as an argument or as a global variable."
+      ]
+    },
+    {
+      "Gb_type": "An opaque object was created in the middle of the program.",
+      "Context": "Opaque object types: {self.value}",
       "Explanation": "Opaque objects cannot be created inside the torch.compile region. They must be created before entering the compiled function.",
       "Hints": [
         "Please create the opaque object before calling torch.compile ",
@@ -3719,6 +3925,37 @@
       "Explanation": "Dynamo does not know the equality comparison of the underlying python object for {self}",
       "Hints": [
         "Consider using a different type of object as the dictionary key instead of {self.python_type()}.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0368": [
+    {
+      "Gb_type": "Frozen dataclass with __post_init__",
+      "Context": "dataclass={dataclass_cls.__name__}",
+      "Explanation": "Cannot reconstruct frozen dataclass with __post_init__ method, as it may have side effects that would be incorrectly replayed.",
+      "Hints": [
+        "Remove the __post_init__ method from the frozen dataclass.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0369": [
+    {
+      "Gb_type": "Frozen dataclass with missing field",
+      "Context": "dataclass={dataclass_cls.__name__}, field={field.name}",
+      "Explanation": "Cannot reconstruct frozen dataclass: field '{field.name}' was not tracked during tracing.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0370": [
+    {
+      "Gb_type": "record_function escaped from compiled region",
+      "Context": "str(self)",
+      "Explanation": "Dynamo doesn't support graph break inside record_function region.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

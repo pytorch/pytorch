@@ -1045,6 +1045,47 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self.assertEqual(pg.options._timeout, timedelta(seconds=23))
 
     @requires_gloo()
+    def test_gloo_set_pg_timeout_api(self):
+        """
+        Test _set_pg_timeout API for Gloo backend (issue #165422).
+        This test demonstrates that dynamically changing timeout via _set_pg_timeout
+        actually affects operation timeouts by:
+        1. verifying operations complete successfully with normal timeout
+        2. setting a very short timeout via _set_pg_timeout
+        3. demonstrating that operations timeout with the new short timeout value
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=50),
+        )
+
+        pg = dist.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device("cpu"))
+        self.assertEqual(backend.options._timeout, timedelta(seconds=50))
+
+        # operations work normally with default timeout
+        tensor = torch.rand(10)
+        pg.allreduce(tensor).wait()
+
+        # change timeout to a very short value using _set_pg_timeout
+        # this is the API from issue #165422
+        c10d.distributed_c10d._set_pg_timeout(timedelta(milliseconds=1), pg)
+        self.assertEqual(backend.options._timeout, timedelta(milliseconds=1))
+
+        # demonstrate that the new timeout is actually enforced
+        # only rank 0 participates - this will cause a timeout
+        if self.rank == 0:
+            t1 = torch.zeros([1], dtype=torch.float32)
+            with self.assertRaisesRegex(RuntimeError, "Timed out waiting 1ms"):
+                pg.allreduce([t1]).wait()
+
+        dist.destroy_process_group()
+
+    @requires_gloo()
     def test_scatter_stress(self):
         inputs = [
             [torch.tensor([i + self.rank]) for _ in range(self.world_size)]
