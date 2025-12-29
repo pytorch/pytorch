@@ -880,17 +880,10 @@ class BuiltinVariable(VariableTracker):
                         return ConstantVariable.create(op.__name__ != "is_")
                     if left is right:
                         return ConstantVariable.create(op(left, right))
-
-                    # In CPython, exceptions compare equal only when they are the same object
-                    # (identity-based). In Dynamo, a single exception object cannot be represented
-                    # by multiple distinct ExceptionVariables. Therefore, the following scenarios
-                    # are impossible:
-                    # + is(a, b) == True but should be False => impossible, since a and b would be
-                    #   the same underlying object.
-                    # + is(a, b) == False but should be True => impossible, since Dynamo cannot
-                    #   create two different ExceptionVariables for the same exception instance.
-                    if istype(left, variables.ExceptionVariable) and istype(
-                        right, variables.ExceptionVariable
+                    if (
+                        istype(left, variables.ExceptionVariable)
+                        and istype(right, variables.ExceptionVariable)
+                        and left.exc_type is not right.exc_type
                     ):
                         return ConstantVariable.create(op(left, right))
                     return None
@@ -1009,7 +1002,7 @@ class BuiltinVariable(VariableTracker):
     ) -> Callable[
         [
             "InstructionTranslator",
-            Sequence[VariableTracker],
+            tuple[VariableTracker, ...],
             dict[str, VariableTracker],
         ],
         VariableTracker | None,
@@ -1034,7 +1027,7 @@ class BuiltinVariable(VariableTracker):
 
             def create_exception_class_object(
                 tx: "InstructionTranslator",
-                args: Sequence[VariableTracker],
+                args: tuple[VariableTracker, ...],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
                 if fn is AssertionError and not all(
@@ -1604,6 +1597,15 @@ class BuiltinVariable(VariableTracker):
     def call_bool(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
+        if arg.is_tensor():
+            item = arg.call_method(tx, "item", [], {})
+            if isinstance(item, SymNodeVariable) and isinstance(
+                item.sym_num, torch.SymBool
+            ):
+                return item
+            if isinstance(item, variables.ConstantVariable):
+                return variables.ConstantVariable.create(bool(item.value))
+            return SymNodeVariable.create(tx, item.as_proxy() != 0)
         # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.
         # https://github.com/python/cpython/blob/3.12/Objects/object.c#L1674-L1697
         if isinstance(arg, SymNodeVariable):
