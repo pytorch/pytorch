@@ -3,6 +3,7 @@
 namespace at::accelerator {
 
 Graph::Graph(bool keep_graph) {
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
   c10::DeviceType device_type = at::accelerator::getAccelerator(true).value();
   TORCH_CHECK(
       has_graph_impl(device_type),

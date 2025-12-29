@@ -1,5 +1,5 @@
 #pragma once
-#include <ATen/DeviceAccelerator.h>
+#include <ATen/accelerator/Accelerator.h>
 #include <ATen/core/GraphImplInterface.h>
 
 namespace at::accelerator {
