@@ -1626,7 +1626,7 @@ class OutputGraph(OutputGraphCommon):
                 graph_output_var,
                 overridden_sources=overridden_sources,
             )
-            self.codegen_suffix(tx, stack_values_flat, pass1)
+            self.codegen_suffix(tx, stack_values_flat, pass1, False)
 
             # Use `pass1.uses` to selectively cache multi-user variables into a
             # temporary local source. This (a). speeds up loading VTs with long
@@ -1644,7 +1644,7 @@ class OutputGraph(OutputGraphCommon):
                 tempvars=tempvars,
                 overridden_sources=overridden_sources,
             )
-            self.codegen_suffix(tx, stack_values_flat, pass2)
+            self.codegen_suffix(tx, stack_values_flat, pass2, True)
 
             if (
                 torch._dynamo.config.log_graph_in_out_metadata
@@ -1917,6 +1917,7 @@ class OutputGraph(OutputGraphCommon):
         tx: "InstructionTranslatorBase",
         stack_values: list[VariableTracker],
         cg: PyCodegen,
+        log_side_effects: bool,
     ) -> None:
         # NOTE: `codegen_save_tempvars` must run first to update `source` fields
         # for variables with `AttributeMutationNew`, as they don't implement
@@ -1945,7 +1946,7 @@ class OutputGraph(OutputGraphCommon):
         self.codegen_cells(tx, cg)
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
-        self.side_effects.codegen_update_mutated(cg)
+        self.side_effects.codegen_update_mutated(cg, log_side_effects)
 
     def cleanup_graph(self) -> None:
         """

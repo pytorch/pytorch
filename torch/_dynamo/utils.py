@@ -110,6 +110,7 @@ if typing.TYPE_CHECKING:
         ValuesView,
     )
 
+    from torch._dynamo.bytecode_transformation import Instruction
     from torch._dynamo.replay_record import ExecutionRecord
     from torch._dynamo.symbolic_convert import (
         InstructionTranslator,
@@ -4365,7 +4366,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
     return None
 
 
-def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> str:
+def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     """
     Python 3.11+ only. Returns lines of source code (from code object `code`)
     corresponding to `inst`'s location data, and underlines relevant code to `inst`.
