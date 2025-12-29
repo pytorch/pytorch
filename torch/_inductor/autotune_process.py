@@ -1289,7 +1289,10 @@ class AsyncAutotuner:
 
     @classmethod
     def get_results(
-        cls, choices: list[ChoiceCaller], inputs_key: str
+        cls,
+        choices: list[ChoiceCaller],
+        inputs_key: str,
+        blocking: bool = True,
     ) -> dict[ChoiceCaller, float]:
         """
         Get autotuning results, blocking until complete.
@@ -1304,5 +1307,10 @@ class AsyncAutotuner:
         timings = {}
         for choice in choices:
             choice_hash = AsyncAutotuner.get_choice_hash(choice, inputs_key)
-            timings[choice] = AsyncAutotuner.choice_hash_to_future[choice_hash].result()
+            if blocking:
+                timings[choice] = AsyncAutotuner.choice_hash_to_future[
+                    choice_hash
+                ].result()
+            else:
+                timings[choice] = AsyncAutotuner.choice_hash_to_future[choice_hash]
         return timings

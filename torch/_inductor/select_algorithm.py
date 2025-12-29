@@ -2846,8 +2846,8 @@ class AlgorithmSelectorCache(PersistentCache):
 
         if return_multi_template and (config.max_autotune or config.max_autotune_gemm):
             if config.pipeline_max_autotune_gemm:
-                assert not config.epilogue_fusion and not config.prologue_fusion, (
-                    "Pipelined autotuning not compatible yet with fusion benchmarking, will cause contention on gpu"
+                assert not config.benchmark_epilogue_fusion, (
+                    "Benchmarking epilogues will cause gpu contention with pipelined autotuning"
                 )
                 assert all(not isinstance(c, SubgraphChoiceCaller) for c in choices), (
                     "Pipelined autotuning not compatible yet with subgraph choices"
@@ -2861,17 +2861,21 @@ class AlgorithmSelectorCache(PersistentCache):
                 triton_kernels = [
                     c for c in choices if not AlgorithmSelectorCache._is_extern(c)
                 ]
-                precompile_instance = PrecompileThreadPool.get_instance()
-                precompile_future = precompile_instance.submit(
-                    self.do_autotuning,
-                    name,
-                    input_nodes,
-                    layout,
-                    input_gen_fns,
-                    inputs_key,
-                    triton_kernels,
-                    precompile_fn,
-                )
+
+                if triton_kernels:
+                    precompile_instance = PrecompileThreadPool.get_instance()
+                    precompile_future = precompile_instance.submit(
+                        self.do_autotuning,
+                        name,
+                        input_nodes,
+                        layout,
+                        input_gen_fns,
+                        inputs_key,
+                        triton_kernels,
+                        precompile_fn,
+                    )
+                else:
+                    precompile_future = None
 
                 def get_timings(hint_override: Optional[int] = None):
                     assert not hint_override, (
@@ -2879,22 +2883,25 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
                     # Await precompilation future, thread pool
                     precompile_start_ts = time.time()
-                    precompile_future.result()
+                    if precompile_future:
+                        precompile_future.result()
                     precompile_elapse = time.time() - precompile_start_ts
 
                     # Await autotuning in subproc pool
-                    autotune_start_ts = time.time()
-                    results = AsyncAutotuner.get_results(choices, inputs_key)
-                    autotune_wait_ts = time.time() - autotune_start_ts
-                    AlgorithmSelectorCache.log_results(
-                        name,
-                        input_nodes,
-                        results,
-                        precompile_elapse,
-                        autotune_wait_ts,
+                    timings = AsyncAutotuner.get_results(
+                        choices, inputs_key, blocking=False
                     )
 
-                    return results
+                    def log_results_wrapper(autotune_time: int):
+                        return AlgorithmSelectorCache.log_results(
+                            name,
+                            input_nodes,
+                            timings,
+                            precompile_elapse,
+                            autotune_time,
+                        )
+
+                    return timings, log_results_wrapper
             else:
 
                 def get_timings(hint_override: Optional[int] = None):
@@ -2929,7 +2936,7 @@ class AlgorithmSelectorCache(PersistentCache):
                         )
                     }
 
-                    return timings
+                    return timings, None
 
             # We take the union of allowed prologue inputs from all choices,
             # and, within benchmark fusion, don't allow prologue fusion for

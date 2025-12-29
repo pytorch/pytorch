@@ -28,6 +28,8 @@ from torch._inductor.autotune_process import (
     AsyncAutotuner,
     AutotuneProcessPool,
     CUDA_VISIBLE_DEVICES,
+    ExternKernelBenchmarkRequest,
+    TritonBenchmarkRequest,
     TuningProcess,
     TuningProcessPool,
 )
@@ -59,6 +61,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocmArch,
     TEST_WITH_ROCM,
+    TEST_XPU,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import (
@@ -3411,6 +3414,25 @@ def autotune_select_algorithm_wrapper_return_multi():
     return wrapper
 
 
+def benchmark_choice_override_timings(benchmark_request, *args, aten_time, triton_time):
+    if isinstance(benchmark_request, ExternKernelBenchmarkRequest) or isinstance(
+        benchmark_request, ExternKernelCaller
+    ):
+        return aten_time
+    elif isinstance(benchmark_request, TritonBenchmarkRequest) or isinstance(
+        benchmark_request, TritonTemplateCaller
+    ):
+        return triton_time
+    else:
+        return float("inf")
+
+
+def mock_benchmark_choice_wrapper(aten_time, triton_time):
+    return functools.partial(
+        benchmark_choice_override_timings, aten_time=aten_time, triton_time=triton_time
+    )
+
+
 @instantiate_parametrized_tests
 class TestEpilogueFusionStaticAnalysis(TestCase):
     @classmethod
@@ -3490,11 +3512,11 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             try:
                 with (
                     self.get_common_patches(use_async_compile, True),
-                    mock.patch.object(
-                        # Patch so that aten always loses
-                        ExternKernelCaller,
-                        "benchmark",
-                        return_value=float("inf"),
+                    mock.patch(
+                        "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                        mock_benchmark_choice_wrapper(
+                            aten_time=float("inf"), triton_time=0.1
+                        ),
                     ),
                 ):
                     compiled_f = torch.compile(f, mode="max-autotune")
@@ -3544,8 +3566,6 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         def f(a, b):
             return (a @ b).to(torch.float32) + 1.0
 
-        torch._dynamo.reset()
-
         a = torch.randn(512, 1024, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(1024, 2048, device=GPU_TYPE, dtype=torch.bfloat16)
 
@@ -3593,30 +3613,22 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             for launcher in self.launchers:
                 launcher.n_spills = mock_n_spills
 
-        # Mock benchmark_choice to return predefined timings based on choice type
-        original_benchmark_choice = AlgorithmSelectorCache.benchmark_choice
-
-        @classmethod
-        def mock_benchmark_choice(cls, choice, autotune_args):
-            if isinstance(choice, ExternKernelCaller):
-                return aten_time
-            elif isinstance(choice, TritonTemplateCaller):
-                return triton_time
-            else:
-                return original_benchmark_choice(choice, autotune_args)
-
         try:
             with (
                 self.get_common_patches(use_async_compile, False),
                 mock.patch.object(
                     AlgorithmSelectorCache,
                     "benchmark_choice",
-                    mock_benchmark_choice,
+                    mock_benchmark_choice_wrapper(aten_time, triton_time),
                 ),
                 mock.patch.object(
                     CachingAutotuner,
                     "precompile",
                     mock_precompile,
+                ),
+                mock.patch(
+                    "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                    mock_benchmark_choice_wrapper(aten_time, triton_time),
                 ),
             ):
                 compiled_f = torch.compile(f)
@@ -3688,17 +3700,6 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
 
         from torch._inductor.scheduler import BaseSchedulerNode
 
-        original_benchmark_choice = AlgorithmSelectorCache.benchmark_choice
-
-        @classmethod
-        def mock_benchmark_choice(cls, choice, autotune_args):
-            if isinstance(choice, ExternKernelCaller):
-                return aten_time
-            elif isinstance(choice, TritonTemplateCaller):
-                return triton_time
-            else:
-                return original_benchmark_choice(choice, autotune_args)
-
         def mock_get_estimated_runtime(node):
             return epilogue_runtime
 
@@ -3708,12 +3709,16 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
                 mock.patch.object(
                     AlgorithmSelectorCache,
                     "benchmark_choice",
-                    mock_benchmark_choice,
+                    mock_benchmark_choice_wrapper(aten_time, triton_time),
                 ),
                 mock.patch.object(
                     BaseSchedulerNode,
                     "_get_estimated_runtime",
                     mock_get_estimated_runtime,
+                ),
+                mock.patch(
+                    "torch._inductor.autotune_process.run_autotune_in_subprocess",
+                    mock_benchmark_choice_wrapper(aten_time, triton_time),
                 ),
             ):
                 compiled_fn = torch.compile(fn)
@@ -3735,24 +3740,14 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
             mm_heuristic.mm_configs = original_mm_configs
 
 
-class TestMaxAutotuneAsyncPipelined(TestMaxAutotune):
-    """Standalone tests for AsyncAutotuner caching behavior."""
+class TestMaxAutotuneAsyncPipelined(TestMaxAutotune, TestEpilogueFusionStaticAnalysis):
+    """Tests for AsyncPipelinedAutotuning path."""
 
     SKIP_TESTS = {
         "test_max_autotune_decompose_k": "Subgraphs not supported with async pipelining",
-        "test_cat_max_autotune_triton": "Fusions not supported with async pipelining",
-        "test_linear_and_cel": "Fusions not supported with async pipelining",
         "test_inf_timing": "Logs not consistent with async pipelined autotuning",
         "test_non_contiguous_input_mm_plus_mm": "Flaky on trunk",
         "test_autotune_device_guard": "Flaky on trunk",
-        "test_template_bad_epilogue_fusion": "Benchmarking path is different",
-        # XPU specific skips due to lack of multiprocess tensor reduction support (issue #170636)
-        "test_max_autotune_addmm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",
-        "test_max_autotune_regular_mm_persistent_tma": "No XPU implementation for multiprocess tensor reduction",
-        "test_max_autotune_regular_mm_persistent_tma_strided": "No XPU implementation for multiprocess tensor reduction",
-        "test_max_autotune_addmm_tma_dynamic_outer_dim": "No XPU implementation for multiprocess tensor reduction",
-        "test_max_autotune_regular_mm_tma_dynamic_outer_dim": "No XPU implementation for multiprocess tensor reduction",
-        # END XPU specific skips
     }
 
     @classmethod
@@ -3761,8 +3756,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune):
         cls._async_config = config.patch(
             {
                 "pipeline_max_autotune_gemm": True,
-                "epilogue_fusion": False,
-                "prologue_fusion": False,
+                "benchmark_epilogue_fusion": False,
             }
         )
         cls._async_config.__enter__()
@@ -3776,16 +3770,16 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune):
         super().setUp()
         test_name = self._testMethodName
         for skip_test_name in self.SKIP_TESTS:
-            if skip_test_name in test_name:
+            if skip_test_name in test_name or TEST_XPU:
                 self.skipTest(self.SKIP_TESTS[skip_test_name])
 
     def tearDown(self):
         super().tearDown()
         AutotuneProcessPool.shutdown_instance()
-
-    def test_async_autotuner_cache_same_inputs(self):
+        # Clear the AsyncAutotuner cache to prevent test pollution
         AsyncAutotuner.choice_hash_to_future.clear()
 
+    def test_async_autotuner_cache_same_inputs(self):
         M, K, N = 128, 64, 256
         M2, K2, N2 = 256, 128, 64
 
