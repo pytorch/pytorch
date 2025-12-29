@@ -322,6 +322,6 @@ CUDAGraphImpl::~CUDAGraphImpl() {
 #endif
 }
 
-REGISTER_GRAPH_IMPL(CUDA, CUDAGraphImpl);
+REGISTER_GRAPH_IMPL(CUDA, CUDAGraphImpl)
 
 } // namespace at::cuda
