@@ -4626,11 +4626,9 @@ def get_and_maybe_log_recompilation_reasons(
 
     if do_recompiles_log or config.error_on_recompile:
         if is_recompiles_verbose_enabled():
-            # For verbose mode, use JSON format
-            json_reasons = [json.dumps({"reason": r}) for r in reasons]
             failures = "\n\n".join(
                 f"guard {i} failures:\n" + textwrap.indent(reason, "- ")
-                for i, reason in enumerate(json_reasons)
+                for i, reason in enumerate(reasons)
             )
         else:
             failures = textwrap.indent("\n".join(reasons), "- ")
