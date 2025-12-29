@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional
 
 import torch
 import torch.jit
@@ -92,7 +91,7 @@ def _log_modified_bessel_fn(x, order=0):
 @torch.jit.script_if_tracing
 def _rejection_sample(loc, concentration, proposal_r, x):
     done = torch.zeros(x.shape, dtype=torch.bool, device=loc.device)
-    # pyrefly: ignore [bad-assignment]
+    # pyrefly: ignore [bad-assignment, missing-attribute]
     while not done.all():
         u = torch.rand((3,) + x.shape, dtype=loc.dtype, device=loc.device)
         u1, u2, u3 = u.unbind()
@@ -134,7 +133,7 @@ class VonMises(Distribution):
         self,
         loc: Tensor,
         concentration: Tensor,
-        validate_args: Optional[bool] = None,
+        validate_args: bool | None = None,
     ) -> None:
         self.loc, self.concentration = broadcast_all(loc, concentration)
         batch_shape = self.loc.shape

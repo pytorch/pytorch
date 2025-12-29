@@ -493,7 +493,7 @@ def run_functionalized_fw_and_collect_metadata(
                 curr_storage in inp_storage_refs
                 and not functional_tensor_storage_changed
             ):
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index, index-error]
                 base_idx = inp_storage_refs[curr_storage]
                 is_input_tensor = id(o) in inp_tensor_ids
                 num_aliased_outs = out_tensor_alias_counts[curr_storage]

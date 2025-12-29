@@ -586,11 +586,22 @@ log_compilation_metrics = True
 # mutated after the print statement.
 reorderable_logging_functions: set[Callable[[Any], None]] = set()
 
-# A set of methods that will be ignored while tracing,
-# to prevent graph breaks.
-# Add logging.Logger.<method> to ignore all calls for method,
-# or logger.<method> to ignore calls for method from this logger instance only.
-ignore_logger_methods: set[Callable[..., Any]] = set()
+# A set of functions that will be ignored during Dynamo tracing.
+# These functions will NOT run, will NOT be reordered, and will NOT
+# cause graph breaks. They act as full no-ops.
+# Ignored functions can take any arguments, but MUST return None.
+# Functions should either be module-level functions,
+# `logging.Logger.<method>` (ignores all method for all logging.Logger instances)
+# or `logger_obj.<method>` (ignores method only for logger_obj logging.Logger instance).
+# Other functions may or may not be ignored due to implementation details. If you want to ignore a function
+# that `ignore_logging_functions` is failing to ignore, please submit an issue.
+ignore_logging_functions: set[Callable[..., Any]] = set()
+
+# Backwards compat: `ignore_logger_methods` now aliases `ignore_logging_functions`.
+# Existing code that used `ignore_logger_methods` will continue to work.
+ignore_logger_methods: set[Callable[..., Any]] = Config(
+    alias="torch._dynamo.config.ignore_logging_functions"
+)
 
 # simulates what would happen if we didn't have support for BUILD_SET opcode,
 # used for testing
@@ -639,6 +650,12 @@ strict_precompile = os.environ.get("TORCH_STRICT_PRECOMPILE", "0") == "1"
 # This flag will also lift certain restrictions during the forward trace such as
 # registering backward hooks on tensors contained within the compiled region.
 compiled_autograd = False
+
+# We have small decompositions for some optimizer ops such as
+# addcmul and foreach_addcmul which avoid item() graph breaks by decomposing
+# into their constituent ops. This flag controls whether we use these decompositions
+# This can affect numerics for non-inductor backends.
+enable_dynamo_decompositions = True
 
 
 # Checks if we should graph break when seeing nn parameter constructors
@@ -753,8 +770,9 @@ enable_aot_compile = False
 # HACK: this is for testing custom ops profiling only
 _custom_ops_profile: Optional[Any] = None
 
-# Deprecated! Please use the config in torch/fx/experimental/_config instead.
-enrich_profiler_metadata: bool = False
+# Experimental flag to enable regional compile on invoke_subgraph HOP.
+# For testing only!
+enable_invoke_subgraph_regional_compile: bool = False
 
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403

@@ -58,7 +58,7 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
-    hint_override: Optional[int] = None
+    hint_override: Optional[int] = dataclasses.field(kw_only=True, default=None)
 
 
 @dataclasses.dataclass
@@ -67,7 +67,7 @@ class GemmConfig(BaseConfig):
     Gemm configuration used for most backends (CPU, CUDA)
     """
 
-    group_m: int = 8
+    group_m: int = dataclasses.field(kw_only=True, default=8)
 
 
 ConvConfig = BaseConfig
@@ -251,7 +251,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         # Exhaustive search for mm configs
         self.exhaustive_configs: list[BaseConfig] = [
-            GemmConfig(BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, group_m)
+            GemmConfig(
+                BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, group_m=group_m
+            )
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
             )
@@ -649,9 +651,13 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         try:
             device = torch.cuda.current_device()
             props = torch.cuda.get_device_properties(device)
-            if not hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+            if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                sm_available = int(props.shared_memory_per_block_optin)
+            elif hasattr(props, "shared_memory_per_block"):  # for ROCm
+                sm_available = int(props.shared_memory_per_block)
+            else:
                 return None
-            sm_available = int(props.shared_memory_per_block_optin)
+
         except Exception:
             # If CUDA is not available or properties cannot be queried, return None
             return None
@@ -1176,10 +1182,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 BLOCK_K,
                 num_stages,
                 num_warps,
-                group_m,
-                matrix_instr_nonkdim,
-                waves_per_eu,
-                kpack,
+                group_m=group_m,
+                matrix_instr_nonkdim=matrix_instr_nonkdim,
+                waves_per_eu=waves_per_eu,
+                kpack=kpack,
             )
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3

@@ -221,12 +221,8 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
   aten::mm(dt: f32[128, 8]| S(0)[0]S(0)[1], dt: f32[8, 128]| S(1)[0]S(1)[1])
-    redistribute_input(0, S(0)[0]S(0)[1] -> S(0)R)
-      redistribute_input(t: f32[16, 8], trace: S(0)[0]S(0)[1]->S(0)R)
-        _c10d_functional::all_gather_into_tensor(t: f32[16, 8], 2, 3)
-        _c10d_functional::wait_tensor(t: f32[32, 8])
-    redistribute_input(1, S(1)[0]S(1)[1] -> RS(1))
-      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR->RS(1))
+    redistribute_input(1, S(1)[0]S(1)[1] -> RR)
+      redistribute_input(t: f32[8, 16], trace: S(1)[0]S(1)[1]->S(1)R->RR)
         _c10d_functional::all_gather_into_tensor(t: f32[8, 16], 2, 3)
         _c10d_functional::wait_tensor(t: f32[16, 16])
         aten::chunk(t: f32[16, 16], 2)
@@ -235,11 +231,9 @@ class TestDTensorDebugMode(TestCase):
         _c10d_functional::wait_tensor(t: f32[32, 32])
         aten::chunk(t: f32[32, 32], 4)
         aten::cat(['t: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]', 't: f32[8, 32]'], 1)
-        aten::chunk(t: f32[8, 128], 2, 1)
-        aten::clone(t: f32[8, 64])
-    aten::mm(t: f32[32, 8], t: f32[8, 64])
-  aten::sum(dt: f32[128, 128]| S(0)S(1))
-    aten::sum(t: f32[32, 64])""",
+    aten::mm(t: f32[16, 8], t: f32[8, 128])
+  aten::sum(dt: f32[128, 128]| S(0)[0]S(0)[1])
+    aten::sum(t: f32[16, 128])""",
         )
 
     def test_debug_mode_einsum(self):
@@ -535,6 +529,66 @@ class TestDTensorDebugMode(TestCase):
             "self.l2(self.l1(x))" in debug_mode.debug_string(show_stack_trace=True)
         )
 
+        # check that nn_module doesn't graph break in compiled regions
+        fn = torch.compile(mod, backend="eager", fullgraph=True)
+        with DebugMode(record_nn_module=True) as debug_mode:
+            fn(inp)
+
+    def test_record_function(self):
+        def fn(x, y):
+            z = x @ y
+            with torch.profiler.record_function("this_is_ignored"):
+                z = z + 1
+            return z.sum()
+
+        x = torch.randn(8, 4, requires_grad=True)
+        y = torch.randn(4, 2, requires_grad=True)
+        with DebugMode() as debug_mode:
+            with torch.profiler.record_function("FWD"):
+                out = torch.compile(fn, backend="aot_eager")(x, y)
+            out.backward()
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+  [record function] FWD
+      aten::mm(t: f32[8, 4], t: f32[4, 2])  ->  t: f32[8, 2]
+      aten::add.Tensor(t: f32[8, 2], 1)  ->  t: f32[8, 2]
+      aten::sum(t: f32[8, 2])  ->  t: f32[]
+      aten::t(t: f32[8, 4])  ->  t: f32[4, 8]
+      aten::t(t: f32[4, 2])  ->  t: f32[2, 4]
+      aten::detach(t: f32[4, 8])  ->  t: f32[4, 8]
+      aten::detach(t: f32[2, 4])  ->  t: f32[2, 4]
+    aten::ones_like(t: f32[], pin_memory=False, memory_format=torch.preserve_format)  ->  t: f32[]
+    aten::expand(t: f32[], [8, 2])  ->  t: f32[8, 2]
+    aten::mm(t: f32[4, 8], t: f32[8, 2])  ->  t: f32[4, 2]
+    aten::mm(t: f32[8, 2], t: f32[2, 4])  ->  t: f32[8, 4]
+    aten::detach(t: f32[8, 4])  ->  t: f32[8, 4]
+    aten::detach(t: f32[4, 2])  ->  t: f32[4, 2]""",
+        )
+
+    def test_in_place_mutation(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                y = x + 1
+                y.add_(1)
+                return y
+
+        mod = Foo()
+        inp = torch.tensor(1)
+        with (
+            DebugMode(record_output=True) as debug_mode,
+            DebugMode.log_tensor_hashes(hash_inputs=True),
+        ):
+            _ = mod(inp)
+
+        self.assertExpectedInline(
+            debug_mode.debug_string(),
+            """\
+    aten::add.Tensor(t: i64[], 1)  ->  t: i64[]  # {'input_hash': ((1.0, None), {}), 'hash': 2.0}
+    aten::add_.Tensor(t: i64[], 1)  ->  t: i64[]  # {'input_hash': ((2.0, None), {}), 'hash': 3.0}""",
+        )
+
     @unittest.skipIf(not HAS_GPU, "requires GPU")
     @unittest.skipIf(not has_triton_package(), "requires triton")
     def test_triton_kernel_logs(self):
@@ -781,7 +835,13 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
         self.assertTrue("c10d::_allgather_base_" in debug_mode.debug_string())
         hash_ = lambda x: norm_hash_fn(x, use_scalar=True)  # noqa: E731
 
-        self.assertEqual(debug_mode.operators[-1].log["hash"][0], hash_(output_tensor))
+        # TODO: the output hash not correct for async op, we should either not log the hash
+        # or wait before logging.
+        # https://github.com/pytorch/pytorch/pull/169295
+        # self.assertEqual(debug_mode.operators[-1].log["hash"][0], hash_(output_tensor))
+        self.assertEqual(
+            debug_mode.operators[-1].log["input_hash"][0][1], hash_(tensor)
+        )
 
         # Verify each rank's contribution
         for i in range(self.world_size):

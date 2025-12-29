@@ -2556,10 +2556,7 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(actual, expected)
 
     @requires_gpu
-    @skipIfXpu(
-        msg="XPU Triton result in nan, "
-        "https://github.com/intel/torch-xpu-ops/issues/2330"
-    )
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @skipIfRocm
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])

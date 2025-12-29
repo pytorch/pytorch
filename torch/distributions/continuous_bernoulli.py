@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -55,10 +54,10 @@ class ContinuousBernoulli(ExponentialFamily):
 
     def __init__(
         self,
-        probs: Optional[Union[Tensor, Number]] = None,
-        logits: Optional[Union[Tensor, Number]] = None,
+        probs: Tensor | Number | None = None,
+        logits: Tensor | Number | None = None,
         lims: tuple[float, float] = (0.499, 0.501),
-        validate_args: Optional[bool] = None,
+        validate_args: bool | None = None,
     ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -55,10 +54,10 @@ class Binomial(Distribution):
 
     def __init__(
         self,
-        total_count: Union[Tensor, int] = 1,
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        total_count: Tensor | int = 1,
+        probs: Tensor | None = None,
+        logits: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         if (probs is None) == (logits is None):
             raise ValueError(

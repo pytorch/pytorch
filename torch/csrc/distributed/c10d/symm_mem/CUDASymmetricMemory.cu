@@ -82,7 +82,7 @@ AllocationRef::~AllocationRef() {
 #endif
 }
 
-CUDASymmetricMemory::CUDASymmetricMemory(
+CUDAPeerAllocInfo::CUDAPeerAllocInfo(
     std::vector<c10::intrusive_ptr<AllocationRef>> alloc_refs,
     std::vector<void*> buffers,
     std::vector<void*> signal_pads,
@@ -114,32 +114,51 @@ CUDASymmetricMemory::CUDASymmetricMemory(
       signal_pads_dev_, signal_pads_.data(), arr_size, cudaMemcpyHostToDevice));
 }
 
+/* Start of CUDASymmetricMemory */
+
+// This is mostly a shallow copy that shares the pointer to `CUDAPeerAllocInfo`
+// which corresponds to the base Block. The CUDASymmetricMemory handle is
+// specified by the offset to the base ptr.
+CUDASymmetricMemory::CUDASymmetricMemory(const c10::intrusive_ptr<CUDAPeerAllocInfo>& pai, size_t offset)
+    : local_device_idx_(pai->local_device_idx_),
+      rank_(pai->rank_),
+      world_size_(pai->world_size_),
+      pai_(pai),
+      offset_(offset) {
+  // offset is specific per symm_mem handle
+  TORCH_INTERNAL_ASSERT(offset_ < pai_->buffer_size_, "offset out of range");
+}
+
 std::vector<void*> CUDASymmetricMemory::get_buffer_ptrs() {
-  return buffers_;
+  return pai_->buffers_;
 }
 
 std::vector<void*> CUDASymmetricMemory::get_signal_pad_ptrs() {
-  return signal_pads_;
+  return pai_->signal_pads_;
 }
 
 void** CUDASymmetricMemory::get_buffer_ptrs_dev() {
-  return buffers_dev_;
+  return pai_->buffers_dev_;
 }
 
 void** CUDASymmetricMemory::get_signal_pad_ptrs_dev() {
-  return signal_pads_dev_;
+  return pai_->signal_pads_dev_;
 }
 
 size_t CUDASymmetricMemory::get_buffer_size() {
-  return buffer_size_;
+  return pai_->buffer_size_;
 }
 
 bool CUDASymmetricMemory::has_multicast_support() {
-  return mc_addr_ != nullptr;
+  return pai_->mc_addr_ != nullptr;
 }
 
 void* CUDASymmetricMemory::get_multicast_ptr() {
-  return mc_addr_;
+  return pai_->mc_addr_;
+}
+
+size_t CUDASymmetricMemory::get_offset() {
+  return offset_;
 }
 
 void check_channel(int channel, int world_size) {
@@ -206,7 +225,7 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
       at::cuda::warp_size(),
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-      reinterpret_cast<uint32_t**>(signal_pads_dev_),
+      reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
       channel,
       rank_,
       world_size_,
@@ -248,7 +267,7 @@ void CUDASymmetricMemory::put_signal(
       at::cuda::warp_size(),
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-      reinterpret_cast<uint32_t**>(signal_pads_dev_),
+      reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
       dst_rank,
       channel,
       rank_,
@@ -296,7 +315,7 @@ void CUDASymmetricMemory::wait_signal(
       at::cuda::warp_size(),
       0,
       at::cuda::getCurrentCUDAStream()>>>(
-      reinterpret_cast<uint32_t**>(signal_pads_dev_),
+      reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
       src_rank,
       channel,
       rank_,
@@ -320,6 +339,8 @@ c10::Device CUDASymmetricMemory::get_device() {
 bool CUDASymmetricMemory::world_within_direct_access() {
   return true;
 }
+
+/* End of CUDASymmetricMemory */
 
 Block::Block(
     c10::intrusive_ptr<AllocationRef> alloc_ref,
@@ -608,7 +629,7 @@ check_all:
 
 namespace {
 template <bool use_fabric_handle>
-c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
+c10::intrusive_ptr<CUDAPeerAllocInfo> make_peer_alloc_info(
     void* ptr,
     c10::intrusive_ptr<Block> block,
     const GroupInfo& group_info) {
@@ -763,7 +784,7 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
         buffers[r], handles[r], block->block_size, block->device_idx));
   }
 
-  auto symm_mem = c10::make_intrusive<CUDASymmetricMemory>(
+  auto pai = c10::make_intrusive<CUDAPeerAllocInfo>(
       std::move(alloc_refs),
       std::move(buffers),
       std::move(signal_pads),
@@ -774,7 +795,7 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
       group_info.rank,
       group_info.world_size);
 
-  return symm_mem;
+  return pai;
 }
 
 } // namespace
@@ -782,11 +803,17 @@ c10::intrusive_ptr<CUDASymmetricMemory> make_symm_mem(
 c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     void* ptr,
     const std::optional<std::string>& group_name) {
-  auto block = find_block(ptr);
+  // In case of MemPool, the `ptr` passed in (i.e. tensor storage ptr) may not
+  // be the same as the allocation base pointer, so we need to find the block
+  // that covers the `ptr`
+  size_t offset = 0;
+  auto block = find_block_covering(ptr, offset);
   if (block == nullptr) {
+    TORCH_WARN(
+      "Pointer not within any SymmetricMemory allocation, "
+      "is the tensor allocated from SymmetricMemory?");
     return nullptr;
   }
-
   // The group_name passed to rendezvous() takes precedence over
   // the default group_name specified during allocation.
   std::string group_name_;
@@ -804,21 +831,25 @@ c10::intrusive_ptr<SymmetricMemory> CUDASymmetricMemoryAllocator::rendezvous(
     group_name_ = *block->default_group_name;
   }
 
+  // If found, this block has been rendezvous by the given group
   auto it = block->symm_mems.find(group_name_);
-  if (it != block->symm_mems.end()) {
-    return it->second;
+  if (it == block->symm_mems.end()) {
+    // Create PeerAllocInfo for this block (this is the costly part)
+    auto group_info = get_group_info(group_name_);
+    TORCH_INTERNAL_ASSERT(
+        handle_type_ != Expandable_Segments_Handle_Type::UNSPECIFIED)
+    bool use_fabric =
+        handle_type_ == Expandable_Segments_Handle_Type::FABRIC_HANDLE;
+    // PeerAllocInfo captures this block's rendezvous info
+    auto pai = use_fabric ? make_peer_alloc_info<true>(ptr, block, group_info)
+                          : make_peer_alloc_info<false>(ptr, block, group_info);
+    // Cache it with the group name
+    it = block->symm_mems.emplace(group_name_, pai).first;
   }
 
-  auto group_info = get_group_info(group_name_);
-
-  TORCH_INTERNAL_ASSERT(
-      handle_type_ != Expandable_Segments_Handle_Type::UNSPECIFIED)
-  bool use_fabric =
-      handle_type_ == Expandable_Segments_Handle_Type::FABRIC_HANDLE;
-  auto symm_mem = use_fabric ? make_symm_mem<true>(ptr, block, group_info)
-                             : make_symm_mem<false>(ptr, block, group_info);
-  block->symm_mems[group_name_] = symm_mem;
-  return symm_mem;
+  // Create symm mem handle for this tensor, specified by its offset
+  auto pai = it->second;
+  return c10::make_intrusive<CUDASymmetricMemory>(pai, offset);
 }
 
 bool CUDASymmetricMemoryAllocator::has_multicast_support(int device_idx) {
@@ -840,6 +871,30 @@ c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block(void* ptr) {
     return nullptr;
   }
   return it->second;
+}
+
+/* Search for a block that covers the given ptr, and write back the offset to
+ * the base ptr; error out if not found */
+c10::intrusive_ptr<Block> CUDASymmetricMemoryAllocator::find_block_covering(void* ptr, size_t& offset) {
+  std::shared_lock lock(mutex_);
+  // In case of MemPool, tensor.storage().data_ptr() may not match
+  // exactly an allocation's base address. Thus we perform the search by
+  // testing if the former is within an allocation's range.
+  auto alloc_it = std::find_if(ptr_to_block_.begin(), ptr_to_block_.end(),
+                             [&](const auto& pair){
+                                auto& block = pair.second;
+                                auto& allocation = block->alloc_ref;
+                                auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+                                auto base_ptr = reinterpret_cast<uintptr_t>(allocation->ptr);
+                                // Modify offset so that it is returned
+                                offset = ptr_int - base_ptr;
+                                return ptr_int >= base_ptr && offset < block->buffer_size; });
+
+  if (alloc_it == ptr_to_block_.end()) {
+    return nullptr;
+  }
+
+  return alloc_it->second;
 }
 
 struct RegisterCUDASymmetricMemoryAllocator {

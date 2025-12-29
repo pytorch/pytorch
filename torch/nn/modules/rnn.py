@@ -128,6 +128,12 @@ class RNNBase(Module):
                 stacklevel=2,
             )
 
+        if not isinstance(bias, bool):
+            raise TypeError(f"bias should be of type bool, got: {type(bias).__name__}")
+        if not isinstance(batch_first, bool):
+            raise TypeError(
+                f"batch_first should be of type bool, got: {type(batch_first).__name__}"
+            )
         if not isinstance(hidden_size, int):
             raise TypeError(
                 f"hidden_size should be of type int, got: {type(hidden_size).__name__}"

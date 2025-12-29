@@ -6,7 +6,6 @@ import functools
 import itertools
 import logging
 import operator
-import os
 import textwrap
 import traceback
 from collections.abc import Callable, Container, Generator, Iterable, Iterator, Sequence
@@ -43,6 +42,7 @@ from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
+from torch._library.opaque_object import is_opaque_type
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -50,7 +50,6 @@ from torch._prims_common import (
     make_channels_last_strides_for,
     StrideType,
 )
-from torch._subclasses.fake_tensor import get_schema_info
 from torch.fx.experimental.symbolic_shapes import (
     _remove_effect_token_unbacked_bindings,
     compute_unbacked_bindings,
@@ -119,7 +118,7 @@ if TYPE_CHECKING:
     from torch.fx.experimental.symbolic_shapes import SympyBoolean
     from torch.fx.node import Argument
 
-    from .codegen.cutlass.cuda_template import CUDATemplate
+    from .codegen.cuda.cuda_template import CUDATemplate
     from .codegen.wrapper import PythonWrapperCodegen
     from .graph import GraphLowering
     from .utils import IndentedBuffer
@@ -151,9 +150,6 @@ _OpOverloads: TypeAlias = Union[torch._ops.OpOverload, torch._ops.HigherOrderOpe
 log = logging.getLogger(__name__)
 indent = functools.partial(textwrap.indent, prefix="  ")
 aten = torch.ops.aten
-
-autotune_warmup = int(os.getenv("TORCH_AUTOTUNE_WARMUP", 25))
-autotune_rep = int(os.getenv("TORCH_AUTOTUNE_REP", 100))
 
 """ [Note: Inductor IR]
 
@@ -3115,14 +3111,14 @@ class SqueezeView(BaseView):
     @staticmethod
     def squeezer(
         size: Sequence[Expr],
-    ) -> tuple[list[int], Callable[[Sequence[Expr]], tuple[Expr]]]:
+    ) -> tuple[list[int], Callable[[Sequence[Expr]], tuple[Expr, ...]]]:
         new_size = [s for s in size if s != 1]
         not_one = [i for i, s in enumerate(size) if s != 1]
         length = len(size)
 
-        def reindex(index: Sequence[Expr]) -> tuple[Expr]:
+        def reindex(index: Sequence[Expr]) -> tuple[Expr, ...]:
             assert len(index) == len(not_one), f"{index} {not_one}"
-            new_index = [sympy.S.Zero] * length
+            new_index: list[Expr] = [sympy.S.Zero] * length
             for idx, s in zip(not_one, index):
                 new_index[idx] = s
             return tuple(new_index)
@@ -5226,15 +5222,9 @@ class ChoiceCaller:
 
     def benchmark(self, *args: Any, out: torch.Tensor) -> float:
         algo = self.to_callable()
-        benchmark_configs = {
-            "warmup": autotune_warmup,
-            "rep": autotune_rep,
-        }
         if config.profile_bandwidth_with_do_bench_using_profiling:
-            return do_bench_using_profiling(lambda: algo(*args), **benchmark_configs)  # type: ignore[arg-type]
-        return benchmarker.benchmark(
-            algo, args, {"out": out}, device=None, **benchmark_configs
-        )
+            return do_bench_using_profiling(lambda: algo(*args))  # type: ignore[arg-type]
+        return benchmarker.benchmark(algo, args, {"out": out}, device=None)
 
     def call_name(self) -> str:
         raise NotImplementedError
@@ -7436,6 +7426,8 @@ class IndexPutFallback(ExternKernel):
 class DeviceCopy(ExternKernelOut):
     @classmethod
     def create(cls, x: IRNode, device: torch.device, non_blocking: bool) -> IRNode:
+        x_device = x.get_device()
+        assert x_device is not None
         if (
             not x.is_extern()
             # Can not apply this optimization if x has been mutated
@@ -7443,13 +7435,15 @@ class DeviceCopy(ExternKernelOut):
             and all(r in V.graph.constants for r in x.get_read_names())
             and not config.aot_inductor.use_runtime_constant_folding
         ):
+            if V.graph.cpp_wrapper:
+                # Even if x is promoted to be a device constant, we still need to
+                # register device info to construct the correct CppWrapper class later
+                V.graph.add_device_info(device)
+                V.graph.add_device_info(x_device)
             return x.constant_to_device(device)
 
         V.graph.add_device_info(device)
-        x_device = x.get_device()
-        assert x_device is not None
         V.graph.add_device_info(x_device)
-
         developer_warning("DeviceCopy in input program")
         constant_args = (non_blocking,)
         # Device Copy should keep the same layout as input
@@ -7868,7 +7862,9 @@ class FallbackKernel(ExternKernelAlloc):
             return example_output.device
         if isinstance(example_output, (list, tuple)):
             device_set = OrderedSet(
-                FallbackKernel.find_device(None, x) for x in example_output
+                # pyrefly: ignore [bad-argument-type]
+                FallbackKernel.find_device(None, x)
+                for x in example_output
             )
             # Remove None
             devices = [device for device in device_set if device]
@@ -7882,9 +7878,11 @@ class FallbackKernel(ExternKernelAlloc):
         return None
 
     def has_side_effects(self) -> bool:
-        if isinstance(self.op_overload, torch._ops.HigherOrderOperator):
-            return False
-        return get_schema_info(self.op_overload).is_mutable()
+        from torch._library.utils import is_impure
+
+        # Note: We don't pass args/kwargs here because they're IRNodes, not actual values
+        # The check is done on the op_overload itself
+        return is_impure(self.op_overload)  # pyrefly: ignore[bad-argument-type]
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
         assert isinstance(
@@ -8683,7 +8681,7 @@ class InvokeSubgraph(ExternKernel):
         # Realize the inputs. Also intermediates can have different strides than
         # the inputs of the subgraph. So, force the intermediates to have same
         # strides as that of subgraph inputs.
-        # pyrefly: ignore [annotation-mismatch]
+        # pyrefly: ignore [annotation-mismatch, redefinition]
         operands: list[IRNode] = [cls.realize_input(x) for x in operands]
         new_operands: list[IRNode] = []
 
@@ -8757,6 +8755,17 @@ class InvokeSubgraph(ExternKernel):
 
 @ir_dataclass(frozen=False)
 class Conditional(ExternKernel):
+    """
+    IR node representing torch.cond
+
+    Attributes:
+        predicate: A boolean scalar tensor determining which branch to execute.
+        operands: Input tensors passed to both true and false subgraphs.
+        true_subgraph: Subgraph executed when predicate is True.
+        false_subgraph: Subgraph executed when predicate is False.
+        outputs: MultiOutput nodes representing the conditional's outputs.
+    """
+
     predicate: Optional[IRNode] = None
     operands: Optional[Sequence[IRNode]] = None
     true_subgraph: Optional[Subgraph] = None
@@ -8815,6 +8824,27 @@ class Conditional(ExternKernel):
         assert isinstance(fx_operands, Sequence), type(fx_operands)
         assert all(isinstance(n, Node) for n in fx_operands)
         fake_operands = [cast(Node, x).meta["val"] for x in fx_operands]
+        fake_outputs = V.graph.current_node.meta["val"]
+
+        def _require_exact_strides(
+            graph_outputs: Sequence[IRNode],
+            fake_tensors: Sequence[torch.Tensor],
+        ) -> list[IRNode]:
+            ret = []
+            for output, fake in zip(graph_outputs, fake_tensors):
+                if isinstance(output, ShapeAsConstantBuffer):
+                    ret.append(output)
+                else:
+                    fake_strides = [
+                        s.node.expr if isinstance(s, torch.SymInt) else s
+                        for s in fake.stride()
+                    ]
+                    ret.append(
+                        ExternKernel.require_exact_strides(
+                            TensorBox(output), fake_strides, allow_padding=False
+                        )
+                    )
+            return ret
 
         for subgraph in (true_fn, false_fn):
             if subgraph.graph is None:
@@ -8826,6 +8856,12 @@ class Conditional(ExternKernel):
                 )
                 with V.set_graph_handler(subgraph.graph):
                     subgraph.graph.run(*fake_operands)
+                    # Force subgraph outputs to have the expected strides from
+                    # FakeTensor metadata. This ensures both branches produce
+                    # outputs with consistent strides.
+                    subgraph.graph.graph_outputs = _require_exact_strides(
+                        subgraph.graph.graph_outputs, fake_outputs
+                    )
 
         assert true_fn.graph is not None
         assert false_fn.graph is not None
@@ -8872,6 +8908,7 @@ class Conditional(ExternKernel):
         outputs = [
             MultiOutput(
                 FixedLayout(
+                    # pyrefly: ignore [bad-argument-type]
                     device=output.get_device()
                     if output.get_device() is not None
                     else device,  # type: ignore[arg-type]
@@ -9319,7 +9356,7 @@ class TorchBindObject(NonTensorObj):
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
 
-        if real_script_obj is None:
+        if is_opaque_type(real_script_obj):
             return 0
 
         assert hasattr(real_script_obj, "__obj_flatten__")

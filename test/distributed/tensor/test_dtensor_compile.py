@@ -63,54 +63,6 @@ from torch.utils.checkpoint import checkpoint
 dev_type = torch.device(get_devtype())
 
 
-class PytreeTuple:
-    """
-    Tuple-like values that are treated as leaves of a PyTree.
-    """
-
-    def __init__(self, *values):
-        self._values = tuple(values)
-
-    def __repr__(self):
-        pr = repr(self._values)[1:-1]
-        return f"{type(self).__name__}({pr})"
-
-    def __getitem__(self, i):
-        return self._values[i]
-
-    def __iter__(self):
-        return iter(self._values)
-
-    def __len__(self):
-        return len(self._values)
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, self.__class__):
-            return self._values == other._values
-        elif isinstance(other, tuple):
-            return self._values == other
-        return False
-
-    def __hash__(self) -> int:
-        return hash(self._values)
-
-    def __add__(self, other):
-        if isinstance(other, (self.__class__, tuple)):
-            return self.__class__(*self, *other)
-        raise NotImplementedError(type(other))
-
-    def __radd__(self, other):
-        if isinstance(other, (self.__class__, tuple)):
-            return self.__class__(*other, *self)
-        raise NotImplementedError(type(other))
-
-    def index(self, value):
-        return self._values.index(value)
-
-    def count(self, value):
-        return self._values.count(value)
-
-
 class SimpleModel(nn.Module):
     def __init__(self, device):
         super().__init__()
@@ -874,7 +826,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_dt.to_local().sum().backward()
 
     def test_dynamo_to_local_grad_placements_sequence(self):
-        placements = PytreeTuple([Shard(0)])
+        placements = [Shard(0)]
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -893,7 +845,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(x):
-            placements = PytreeTuple([Shard(0)])
+            placements = [Shard(0)]
             return dt.to_local(grad_placements=placements) + 2
 
         fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
@@ -907,7 +859,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
     def test_dynamo_from_local_grad_placements_sequence_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = PytreeTuple(Shard(0))
+        placements = [Shard(0)]
 
         def fn(x):
             dt = DTensor.from_local(
@@ -928,7 +880,7 @@ def forward(self, b_parametrizations_buffer_original0, x):
     def test_dynamo_from_local_grad_placements_sequence_intermediate_as_args(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = PytreeTuple(Shard(0))
+        placements = [Shard(0)]
 
         def fn(x):
             dt = DTensor.from_local(

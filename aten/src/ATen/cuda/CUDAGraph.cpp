@@ -169,21 +169,6 @@ void CUDAGraph::instantiate() {
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1g1accfe1da0c605a577c22d9751a09597
   // cudaGraphInstantiateWithFlags
   // https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__GRAPH.html#group__CUDART__GRAPH_1ga2c652a24ba93e52b99a47bec0888233
-  int version = 0;
-  AT_CUDA_CHECK(cudaDriverGetVersion(&version));
-  if (version < 11040) {
-    // Trailing NULL, NULL, 0 arguments were recommended by Cuda driver people,
-    // who prefer not to report error message through these arguments moving forward
-    // (they prefer return value, or errors on api calls internal to the capture)
-    // ROCM appears to fail with HIP error: invalid argument
-#if (defined(CUDA_VERSION) && CUDA_VERSION >= 12000) && !defined(USE_ROCM)
-    AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, cudaGraphInstantiateFlagUseNodePriority));
-#else
-    AT_CUDA_CHECK(cudaGraphInstantiate(&graph_exec_, graph_, NULL, NULL, 0));
-#endif
-//Since ROCm 6.2, we want to go down this path as hipGraphExecDestroy in the destructor will not immediately free the memory.
-//It will wait for the next sync operation. cudaGraphInstantiateFlagAutoFreeOnLaunch will add async frees after graph launch.
-  } else {
 #if !defined(USE_ROCM)
     AT_CUDA_CHECK(cudaGraphInstantiateWithFlags(&graph_exec_,
                                                 graph_,
@@ -193,7 +178,6 @@ void CUDAGraph::instantiate() {
                                                 graph_,
                                                 cudaGraphInstantiateFlagAutoFreeOnLaunch));
 #endif
-  }
   has_graph_exec_ = true;
 }
 
@@ -214,16 +198,6 @@ void CUDAGraph::replay() {
   }
   // graph_exec_ may be replayed in any stream.
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
-
-  int version = 0;
-  AT_CUDA_CHECK(cudaDriverGetVersion(&version));
-  if (version < 11040) {
-    // Workaround for bug in libcuda.so that causes replayed graphs with
-    // certain topologies to be corrupted (kernels elided, internal syncs
-    // ignored) when replayed back to back without a sync in between.
-    // The bug is fixed in CUDA 11.4+.
-    AT_CUDA_CHECK(cudaDeviceSynchronize());
-  }
 }
 
 void CUDAGraph::enable_debug_mode() {

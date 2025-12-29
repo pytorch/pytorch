@@ -433,6 +433,9 @@ class ExceptionVariable(VariableTracker):
         # Contains the call stack where the exception was raised. Dynamo does
         # not track traceback. So, this variable is always set to None
         self.__traceback__ = ConstantVariable(None)
+        # The user stack at the time this exception was first raised.
+        # Used to preserve the original exception location when re-raising.
+        self.python_stack = None
 
     def set_context(self, context: "ExceptionVariable"):
         self.__context__ = context
@@ -474,7 +477,7 @@ class ExceptionVariable(VariableTracker):
         if name == "__context__":
             self.set_context(val)
         elif name == "__cause__":
-            if (isinstance(val, ConstantVariable) and val.value is None) or isinstance(
+            if val.is_constant_none() or isinstance(
                 val,
                 (
                     variables.BuiltinVariable,
@@ -488,12 +491,12 @@ class ExceptionVariable(VariableTracker):
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__suppress_context__":
-            if isinstance(val, ConstantVariable) and val.value in (True, False):
+            if val.is_constant_match(True, False):
                 self.__suppress_context__ = val
             else:
                 raise_error("exception cause must be None or derive from BaseException")
         elif name == "__traceback__":
-            if isinstance(val, ConstantVariable) and val.value is None:
+            if val.is_constant_none():
                 self.__traceback__ = val
             else:
                 unimplemented(
@@ -691,7 +694,7 @@ class AutogradFunctionVariable(VariableTracker):
 
         def visit(vt):
             nonlocal requires_grad
-            if isinstance(vt, variables.TensorVariable):
+            if vt.is_tensor():
                 if vt.requires_grad is not False:
                     requires_grad = True
             if isinstance(vt, variables.NNModuleVariable):
@@ -701,6 +704,7 @@ class AutogradFunctionVariable(VariableTracker):
         VariableTracker.visit(visit, (args, kwargs))
 
         if requires_grad and torch.is_grad_enabled():
+            source = self.source
             if config.capture_autograd_function is False:
                 warnings.warn(
                     "The config.capture_autograd_function flag is deprecated, it's now always true."
@@ -720,6 +724,10 @@ class AutogradFunctionVariable(VariableTracker):
                 forward_fn = autograd_function_forward_rewritten(
                     self.fn_cls.forward, self.fn_cls.setup_context
                 )
+                # The forward points to a new function now, so we can't use the
+                # old source. Later on, we guard specifically on
+                # is_setup_ctx_defined
+                source = None
 
             vjp_fn = self.fn_cls.vjp  # type: ignore[attr-defined]
             if vjp_fn is not torch.autograd.Function.vjp:
@@ -752,29 +760,23 @@ class AutogradFunctionVariable(VariableTracker):
 
             from .higher_order_ops import AutogradFunctionApplyVariable
 
-            source = self.source
-            if source is None:
+            if source is None and not is_setup_ctx_defined:
                 source = AttrSource(
                     tx.import_source(self.fn_cls.__module__), self.fn_cls.__name__
                 )
+            apply_source = source and AttrSource(source, member="apply")
 
             val = AutogradFunctionApplyVariable(
                 forward_fn,
                 self.fn_cls.backward,
                 source,
-                source=AttrSource(source, member="apply"),
+                source=apply_source,
             ).call_function(tx, args, kwargs)
-            # Inside of AutogradFunctionApplyVariable.call_function, we use sourceless variable wrapping
-            # the forward function, as we don't want to generate guards for new_forward.__closure__
-            # if forward is rewritten by autograd_function_forward_rewritten.
-            # But we still need to generate correct guards for the original forward and setup_context
-            # functions, so we have to add guards manually.
-            if self.source:
+            if self.source and is_setup_ctx_defined:
                 fwd_src = AttrSource(self.source, "forward")
                 install_guard(fwd_src.make_guard(GuardBuilder.CLOSURE_MATCH))
-                if is_setup_ctx_defined:
-                    setup_ctx_src = AttrSource(self.source, "setup_context")
-                    install_guard(setup_ctx_src.make_guard(GuardBuilder.CLOSURE_MATCH))
+                setup_ctx_src = AttrSource(self.source, "setup_context")
+                install_guard(setup_ctx_src.make_guard(GuardBuilder.CLOSURE_MATCH))
 
             return val
 
@@ -925,10 +927,7 @@ class AutogradFunctionContextVariable(UserDefinedObjectVariable):
     def create(tx: "InstructionTranslator", args=None, kwargs=None):
         needs_input_grad = None
         if args and not kwargs:
-            needs_input_grad = tuple(
-                isinstance(x, variables.TensorVariable) and x.requires_grad
-                for x in args
-            )
+            needs_input_grad = tuple(x.is_tensor() and x.requires_grad for x in args)
         out = tx.output.side_effects.track_object_new(
             None,
             torch.autograd.function.FunctionCtx,
@@ -1781,9 +1780,22 @@ class DebuggingVariable(VariableTracker):
         return True
 
 
+class IgnoredFunctionVariable(VariableTracker):
+    """
+    Represents a call to an arbitrary function that should be ignored.
+    """
+
+    def __init__(self, value, **kwargs):
+        super().__init__(**kwargs)
+        self.value = value
+
+    def call_function(self, tx, args, kwargs):
+        return variables.ConstantVariable.create(None)
+
+
 class LoggingLoggerVariable(VariableTracker):
     """
-    Represents a call to any of logging.Logger methods
+    Represents a call to any logging.Logger methods.
     """
 
     def __init__(self, value, **kwargs) -> None:
@@ -1798,18 +1810,24 @@ class LoggingLoggerVariable(VariableTracker):
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
         if tx.export:
-            # For export cases, we can just make debugging functions no-ops
-            return
+            # For export cases, we can just make logging functions no-ops.
+            return variables.ConstantVariable.create(None)
+
         method = getattr(self.value, name, None)
         function = getattr(method, "__func__", None)
-        if {method, function}.intersection(torch._dynamo.config.ignore_logger_methods):
+
+        # Unified ignore set
+        ignore_set = torch._dynamo.config.ignore_logging_functions
+
+        if method in ignore_set or function in ignore_set:
             return variables.ConstantVariable.create(None)
+
         unimplemented(
             gb_type="logging.Logger method not supported for non-export cases",
             context=f"method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
             explanation="logging.Logger methods are not supported for non-export cases.",
             hints=[
-                "Add the logging method to `torch._dynamo.config.ignore_logger_methods.",
+                "Add the logging method to `torch._dynamo.config.ignore_logging_functions`.",
             ],
         )
 
@@ -1817,7 +1835,6 @@ class LoggingLoggerVariable(VariableTracker):
 class ConstantLikeVariable(VariableTracker):
     """self.value is a compile-time constant, but not a literal"""
 
-    _error_prefix = "ConstantLikeVariable"
     try:
         from numpy import (
             dtype as np_dtype,
@@ -1831,6 +1848,17 @@ class ConstantLikeVariable(VariableTracker):
     def __init__(self, value, **kwargs) -> None:
         super().__init__(**kwargs)
         self.value = value
+
+    @property
+    def _error_prefix(self):
+        """Dynamically compute the prefix from the value's type"""
+        t = type(self.value)
+
+        # For builtins (int, str, etc.), just return the name
+        if t.__module__ == "builtins":
+            return t.__qualname__
+
+        return f"{t.__module__}.{t.__qualname__}"
 
     def as_python_constant(self):
         return self.value
@@ -1861,7 +1889,7 @@ class ConstantLikeVariable(VariableTracker):
         if variables.ConstantVariable.is_literal(result):
             return variables.ConstantVariable.create(result)
         if isinstance(result, re.Match):
-            return ConstantRegexMatchVariable(result)
+            return ConstantLikeVariable(result)
 
         unimplemented(
             gb_type="constant-like method call with unsupported return type",
@@ -1886,14 +1914,6 @@ class ConstantLikeVariable(VariableTracker):
         return GetAttrVariable(self, name)
 
 
-class RegexPatternVariable(ConstantLikeVariable):
-    _error_prefix = "re.Pattern"
-
-
-class ConstantRegexMatchVariable(ConstantLikeVariable):
-    _error_prefix = "re.Match"
-
-
 class TorchVersionVariable(ConstantLikeVariable):
     _error_prefix = "torch.__version__"
 
@@ -1903,13 +1923,7 @@ class TorchVersionVariable(ConstantLikeVariable):
         super().__init__(**kwargs)
 
 
-class NumpyTypeInfoVariable(ConstantLikeVariable):
-    _error_prefix = "np.iinfo/np.finfo"
-
-
 class NumpyDTypeVariable(ConstantLikeVariable):
-    _error_prefix = "np.dtype[...]"
-
     def as_proxy(self):
         """Similar to how numpy dtype descriptors (e.g. np.float32 ) are handled by NumpyVariable:
 
@@ -1920,8 +1934,8 @@ class NumpyDTypeVariable(ConstantLikeVariable):
 
 
 np_constant_collections_map = {
-    tnp.finfo: NumpyTypeInfoVariable,
-    tnp.iinfo: NumpyTypeInfoVariable,
+    tnp.finfo: ConstantLikeVariable,
+    tnp.iinfo: ConstantLikeVariable,
     tnp.dtype: NumpyDTypeVariable,
 }
 

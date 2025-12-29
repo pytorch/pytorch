@@ -12,7 +12,7 @@ from torch.testing._internal.common_utils import TestCase, run_tests, do_test_dt
     load_tests, TEST_NUMPY, TEST_SCIPY, IS_WINDOWS, gradcheck, coalescedonoff, \
     DeterministicGuard, first_sample, TEST_WITH_CROSSREF, TEST_WITH_ROCM, skipIfTorchDynamo, \
     parametrize, subtest, is_coalesced_indices, suppress_warnings, instantiate_parametrized_tests, \
-    skipIfCrossRef, slowTest
+    skipIfCrossRef
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_mps import mps_ops_modifier
 from numbers import Number
@@ -279,12 +279,6 @@ class TestSparse(TestSparseBase):
                 return True
             else:
                 existing_indices.add(index)
-
-    def test_negative_indices(self):
-        indices = torch.tensor([[0, 1, -1], [2, 0, 1]])
-        values = torch.tensor([1, 2, 3])
-        shape = torch.Size([3, 3])
-        self.assertRaisesRegex(RuntimeError, "found negative index", lambda: torch.sparse_coo_tensor(indices, values, shape))
 
     def randn(self, *args, **kwargs):
         """
@@ -4929,7 +4923,6 @@ class TestSparseAny(TestCase):
                                         f' contiguous_indices{contiguous_indices}, contiguous_values={contiguous_values}')
         assert not untested_combinations, untested_combinations
 
-    @slowTest
     @all_sparse_layouts('layout', include_strided=False)
     def test_constructor_autograd(self, device, layout):
 
@@ -5486,7 +5479,6 @@ class TestSparseAny(TestCase):
             result = mask.to_dense().sparse_mask(mask)
             self.assertEqual(result, mask)
 
-    @slowTest
     @all_sparse_layouts('layout', include_strided=False)
     @parametrize("masked", [subtest(False, name='nonmasked'), subtest(True, name='masked')])
     @parametrize("fast_mode", [subtest(False, name='slow'), subtest(True, name='fast')])

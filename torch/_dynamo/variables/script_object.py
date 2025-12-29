@@ -19,6 +19,7 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 """
 
 import functools
+import inspect
 from collections.abc import Callable, Iterable
 from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -26,19 +27,23 @@ from typing_extensions import ParamSpec
 import torch
 from torch._guards import Source
 from torch._library.opaque_object import (
+    get_member_type,
     is_opaque_reference_type,
     is_opaque_type,
     is_opaque_value_type,
+    MemberType,
 )
 from torch.fx.proxy import Proxy
 
 from .. import graph_break_hints
 from ..eval_frame import skip_code
 from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
+from ..source import AttrSource, CallMethodSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
 from .lists import TupleVariable
+from .misc import LambdaVariable
 from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
@@ -149,31 +154,48 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     def as_proxy(self) -> Proxy:
         return self.proxy
 
+    def _is_opaque_reference_type(self) -> bool:
+        return hasattr(self.value, "script_class_name") and is_opaque_reference_type(
+            self.value.script_class_name
+        )
+
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from torch._higher_order_ops.torchbind import call_torchbind
 
-        from ..source import AttrSource
         from .higher_order_ops import TorchHigherOrderOperatorVariable
 
         if is_opaque_value_type(type(self.value)):
             res = super().var_getattr(tx, name)
             return res
 
-        if hasattr(self.value, "script_class_name") and is_opaque_type(
-            self.value.script_class_name
-        ):
-            # For non-value opaque types, block attribute access
-            unimplemented(
-                gb_type="Attempted to access attributes/methods on an OpaqueObject",
-                context=f"value={self.value}, attr={name}",
-                explanation="Attribute/method access of OpaqueObjects is not supported.",
-                hints=[
-                    "Use custom operators instead of direct attribute/method access.",
-                ],
-            )
+        if self._is_opaque_reference_type():
+            member_type = get_member_type(self.value.script_class_name, name)
+            if member_type is None:
+                unimplemented(
+                    gb_type="Attempted to access unregistered member on an OpaqueObject",
+                    context=f"value={self.value}, attr={name}",
+                    explanation=f"Member '{name}' is not registered for this opaque object type.",
+                    hints=[
+                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
+                    ],
+                )
+
+            if member_type in (MemberType.CONSTANT, MemberType.GUARDED):
+                value = getattr(
+                    self.value.real_obj,  # pyrefly: ignore[missing-attribute]
+                    name,
+                )
+                if inspect.ismethod(value):
+                    return LambdaVariable(
+                        lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
+                    )
+                else:
+                    return super().var_getattr(tx, name)
+            elif member_type == MemberType.INLINED:
+                return super().var_getattr(tx, name)
 
         method = getattr(self.value, name, None)
         if method is None:
@@ -218,6 +240,57 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder, VariableBuilder
+
+        value_type = type(self.value)
+
+        def call_method_and_return_constant(real_obj):
+            # Call the method and return result as constant
+
+            args_const = [x.as_python_constant() for x in args]
+            if inspect.getattr_static(value_type, "__getattr__", None) is not None:
+                unimplemented(
+                    gb_type="Opaque object with custom __getattr__ not supported",
+                    context=f"{value_type.__name__} with custom __getattr__",
+                    explanation="Dynamo does not support opaque objects types with custom __getattr__ methods",
+                    hints=[],
+                )
+
+            kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
+
+            method = getattr(real_obj, name)
+
+            if name == "__setattr__":
+                method(*args_const, **kwargs_const)
+                return real_obj  # pyrefly: ignore[bad-return]
+
+            constant_val = method(*args_const, **kwargs_const)
+
+            if self.source:
+                # convert to tuple to make it hashable
+                kwargs_tuple = tuple(sorted(kwargs_const.items()))
+                call_source = CallMethodSource(
+                    self.source,
+                    name,
+                    tuple(args_const),
+                    kwargs_tuple,  # pyrefly: ignore[bad-argument-type]
+                )
+                return VariableBuilder(tx, call_source)(constant_val)
+            else:
+                return SourcelessBuilder.create(tx, constant_val)
+
+        if is_opaque_value_type(value_type):
+            return call_method_and_return_constant(self.value)
+
+        if self._is_opaque_reference_type():
+            member_type = get_member_type(
+                self.value.script_class_name,  # pyrefly: ignore[missing-attribute]
+                name,
+            )
+
+            if member_type in (MemberType.CONSTANT, MemberType.GUARDED):
+                return call_method_and_return_constant(self.value)
+
         unimplemented(
             gb_type="Weird method call on TorchScript object",
             context=f"value={self.value}, method={name}",

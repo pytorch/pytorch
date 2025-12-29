@@ -810,27 +810,30 @@ from user code:
         torch.distributed.init_process_group(
             "fake", store=fake_store, rank=0, world_size=4
         )
-        mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("dp", "tp"))
-        input_tensor = torch.randn(32, 32, device="cpu")
-        placements = (Replicate(), Replicate())
-        d_input_tensor = DTensor.from_local(input_tensor, mesh, placements)
-        mod = RedistributeModel()
+        try:
+            mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("dp", "tp"))
+            input_tensor = torch.randn(32, 32, device="cpu")
+            placements = (Replicate(), Replicate())
+            d_input_tensor = DTensor.from_local(input_tensor, mesh, placements)
+            mod = RedistributeModel()
 
-        compiled_fn = torch.compile(
-            mod,
-            fullgraph=True,
-        ).forward.aot_compile(((input_tensor, d_input_tensor, mesh), {}))
-        inputs = (input_tensor, d_input_tensor, mesh)
-        expected = mod(*inputs)
-        actual = compiled_fn(mod, *inputs)
-        self.assertEqual(expected, actual)
-        compiled_fn.save_compiled_function(self.path())
-        torch._dynamo.reset()
-        with torch.compiler.set_stance("fail_on_recompile"):
-            with open(self.path(), "rb") as f:
-                compiled_fn = torch.compiler.load_compiled_function(f)
+            compiled_fn = torch.compile(
+                mod,
+                fullgraph=True,
+            ).forward.aot_compile(((input_tensor, d_input_tensor, mesh), {}))
+            inputs = (input_tensor, d_input_tensor, mesh)
+            expected = mod(*inputs)
             actual = compiled_fn(mod, *inputs)
             self.assertEqual(expected, actual)
+            compiled_fn.save_compiled_function(self.path())
+            torch._dynamo.reset()
+            with torch.compiler.set_stance("fail_on_recompile"):
+                with open(self.path(), "rb") as f:
+                    compiled_fn = torch.compiler.load_compiled_function(f)
+                actual = compiled_fn(mod, *inputs)
+                self.assertEqual(expected, actual)
+        finally:
+            torch.distributed.destroy_process_group()
 
     def test_aot_compile_with_checkpoint(self):
         from torch.utils.checkpoint import checkpoint

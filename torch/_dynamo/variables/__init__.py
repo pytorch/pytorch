@@ -49,9 +49,10 @@ from .dicts import (
     FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedSetVariable,
     SetVariable,
 )
-from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
+from .distributed import BackwardHookVariable, DistributedVariable
 from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
@@ -115,7 +116,6 @@ from .misc import (
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
-    RegexPatternVariable,
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
@@ -195,11 +195,9 @@ __all__ = [
     "NumpyNdarrayVariable",
     "NumpyVariable",
     "OptimizerVariable",
-    "PlacementVariable",
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
-    "RegexPatternVariable",
     "RemovableHandleVariable",
     "RepeatIteratorVariable",
     "SDPAParamsVariable",

@@ -273,6 +273,13 @@ class CUDAAllocator : public DeviceAllocator {
         " does not yet support setUseOnOOM. "
         "If you need it, please file an issue describing your use case.");
   }
+  virtual void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support setNoSplit. "
+        "If you need it, please file an issue describing your use case.");
+  }
 
   // returns true if the allocated blocks are equal to expected live allocations
   virtual bool checkPoolLiveAllocations(
@@ -299,7 +306,8 @@ class CUDAAllocator : public DeviceAllocator {
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       RecordContext when,
-      bool clearHistory) = 0;
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) = 0;
   virtual void recordAnnotation(
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void pushCompileContext(std::string& md) {}
@@ -468,9 +476,15 @@ inline void recordHistory(
     CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
     RecordContext when,
-    bool clearHistory) {
+    bool clearHistory,
+    const std::vector<std::string>& skip_actions) {
   get()->recordHistory(
-      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
+      enabled,
+      context_recorder,
+      alloc_trace_max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 inline void recordAnnotation(
@@ -521,7 +535,9 @@ inline void setUseOnOOM(
     bool use_on_oom) {
   get()->setUseOnOOM(device, mempool_id, use_on_oom);
 }
-
+inline void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  get()->setNoSplit(device, mempool_id);
+}
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
 }

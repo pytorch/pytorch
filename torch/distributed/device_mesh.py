@@ -33,6 +33,7 @@ if not is_available():
         pass
 
     sys.modules["torch.distributed.device_mesh"].DeviceMesh = _DeviceMeshStub  # type: ignore[attr-defined]
+    # pyrefly: ignore [missing-attribute]
     sys.modules[
         "torch.distributed.device_mesh"
     ].init_device_mesh = _init_device_mesh_stub  # type: ignore[attr-defined]

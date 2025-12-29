@@ -368,13 +368,26 @@ test_h100_distributed() {
   assert_git_not_dirty
 }
 
-test_h100_symm_mem() {
+_run_symm_mem_tests() {
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
+}
+
+test_h100_symm_mem() {
+  # Configure NVSHMEM to use smaller heap and work without NVSwitch
+  # Default heap is 128GB which fails cuMemMap on AWS H100 instances
+  export NVSHMEM_SYMMETRIC_SIZE=4G
+  # Disable NVLink Switch features (not available on AWS H100 instances)
+  export NVSHMEM_DISABLE_NVLS=1
+  _run_symm_mem_tests
+}
+
+test_b200_symm_mem() {
+  _run_symm_mem_tests
 }
 
 test_h100_cutlass_backend() {
@@ -1791,6 +1804,7 @@ test_operator_microbenchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
+  # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
   for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv optimizer; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
@@ -2001,7 +2015,7 @@ elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem
 elif [[ "${TEST_CONFIG}" == "b200-symm-mem" ]]; then
-  test_h100_symm_mem
+  test_b200_symm_mem
 elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
 elif [[ "${TEST_CONFIG}" == openreg ]]; then

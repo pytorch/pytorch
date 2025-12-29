@@ -1,10 +1,12 @@
 # mypy: allow-untyped-defs
 import io
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
+from torch._higher_order_ops.invoke_subgraph import NestedCompileRegionOptions
 
 from . import config
 
@@ -635,7 +637,9 @@ def skip_all_guards_unsafe(guard_entries):
     return [False for entry in guard_entries]
 
 
-def nested_compile_region(fn=None):
+def nested_compile_region(
+    fn=None, options: Optional[NestedCompileRegionOptions] = None
+):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
     compile region (which is often repeated in the full model) whose code can be
@@ -644,8 +648,8 @@ def nested_compile_region(fn=None):
 
     During **``torch.compile``** tracing, the compiler applies *hierarchical
     compilation* with ``nested_compile_region``: it emits optimized code for the
-    marked region the first time it is encountered and re-emits (or “stamps
-    out”) the previously compiled code on every subsequent invocation.  This can
+    marked region the first time it is encountered and re-emits (or "stamps
+    out") the previously compiled code on every subsequent invocation.  This can
     substantially reduce overall compile time for deeply-stacked,
     structurally-identical components such as the transformer layers of a
     large-language-model (LLM).
@@ -659,13 +663,27 @@ def nested_compile_region(fn=None):
     to reuse, it will transparently re-compile the region.  Using it is
     therefore *safe*: correctness is always preserved, and you pay the extra
     compilation cost only when required.
+
+    Args:
+        fn: The function to wrap
+        options: Optional backend to use for compiling the subgraph.
+            Warning: this is an experimental feature under development and
+            not ready for use yet.
     """
+
+    if options is not None:
+        from torch._dynamo import config as dynamo_config
+
+        if not dynamo_config.enable_invoke_subgraph_regional_compile:
+            raise RuntimeError(
+                "nested_compile_region config is an experiemntal feature for testing only."
+            )
 
     from torch._higher_order_ops.invoke_subgraph import (
         mark_compile_region as _mark_compile_region,
     )
 
-    return _mark_compile_region(fn)
+    return _mark_compile_region(fn, options=options)
 
 
 def load_compiled_function(
