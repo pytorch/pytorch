@@ -501,6 +501,7 @@ class DeviceCachingAllocator {
   std::atomic<CreateContextFn> context_recorder_;
   RecordContext record_context_ = RecordContext::NEVER;
   RingBuffer<TraceEntry> alloc_buffer;
+  std::unordered_set<TraceEntry::Action> skip_actions_list;
   std::vector<std::pair<MempoolId_t, std::function<bool(sycl::queue*)>>>
       captures_underway;
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
@@ -569,18 +570,54 @@ class DeviceCachingAllocator {
 
     size_t original_block_size = block->size;
     size_t requested_size = block->requested_size;
+    int64_t net_change_inactive_split_blocks = 0;
+    int64_t net_change_inactive_split_size = 0;
+
     auto& pool = *block->pool;
     const std::array<Block*, 2> merge_candidates = {block->prev, block->next};
     for (Block* merge_candidate : merge_candidates) {
-      try_merge_blocks(block, merge_candidate, pool);
+      const auto subsumed_size = try_merge_blocks(block, merge_candidate, pool);
+      if (subsumed_size > 0) {
+        net_change_inactive_split_blocks -= 1;
+        net_change_inactive_split_size -= static_cast<int64_t>(subsumed_size);
+      }
     }
 
     active_blocks.erase(block);
     bool inserted = pool.blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
+    if (block->is_split()) {
+      net_change_inactive_split_blocks += 1;
+      net_change_inactive_split_size += static_cast<int64_t>(block->size);
+    }
+
     StatTypes stat_types = get_stat_types_for_pool(pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      // `inactive_split` is intended to reflect blocks that cannot be
+      // immediately released even when a free is requested. However, expandable
+      // segments behave differently: any fully free page within an expandable
+      // segment can always be safely released. Accurately tracking expandable
+      // segments in this statistic would significantly complicate the
+      // bookkeeping logic, so we intentionally exclude expandable segments from
+      // the `inactive_split` metric.
+      if (!block->expandable_segment) {
+        if (net_change_inactive_split_blocks > 0) {
+          stats.inactive_split[stat_type].increase(
+              static_cast<size_t>(net_change_inactive_split_blocks));
+        } else if (net_change_inactive_split_blocks < 0) {
+          stats.inactive_split[stat_type].decrease(
+              static_cast<size_t>(-net_change_inactive_split_blocks));
+        }
+        if (net_change_inactive_split_size > 0) {
+          stats.inactive_split_bytes[stat_type].increase(
+              static_cast<size_t>(net_change_inactive_split_size));
+        } else if (net_change_inactive_split_size < 0) {
+          stats.inactive_split_bytes[stat_type].decrease(
+              static_cast<size_t>(-net_change_inactive_split_size));
+        }
+      }
+      stats.active[stat_type].decrease(1);
       stats.active_bytes[stat_type].decrease(original_block_size);
       stats.requested_bytes[stat_type].decrease(requested_size);
     });
@@ -889,6 +926,7 @@ class DeviceCachingAllocator {
     }
     p.block = new Block(p.device(), p.queue(), size, p.pool, ptr);
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
+      stats.segment[stat_type].increase(1);
       stats.reserved_bytes[stat_type].increase(size);
     });
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
@@ -981,6 +1019,7 @@ class DeviceCachingAllocator {
 
     StatTypes stat_types = get_stat_types_for_pool(*pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      stats.segment[stat_type].decrease(1);
       stats.reserved_bytes[stat_type].decrease(block->size);
     });
 
@@ -1164,6 +1203,7 @@ class DeviceCachingAllocator {
     Block* block = params.block;
     Block* remaining = nullptr;
 
+    const bool already_split = block->is_split();
     if (split_remainder) {
       remaining = block;
 
@@ -1180,6 +1220,28 @@ class DeviceCachingAllocator {
       remaining->size -= size;
       bool inserted = pool->blocks.insert(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+
+      if (already_split && !block->expandable_segment) {
+        // Allocate from an existing inactive split block: decrease inactive
+        // split bytes.
+        for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+          stats.inactive_split_bytes[stat_type].decrease(block->size);
+        });
+      } else if (!block->expandable_segment) {
+        // First time split a non-expandable block: create a new inactive
+        // split block (the remaining part), so increase the inactive split
+        // count and bytes.
+        for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+          stats.inactive_split[stat_type].increase(1);
+          stats.inactive_split_bytes[stat_type].increase(remaining->size);
+        });
+      }
+    } else if (already_split && !block->expandable_segment) {
+      // Allocate the whole inactive split block: decrease both count and bytes.
+      for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+        stats.inactive_split[stat_type].decrease(1);
+        stats.inactive_split_bytes[stat_type].decrease(block->size);
+      });
     }
 
     block->allocated = true;
@@ -1199,6 +1261,8 @@ class DeviceCachingAllocator {
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted)
 
     for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+      stats.allocation[stat_type].increase(1);
+      stats.active[stat_type].increase(1);
       stats.allocated_bytes[stat_type].increase(block->size);
       stats.active_bytes[stat_type].increase(block->size);
       stats.requested_bytes[stat_type].increase(block->requested_size);
@@ -1388,6 +1452,7 @@ class DeviceCachingAllocator {
 
     StatTypes stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      stats.allocation[stat_type].decrease(1);
       stats.allocated_bytes[stat_type].decrease(block->size);
     });
 
@@ -1440,9 +1505,14 @@ class DeviceCachingAllocator {
 
     for (const auto statType :
          c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+      stats.allocation[statType].reset_accumulated();
+      stats.segment[statType].reset_accumulated();
+      stats.active[statType].reset_accumulated();
+      stats.inactive_split[statType].reset_accumulated();
       stats.allocated_bytes[statType].reset_accumulated();
       stats.reserved_bytes[statType].reset_accumulated();
       stats.active_bytes[statType].reset_accumulated();
+      stats.inactive_split_bytes[statType].reset_accumulated();
       stats.requested_bytes[statType].reset_accumulated();
     }
     stats.num_alloc_retries = 0;
@@ -1453,9 +1523,14 @@ class DeviceCachingAllocator {
 
     for (const auto statType :
          c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+      stats.allocation[statType].reset_peak();
+      stats.segment[statType].reset_peak();
+      stats.active[statType].reset_peak();
+      stats.inactive_split[statType].reset_peak();
       stats.allocated_bytes[statType].reset_peak();
       stats.reserved_bytes[statType].reset_peak();
       stats.active_bytes[statType].reset_peak();
+      stats.inactive_split_bytes[statType].reset_peak();
       stats.requested_bytes[statType].reset_peak();
     }
   }
@@ -1469,6 +1544,9 @@ class DeviceCachingAllocator {
       MempoolId_t mempool_id,
       std::shared_ptr<GatheredContext> context) {
     if (!record_history)
+      return;
+    bool should_skip = skip_actions_list.count(action) > 0;
+    if (should_skip)
       return;
     TraceEntry te(
         action,
@@ -1579,10 +1657,32 @@ class DeviceCachingAllocator {
       CreateContextFn context_recorder,
       size_t alloc_buffer_max_entries,
       RecordContext when,
-      bool clearHistory) {
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
+
+    static const std::unordered_map<std::string, TraceEntry::Action>
+        kActionMap = {
+            {"alloc", TraceEntry::Action::ALLOC},
+            {"free_requested", TraceEntry::Action::FREE_REQUESTED},
+            {"free_completed", TraceEntry::Action::FREE_COMPLETED},
+            {"segment_alloc", TraceEntry::Action::SEGMENT_ALLOC},
+            {"segment_free", TraceEntry::Action::SEGMENT_FREE},
+            {"segment_map", TraceEntry::Action::SEGMENT_MAP},
+            {"segment_unmap", TraceEntry::Action::SEGMENT_UNMAP},
+            {"snapshot", TraceEntry::Action::SNAPSHOT},
+            {"oom", TraceEntry::Action::OOM},
+        };
+
+    skip_actions_list.clear();
+    for (const auto& action_str : skip_actions) {
+      auto it = kActionMap.find(action_str);
+      TORCH_CHECK(it != kActionMap.end(), "Unknown skip action: ", action_str);
+      skip_actions_list.insert(it->second);
+    }
+
     context_recorder_.store(record_history ? context_recorder : nullptr);
     alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
@@ -1903,14 +2003,16 @@ class NativeCachingAllocator : public XPUAllocator {
       CreateContextFn context_recorder,
       size_t alloc_buffer_max_entries,
       RecordContext when,
-      bool clearHistory) {
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) {
     for (auto& allocator : device_allocators) {
       allocator->recordHistory(
           enabled,
           context_recorder,
           alloc_buffer_max_entries,
           when,
-          clearHistory);
+          clearHistory,
+          skip_actions);
     }
   }
 
@@ -1982,9 +2084,15 @@ void recordHistory(
     CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
     RecordContext when,
-    bool clearHistory) {
+    bool clearHistory,
+    const std::vector<std::string>& skip_actions) {
   native_allocator.recordHistory(
-      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
+      enabled,
+      context_recorder,
+      alloc_trace_max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 SnapshotInfo snapshot(MempoolId_t mempool_id) {

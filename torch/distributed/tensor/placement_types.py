@@ -21,7 +21,7 @@ from torch.distributed.tensor._collective_utils import (
 from torch.distributed.tensor._ops._mask_buffer import MaskBuffer
 
 
-__all__ = ["Placement", "Shard", "Replicate", "Partial", "MaskPartial"]
+__all__ = ["Placement", "Shard", "Replicate", "Partial"]
 
 
 # Appease TestPublicBindings.test_correct_module_names
@@ -499,13 +499,15 @@ class _StridedShard(torch._C._distributed.StridedShard):
     _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
     is sharded on the TP mesh dimension first, then sharded on the FSDP mesh dimension.
     We call this right-to-left sharding which is the opposite of the default
-    left-to-right sharding. See the example below:
+    left-to-right sharding. See the example below::
+
         tensor shape: [8, 8]
         mesh: [[0, 1], [2, 3]], names=("dp", "tp")
         placements: [Shard(0), Shard(0)]
 
     The default sharding behavior shards the tensor on "dp" mesh dimension first then
-    "tp" dimension. The sharding result will be:
+    "tp" dimension. The sharding result will be::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -515,7 +517,8 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
     While the FSDP2 + TP sharding behavior does the opposite: it shards the tensor on
     "tp" mesh dim first then "dp" dim. This right-to-left sharding will produce the
-    result:
+    result::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -529,13 +532,15 @@ class _StridedShard(torch._C._distributed.StridedShard):
     this, we use _StridedShard placement to make this right-to-left sharding compatible
     with our left-to-right convention on both tensor distribution and redistribution.
 
-    Now with _StridedShard, the right-to-left sharding above can be represented as:
+    Now with _StridedShard, the right-to-left sharding above can be represented as::
+
         tensor shape: [8, 8]
         mesh: [[0, 1], [2, 3]], names=("dp", "tp")
         placements: [_StridedShard(0, split_factor=2), Shard(0)]
 
     And a left-to-right processing of `placements` will produce the same result, which is
-    different from using the `Shard` placement:
+    different from using the `Shard` placement::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -1004,13 +1009,13 @@ _Partial = Partial
 
 
 @dataclass(frozen=True)
-class MaskPartial(Partial):
+class _MaskPartial(Partial):
     """
     A partial mask placement devised for rowwise sharded embedding op, where we need
     to mask and adjust the indices to the local embedding shard, embedding masking
     is a special type of the Partial placement
 
-    NOTE: the lifecycle of this MaskPartial placement follows the corresponding DTensor
+    NOTE: the lifecycle of this _MaskPartial placement follows the corresponding DTensor
     lifecycle, i.e. the indices_mask would only be alive during the lifetime of the DTensor.
     """
 
@@ -1061,14 +1066,14 @@ class MaskPartial(Partial):
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
         assert self.offset_shape is not None, (
-            "offset_shape needs to be set for MaskPartial"
+            "offset_shape needs to be set for _MaskPartial"
         )
         local_shard_size, local_offset_on_dim = Shard.local_shard_size_and_offset(
             self.offset_shape[self.offset_dim],
             num_chunks,
             my_coordinate[mesh_dim],
         )
-        mask, masked_tensor = MaskPartial._mask_tensor(
+        mask, masked_tensor = _MaskPartial._mask_tensor(
             tensor, local_offset_on_dim, local_shard_size
         )
         # materialize the mask buffer to be used for reduction
@@ -1113,18 +1118,14 @@ class MaskPartial(Partial):
         return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, MaskPartial):
-            return False
-
-        # if either data is not None, we invalidate the sharding cache, as this indicates
-        # the current MaskPartial placement is still in use and should not be used for cache hit.
-        if self.mask_buffer.data is not None or other.mask_buffer.data is not None:
+        if not isinstance(other, _MaskPartial):
             return False
 
         return (
             self.reduce_op == other.reduce_op
             and self.offset_shape == other.offset_shape
             and self.offset_dim == other.offset_dim
+            and self.mask_buffer is other.mask_buffer
         )
 
     def __hash__(self) -> int:
@@ -1133,17 +1134,18 @@ class MaskPartial(Partial):
                 self.reduce_op,
                 self.offset_shape,
                 self.offset_dim,
+                id(self.mask_buffer),
             )
         )
 
     def __repr__(self) -> str:
         """
-        machine readable representation of the MaskPartial placement
+        machine readable representation of the _MaskPartial placement
         """
-        return f"MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
+        return f"_MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
 
     def __str__(self) -> str:
         """
-        human readable representation of the MaskPartial placement
+        human readable representation of the _MaskPartial placement
         """
         return f"MaskP({self.reduce_op}, {self.offset_shape}, {self.offset_dim})"

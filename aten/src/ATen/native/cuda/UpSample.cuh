@@ -350,8 +350,8 @@ __device__ __forceinline__ accscalar_t interpolate_aa_single_dim(
     const scalar_t* src,
     const scalar_t* weights,
     int size) {
-  scalar_t t = static_cast<accscalar_t>(*src);
-  scalar_t wts = static_cast<accscalar_t>(weights[0]);
+  accscalar_t t = static_cast<accscalar_t>(*src);
+  accscalar_t wts = static_cast<accscalar_t>(weights[0]);
   accscalar_t output = t * wts;
 
   int j = 1;
