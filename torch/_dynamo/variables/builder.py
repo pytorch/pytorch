@@ -1859,6 +1859,7 @@ class VariableBuilder:
             guards = []
             # type: ignore[attr-defined]
             for i, tensor_variable in enumerate(list_variable.items):
+                # pyrefly: ignore[unexpected-keyword]
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable

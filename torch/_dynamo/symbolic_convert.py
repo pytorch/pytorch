@@ -4592,9 +4592,13 @@ class InstructionTranslator(InstructionTranslatorBase):
                         local_dynamism = frozenset(dynamism.get(name, {}).items())
                     var = LazyVariableTracker.create(
                         value,
+                        # NOTE: pyrefly currently has issue with init for frozen
+                        # dataclass, so ignore these errors
                         LocalSource(
                             name,
+                            # pyrefly: ignore[unexpected-keyword]
                             is_input=True,
+                            # pyrefly: ignore[unexpected-keyword]
                             dynamism=local_dynamism,
                         ),
                     )
@@ -4647,6 +4651,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             assert closure is not None
             for name, cell in zip(self.freevars(), closure):
                 cell_source = LocalCellSource(name)
+                # pyrefly: ignore[unexpected-keyword]
                 contents_source = LocalSource(name, is_derefed_cell_contents=True)
                 try:
                     contents_var = LazyVariableTracker.create(
