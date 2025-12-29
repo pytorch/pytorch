@@ -10,7 +10,6 @@ import itertools
 from typing import Any, Optional, Union
 
 import torch
-from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor import config
 from torch._inductor.autotune_process import (
     BenchmarkRequest,
@@ -98,13 +97,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
 
         workspace = self._workspace
 
-        # Capture stream at closure creation time, like Triton does.
-        # This ensures the kernel runs on the same stream where CUDA events
-        # are recorded for benchmarking, giving accurate timing measurements.
-        device_interface = get_interface_for_device(out.device.type)
-        stream = device_interface.get_raw_stream(out.device.index)
-
         def run_kernel():
+            stream = torch.cuda.current_stream()
             kernel.run(
                 args,
                 artifact,
