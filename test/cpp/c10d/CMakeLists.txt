@@ -88,6 +88,7 @@ endif()
 
 if(LINUX AND USE_GLOO AND USE_C10D_GLOO)
   add_executable(example_allreduce example/allreduce.cpp)
+  torch_compile_options(example_allreduce)
   target_include_directories(example_allreduce PRIVATE $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/distributed>)
   target_link_libraries(example_allreduce torch_cpu)
   if(USE_CUDA)
