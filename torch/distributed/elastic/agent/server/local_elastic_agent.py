@@ -18,6 +18,7 @@ from string import Template
 from typing import Any, TYPE_CHECKING
 
 import torch.distributed.elastic.timer as timer
+from torch._tempdir import get_temp_path
 from torch.distributed.elastic import events
 from torch.distributed.elastic.agent.server.api import (
     RunResult,
@@ -170,7 +171,7 @@ class LocalElasticAgent(SimpleElasticAgent):
         watchdog_file_path = os.getenv(watchdog_file_env_name)
         if watchdog_enabled is not None and str(watchdog_enabled) == "1":
             if watchdog_file_path is None:
-                watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
+                watchdog_file_path = get_temp_path(filename=f"watchdog_timer_{uuid.uuid4()}")
             logger.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
             if not envs:
                 logger.warning(

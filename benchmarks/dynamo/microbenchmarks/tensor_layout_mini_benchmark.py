@@ -1,3 +1,6 @@
+import os
+import tempfile
+
 import torch
 from torch._inductor import ir
 from torch._inductor.runtime.benchmarking import benchmarker
@@ -48,7 +51,7 @@ def bench_conv(with_stack=True):
         test_out = test_fn()
         torch.cuda.synchronize()
 
-    p.export_chrome_trace("/tmp/chrome.json")
+    p.export_chrome_trace(os.path.join(tempfile.gettempdir(), "chrome.json"))
     assert torch.allclose(baseline_out, test_out, atol=1e-3, rtol=1e-3), (
         baseline_out[0][0][0][:32],
         test_out[0][0][0][:32],

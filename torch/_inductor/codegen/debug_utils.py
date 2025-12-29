@@ -9,6 +9,7 @@ from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch import dtype as torch_dtype
+from torch._tempdir import get_temp_path
 
 from .. import config
 from ..virtualized import V
@@ -210,15 +211,14 @@ class DebugPrinterManager:
                     f'aoti_torch_save_tensor_handle({arg}, "{arg}", "{launch_prefix}", "{kernel_name}");'
                 )
             else:
-                cwd = os.getcwd()
-                saved_dir = cwd + "/tmp/jit_inductor/"
+                saved_dir = get_temp_path(subdirectory="jit_inductor")
                 if not os.path.exists(saved_dir):
                     log.info(
                         "Creating directory to save inductor intermediate tensor values."
                     )
                     os.makedirs(saved_dir)
                 # Save the model to the directory
-                saved_path = saved_dir + f"{launch_prefix}_{kernel_name}_{arg}.pt"
+                saved_path = os.path.join(saved_dir, f"{launch_prefix}_{kernel_name}_{arg}.pt")
                 log.info(
                     "Saved intermediate tensor %s for %s to %s",
                     arg,

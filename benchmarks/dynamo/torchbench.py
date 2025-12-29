@@ -6,6 +6,7 @@ import logging
 import os
 import re
 import sys
+import tempfile
 import warnings
 from collections import namedtuple
 from os.path import abspath, exists
@@ -51,7 +52,7 @@ def _reassign_parameters(model):
 def setup_torchbench_cwd():
     original_dir = abspath(os.getcwd())
 
-    os.environ["KALDI_ROOT"] = "/tmp"  # avoids some spam
+    os.environ["KALDI_ROOT"] = tempfile.gettempdir()  # avoids some spam
     for torchbench_dir in (
         "./torchbenchmark",
         "../torchbenchmark",

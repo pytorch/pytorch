@@ -5,6 +5,7 @@ import sysconfig
 from typing import Any
 
 import torch.distributed as dist
+from torch._tempdir import get_pytorch_tmpdir
 from torch.utils._triton import has_triton
 
 
@@ -1209,7 +1210,7 @@ if has_triton():
         def on_exit() -> None:
             logger.info("PTX files:")
             for kernel in triton_kernels:
-                with tempfile.NamedTemporaryFile(dir="/tmp", delete=False) as f:
+                with tempfile.NamedTemporaryFile(dir=get_pytorch_tmpdir(), delete=False) as f:
                     f.write(kernel.asm["ptx"].encode("utf-8"))
                     logger.info(f"+- {kernel.name}: {f.name}")  # noqa: G004
 

@@ -769,10 +769,10 @@ class RendezvousFileTest(TestCase):
             gen = dist.rendezvous("file://?rank=0&world_size=1")
             next(gen)
         with self.assertRaisesRegex(ValueError, "rank parameter missing"):
-            gen = dist.rendezvous("file:///tmp/foo?world_size=1")
+            gen = dist.rendezvous(f"file://{tempfile.gettempdir()}/foo?world_size=1")
             next(gen)
         with self.assertRaisesRegex(ValueError, "size parameter missing"):
-            gen = dist.rendezvous("file:///tmp/foo?rank=0")
+            gen = dist.rendezvous(f"file://{tempfile.gettempdir()}/foo?rank=0")
             next(gen)
 
     def test_nominal(self):
