@@ -38,11 +38,8 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
-<<<<<<< HEAD
-from torch._logging import getArtifactLogger
-=======
 from torch._library.utils import is_builtin
->>>>>>> 0990aa2421e (Add custom torch_dispatch mode  at first invocation of inductor runtime to check custom ops)
+from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
