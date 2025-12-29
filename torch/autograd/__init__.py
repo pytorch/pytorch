@@ -94,6 +94,7 @@ def _make_grads(
     new_grads: list[_OptionalTensor] = []
 
     for out, grad in zip(outputs, grads):
+        # pyrefly: ignore [redundant-cast]
         out = cast(Union[torch.Tensor, graph.GradientEdge], out)
         out_size = None
         out_device = None
@@ -350,7 +351,7 @@ def backward(
             Union[tuple[torch.Tensor], tuple[graph.GradientEdge]], (tensors,)
         )
     else:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         tensors = tuple(tensors)
 
     grad_tensors_ = _tensor_or_tensors_to_tuple(grad_tensors, len(tensors))
@@ -450,12 +451,12 @@ def grad(
             Union[Sequence[torch.Tensor], Sequence[graph.GradientEdge]], (outputs,)
         )
     else:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         outputs = tuple(outputs)
     if is_tensor_like(inputs) or isinstance(inputs, graph.GradientEdge):
         inputs = cast(_TensorOrTensorsOrGradEdge, (inputs,))
     else:
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         inputs = tuple(inputs)
     t_outputs = tuple(i for i in outputs if is_tensor_like(i))
     t_inputs = tuple(i for i in inputs if is_tensor_like(i))
@@ -532,7 +533,7 @@ def grad(
         result = tuple(
             output
             if output is not None
-            else torch.zeros_like(input, requires_grad=True)
+            else torch.zeros_like(input, requires_grad=create_graph)
             for (output, input) in zip(result, inputs)
         )
     return result

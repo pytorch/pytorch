@@ -74,7 +74,7 @@ class TestCase(InductorTestCase):
         def run(op, args, kwargs):
             return op(*args, **kwargs)
 
-        sample_inputs_itr = op.sample_inputs("cuda", dtype, requires_grad=False)
+        sample_inputs_itr = op.sample_inputs(GPU_TYPE, dtype, requires_grad=False)
         for sample_input in sample_inputs_itr:
             args = (sample_input.input,) + sample_input.args
             kwargs = sample_input.kwargs
@@ -204,11 +204,20 @@ class TestCase(InductorTestCase):
 
         # Edge case: torch.round maps to libdevice.nearbyint.
         triton_op_name_overrides = {
-            "round": "nearbyint",
-            # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
-            "sqrt": "sqrt_rn",
+            "default": {
+                "round": "nearbyint",
+                # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
+                "sqrt": "sqrt_rn",
+            },
+            "xpu": {
+                "round": "nearbyint",
+                "sqrt": "sqrt",
+            },
         }
-        override = triton_op_name_overrides.get(op_name)
+        if GPU_TYPE in triton_op_name_overrides:
+            override = triton_op_name_overrides[GPU_TYPE].get(op_name)
+        else:
+            override = triton_op_name_overrides["default"].get(op_name)
         triton_op_name = override if override is not None else torch_op_name
 
         # Get the number of args for the op.
@@ -335,7 +344,9 @@ class TestCase(InductorTestCase):
         self.assertEqual(num_downcasts, 0 if upcast_to_fp32 else 1)
 
 
-instantiate_device_type_tests(TestCase, globals(), only_for=("cuda",))
+instantiate_device_type_tests(
+    TestCase, globals(), only_for=("cuda", "xpu"), allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

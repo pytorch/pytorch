@@ -41,7 +41,7 @@ void woq_matmul_int4_impl(
       dst_usr_dims;
   dnnl::memory::dims m1_usr_strides, m2_usr_strides, scale_usr_strides,
       zp_usr_strides, dst_usr_strides;
-  int compressed_k = (int)(k / 8);
+  int compressed_k = k / 8;
   int num_groups = (int)(k / group_size);
   m1_usr_dims = {m, k};
   m1_usr_strides = {m1.stride(0), m1.stride(1)};

@@ -1,4 +1,3 @@
-#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
 #include <c10/xpu/XPUFunctions.h>
 
@@ -33,7 +32,6 @@ namespace {
  *    one iGPU and enumerate all iGPUs on that platform.
  * 3. If neither dGPUs nor iGPUs are found, conclude that no GPUs are available.
  */
-c10::once_flag init_flag;
 thread_local DeviceIndex curDeviceIndex = 0;
 
 struct DevicePool {
@@ -149,7 +147,10 @@ inline void initGlobalDevicePoolState() {
 }
 
 inline void initDevicePoolCallOnce() {
-  c10::call_once(init_flag, initGlobalDevicePoolState);
+  auto static init_flag [[maybe_unused]] = [] {
+    initGlobalDevicePoolState();
+    return true;
+  }();
 }
 
 void initDeviceProperties(DeviceProp* device_prop, DeviceIndex device) {

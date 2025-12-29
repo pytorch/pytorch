@@ -96,6 +96,7 @@ def disable(fn=None, recursive=True, *, reason=None, wrapping=True):  # type: ig
             nonrecursive_disable_wrapper._torchdynamo_disable = True  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_disable_msg = reason  # type: ignore[attr-defined]
             nonrecursive_disable_wrapper._torchdynamo_orig_callable = fn  # type: ignore[attr-defined]
+            nonrecursive_disable_wrapper._torchdynamo_disable_recursive = False  # type: ignore[attr-defined]
             # pyrefly: ignore [bad-return]
             return nonrecursive_disable_wrapper
 
@@ -574,34 +575,49 @@ def mark_unbacked(
         specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.
             If provided, Dynamo will generate specialized compiled regions for each criterion in addition to a generic trace.
     """
-    # You could have copied the mark_dynamic behavior but I'm not convinced
-    # it's what you want
-    assert not is_traceable_wrapper_subclass(t), "not implemented yet"
+    if torch.distributed.is_available() and isinstance(
+        t, torch.distributed.tensor.DTensor
+    ):
+        # apply on inner tensor sizes/strides
+        mark_unbacked(t._local_tensor, index)
+    else:
+        # You could have copied the mark_dynamic behavior but I'm not convinced
+        # it's what you want
+        assert not is_traceable_wrapper_subclass(t), "not implemented yet"
 
     if isinstance(index, int):
         if strict:
             if not hasattr(t, "_dynamo_strict_unbacked_indices"):
+                # pyrefly: ignore [missing-attribute]
                 t._dynamo_strict_unbacked_indices = set()
+            # pyrefly: ignore [missing-attribute]
             t._dynamo_strict_unbacked_indices.add(index)
             return
 
         if not hasattr(t, "_specialized_on"):
+            # pyrefly: ignore [missing-attribute]
             t._specialize_on = {}
 
         if not hasattr(t, "_dynamo_unbacked_indices"):
+            # pyrefly: ignore [missing-attribute]
             t._dynamo_unbacked_indices = set()
 
         if not hasattr(t, "_dynamo_hint_overrides"):
+            # pyrefly: ignore [missing-attribute]
             t._dynamo_hint_overrides = {}
 
         if hint_override:
+            # pyrefly: ignore [missing-attribute]
             t._dynamo_hint_overrides[index] = hint_override
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
+        # pyrefly: ignore [missing-attribute]
         if isinstance(t._specialize_on, dict):
+            # pyrefly: ignore [missing-attribute]
             t._specialize_on[index] = specialize_on if specialize_on is not None else []
 
+        # pyrefly: ignore [missing-attribute]
         t._dynamo_unbacked_indices.add(index)
         return
 
@@ -890,6 +906,7 @@ _allowed_config_patches = (
     "allow_unspec_int_on_nn_module",
     "skip_torchrec",
     "dont_skip_tracing",
+    "nested_graph_breaks",
 )
 
 from . import config
@@ -965,6 +982,26 @@ def dont_skip_tracing(fn: Optional[Any] = None) -> Any:
     return ctx
 
 
+@overload
+def disable_nested_graph_breaks(fn: None = None) -> DynamoConfigPatchProxy: ...
+
+
+@overload
+def disable_nested_graph_breaks(fn: Callable[_P, _R]) -> Callable[_P, _R]: ...
+
+
+def disable_nested_graph_breaks(fn: Optional[Any] = None) -> Any:
+    """
+    Context manager/decorator to disable nested graph breaks when tracing
+    this function and any nested functions. Used when nested graph breaks
+    is causing problems.
+    """
+    ctx = patch_dynamo_config(nested_graph_breaks=False)
+    if fn:
+        return ctx(fn)
+    return ctx
+
+
 class ErrorOnGraphBreakDecoratorContextManager:
     def __init__(self, error_on_graph_break: bool) -> None:
         self.error_on_graph_break = error_on_graph_break
@@ -1002,3 +1039,13 @@ def error_on_graph_break(
     The default value of torch.compile's `error_on_graph_break` setting is False.
     """
     return ErrorOnGraphBreakDecoratorContextManager(error_on_graph_break)
+
+
+def is_dynamo_disable_recursive(method: Callable[[Any], Any]) -> Optional[bool]:
+    """
+    Check if a method is marked as `dynamo_disable` recursively. It returns:
+    - True if disable(recursive=True)
+    - False if disable(recursive=False)
+    - None if method is not a disable decorator
+    """
+    return getattr(method, "_torchdynamo_disable_recursive", None)

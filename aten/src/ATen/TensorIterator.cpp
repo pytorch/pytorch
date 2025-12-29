@@ -572,20 +572,20 @@ DimVector TensorIteratorBase::invert_perm(IntArrayRef input) const {
 }
 
 void TensorIteratorBase::allocate_or_resize_outputs() {
+  // check if permutation is just an inverted order
+  bool inverted = true;
+  for (const auto j : c10::irange(ndim())) {
+    if (perm_[j] != ndim() - j - 1) {
+      inverted = false;
+      break;
+    }
+  }
   for (const auto i : c10::irange(num_outputs_)) {
     auto& op = operands_[i];
     if (!op.tensor_base().defined() || op.will_resize) {
       TORCH_INTERNAL_ASSERT(op.is_type_defined(), "no type for operand", i);
       auto element_size = elementSize(op.target_dtype);
       op.stride_bytes = compatible_stride(static_cast<int64_t>(element_size));
-      // check if permutation is just an inverted order
-      bool inverted = true;
-      for (const auto j : c10::irange(ndim())) {
-        if (perm_[j] != ndim() - j - 1) {
-          inverted = false;
-          break;
-        }
-      }
       auto tensor_shape = invert_perm(shape_);
       if (inverted) {
         // can just return contiguous output
@@ -862,7 +862,7 @@ void TensorIteratorBase::narrow(int dim, int64_t start, int64_t size) {
   shape_[dim] = size;
   view_offsets_[dim] += start;
   for (auto& op : operands_) {
-    op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
+    op.data = (static_cast<char*>(op.data)) + op.stride_bytes[dim] * start;
   }
   if (size == 1 && !is_reduction_) {
     coalesce_dimensions();
@@ -873,7 +873,7 @@ void TensorIteratorBase::select_all_keeping_dim(int start_dim, IntArrayRef indic
   TORCH_INTERNAL_ASSERT(start_dim <= ndim());
   for (const auto i : c10::irange(start_dim, ndim())) {
     for (auto& op : operands_) {
-      op.data = ((char*)op.data) + op.stride_bytes[i] * indices[i - start_dim];
+      op.data = (static_cast<char*>(op.data)) + op.stride_bytes[i] * indices[i - start_dim];
     }
     shape_[i] = 1;
   }

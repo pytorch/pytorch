@@ -1,4 +1,3 @@
-#include <ATen/ThreadLocalState.h>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/RankLocal.hpp>
 
@@ -7,11 +6,6 @@
 #include <fmt/ranges.h>
 
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupMPI.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupUCC.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupWrapper.hpp>
 
 namespace c10d {
 
@@ -81,7 +75,7 @@ c10::intrusive_ptr<Backend> ProcessGroup::getBackend(
   ProcessGroup::BackendType backendType{ProcessGroup::BackendType::UNDEFINED};
   try {
     backendType = deviceTypeToBackendType_.at(deviceType);
-  } catch (const std::out_of_range& e) {
+  } catch (const std::out_of_range&) {
     TORCH_CHECK(
         false, "No backend type associated with device type ", deviceType);
   }
@@ -196,6 +190,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     backendOpts->group_name = groupName;
     backendOpts->timeout =
         timeout.has_value() ? timeout.value() : backendOpts->timeout;
+    backendOpts->group_desc = groupDesc;
     auto splitBackend = parentBackend->split(store, sorted_ranks, backendOpts);
     if (splitBackend == nullptr) {
       continue;

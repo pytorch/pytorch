@@ -9,7 +9,7 @@ from collections.abc import Callable, Iterable
 from enum import Enum
 from functools import partial
 from typing import Any, Optional
-from typing_extensions import Self
+from typing_extensions import deprecated, Self
 from warnings import warn
 
 import torch
@@ -37,6 +37,14 @@ __all__ = [
     "ExecutionTraceObserver",
 ]
 PROFILER_STEP_NAME = "ProfilerStep"
+
+_WARNINGS_SHOWN = set()
+
+
+def _warn_once(msg, category=UserWarning, stacklevel=2):
+    if msg not in _WARNINGS_SHOWN:
+        _WARNINGS_SHOWN.add(msg)
+        warn(msg, category=category, stacklevel=stacklevel)
 
 
 class _NumpyEncoder(json.JSONEncoder):
@@ -135,16 +143,16 @@ class _KinetoProfile:
     def __init__(
         self,
         *,
-        activities: Optional[Iterable[ProfilerActivity]] = None,
+        activities: Iterable[ProfilerActivity] | None = None,
         record_shapes: bool = False,
         profile_memory: bool = False,
         with_stack: bool = False,
         with_flops: bool = False,
         with_modules: bool = False,
-        experimental_config: Optional[_ExperimentalConfig] = None,
-        execution_trace_observer: Optional[_ITraceObserver] = None,
+        experimental_config: _ExperimentalConfig | None = None,
+        execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
-        custom_trace_id_callback: Optional[Callable[[], str]] = None,
+        custom_trace_id_callback: Callable[[], str] | None = None,
     ) -> None:
         self.activities = set(activities) if activities else supported_activities()
         self.record_shapes = record_shapes
@@ -156,24 +164,24 @@ class _KinetoProfile:
         self.execution_trace_observer = execution_trace_observer
         self.acc_events = acc_events
         self.custom_trace_id_callback = custom_trace_id_callback
-        self.profiler: Optional[prof.profile] = None
+        self.profiler: prof.profile | None = None
         self.has_cudagraphs = False
-        self.mem_tl: Optional[MemoryProfileTimeline] = None
+        self.mem_tl: MemoryProfileTimeline | None = None
         self.use_device = None
         if ProfilerActivity.CUDA in self.activities:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "cuda"
         elif ProfilerActivity.XPU in self.activities:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "xpu"
         elif ProfilerActivity.MTIA in self.activities:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "mtia"
         elif ProfilerActivity.HPU in self.activities:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.use_device = "hpu"
         elif ProfilerActivity.PrivateUse1 in self.activities:
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self.use_device = _get_privateuse1_backend_name()
 
         # user-defined metadata to be amended to the trace
@@ -205,12 +213,19 @@ class _KinetoProfile:
                 acc_events=self.acc_events,
                 custom_trace_id_callback=self.custom_trace_id_callback,
             )
+        if (self.profiler is not None) and (not self.acc_events):
+            _warn_once(
+                "Warning: Profiler clears events at the end of each cycle."
+                "Only events from the current cycle will be reported."
+                "To keep events across cycles, set acc_events=True."
+            )
         self.profiler._prepare_trace()
 
     def start_trace(self) -> None:
         if self.execution_trace_observer:
             self.execution_trace_observer.start()
-        assert self.profiler is not None
+        if self.profiler is None:
+            raise AssertionError("Profiler must be initialized before starting trace")
         self.profiler._start_trace()
 
         if self.profile_memory:
@@ -256,7 +271,8 @@ class _KinetoProfile:
     def stop_trace(self) -> None:
         if self.execution_trace_observer:
             self.execution_trace_observer.stop()
-        assert self.profiler is not None
+        if self.profiler is None:
+            raise AssertionError("Profiler must be initialized before stopping trace")
         self.profiler.__exit__(None, None, None)
 
     def export_chrome_trace(self, path: str):
@@ -264,15 +280,15 @@ class _KinetoProfile:
         Exports the collected trace in Chrome JSON format. If kineto is enabled, only
         last cycle in schedule is exported.
         """
-        assert self.profiler
+        if self.profiler is None:
+            raise AssertionError(
+                "Profiler must be initialized before exporting chrome trace"
+            )
         if path.endswith(".gz"):
-            fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
-            fp.close()
-            retvalue = self.profiler.export_chrome_trace(fp.name)
-            with open(fp.name, "rb") as fin:
-                with gzip.open(path, "wb") as fout:
+            with tempfile.NamedTemporaryFile("w+b", suffix=".json") as fp:
+                retvalue = self.profiler.export_chrome_trace(fp.name)
+                with open(fp.name, "rb") as fin, gzip.open(path, "wb") as fout:
                     fout.writelines(fin)
-            os.remove(fp.name)
             return retvalue
         else:
             return self.profiler.export_chrome_trace(path)
@@ -284,7 +300,8 @@ class _KinetoProfile:
             path (str): save stacks file to this location;
             metric (str): metric to use: "self_cpu_time_total" or "self_cuda_time_total"
         """
-        assert self.profiler
+        if self.profiler is None:
+            raise AssertionError("Profiler must be initialized before exporting stacks")
         return self.profiler.export_stacks(path, metric)
 
     def toggle_collection_dynamic(
@@ -316,7 +333,7 @@ class _KinetoProfile:
             print(p.key_averages().table(
                 sort_by="self_cuda_time_total", row_limit=-1))
         """
-        if not self.profiler:
+        if self.profiler is None:
             return
         self.profiler.toggle_collection_dynamic(enable, activities)
 
@@ -333,7 +350,10 @@ class _KinetoProfile:
             To use shape/stack functionality make sure to set record_shapes/with_stack
             when creating profiler context manager.
         """
-        assert self.profiler
+        if self.profiler is None:
+            raise AssertionError(
+                "Profiler must be initialized before getting key averages"
+            )
         return self.profiler.key_averages(
             group_by_input_shape, group_by_stack_n, group_by_overload_name
         )
@@ -343,7 +363,8 @@ class _KinetoProfile:
         Returns the list of unaggregated profiler events,
         to be used in the trace callback or after the profiling is finished
         """
-        assert self.profiler
+        if self.profiler is None:
+            raise AssertionError("Profiler must be initialized before accessing events")
         return self.profiler.function_events
 
     def add_metadata(self, key: str, value: str) -> None:
@@ -385,7 +406,7 @@ class _KinetoProfile:
         }
         if backend == "nccl":
             nccl_version = torch.cuda.nccl.version()
-            # pyrefly: ignore  # unsupported-operation
+            # pyrefly: ignore [unsupported-operation]
             dist_info["nccl_version"] = ".".join(str(v) for v in nccl_version)
         return dist_info
 
@@ -395,10 +416,18 @@ class _KinetoProfile:
         if missing:
             raise ValueError(f"{', '.join(missing)} required for memory profiling.")
 
-        assert self.profiler is not None and self.profiler.kineto_results is not None
+        if self.profiler is None or self.profiler.kineto_results is None:
+            raise AssertionError(
+                "Profiler and kineto_results must be initialized for memory profiling"
+            )
         return MemoryProfile(self.profiler.kineto_results)
 
-    def export_memory_timeline(self, path: str, device: Optional[str] = None) -> None:
+    @deprecated(
+        "`export_memory_timeline` is deprecated and will be removed in a future version. "
+        "Please use `torch.cuda.memory._record_memory_history` and `torch.cuda.memory._export_memory_snapshot` instead.",
+        category=FutureWarning,
+    )
+    def export_memory_timeline(self, path: str, device: str | None = None) -> None:
         """Export memory event information from the profiler collected
         tree for a given device, and export a timeline plot. There are 3
         exportable files using ``export_memory_timeline``, each controlled by the
@@ -419,6 +448,11 @@ class _KinetoProfile:
           ``torch.profiler._memory_profiler.Category``.
 
         Output: Memory timeline written as gzipped JSON, JSON, or HTML.
+
+        .. deprecated::
+            ``export_memory_timeline`` is deprecated and will be removed in a future version.
+            Please use ``torch.cuda.memory._record_memory_history`` and
+            ``torch.cuda.memory._export_memory_snapshot`` instead.
         """
         # Default to device 0, if unset. Fallback on cpu.
         if device is None:
@@ -435,16 +469,13 @@ class _KinetoProfile:
         if path.endswith(".html"):
             self.mem_tl.export_memory_timeline_html(path, device)
         elif path.endswith(".gz"):
-            fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=False)
-            fp.close()
-            if path.endswith("raw.json.gz"):
-                self.mem_tl.export_memory_timeline_raw(fp.name, device)
-            else:
-                self.mem_tl.export_memory_timeline(fp.name, device)
-            with open(fp.name) as fin:
-                with gzip.open(path, "wt") as fout:
+            with tempfile.NamedTemporaryFile("w+t", suffix=".json") as fp:
+                if path.endswith("raw.json.gz"):
+                    self.mem_tl.export_memory_timeline_raw(fp.name, device)
+                else:
+                    self.mem_tl.export_memory_timeline(fp.name, device)
+                with open(fp.name) as fin, gzip.open(path, "wt") as fout:
                     fout.writelines(fin)
-            os.remove(fp.name)
         else:
             self.mem_tl.export_memory_timeline(path, device)
 
@@ -485,7 +516,8 @@ def schedule(
     """
 
     def schedule_fn(step: int) -> ProfilerAction:
-        assert step >= 0
+        if step < 0:
+            raise AssertionError(f"Step must be non-negative. Got {step}.")
         if step < skip_first:
             return ProfilerAction.NONE
         else:
@@ -508,9 +540,11 @@ def schedule(
                 else ProfilerAction.RECORD_AND_SAVE
             )
 
-    assert (
-        wait >= 0 and warmup >= 0 and active > 0 and repeat >= 0 and skip_first >= 0
-    ), "Invalid profiler schedule arguments"
+    if wait < 0 or warmup < 0 or active <= 0 or repeat < 0 or skip_first < 0:
+        raise AssertionError(
+            f"Invalid profiler schedule arguments. Got wait={wait} (need >= 0), warmup={warmup} (need >= 0), "
+            f"active={active} (need > 0), repeat={repeat} (need >= 0), skip_first={skip_first} (need >= 0)."
+        )
     if warmup == 0:
         warn(
             "Profiler won't be using warmup, this can skew profiler results",
@@ -528,7 +562,7 @@ def _default_schedule_fn(_: int) -> ProfilerAction:
 
 
 def tensorboard_trace_handler(
-    dir_name: str, worker_name: Optional[str] = None, use_gzip: bool = False
+    dir_name: str, worker_name: str | None = None, use_gzip: bool = False
 ):
     """
     Outputs tracing files to directory of ``dir_name``, then that directory can be
@@ -691,20 +725,20 @@ class profile(_KinetoProfile):
     def __init__(
         self,
         *,
-        activities: Optional[Iterable[ProfilerActivity]] = None,
-        schedule: Optional[Callable[[int], ProfilerAction]] = None,
-        on_trace_ready: Optional[Callable[..., Any]] = None,
+        activities: Iterable[ProfilerActivity] | None = None,
+        schedule: Callable[[int], ProfilerAction] | None = None,
+        on_trace_ready: Callable[..., Any] | None = None,
         record_shapes: bool = False,
         profile_memory: bool = False,
         with_stack: bool = False,
         with_flops: bool = False,
         with_modules: bool = False,
-        experimental_config: Optional[_ExperimentalConfig] = None,
-        execution_trace_observer: Optional[_ITraceObserver] = None,
+        experimental_config: _ExperimentalConfig | None = None,
+        execution_trace_observer: _ITraceObserver | None = None,
         acc_events: bool = False,
         # deprecated:
-        use_cuda: Optional[bool] = None,
-        custom_trace_id_callback: Optional[Callable[[], str]] = None,
+        use_cuda: bool | None = None,
+        custom_trace_id_callback: Callable[[], str] | None = None,
     ) -> None:
         activities_set = set(activities) if activities else supported_activities()
         if use_cuda is not None:
@@ -717,7 +751,8 @@ class profile(_KinetoProfile):
                 activities_set.add(ProfilerActivity.CUDA)
             elif ProfilerActivity.CUDA in activities_set:
                 activities_set.remove(ProfilerActivity.CUDA)
-        assert len(activities_set) > 0, "No valid profiler activities found"
+        if len(activities_set) == 0:
+            raise AssertionError("No valid profiler activities found")
 
         super().__init__(
             activities=activities,
@@ -744,10 +779,10 @@ class profile(_KinetoProfile):
         self.on_trace_ready = on_trace_ready
         self.step_num = 0
         self.current_action = self.schedule(self.step_num)
-        self.step_rec_fn: Optional[prof.record_function] = None
+        self.step_rec_fn: prof.record_function | None = None
 
         self.action_map: dict[
-            tuple[ProfilerAction, Optional[ProfilerAction]], list[Any]
+            tuple[ProfilerAction, ProfilerAction | None], list[Any]
         ] = {
             # key is (prev_action, current_action), value is action list corresponding to the state pair.
             (ProfilerAction.NONE, ProfilerAction.NONE): [],
@@ -880,7 +915,7 @@ class profile(_KinetoProfile):
             for action in action_list:
                 action()
 
-    def _stats(self) -> Optional[prof._ProfilerStats]:
+    def _stats(self) -> prof._ProfilerStats | None:
         if self.profiler is None:
             return None
         return self.profiler._stats
@@ -930,16 +965,18 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         if os.environ.get("ENABLE_PYTORCH_EXECUTION_TRACE", "0") == "1":
             try:
-                fp = tempfile.NamedTemporaryFile("w+t", suffix=".et.json", delete=False)
+                with tempfile.NamedTemporaryFile(
+                    "w+t", suffix=".et.json", delete=False
+                ) as fp:
+                    filename = fp.name
             except Exception as e:
                 warn(
                     f"Execution trace will not be recorded. Exception on creating default temporary file: {e}",
                     stacklevel=2,
                 )
                 return None
-            fp.close()
             et = ExecutionTraceObserver()
-            et.register_callback(fp.name)
+            et.register_callback(filename)
             # additionally, check if the env requires us to collect extra resources
             if os.environ.get("ENABLE_PYTORCH_EXECUTION_TRACE_EXTRAS", "0") == "1":
                 et.set_extra_resource_collection(True)
@@ -968,9 +1005,8 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
 
         def get_temp_uncompressed_file() -> str:
-            fp = tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False)
-            fp.close()
-            return fp.name
+            with tempfile.NamedTemporaryFile("w+b", suffix=".json", delete=False) as fp:
+                return fp.name
 
         if not self._registered:
             self.output_file_path = output_file_path
@@ -980,7 +1016,7 @@ class ExecutionTraceObserver(_ITraceObserver):
             self._registered = _add_execution_trace_observer(output_file_path)
         return self
 
-    def get_resources_dir(self, can_create=False) -> Optional[str]:
+    def get_resources_dir(self, can_create=False) -> str | None:
         """
         Generates the resources directory for the generated kernels,
         or index tensor data or any other metadata that is required
@@ -1009,7 +1045,7 @@ class ExecutionTraceObserver(_ITraceObserver):
     @staticmethod
     def get_resources_dir_for_et_path(
         trace_path, create_dir: bool = False
-    ) -> Optional[str]:
+    ) -> str | None:
         work_dir, file_name = os.path.split(trace_path)
         resource_dir = os.path.join(
             work_dir, os.path.splitext(file_name)[0] + "_resources"
@@ -1118,7 +1154,7 @@ class ExecutionTraceObserver(_ITraceObserver):
         """
         self.unregister_callback()
 
-    def get_output_file_path(self) -> Optional[str]:
+    def get_output_file_path(self) -> str | None:
         """
         Returns the output file name or None.
         """

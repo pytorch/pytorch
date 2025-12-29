@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import math
-from typing import ClassVar, Optional
+from typing import ClassVar
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -111,9 +111,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
             bound = 1 / math.sqrt(fan_in)
             init.uniform_(self.bias, -bound, bound)
-
-    def reset_parameters(self):
-        super().reset_parameters()
 
     def update_bn_stats(self):
         self.freeze_bn = False
@@ -263,10 +260,6 @@ class _ConvBnNd(nn.modules.conv._ConvNd, nni._FusedModule):
             conv_bn += (self.bias - self.bias).reshape(bias_shape)
 
         return conv_bn
-
-    def extra_repr(self):
-        # TODO(jerryzh): extend
-        return super().extra_repr()
 
     def forward(self, input):
         return self._forward(input)
@@ -458,7 +451,7 @@ class ConvBn1d(_ConvBnNd, nn.Conv1d):
     """
 
     _FLOAT_BN_MODULE: ClassVar[type[nn.BatchNorm1d]] = nn.BatchNorm1d
-    _FLOAT_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _FLOAT_RELU_MODULE: ClassVar[type[nn.Module] | None] = None
     _FLOAT_MODULE: ClassVar[type[nn.Module]] = nni.ConvBn1d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv1d]] = nn.Conv1d
 
@@ -530,53 +523,17 @@ class ConvBnReLU1d(ConvBn1d):
     _FLOAT_MODULE: ClassVar[type[nn.Module]] = nni.ConvBnReLU1d
     _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv1d]] = nn.Conv1d
     _FLOAT_BN_MODULE: ClassVar[type[nn.BatchNorm1d]] = nn.BatchNorm1d
-    _FLOAT_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nn.ReLU
+    _FLOAT_RELU_MODULE: ClassVar[type[nn.Module] | None] = nn.ReLU
     # module class after fusing bn into conv
-    _FUSED_FLOAT_MODULE: ClassVar[Optional[type[nn.Module]]] = nni.ConvReLU1d
-
-    def __init__(
-        self,
-        # Conv1d args
-        in_channels,
-        out_channels,
-        kernel_size,
-        stride=1,
-        padding=0,
-        dilation=1,
-        groups=1,
-        bias=None,
-        padding_mode="zeros",
-        # BatchNorm1d args
-        # num_features: out_channels
-        eps=1e-05,
-        momentum=0.1,
-        # affine: True
-        # track_running_stats: True
-        # Args for this module
-        freeze_bn=False,
-        qconfig=None,
-    ):
-        super().__init__(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bias,
-            padding_mode,
-            eps,
-            momentum,
-            freeze_bn,
-            qconfig,
-        )
+    _FUSED_FLOAT_MODULE: ClassVar[type[nn.Module] | None] = nni.ConvReLU1d
 
     def forward(self, input):
+        r"""Performs forward pass through fused Conv1d, BatchNorm1d, and ReLU."""
         return F.relu(self._forward(input))
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
+        r"""Creates a QAT module from a floating point module."""
         return super().from_float(mod, use_precomputed_fake_quant)
 
 
@@ -595,8 +552,8 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
 
     _FLOAT_MODULE: ClassVar[type[nni.ConvReLU1d]] = nni.ConvReLU1d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv1d]] = nn.Conv1d
-    _FLOAT_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = None
-    _FLOAT_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nn.ReLU
+    _FLOAT_BN_MODULE: ClassVar[type[nn.Module] | None] = None
+    _FLOAT_RELU_MODULE: ClassVar[type[nn.Module] | None] = nn.ReLU
 
     def __init__(
         self,
@@ -629,12 +586,14 @@ class ConvReLU1d(nnqat.Conv1d, nni._FusedModule):
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
+        r"""Performs forward pass through fused Conv1d and ReLU."""
         return F.relu(
             self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
         )
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
+        r"""Creates a QAT module from a floating point module."""
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -660,8 +619,8 @@ class ConvBn2d(_ConvBnNd, nn.Conv2d):
 
     _FLOAT_MODULE: ClassVar[type[nni.ConvBn2d]] = nni.ConvBn2d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
-    _FLOAT_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nn.BatchNorm2d
-    _FLOAT_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _FLOAT_BN_MODULE: ClassVar[type[nn.Module] | None] = nn.BatchNorm2d
+    _FLOAT_RELU_MODULE: ClassVar[type[nn.Module] | None] = None
 
     def __init__(
         self,
@@ -731,53 +690,17 @@ class ConvBnReLU2d(ConvBn2d):
     _FLOAT_MODULE: ClassVar[type[nni.ConvBnReLU2d]] = nni.ConvBnReLU2d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
     _FLOAT_BN_MODULE: ClassVar[type[nn.BatchNorm2d]] = nn.BatchNorm2d
-    _FLOAT_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nn.ReLU
+    _FLOAT_RELU_MODULE: ClassVar[type[nn.Module] | None] = nn.ReLU
     # module class after fusing bn into conv
-    _FUSED_FLOAT_MODULE: ClassVar[Optional[type[nni.ConvReLU2d]]] = nni.ConvReLU2d
-
-    def __init__(
-        self,
-        # Conv2d args
-        in_channels,
-        out_channels,
-        kernel_size,
-        stride=1,
-        padding=0,
-        dilation=1,
-        groups=1,
-        bias=None,
-        padding_mode="zeros",
-        # BatchNorm2d args
-        # num_features: out_channels
-        eps=1e-05,
-        momentum=0.1,
-        # affine: True
-        # track_running_stats: True
-        # Args for this module
-        freeze_bn=False,
-        qconfig=None,
-    ):
-        super().__init__(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bias,
-            padding_mode,
-            eps,
-            momentum,
-            freeze_bn,
-            qconfig,
-        )
+    _FUSED_FLOAT_MODULE: ClassVar[type[nni.ConvReLU2d] | None] = nni.ConvReLU2d
 
     def forward(self, input):
+        r"""Performs forward pass through fused Conv2d, BatchNorm2d, and ReLU."""
         return F.relu(self._forward(input))
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
+        r"""Creates a QAT module from a floating point module."""
         return super().from_float(mod, use_precomputed_fake_quant)
 
 
@@ -796,8 +719,8 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
 
     _FLOAT_MODULE: ClassVar[type[nn.Module]] = nni.ConvReLU2d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
-    _FLOAT_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = None
-    _FLOAT_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nn.ReLU
+    _FLOAT_BN_MODULE: ClassVar[type[nn.Module] | None] = None
+    _FLOAT_RELU_MODULE: ClassVar[type[nn.Module] | None] = nn.ReLU
 
     def __init__(
         self,
@@ -830,12 +753,14 @@ class ConvReLU2d(nnqat.Conv2d, nni._FusedModule):
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
+        r"""Performs forward pass through fused Conv2d and ReLU."""
         return F.relu(
             self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
         )
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
+        r"""Creates a QAT module from a floating point module."""
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -861,8 +786,8 @@ class ConvBn3d(_ConvBnNd, nn.Conv3d):
 
     _FLOAT_MODULE: ClassVar[type[nni.ConvBn3d]] = nni.ConvBn3d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
-    _FLOAT_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = nn.BatchNorm3d
-    _FLOAT_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _FLOAT_BN_MODULE: ClassVar[type[nn.Module] | None] = nn.BatchNorm3d
+    _FLOAT_RELU_MODULE: ClassVar[type[nn.Module] | None] = None
 
     def __init__(
         self,
@@ -931,53 +856,17 @@ class ConvBnReLU3d(ConvBn3d):
     _FLOAT_MODULE: ClassVar[type[nni.ConvBnReLU3d]] = nni.ConvBnReLU3d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
     _FLOAT_BN_MODULE: ClassVar[type[nn.BatchNorm3d]] = nn.BatchNorm3d
-    _FLOAT_RELU_MODULE: ClassVar[Optional[type[nn.ReLU]]] = nn.ReLU
+    _FLOAT_RELU_MODULE: ClassVar[type[nn.ReLU] | None] = nn.ReLU
     # module class after fusing bn into conv
-    _FUSED_FLOAT_MODULE: ClassVar[Optional[type[nni.ConvReLU3d]]] = nni.ConvReLU3d
-
-    def __init__(
-        self,
-        # Conv3d args
-        in_channels,
-        out_channels,
-        kernel_size,
-        stride=1,
-        padding=0,
-        dilation=1,
-        groups=1,
-        bias=None,
-        padding_mode="zeros",
-        # BatchNorm3d args
-        # num_features: out_channels
-        eps=1e-05,
-        momentum=0.1,
-        # affine: True
-        # track_running_stats: True
-        # Args for this module
-        freeze_bn=False,
-        qconfig=None,
-    ):
-        super().__init__(
-            in_channels,
-            out_channels,
-            kernel_size,
-            stride,
-            padding,
-            dilation,
-            groups,
-            bias,
-            padding_mode,
-            eps,
-            momentum,
-            freeze_bn,
-            qconfig,
-        )
+    _FUSED_FLOAT_MODULE: ClassVar[type[nni.ConvReLU3d] | None] = nni.ConvReLU3d
 
     def forward(self, input):
+        r"""Performs forward pass through fused Conv3d, BatchNorm3d, and ReLU."""
         return F.relu(ConvBn3d._forward(self, input))
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):
+        r"""Creates a QAT module from a floating point module."""
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )
@@ -998,8 +887,8 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
 
     _FLOAT_MODULE: ClassVar[type[nni.ConvReLU3d]] = nni.ConvReLU3d  # type: ignore[assignment]
     _FLOAT_CONV_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
-    _FLOAT_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = None
-    _FLOAT_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = nn.ReLU
+    _FLOAT_BN_MODULE: ClassVar[type[nn.Module] | None] = None
+    _FLOAT_RELU_MODULE: ClassVar[type[nn.Module] | None] = nn.ReLU
 
     def __init__(
         self,
@@ -1032,12 +921,14 @@ class ConvReLU3d(nnqat.Conv3d, nni._FusedModule):
         self.weight_fake_quant = self.qconfig.weight()
 
     def forward(self, input):
+        r"""Performs forward pass through fused Conv3d and ReLU."""
         return F.relu(
             self._conv_forward(input, self.weight_fake_quant(self.weight), self.bias)
         )
 
     @classmethod
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
+        r"""Creates a QAT module from a floating point module."""
         return super().from_float(
             mod, use_precomputed_fake_quant=use_precomputed_fake_quant
         )

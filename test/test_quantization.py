@@ -51,7 +51,7 @@ from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQAT  # n
 from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQATNumerics  # noqa: F401
 # 3. Eager mode fusion passes
 from quantization.eager.test_fuse_eager import TestFuseEager  # noqa: F401
-# 4. Testing model numerics between quanitzed and FP32 models
+# 4. Testing model numerics between quantized and FP32 models
 from quantization.eager.test_model_numerics import TestModelNumericsEager  # noqa: F401
 # 5. Tooling: numeric_suite
 from quantization.eager.test_numeric_suite_eager import TestNumericSuiteEager  # noqa: F401
@@ -72,28 +72,6 @@ try:
 except ImportError as e:
     # In FBCode we separate FX out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_fx`
-    log.warning(e)  # noqa:G200
-
-# PyTorch 2 Export Quantization
-try:
-    # To be moved to compiler side later
-    from quantization.pt2e.test_graph_utils import TestGraphUtils  # noqa: F401
-    from quantization.pt2e.test_duplicate_dq import TestDuplicateDQPass  # noqa: F401
-    from quantization.pt2e.test_metadata_porting import TestMetaDataPorting  # noqa: F401
-    from quantization.pt2e.test_numeric_debugger import TestNumericDebugger  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EAffineQuantization  # noqa: F401
-    from quantization.pt2e.test_representation import TestPT2ERepresentation  # noqa: F401
-    from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizer  # noqa: F401
-    from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizerModels  # noqa: F401
-    from quantization.pt2e.test_x86inductor_quantizer import TestQuantizePT2EX86Inductor  # noqa: F401
-    # TODO: Figure out a way to merge all QAT tests in one TestCase
-    from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQAT_ConvBn1d  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQAT_ConvBn2d  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQATModels  # noqa: F401
-except ImportError as e:
-    # In FBCode we separate PT2 out into a separate target for the sake of dev
-    # velocity. These are covered by a separate test target `quantization_pt2e`
     log.warning(e)  # noqa:G200
 
 try:

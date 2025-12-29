@@ -8,7 +8,7 @@ import logging
 import re
 from collections import defaultdict
 from math import inf
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -51,7 +51,7 @@ from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from ..ops_handler import ReductionType, StoreMode
     from ..shape_propagation import BlockShapeType
@@ -570,6 +570,16 @@ class HalideOverrides(OpOverrides):
     def device_assert_async(cond, msg):
         raise NotImplementedError("device_assert_async")
 
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def partial_accumulate(
+        name: str,
+        reduction_type: str,
+        value: CSEVariable,
+        extra_meta: dict[str, Any],
+    ) -> None:
+        raise NotImplementedError
+
 
 HalideOverrides._initialize_pointwise_overrides("halide")
 
@@ -819,6 +829,7 @@ class HalideKernel(SIMDKernel):
                         if lt(divisor, n.divisor) and lt(n.divisor, end)
                     ]
                 )
+                # pyrefly: ignore [bad-assignment]
                 while sizes_to_add:
                     next_size = functools.reduce(sympy.gcd, sizes_to_add)
                     if eq(next_size, 1):
@@ -896,7 +907,7 @@ class HalideKernel(SIMDKernel):
             return self.dom_renames[prefix]
 
         renames = {}
-        for var in self.halide_vars.keys():
+        for var in self.halide_vars:
             if not self.inside_reduction and var in self.reduction_renames:
                 continue
             m = re.match(r"^h(\d+)$", var.name)
@@ -1650,7 +1661,7 @@ class HalideKernel(SIMDKernel):
             n = max(2, n)
         return n
 
-    def call_kernel(self, name: str, node=None):
+    def call_kernel(self, name: str, node=None, deallocate_ws: bool = True):
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
         call_args = [f"{n}" for n, arg in self.halide_argdefs() if arg.alias_of is None]

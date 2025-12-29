@@ -1,5 +1,5 @@
 from concurrent.futures import Future
-from typing import Any, Optional
+from typing import Any
 
 import torch.distributed as dist
 import torch.distributed.checkpoint.state_dict_loader as loader
@@ -17,7 +17,7 @@ __all__: list[str] = []
 
 
 class _Checkpointer:
-    """This base class specefies a high level API for saving and loading
+    """This base class specifies a high level API for saving and loading
     distributed `state_dict` 's. It provides an abstraction over the low-level APIs
     provided by :py:mod:`torch.distributed.checkpoint.storage`, essentially calling
     :py:meth: `torch.distributed.state_dict_saver.save` and
@@ -34,11 +34,11 @@ class _Checkpointer:
         storage_writer: StorageWriter,
         storage_reader: StorageReader,
         *,
-        process_group: Optional[dist.ProcessGroup] = None,
+        process_group: dist.ProcessGroup | None = None,
         coordinator_rank: int = 0,
         no_dist: bool = False,
-        load_planner: Optional[LoadPlanner] = None,
-        save_planner: Optional[SavePlanner] = None,
+        load_planner: LoadPlanner | None = None,
+        save_planner: SavePlanner | None = None,
     ):
         """Initializes the Checkpointer instance.
 

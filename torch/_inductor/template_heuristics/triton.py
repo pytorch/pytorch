@@ -6,7 +6,7 @@ import math
 import os
 from functools import partial
 from threading import Lock
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -19,9 +19,12 @@ from .. import config, config as inductor_config
 from ..kernel.bmm import bmm_template
 from ..kernel.mm import (
     blackwell_ws_persistent_device_tma_mm_template,
+    get_scaling_options,
+    get_tile_size,
     mm_template,
     persistent_tma_mm_template,
     scaled_mm_device_tma_epilogue_scaling_template,
+    scaled_mm_device_tma_main_loop_scaling_template,
 )
 from ..kernel.mm_plus_mm import mm_plus_mm_template
 from ..kernel_inputs import KernelInputs, MMKernelInputs
@@ -38,9 +41,12 @@ from .registry import register_template_heuristic
 
 
 if TYPE_CHECKING:
-    from collections.abc import Generator
+    from collections.abc import Callable, Generator
 
     from triton import Config as TritonConfig
+
+else:
+    from torch._inductor.runtime.triton_compat import Config as TritonConfig
 
 
 # Gemm Configs
@@ -55,7 +61,7 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
-    hint_override: Optional[int] = None
+    hint_override: Optional[int] = dataclasses.field(kw_only=True, default=None)
 
 
 @dataclasses.dataclass
@@ -64,7 +70,7 @@ class GemmConfig(BaseConfig):
     Gemm configuration used for most backends (CPU, CUDA)
     """
 
-    group_m: int = 8
+    group_m: int = dataclasses.field(kw_only=True, default=8)
 
 
 ConvConfig = BaseConfig
@@ -248,7 +254,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         # Exhaustive search for mm configs
         self.exhaustive_configs: list[BaseConfig] = [
-            GemmConfig(BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, group_m)
+            GemmConfig(
+                BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, group_m=group_m
+            )
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
             )
@@ -419,8 +427,12 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(32, 256, 64, 6, 4),
             GemmConfig(64, 16, 256, 5, 4),
             GemmConfig(64, 32, 256, 5, 4),
+            GemmConfig(64, 128, 128, 2, 4),
             GemmConfig(64, 128, 128, 3, 4),
+            GemmConfig(128, 128, 128, 2, 4),
             GemmConfig(128, 256, 128, 4, 8),
+            GemmConfig(256, 128, 128, 2, 4),
+            GemmConfig(256, 128, 128, 2, 8),
         ]
 
         self.scaled_persistent_mm_configs: list[BaseConfig] = [
@@ -616,18 +628,26 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
 
             for c in configs:
-                scaled_config = dataclasses.replace(
-                    c,
-                    block_m=max(min(int(c.block_m * scale), m_hint), min_block_size),
-                    block_n=max(min(int(c.block_n * scale), n_hint), min_block_size),
-                    block_k=max(min(int(c.block_k * scale), k_hint), min_block_size_k),
-                    hint_override=hint_override,
-                )
+                block_m = max(min(int(c.block_m * scale), m_hint), min_block_size)
+                block_n = max(min(int(c.block_n * scale), n_hint), min_block_size)
+                block_k = max(min(int(c.block_k * scale), k_hint), min_block_size_k)
+                if not exclude(block_m, block_n, block_k):
+                    # This copy is expensive, so avoid it if we can.
+                    if (block_m, block_n, block_k, hint_override) != (
+                        c.block_m,
+                        c.block_n,
+                        c.block_k,
+                        c.hint_override,
+                    ):
+                        c = dataclasses.replace(
+                            c,
+                            block_m=block_m,
+                            block_n=block_n,
+                            block_k=block_k,
+                            hint_override=hint_override,
+                        )
 
-                if not exclude(
-                    scaled_config.block_m, scaled_config.block_n, scaled_config.block_k
-                ):
-                    scaled_configs.append(scaled_config)
+                    scaled_configs.append(c)
 
         return scaled_configs
 
@@ -642,9 +662,13 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         try:
             device = torch.cuda.current_device()
             props = torch.cuda.get_device_properties(device)
-            if not hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+            if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                sm_available = int(props.shared_memory_per_block_optin)
+            elif hasattr(props, "shared_memory_per_block"):  # for ROCm
+                sm_available = int(props.shared_memory_per_block)
+            else:
                 return None
-            sm_available = int(props.shared_memory_per_block_optin)
+
         except Exception:
             # If CUDA is not available or properties cannot be queried, return None
             return None
@@ -740,8 +764,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     def triton_config(
         self, num_stages: int, num_warps: int, **kwargs: Any
     ) -> TritonConfig:
-        from triton import Config as TritonConfig  # type: ignore[attr-defined]
-
         return TritonConfig(kwargs, num_stages=num_stages, num_warps=num_warps)
 
     def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
@@ -899,7 +921,6 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
     def __init__(self) -> None:
         super().__init__()
-
         self.sm_120_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 2, 4),
             (torch.float32, 128): FlexConfig(128, 32, 2, 4),
@@ -974,7 +995,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
-                default_config = FlexConfig(128, 64, 3, 4)
+                default_config = FlexConfig(64, 64, 3, 4)
             if capability >= (12, 0):
                 default_config = self.sm_120_default_flex_config.get(
                     (dtype, head_dim), default_config
@@ -1007,7 +1028,6 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
     ) -> list[FlexBwDConfig]:
         capability = torch.cuda.get_device_capability()
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
-
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
@@ -1016,6 +1036,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         major, minor = capability
         if dtype == torch.float32:
             capability_class = "float32"
+        elif major == 12:
+            capability_class = "sm12x"
         elif major >= 10:
             capability_class = "sm10x"
         elif capability == (9, 0):
@@ -1040,6 +1062,13 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 FlexBwDConfig(64, 64, 64, 64, 1, 4)
             ),
             "sm8x": lambda h: (
+                FlexBwDConfig(32, 128, 128, 32, 3, 4)
+                if h < 64
+                else FlexBwDConfig(
+                    64, 64, 64, 64, 3 if minor == 6 and h == 128 else 2, 4
+                )
+            ),
+            "sm12x": lambda h: (
                 FlexBwDConfig(32, 128, 128, 32, 3, 4)
                 if h < 64
                 else FlexBwDConfig(
@@ -1162,10 +1191,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 BLOCK_K,
                 num_stages,
                 num_warps,
-                group_m,
-                matrix_instr_nonkdim,
-                waves_per_eu,
-                kpack,
+                group_m=group_m,
+                matrix_instr_nonkdim=matrix_instr_nonkdim,
+                waves_per_eu=waves_per_eu,
+                kpack=kpack,
             )
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
@@ -1264,7 +1293,16 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         configs: list[BaseConfig],
         dtype_size: int,
     ) -> list[BaseConfig]:
-        return configs
+        # these cause AMD compile to crash
+        pruned_configs = [
+            c
+            for c in configs
+            if not (
+                getattr(c, "matrix_instr_nonkdim", 0) == 2
+                and getattr(c, "kpack", 0) == 2
+            )
+        ]
+        return pruned_configs
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
@@ -1315,6 +1353,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
             # Check if gemm specific arg exists - add to key if does
             group_m = getattr(conf, "group_m", None)
+            # AMD GPU crashes if group_m = 0
+            if group_m is not None and group_m <= 0:
+                group_m = 8
             if group_m is not None:
                 key += (group_m,)
 
@@ -1635,21 +1676,18 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     def _convert_config_to_template_kwargs(
         self,
         triton_config: TritonConfig,
-        m: sympy.Integer,
-        n: sympy.Integer,
-        k: sympy.Integer,
+        m: sympy.Integer | sympy.Symbol,
+        n: sympy.Integer | sympy.Symbol,
+        k: sympy.Integer | sympy.Symbol,
         out_dtype: torch.dtype,
     ) -> dict[str, Any]:
         """
         Convert triton config to template kwargs.
         Moved from mm_common.mm_options.
         """
-        # Calculate EVEN_K symbolic
-        even_k_symbolic = (
-            # it isn't worth guarding on this
-            sympy.gcd(k, triton_config.kwargs["BLOCK_K"])
-            == triton_config.kwargs["BLOCK_K"]
-        )
+        # Calculate EVEN_K symbolic. (It isn't worth guarding on this)
+        even_k_symbolic = (k % triton_config.kwargs["BLOCK_K"]) == 0
+        even_k_symbolic = V.graph.sizevars.statically_known_true(even_k_symbolic)
 
         # Build options dict
 
@@ -1770,6 +1808,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
             "tma_store": config.triton.enable_template_tma_store,
+            "transpose_discontiguous_tensor_descriptors_override": True,
         }
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
@@ -1886,11 +1925,6 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
 
             return False
 
-        def is_scalar_like(sz: Any) -> bool:
-            return (len(sz) == 0) or all(
-                V.graph.sizevars.statically_known_equals(d, 1) for d in sz
-            )
-
         size_a, size_b = scale_a.get_size(), scale_b.get_size()
         assert are_compatible_scales(size_a, size_b), (
             "Expect scale_a and scale_b to be either both scalars (including single-element tensors) "
@@ -1947,6 +1981,29 @@ class ScaledMMConfigMixin(BaseScaledMMConfigMixin):
         if using_b200() and V.graph.sizevars.guard_or_false(sympy.Lt(k, 32)):
             return False
         return True
+
+    # pyrefly: ignore [bad-override]
+    def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
+        """
+        Filter out bad configs for specific hardware.
+        On AMD MI350X (GFX 9.5+), skip configs with BLOCK_K<=64 due to lack of corresponding MFMA instructions.
+        """
+
+        def should_skip_mi350x_config(config: BaseConfig) -> bool:
+            """Skip config if BLOCK_K<=64 on MI350X (GFX 9.5+)"""
+            try:
+                return (
+                    config.block_k <= 64
+                    and torch.version.hip is not None
+                    and torch.cuda.get_device_capability() >= (9, 5)
+                )
+            except RuntimeError:
+                # If no HIP GPUs are available, we can't check device capability
+                # so we don't skip any configs
+                return False
+
+        filtered_configs = [c for c in configs if not should_skip_mi350x_config(c)]
+        return super()._filter_configs(filtered_configs)
 
 
 # Scaled TMA-specific mixin for scaled MM templates with TMA
@@ -2152,6 +2209,72 @@ class CUDAScaledTMAEpilogueScalingTemplateConfigHeuristic(
         super().__init__()
         # Override mm_configs to use scaled_persistent_mm_configs for TMA
         self.mm_configs = self.scaled_persistent_mm_configs
+
+
+@register_template_heuristic(
+    scaled_mm_device_tma_main_loop_scaling_template.uid,
+    "cuda",
+    register=torch.version.hip is None,
+    op_name="scaled_mm",
+)
+class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
+    ScaledTMAConfigMixin, CUDAConfigHeuristic
+):
+    """
+    Scaled TMA template heuristic for CUDA:
+        main loop scaling variants (BlockWise1x128, BlockWise1x32, BlockWise1x16, BlockWise128x128)
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        # Override mm_configs to use scaled_persistent_mm_configs for TMA
+        self.mm_configs = self.scaled_persistent_mm_configs
+
+    def _get_template_configs_impl(
+        self,
+        kernel_inputs: KernelInputs,
+        op_name: str,
+    ) -> Generator[dict[str, Any], None, None]:
+        """
+        Generate main loop scaling kernel inputs.
+        """
+        mat_a, mat_b, scale_a, scale_b = kernel_inputs._input_nodes
+        scale_a_size, scale_b_size = scale_a.get_size(), scale_b.get_size()
+
+        scale_option_a, scale_option_b = get_scaling_options(
+            mat_a, mat_b, scale_a_size, scale_b_size
+        )
+        tile_size_a = get_tile_size(scale_option_a)
+        tile_size_b = get_tile_size(scale_option_b)
+
+        # Get base scaled MM template configs from superclass
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs,
+            op_name,
+        ):
+            # Add scaling-specific options for main loop scaling variants
+
+            # Inductor templates require compile-time constants passed in as tl.constexpr values.
+            # In cases in which the block size (BLOCK_*) is smaller than the tile size (128, 32, 16),
+            # scales must be broadcasted to BLOCK_* (rather than to a tile_sizextile_size chunk).
+
+            template_kwargs["TILE_SIZE_A"] = tile_size_a
+            template_kwargs["TILE_SIZE_B"] = tile_size_b
+
+            template_kwargs["MIN_BLOCK_TILE_AM"] = min(
+                template_kwargs["BLOCK_M"], tile_size_a
+            )
+            template_kwargs["MIN_BLOCK_TILE_AK"] = min(
+                template_kwargs["BLOCK_K"], tile_size_a
+            )
+            template_kwargs["MIN_BLOCK_TILE_BK"] = min(
+                template_kwargs["BLOCK_K"], tile_size_b
+            )
+            template_kwargs["MIN_BLOCK_TILE_BN"] = min(
+                template_kwargs["BLOCK_N"], tile_size_b
+            )
+
+            yield template_kwargs
 
 
 @register_template_heuristic(

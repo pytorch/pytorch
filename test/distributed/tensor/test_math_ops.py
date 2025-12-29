@@ -7,6 +7,7 @@ from pprint import pformat
 from typing import NamedTuple
 
 import torch
+import torch.distributed as dist
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -25,9 +26,12 @@ from torch.distributed.tensor.parallel import (
     RowwiseParallel,
     SequenceParallel,
 )
+from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
+    map_local_for_rank,
     skip_unless_torch_gpu,
     with_comms,
 )
@@ -57,9 +61,9 @@ class DistMathOpsTest(DTensorTestBase):
         shard_spec = [Shard(0)]
 
         tensor = torch.randn(12, 8, 8)
-        # TODO: check `all` correctness and test `all` on a bool tensor
-        if op_str in ("any"):
-            # test out a bool tensor for any
+        if op_str in ("any", "all"):
+            # Test bool tensor for any() and all() reduction ops
+            # Previously all() had a bug using sum reduction instead of product
             tensor = tensor < 0
         dtensor = distribute_tensor(tensor, device_mesh, shard_spec)
 
@@ -471,11 +475,10 @@ class DistMathOpsTest(DTensorTestBase):
             out_req_grad: bool
 
         subtest_fails = {}
-        valid_filter = (  # noqa: E731
-            lambda cfg: (
-                not (cfg.ln_req_grad and not cfg.elementwise_affine) and any(cfg[3:])
-            )
-        )
+
+        def valid_filter(cfg):
+            return not (cfg.ln_req_grad and not cfg.elementwise_affine) and any(cfg[3:])
+
         subtest_cfgs = list(
             filter(
                 valid_filter,
@@ -670,10 +673,11 @@ class DistMathOpsTest(DTensorTestBase):
     def test_vector_norm_partial(self):
         device_mesh = self.build_device_mesh()
 
-        rank = device_mesh.get_local_rank()
         all_ranks = list(range(self.world_size))
 
-        local_grad = torch.tensor([rank, 1], dtype=torch.float32)
+        local_grad = map_local_for_rank(
+            self.rank, lambda rank: torch.tensor([rank, 1], dtype=torch.float32)
+        )
         full_grad = torch.tensor([sum(all_ranks), self.world_size], dtype=torch.float32)
 
         partial_grad = DTensor.from_local(local_grad, device_mesh, [Partial()])
@@ -708,11 +712,14 @@ class DistMathOpsTest(DTensorTestBase):
     def test_foreach_norm_partial(self):
         device_mesh = self.build_device_mesh()
 
-        rank = device_mesh.get_local_rank()
         all_ranks = list(range(self.world_size))
 
-        local_grad0 = torch.tensor([rank, 1], dtype=torch.float32)
-        local_grad1 = torch.tensor([rank + 1, 2], dtype=torch.float32)
+        local_grad0 = map_local_for_rank(
+            self.rank, lambda rank: torch.tensor([rank, 1], dtype=torch.float32)
+        )
+        local_grad1 = map_local_for_rank(
+            self.rank, lambda rank: torch.tensor([rank + 1, 2], dtype=torch.float32)
+        )
 
         grad0 = torch.tensor([sum(all_ranks), self.world_size], dtype=torch.float32)
         grad1 = torch.tensor(
@@ -758,6 +765,7 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(grad1_norm.device_mesh, mesh_y)
 
     @with_comms
+    @skip_if_lt_x_gpu(4)
     def test_foreach_add_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
@@ -790,6 +798,23 @@ class DistMathOpsTest(DTensorTestBase):
             torch.ops.aten._foreach_add(
                 [replica_inp00, replica_inp01], [replica_inp10, replica_inp11]
             )
+
+    @with_comms
+    def test_foreach_compose(self):
+        """Test composing multiple foreach operations."""
+        device_mesh = self.build_device_mesh()
+        local_shards = tuple(torch.randn(4, 8) for _ in range(3))
+        dt_inputs = tuple(
+            distribute_tensor(shard, device_mesh, [Shard(0)]) for shard in local_shards
+        )
+        dt_abs = torch._foreach_abs(dt_inputs)
+        dt_max = torch._foreach_max(dt_abs)
+
+        abs = torch._foreach_abs(local_shards)
+        expected_max = torch._foreach_max(abs)
+
+        for max_val, expected in zip(dt_max, expected_max):
+            self.assertEqual(max_val.full_tensor(), expected)
 
     @with_comms
     def test_linalg_eigh(self):
@@ -971,6 +996,93 @@ class DistMathOpsTest(DTensorTestBase):
                     self.assertTrue(output_dtensor.placements[0].is_shard(shard_dim))
                 self.assertEqual(output_dtensor.full_tensor(), output)
 
+    @with_comms
+    def test_partial_reduction_ops(self):
+        mesh = self.build_device_mesh()
+        rank = dist.get_rank()
+
+        torch.manual_seed(rank)
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+        out_without_redistribute = torch.norm(dt)
+
+        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
+        out_with_redistribute = torch.norm(dt)
+
+        self.assertEqual(out_without_redistribute, out_with_redistribute)
+
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+        out_without_redistribute = torch.max(dt)
+
+        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
+        out_with_redistribute = torch.max(dt)
+
+        self.assertEqual(out_without_redistribute, out_with_redistribute)
+
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("sum")]
+        )
+        out_without_redistribute = torch.min(dt)
+
+        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
+        out_with_redistribute = torch.min(dt)
+
+        self.assertEqual(out_without_redistribute, out_with_redistribute)
+
+    @with_comms
+    def test_matching_partial_reduction_ops(self):
+        mesh = self.build_device_mesh()
+        rank = dist.get_rank()
+
+        torch.manual_seed(rank)
+        local_tensor = torch.rand(3, dtype=torch.float32, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor, device_mesh=mesh, placements=[Partial("max")]
+        )
+        out_without_redistribute = torch.max(dt)
+
+        dt = dt.redistribute(dt.device_mesh, placements=[Replicate()])
+        out_with_redistribute = torch.max(dt)
+
+        self.assertTrue(out_without_redistribute.placements[0].is_partial())
+        self.assertTrue(out_with_redistribute.placements[0].is_replicate())
+        self.assertEqual(out_without_redistribute, out_with_redistribute)
+
+    @skip_if_lt_x_gpu(4)
+    @with_comms
+    def test_std(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))
+        rank = self.rank
+        comm_mode = CommDebugMode()
+
+        global_tensor = map_local_for_rank(
+            rank,
+            lambda rank: torch.tensor(
+                [[-20.0, -18.0, -12.0, 0.0], [-20.0, -18.0, -8.0, 4.0]]
+            ),
+        )
+
+        dt = distribute_tensor(global_tensor, mesh, [Shard(0), Shard(1)])
+
+        with comm_mode:
+            res = dt.std(dim=1)
+        expected_answer = torch.tensor([9.0, 11.0])
+
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+        self.assertEqual(comm_mode.get_comm_counts()[funcol.all_gather_into_tensor], 1)
+        self.assertEqual(res.placements, [Shard(0), Replicate()])
+        self.assertEqual(res.full_tensor(), expected_answer)
+
+
+DistMathOpsTestWithLocalTensor = create_local_tensor_test_class(
+    DistMathOpsTest,
+)
 
 if __name__ == "__main__":
     run_tests()

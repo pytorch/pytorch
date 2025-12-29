@@ -6,7 +6,7 @@ dependencies = [
     "GitPython==3.1.45",
     "docker==7.1.0",
     "pytest==7.3.2",
-    "uv==0.9.5"
+    "uv==0.9.6"
 ]
 
 [tool.setuptools]
@@ -21,3 +21,6 @@ preview = true
 
 # Now you can select your preview rules, like RUF048
 extend-select = ["RUF048"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*.py" = ["S101"]

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import inspect
 import warnings
-from typing import Any, Optional
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -58,7 +58,7 @@ def apply_sharding(
     """
     graph = traverse_dps(datapipe)
 
-    def _helper(graph, prev_applied=None):
+    def _helper(graph, prev_applied=None) -> None:
         for dp, sub_graph in graph.values():
             applied = None
             if _is_sharding_datapipe(dp):
@@ -94,9 +94,7 @@ def _is_shuffle_datapipe(datapipe: DataPipe) -> bool:
     )
 
 
-def apply_shuffle_settings(
-    datapipe: DataPipe, shuffle: Optional[bool] = None
-) -> DataPipe:
+def apply_shuffle_settings(datapipe: DataPipe, shuffle: bool | None = None) -> DataPipe:
     r"""
     Traverse the graph of ``DataPipes`` to find and set shuffle attribute.
 

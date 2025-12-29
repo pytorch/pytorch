@@ -26,11 +26,11 @@ import dataclasses
 import logging
 import os
 from functools import partial
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
-from typing_extensions import TypeAlias
+from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 
 import torch
 from torch._dynamo.utils import counters, get_runtime_metrics_context
+from torch._higher_order_ops.wrap import inductor_compiled_code
 from torch._inductor.cudagraph_utils import (
     BoxedDeviceIndex,
     CudagraphCachedInfo,
@@ -52,6 +52,7 @@ from torch._inductor.utils import (
 )
 from torch.autograd.profiler import record_function
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
 from . import config
 from .runtime.autotune_cache import AutotuneCacheBundler
@@ -59,7 +60,7 @@ from .runtime.autotune_cache import AutotuneCacheBundler
 
 if TYPE_CHECKING:
     from collections import Counter
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from torch._inductor import metrics
     from torch._inductor.graph import GraphLowering
@@ -86,6 +87,9 @@ class OutputCode:
     _time_taken_ns: Optional[int] = dataclasses.field(default=None, init=False)
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
+        raise NotImplementedError(type(self))
+
+    def prepare_for_serialization(self) -> None:
         raise NotImplementedError(type(self))
 
     def post_compile(
@@ -192,7 +196,7 @@ def cudagraph_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
-    constants: dict[str, torch.Tensor],
+    constants: dict[str, Union[torch.Tensor, type]],
     boxed_forward_device_index: Optional[BoxedDeviceIndex],
 ) -> None:
     """
@@ -222,6 +226,10 @@ def cudagraph_post_compile(
 
         current_callable = compiled_graph.current_callable
         assert current_callable is not None
+        # Filter to only tensor constants (exclude opaque value type classes)
+        tensor_constants = {
+            k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
+        }
         compiled_graph.current_callable = cudagraphify(
             current_callable,
             static_input_idxs=static_input_idxs or (),
@@ -229,7 +237,7 @@ def cudagraph_post_compile(
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
-            constants=tuple(constants.values()),
+            constants=tuple(tensor_constants.values()),
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
         )
@@ -255,7 +263,7 @@ def cudagraph_partition_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
-    constants: dict[str, torch.Tensor],
+    constants: dict[str, Union[torch.Tensor, type]],
     boxed_forward_device_index: Optional[BoxedDeviceIndex],
 ) -> None:
     """
@@ -288,12 +296,17 @@ def cudagraph_partition_post_compile(
     mutated_input_idxs = compiled_graph.mutated_input_idxs
     device_index = next(iter(compiled_graph.device_idxs))
 
+    # Filter to only tensor constants (exclude opaque value type classes)
+    tensor_constants = {
+        k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
+    }
+
     graph_metadata = CudagraphMetadata(
         compiled_graph.cudagraph_info.placeholders,
         static_input_idxs,
         mutated_input_idxs,
         compiled_graph.cudagraph_info.stack_traces,
-        constants,
+        tensor_constants,
     )
 
     prepare_cudagraph_post_compile(
@@ -365,9 +378,9 @@ class CompiledFxGraphConstants:
     the value of constants directly off of the original saved object.
     """
 
-    def unwrap(self, g: CompiledFxGraph) -> dict[str, torch.Tensor]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, Union[torch.Tensor, type]]:
         assert g.constants is not None
-        return g.constants
+        return {**g.constants, **g.opaque_value_type_classes}
 
 
 class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
@@ -382,13 +395,13 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         self.gm = gm
 
-    def unwrap(self, g: CompiledFxGraph) -> dict[str, torch.Tensor]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, Union[torch.Tensor, type]]:
         frozen_params = {
             name: getattr(self.gm, orig_name)
             for name, orig_name in g.frozen_param_names.items()
         }
         constants = g.constants or {}
-        return {**constants, **frozen_params}
+        return {**constants, **frozen_params, **g.opaque_value_type_classes}
 
 
 @dataclasses.dataclass
@@ -415,6 +428,7 @@ class CompiledFxGraph(OutputCode):
     constants: Optional[dict[str, torch.Tensor]]
     frozen_param_names: dict[str, str]
     torchbind_constants: dict[str, torch._C.ScriptObject | FakeScriptObject]
+    opaque_value_type_classes: dict[str, type]
     output_strides: Optional[list[Optional[tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
@@ -435,6 +449,7 @@ class CompiledFxGraph(OutputCode):
 
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[TritonBundle] = None
+    _wrap_compiled_regions: bool = False
 
     def __init__(
         self,
@@ -498,6 +513,7 @@ class CompiledFxGraph(OutputCode):
                     self.constants[k] = v
 
         self.torchbind_constants = graph.torchbind_constants
+        self.opaque_value_type_classes = graph.opaque_value_type_classes
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.metrics_deltas = metrics_deltas
@@ -578,6 +594,10 @@ class CompiledFxGraph(OutputCode):
 
         # aot autograd needs to know to pass in inputs as a list
         self._boxed_call = True
+
+        # Store whether to wrap compiled regions in inductor_compiled_code HOP
+        # This is set at compile time to avoid runtime overhead
+        self._wrap_compiled_regions = config.wrap_inductor_compiled_regions
 
     def __del__(self) -> None:
         if self.compiled_fn_runner is not None:
@@ -677,7 +697,7 @@ class CompiledFxGraph(OutputCode):
                     ]
                 else:
                     # On the forward we don't know whether or not
-                    # boxed_foward_device_index is set yet
+                    # boxed_forward_device_index is set yet
                     boxed_forward_device_index = graph_kwargs.get(
                         "boxed_forward_device_index", None
                     )
@@ -709,6 +729,19 @@ class CompiledFxGraph(OutputCode):
             inputs_to_check,
             self.mutated_input_idxs,
         )
+
+        # Apply inductor_compiled_code HOP wrapper if configured
+        # This is done in post_compile to ensure it works with cached artifacts
+        if self._wrap_compiled_regions and self.current_callable is not None:
+            original_callable = self.current_callable
+
+            def wrapped_callable(inputs):
+                if is_in_torch_dispatch_mode():
+                    return inductor_compiled_code(original_callable, inputs)
+                else:
+                    return original_callable(inputs)
+
+            self.current_callable = wrapped_callable
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         self._triton_bundle = triton_bundle
@@ -771,9 +804,87 @@ class CompiledAOTI(OutputCode):
     """
 
     filename: Union[str, list[Union[str, Weights]], torch.fx.GraphModule]
+    device_type: str
+    current_callable: Optional[Callable[..., Any]] = None
+    _cached_files: dict[str, bytes] = dataclasses.field(default_factory=dict)
+
+    def __post_init__(self):
+        if not config.aot_inductor.link_libtorch:
+            return
+
+        if (
+            torch._inductor.cpp_builder._IS_MACOS
+            or torch._inductor.cpp_builder._IS_WINDOWS
+        ):
+            return
+
+        if config.aot_inductor.cross_target_platform == "windows":
+            return
+
+        if config.aot_inductor.package_cpp_only:
+            return
+
+        if not config.enable_autograd_for_aot:
+            return
+
+        if isinstance(self.filename, list):
+            current_callable = next(
+                fn for fn in self.filename if isinstance(fn, str) and fn.endswith(".so")
+            )
+        else:
+            current_callable = self.filename
+
+        if isinstance(current_callable, torch.fx.GraphModule):
+            # pyrefly: ignore [bad-assignment]
+            self.current_callable = current_callable
+            return
+
+        if self.device_type.startswith("cuda"):
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCuda(  # type: ignore[call-arg]
+                    current_callable,
+                    1,
+                    self.device_type,
+                    "",
+                    True,
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
+        elif self.device_type == "cpu":
+            current_callable = (
+                torch._C._aoti.AOTIModelContainerRunnerCpu(  # type: ignore[call-arg]
+                    current_callable, 1
+                ).run  # type: ignore[attr-defined]
+            )  # type: ignore[attr-defined]
+        else:
+            raise RuntimeError(f"unsupported device type {self.device_type}")
+        self.current_callable = current_callable
+        self._boxed_call = True
+        for file in self._cached_files:
+            if not os.path.exists(file):
+                with open(file, "wb") as f:
+                    f.write(self._cached_files[file])
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
-        raise NotImplementedError("NYI")
+        if self.current_callable is None:
+            raise RuntimeError("AOTInductor compiled so is not loaded")
+        return self.current_callable(inputs)
+
+    def prepare_for_serialization(self) -> None:
+        self.current_callable = None
+        self._cached_files = {}
+        filenames: list[str] = []
+        if isinstance(self.filename, list):
+            filenames = self.filename  # type: ignore[assignment]
+        elif isinstance(self.filename, str):
+            filenames = [self.filename]
+        for name in filenames:
+            with open(name, "rb") as f:
+                self._cached_files[name] = f.read()
+
+    def __getstate__(self):
+        state = self.__dict__.copy()
+        state["current_callable"] = None
+        return state
 
     def post_compile(
         self,
@@ -781,7 +892,8 @@ class CompiledAOTI(OutputCode):
         constants: CompiledFxGraphConstants,
         graph_kwargs: _CompileFxKwargs,
     ) -> None:
-        pass
+        if self.current_callable is None:
+            self.__post_init__()
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
@@ -807,3 +919,97 @@ class MockFXGraphCacheOutput(OutputCode):
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
         pass
+
+
+@dataclasses.dataclass
+class RegionalOutputCode(OutputCode):
+    """
+    OutputCode for regional inductor compilation results.
+
+    Regional inductor returns a torch.fx.GraphModule that contains both
+    compiled regions (via standalone_compile) and eager regions. This needs
+    special serialization using GraphPickler instead of standard pickle.
+
+    The serialization strategy stores the GraphModule as bytes using
+    GraphPickler.dumps(), which handles FakeTensors, AOTCompiledArtifacts,
+    and other special objects that standard pickle cannot handle.
+    """
+
+    # The serialized graph module as bytes (using GraphPickler)
+    _serialized_graph_module: Optional[bytes] = dataclasses.field(
+        default=None, init=False
+    )
+
+    # The actual graph module (cleared during serialization)
+    _graph_module: Optional[torch.fx.GraphModule] = dataclasses.field(
+        default=None, init=False
+    )
+
+    def __init__(self, graph_module: torch.fx.GraphModule):
+        """
+        Args:
+            graph_module: The torch.fx.GraphModule returned by regional_inductor
+        """
+        super().__init__()
+        self._graph_module = graph_module
+        self._serialized_graph_module = None
+
+    def __call__(self, inputs: Sequence[Any]) -> Any:
+        """Execute the regional compiled graph."""
+        if self._graph_module is None:
+            raise RuntimeError(
+                "RegionalOutputCode has no graph module loaded. "
+                "Did you forget to call post_compile()?"
+            )
+        return self._graph_module(*inputs)
+
+    def post_compile(
+        self,
+        example_inputs: Sequence[InputType],
+        constants: CompiledFxGraphConstants,
+        graph_kwargs: _CompileFxKwargs,
+    ) -> None:
+        """
+        Post-compile processing for regional inductor.
+
+        This deserializes the GraphModule from bytes using GraphPickler,
+        extracting the fake_mode from example_inputs.
+        """
+        if self._graph_module is not None:
+            return
+        assert self._serialized_graph_module is not None
+        # Get fake mode from example inputs
+        from torch._guards import detect_fake_mode
+
+        fake_mode = detect_fake_mode(example_inputs)
+        if fake_mode is None:
+            raise RuntimeError(
+                "Could not detect fake mode from example inputs. "
+                "Regional inductor requires fake mode for deserialization."
+            )
+
+        # Deserialize the graph module
+        from torch.fx._graph_pickler import GraphPickler
+
+        gm = GraphPickler.loads(self._serialized_graph_module, fake_mode)
+        assert isinstance(gm, torch.fx.GraphModule)
+        gm.recompile()
+        self._graph_module = gm
+
+    def set_triton_bundle(self, triton_bundle: Any) -> None:
+        """Regional inductor doesn't use triton bundles directly."""
+
+    def prepare_for_serialization(self) -> None:
+        """
+        Prepare for serialization by converting the GraphModule to bytes.
+
+        This uses GraphPickler to serialize the graph module since it contains
+        special objects like FakeTensors and AOTCompiledArtifacts that need
+        custom pickling.
+        """
+        if self._graph_module is not None:
+            from torch.fx._graph_pickler import GraphPickler
+
+            self._serialized_graph_module = GraphPickler.dumps(self._graph_module)
+            # Clear the graph module to avoid pickling it with standard pickle
+            self._graph_module = None

@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
+import base64
 import contextlib
 import copy
+import hashlib
 import itertools
 import linecache
 import os
@@ -18,6 +20,7 @@ from torch.nn.modules.module import _addindent
 from torch.package import Importer, PackageExporter, PackageImporter, sys_importer
 
 from ._compatibility import compatibility
+from .experimental import _config as fx_experimental_config
 from .graph import (
     _BoxedCodeGen,
     _custom_builtins,
@@ -36,6 +39,7 @@ __all__ = [
 ]
 
 _USER_PRESERVED_ATTRIBUTES_KEY = "_user_preserved_attributes"
+FX_GRAPH_MODULE_FILE_PREFIX = "fx_generated_"
 
 
 # Normal exec loses the source code, however we can work with
@@ -61,7 +65,13 @@ class _EvalCacheLoader:
 
         key = self._get_key()
         if co_fields:
-            key += f" from {co_fields['co_filename']}:{co_fields['co_firstlineno']} in {co_fields['co_name']}"
+            if "co_filename" in co_fields:
+                # If only co_filename is provided, use it directly as the key
+                if "co_firstlineno" not in co_fields or "co_name" not in co_fields:
+                    key = co_fields["co_filename"]
+                else:
+                    # Full co_fields with all three components
+                    key += f" from {co_fields['co_filename']}:{co_fields['co_firstlineno']} in {co_fields['co_name']}"
         self.eval_cache[key] = src
 
         # Don't mutate globals so that this loader is only used
@@ -353,6 +363,36 @@ def _print_readable(
     return output
 
 
+def _metadata_hash(code: str, node_metadata: dict) -> str:
+    """
+    Create a content-addressed hash from code and metadata.
+
+    Args:
+        code: The source code string
+        lineno_map: Mapping from line numbers to node indices
+        node_metadata: Metadata for each node
+
+    Returns:
+        A 51-character base32-encoded hash
+    """
+    import json
+
+    # Create a deterministic string representation of all components
+    # We use JSON to ensure consistent serialization
+    hash_data = {
+        "code": code,
+        "node_metadata": node_metadata,
+    }
+    hashing_str = json.dumps(hash_data).encode("utf-8")
+
+    # [:51] to strip off the "Q====" suffix common to every hash value.
+    return (
+        base64.b32encode(hashlib.sha256(hashing_str).digest())[:51]
+        .decode("utf-8")
+        .lower()
+    )
+
+
 class _WrappedCall:
     def __init__(self, cls, cls_call):
         self.cls = cls
@@ -535,7 +575,7 @@ class GraphModule(torch.nn.Module):
             self.graph._tracer_cls
             and "<locals>" not in self.graph._tracer_cls.__qualname__
         ):
-            # pyrefly: ignore  # bad-assignment
+            # pyrefly: ignore [bad-assignment]
             self._tracer_cls = self.graph._tracer_cls
 
         self._tracer_extras = {}
@@ -819,15 +859,64 @@ class {module_name}(torch.nn.Module):
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
+        # Do not import anything inside recompile, it might slow down the
+        # function and cause perf regression. Import outside of the method instead.
         if isinstance(self._graph._codegen, _PyTreeCodeGen):
             self._in_spec = self._graph._codegen.pytree_info.in_spec
             self._out_spec = self._graph._codegen.pytree_info.out_spec
-        python_code = self._graph.python_code(root_module="self")
+
+        python_code = self._graph.python_code(
+            root_module="self",
+            record_func=fx_experimental_config.enrich_profiler_metadata,
+        )
         self._code = python_code.src
         self._lineno_map = python_code._lineno_map
+        self._prologue_start = python_code._prologue_start
 
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
+
+        if fx_experimental_config.enrich_profiler_metadata:
+            # Generate metadata and register for profiler augmentation
+            node_metadata: dict[int, dict[str, Any]] = {}
+            for i, node in enumerate(self._graph.nodes):
+                node_metadata[i] = {
+                    "name": node.name,
+                    "op": node.op,
+                    "target": str(node.target),
+                    "stack_trace": node.meta.get("stack_trace", None),
+                }
+
+            # Generate a content-addressed filename based on hash of code and metadata
+            # This ensures the same code+metadata always generates the same filename
+            hash_value = _metadata_hash(self._code, node_metadata)
+            file_stem = f"{FX_GRAPH_MODULE_FILE_PREFIX}_{hash_value}"
+            filename = f"{file_stem}.py"
+
+            # Only include co_filename to use it directly as the cache key
+            co_fields = {
+                "co_filename": filename,
+            }
+
+            # Store metadata in global in-memory registry
+            metadata = {
+                "lineno_map": python_code._lineno_map,
+                "prologue_start": python_code._prologue_start,
+                "node_metadata": node_metadata,
+            }
+
+            # Register metadata in the global registry
+            from torch.fx.traceback import _register_fx_metadata
+
+            _register_fx_metadata(filename, metadata)
+
+            # Replace the placeholder in generated code with actual filename
+            # The double hash ## convention is used by post-processing to find the fx markers
+            self._code = self._code.replace(
+                "torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##')",
+                f"torch._C._profiler._RecordFunctionFast('## {filename} ##')",
+            )
+
         cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 
         # Determine whether this class explicitly defines a __call__ implementation

@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["module: unknown"]
 
+import multiprocessing
 import os
 import random
 import shutil
@@ -53,8 +54,10 @@ from torch.utils.data import DataLoader
 # sharding on sandcastle. This line silences flake warnings
 load_tests = load_tests  # noqa: PLW0127
 
-HAS_CUDA = torch.cuda.is_available()
-
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
+TEST_GPU = torch.xpu.is_available() or torch.cuda.is_available()
 
 from torch.testing._internal.common_utils import run_tests, TestCase
 
@@ -302,24 +305,24 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
-    def test_checkpoint_rng_cuda(self):
+    @unittest.skipIf(not TEST_GPU, "No accelerator")
+    def test_checkpoint_rng_gpu(self):
         for _ in range(5):
-            inp = torch.randn(20000, device="cuda").requires_grad_()
+            inp = torch.randn(20000, device=device_type).requires_grad_()
             phase1 = torch.nn.Dropout()
             phase2 = torch.nn.Dropout()
 
             def run_fn(input):
                 return phase2(input)
 
-            state = torch.cuda.get_rng_state()
+            state = torch.get_device_module(device_type).get_rng_state()
 
             out = phase1(inp)
             out = checkpoint(run_fn, out, use_reentrant=True)
             out.sum().backward()
             grad_with_checkpointing = inp.grad
 
-            torch.cuda.set_rng_state(state)
+            torch.get_device_module(device_type).set_rng_state(state)
 
             inp.grad = None
 
@@ -330,9 +333,9 @@ class TestCheckpoint(TestCase):
 
             self.assertEqual(grad_with_checkpointing, grad_no_checkpointing)
 
-    @unittest.skipIf(not HAS_CUDA, "No CUDA")
+    @unittest.skipIf(not TEST_GPU, "No accelerator")
     def test_checkpoint_not_preserve_rng_state_and_without_reentrant(self):
-        inp = torch.randn(2, device="cuda").requires_grad_()
+        inp = torch.randn(2, device=device_type).requires_grad_()
         layer = torch.nn.Dropout()
 
         def run_fn(input):
@@ -435,10 +438,10 @@ class TestCheckpoint(TestCase):
             out = checkpoint(run_fn2, input_var, input_var2, use_reentrant=True)
             out.sum().backward()
 
-    @unittest.skipIf(not torch.cuda.is_available(), "Test requires CUDA")
+    @unittest.skipIf(not TEST_GPU, "No accelerator")
     def test_checkpointing_without_reentrant_early_free(self):
         # I don't know how to check if the temporary saved variable buffer
-        # get de-allocated directly. So using cuda memory usage as a proxy
+        # get de-allocated directly. So using GPU memory usage as a proxy
 
         def _do_test(fn, should_free):
             stats: list[int] = []
@@ -449,8 +452,8 @@ class TestCheckpoint(TestCase):
                 # emptied at each step)
                 def hook(_unused):
                     self.assertEqual(len(stats), idx)
-                    torch.cuda.synchronize()
-                    stats.append(torch.cuda.memory_allocated())
+                    torch.accelerator.synchronize()
+                    stats.append(torch.accelerator.memory_allocated())
                     if idx > 0:
                         if should_free:
                             self.assertLess(stats[idx], stats[idx - 1])
@@ -475,7 +478,7 @@ class TestCheckpoint(TestCase):
 
             return stats
 
-        x = torch.zeros(10, device="cuda", requires_grad=True)
+        x = torch.zeros(10, device=device_type, requires_grad=True)
         x.grad = torch.zeros_like(x)
 
         # In a regular backward, buffers get eagerly freed
@@ -505,8 +508,8 @@ class TestCheckpoint(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_get_device_states_recursive(self):
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:1")],
+            "foo": torch.rand(10, device=f"{device_type}:0"),
+            "bar": [torch.rand(10, device=f"{device_type}:1")],
         }
         device_ids, device_states = get_device_states(inp)
         self.assertEqual(2, len(device_ids))
@@ -522,42 +525,42 @@ class TestCheckpoint(TestCase):
         self.assertEqual("meta", device_type)
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    def test_infer_device_state_recursive_multi_cuda(self):
-        # Check that no warning is issued for either cuda:0, cuda:1 or
-        # cuda:0, cuda:0 cases since they are both the same device type
+    def test_infer_device_state_recursive_multi_gpu(self):
+        # Check that no warning is issued for either gpu:0, gpu:1 or
+        # gpu:0, gpu:0 cases since they are both the same device type
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:1")],
+            "foo": torch.rand(10, device=f"{device_type}:0"),
+            "bar": [torch.rand(10, device=f"{device_type}:1")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(device_type, _device_type)
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
-            "bar": [torch.rand(10, device="cuda:0")],
+            "foo": torch.rand(10, device=f"{device_type}:0"),
+            "bar": [torch.rand(10, device=f"{device_type}:0")],
         }
         with warnings.catch_warnings():
             warnings.simplefilter("error")
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
-        # Check that a warning is issued for cuda:0, meta and that it includes
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(device_type, _device_type)
+        # Check that a warning is issued for gpu:0, meta and that it includes
         # device type information
         inp = {
-            "foo": torch.rand(10, device="cuda:0"),
+            "foo": torch.rand(10, device=f"{device_type}:0"),
             "bar": [torch.rand(10, device="meta")],
         }
         with warnings.catch_warnings(record=True) as w:
-            device_type = _infer_device_type(inp)
-            self.assertEqual("cuda", device_type)
+            _device_type = _infer_device_type(inp)
+            self.assertEqual(device_type, _device_type)
         self.assertEqual(len(w), 1)
         warning_msg = str(w[-1].message)
         self.assertTrue(
             "Tensor arguments, excluding CPU tensors, are detected on at least two types of devices"
             in warning_msg
         )
-        self.assertTrue("Device types: ['cuda', 'meta']" in warning_msg)
-        self.assertTrue("first device type: cuda" in warning_msg)
+        self.assertTrue(f"Device types: ['{device_type}', 'meta']" in warning_msg)
+        self.assertTrue(f"first device type: {device_type}" in warning_msg)
 
 
 class TestDataLoaderUtils(TestCase):
@@ -604,7 +607,7 @@ class TestDataLoaderUtils(TestCase):
         self.assertEqual(len(list(dataiter)), 1)
 
     @unittest.skip(
-        "FIXME: Intermittent CUDA out-of-memory error on Windows and time-out under ASAN"
+        "FIXME: Intermittent GPU out-of-memory error on Windows and time-out under ASAN"
     )
     def test_multi_keep(self):
         dataloader: DataLoader = DataLoader(
@@ -649,6 +652,7 @@ class TestHipify(TestCase):
 
 class TestHipifyTrie(TestCase):
     def setUp(self):
+        super().setUp()
         from torch.utils.hipify import hipify_python
 
         self.trie = hipify_python.Trie()
@@ -860,27 +864,33 @@ class TestDeviceUtils(TestCase):
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_get_default_device_more(self):
         try:
-            torch.set_default_device("cuda")
+            torch.set_default_device(device_type)
             self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
             torch.set_default_device(None)
 
-            torch.set_default_device("cuda")
-            torch.cuda.set_device("cuda:1")
+            torch.set_default_device(device_type)
+            torch.get_device_module(device_type).set_device(f"{device_type}:1")
+            self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
+            torch.accelerator.set_device_index(1)
             self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
             torch.set_default_device(None)
 
-            torch.set_default_device("cuda:1")
+            torch.set_default_device(f"{device_type}:1")
             self.assertEqual(torch.get_default_device(), torch.tensor([]).device)
             torch.set_default_device(None)
 
-            torch.set_default_device("cuda:1")
-            with torch.device("cuda:0"):
-                self.assertEqual(torch.get_default_device(), torch.device("cuda", 0))
+            torch.set_default_device(f"{device_type}:1")
+            with torch.device(f"{device_type}:0"):
+                self.assertEqual(
+                    torch.get_default_device(), torch.device(f"{device_type}", 0)
+                )
 
             torch.set_default_device("cpu")
             self.assertEqual(torch.get_default_device(), torch.device("cpu"))
-            with torch.device("cuda:0"):
-                self.assertEqual(torch.get_default_device(), torch.device("cuda", 0))
+            with torch.device(f"{device_type}:0"):
+                self.assertEqual(
+                    torch.get_default_device(), torch.device(f"{device_type}", 0)
+                )
 
             self.assertEqual(torch.get_default_device(), torch.device("cpu"))
         finally:
@@ -1009,6 +1019,37 @@ class TestDeprecate(TestCase):
             deprecated_api(1, y=2)  # noqa: F821
         _deprecated_api(1, 2)
         _deprecated_api(1, y=2)
+
+
+class TestDeviceLazyInit(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "pthread_atfork not available on Windows")
+    def test_fork_poison_on_lazy_init(self, device):
+        torch.empty(1, device=device)
+
+        def child(q):
+            try:
+                torch.empty(1, device=device)
+            except Exception as e:
+                q.put(e)
+
+        ctx = multiprocessing.get_context("fork")
+        q = ctx.Queue()
+        p = ctx.Process(target=child, args=(q,))
+        p.start()
+        p.join()
+        self.assertTrue(not q.empty())
+        exc = q.get()
+        pattern = (
+            r"Cannot re-initialize .* in forked subprocess\. "
+            r"To use .* with multiprocessing, you must use the 'spawn' start method"
+        )
+        self.assertIsInstance(exc, RuntimeError)
+        self.assertRegex(str(exc), pattern)
+
+
+instantiate_device_type_tests(
+    TestDeviceLazyInit, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 
 if __name__ == "__main__":

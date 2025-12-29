@@ -3,7 +3,7 @@ import operator
 import warnings
 from collections.abc import Sequence
 from itertools import chain
-from typing import Any, Generic, Optional, TypeVar, Union
+from typing import Any, Generic, TypeVar
 
 import torch
 from torch._utils import (
@@ -21,7 +21,7 @@ from torch.nn.parallel.scatter_gather import gather, scatter_kwargs
 __all__ = ["DataParallel", "data_parallel"]
 
 
-def _check_balance(device_ids: Sequence[Union[int, torch.device]]) -> None:
+def _check_balance(device_ids: Sequence[int | torch.device]) -> None:
     imbalance_warn = """
     There is an imbalance between your GPUs. You may want to exclude GPU {} which
     has less than 75% of the memory or cores of GPU {}. You can do so by setting
@@ -30,7 +30,7 @@ def _check_balance(device_ids: Sequence[Union[int, torch.device]]) -> None:
     device_ids = [_get_device_index(x, True) for x in device_ids]
     dev_props = _get_devices_properties(device_ids)
 
-    def warn_imbalance(get_prop):
+    def warn_imbalance(get_prop) -> bool:
         values = [get_prop(props) for props in dev_props]
         min_pos, min_val = min(enumerate(values), key=operator.itemgetter(1))
         max_pos, max_val = max(enumerate(values), key=operator.itemgetter(1))
@@ -136,8 +136,8 @@ class DataParallel(Module, Generic[T]):
     def __init__(
         self,
         module: T,
-        device_ids: Optional[Sequence[Union[int, torch.device]]] = None,
-        output_device: Optional[Union[int, torch.device]] = None,
+        device_ids: Sequence[int | torch.device] | None = None,
+        output_device: int | torch.device | None = None,
         dim: int = 0,
     ) -> None:
         super().__init__()
@@ -197,16 +197,14 @@ class DataParallel(Module, Generic[T]):
             outputs = self.parallel_apply(replicas, inputs, module_kwargs)
             return self.gather(outputs, self.output_device)
 
-    def replicate(
-        self, module: T, device_ids: Sequence[Union[int, torch.device]]
-    ) -> list[T]:
+    def replicate(self, module: T, device_ids: Sequence[int | torch.device]) -> list[T]:
         return replicate(module, device_ids, not torch.is_grad_enabled())
 
     def scatter(
         self,
         inputs: tuple[Any, ...],
-        kwargs: Optional[dict[str, Any]],
-        device_ids: Sequence[Union[int, torch.device]],
+        kwargs: dict[str, Any] | None,
+        device_ids: Sequence[int | torch.device],
     ) -> Any:
         return scatter_kwargs(inputs, kwargs, device_ids, dim=self.dim)
 
@@ -217,17 +215,17 @@ class DataParallel(Module, Generic[T]):
             replicas, inputs, kwargs, self.device_ids[: len(replicas)]
         )
 
-    def gather(self, outputs: Any, output_device: Union[int, torch.device]) -> Any:
+    def gather(self, outputs: Any, output_device: int | torch.device) -> Any:
         return gather(outputs, output_device, dim=self.dim)
 
 
 def data_parallel(
     module: Module,
     inputs: Any,
-    device_ids: Optional[Sequence[Union[int, torch.device]]] = None,
-    output_device: Optional[Union[int, torch.device]] = None,
+    device_ids: Sequence[int | torch.device] | None = None,
+    output_device: int | torch.device | None = None,
     dim: int = 0,
-    module_kwargs: Optional[Any] = None,
+    module_kwargs: Any | None = None,
 ) -> torch.Tensor:
     r"""Evaluate module(input) in parallel across the GPUs given in device_ids.
 
@@ -281,7 +279,8 @@ def data_parallel(
         inputs = ((),)
         module_kwargs = ({},)
 
-    assert module_kwargs is not None
+    if module_kwargs is None:
+        raise AssertionError("module_kwargs should not be None after scatter_kwargs")
 
     if len(device_ids) == 1:
         return module(*inputs[0], **module_kwargs[0])

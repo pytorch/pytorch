@@ -272,6 +272,7 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
     expected_stride = 1
     expected_stride_max = 1
 
+    # pyrefly: ignore [bad-assignment]
     for x, y in reversed(tuple(zip(sizes, strides))):
         # Skips checking strides when a dimension has length 1.
         if maybe_guard_or_false(x == 1):
@@ -396,7 +397,7 @@ def is_contiguous_for_memory_format(  # type: ignore[return]
     *,
     memory_format: torch.memory_format,
     false_if_dde=False,
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
 ) -> bool:
     validate_memory_format(memory_format)
 
@@ -820,13 +821,13 @@ def canonicalize_dims(
     rank: int,
     indices: Sequence[int],
     wrap_scalar: bool = True,
-    # pyrefly: ignore  # bad-return
+    # pyrefly: ignore [bad-return]
 ) -> tuple[int, ...]:
     pass
 
 
 @overload
-# pyrefly: ignore  # bad-return
+# pyrefly: ignore [bad-return]
 def canonicalize_dims(rank: int, indices: int, wrap_scalar: bool = True) -> int:
     pass
 
@@ -873,7 +874,7 @@ def check_same_device(*args, allow_cpu_scalar_tensors):
 
     # Note: cannot initialize device to the first arg's device (it may not have one)
     device = None
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -921,7 +922,7 @@ def check_same_shape(*args, allow_cpu_scalar_tensors: bool):
     """
     shape = None
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -948,7 +949,7 @@ def extract_shape(*args, allow_cpu_scalar_tensors: bool) -> Optional[ShapeType]:
     shape = None
     scalar_shape = None
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for arg in args:
         if isinstance(arg, Number):
             continue
@@ -1005,7 +1006,7 @@ def extract_shape_from_varargs(
 
     # Handles tuple unwrapping
     if len(shape) == 1 and isinstance(shape[0], Sequence):
-        # pyrefly: ignore  # bad-assignment
+        # pyrefly: ignore [bad-assignment]
         shape = shape[0]
 
     if validate:
@@ -1301,7 +1302,7 @@ def get_higher_dtype(
 
         raise RuntimeError("Unexpected type given to _extract_dtype!")
 
-    # pyrefly: ignore  # bad-argument-type
+    # pyrefly: ignore [bad-argument-type]
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
@@ -1397,7 +1398,7 @@ def check_same_dtype(*args):
     full_dtype = None
     scalar_type = None
 
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     for arg in args:
         if isinstance(arg, Number):
             # Scalar type checking is disabled (and may be removed in the future)
@@ -1668,10 +1669,10 @@ def elementwise_dtypes(
 
         # Prefers dtype of tensors with one or more dimensions
         if one_plus_dim_tensor_dtype is not None:
-            # pyrefly: ignore  # bad-return
+            # pyrefly: ignore [bad-return]
             return one_plus_dim_tensor_dtype
 
-        # pyrefly: ignore  # bad-return
+        # pyrefly: ignore [bad-return]
         return zero_dim_tensor_dtype
 
     if highest_type is float:
@@ -1895,8 +1896,6 @@ def set_correction(
     # NB: we don't actually support symint here, but it's harmless to accept
     if not isinstance(correction, (IntLike, FloatLike)):
         raise ValueError("correction argument should be integer or float")
-    if correction < 0:
-        raise ValueError("correction argument should be non-negative")
     return sym_float(correction)
 
 

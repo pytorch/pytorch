@@ -7,7 +7,6 @@
 #define AT_ATOMIC_IPC_REFCOUNT 1
 #endif
 
-#include <c10/core/CPUAllocator.h>
 
 #include <c10/util/error.h>
 #ifdef _WIN32
@@ -252,13 +251,13 @@ MapAllocator::MapAllocator(WithFd /*unused*/, std::string_view filename, int fd,
     if (!(flags_ & ALLOCATOR_MAPPED_FROMFD)) {
       if (flags_ & ALLOCATOR_MAPPED_SHARED) {
         // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
-        if ((fd = open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
+        if ((fd = open(filename_.c_str(), flags, static_cast<mode_t>(0600))) == -1) {
           TORCH_CHECK(false, "unable to open file <", filename_, "> in read-write mode: ", c10::utils::str_error(errno), " (", errno, ")");
         }
       } else if (flags_ & ALLOCATOR_MAPPED_SHAREDMEM) {
 #ifdef HAVE_SHM_OPEN
         // NOLINTNEXTLINE(bugprone-assignment-in-if-condition)
-        if((fd = shm_open(filename_.c_str(), flags, (mode_t)0600)) == -1) {
+        if((fd = shm_open(filename_.c_str(), flags, static_cast<mode_t>(0600))) == -1) {
           TORCH_CHECK(false, "unable to open shared memory object <", filename_, "> in read-write mode: ", c10::utils::str_error(errno), " (", errno, ")");
         }
 #else
@@ -503,7 +502,7 @@ RefcountedMapAllocator::RefcountedMapAllocator(WithFd /*unused*/, const char *fi
 
 void RefcountedMapAllocator::initializeAlloc() {
   TORCH_CHECK(base_ptr_, "base_ptr_ is null");
-  MapInfo *map_info = (MapInfo*)base_ptr_;
+  MapInfo *map_info = static_cast<MapInfo*>(base_ptr_);
 
 #ifdef _WIN32
   ReleaseContext* r_ctx = new ReleaseContext;
@@ -539,7 +538,7 @@ void RefcountedMapAllocator::close() {
   }
 #else /* _WIN32 */
 
-  MapInfo *info = (MapInfo*)(data);
+  MapInfo *info = static_cast<MapInfo*>(data);
   if (--info->refcount == 0) {
 #ifdef HAVE_SHM_UNLINK
     if (shm_unlink(filename_.c_str()) == -1) {

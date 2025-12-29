@@ -282,7 +282,7 @@ RuntimeConfigs {
 
 Constant folding is the process of finding all of the constant-evaluable
 subgraphs, evaluating them at startup, and then storing their results as
-constants as opposed to re-evaluting them every time.
+constants as opposed to re-evaluating them every time.
 
 To enable constant folding, you can set the following configurations.
 

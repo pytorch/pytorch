@@ -179,10 +179,13 @@ if __name__ == "__main__":
 
     if args.outfile == "stdout":
         outfile = sys.stdout
+        need_close = False
     elif args.outfile == "stderr":
         outfile = sys.stderr
+        need_close = False
     else:
-        outfile = open(args.outfile, "a")
+        outfile = open(args.outfile, "a")  # noqa: SIM115
+        need_close = True
 
     ops = args.ops.split(",")
 
@@ -434,3 +437,5 @@ if __name__ == "__main__":
                 if op not in {"bsr_scatter_mm6", "bsr_dense_mm_with_meta"}:
                     # Break on operations that do not consume parameters
                     break
+    if need_close:
+        outfile.close()

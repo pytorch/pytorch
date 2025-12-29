@@ -3,7 +3,6 @@ import functools
 import math
 import operator
 from typing import *  # noqa: F403
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -46,12 +45,13 @@ def _outer_to_inner_dim(ndim, dim, ragged_dim, canonicalize=False):
     if canonicalize:
         dim = canonicalize_dims(ndim, dim)
 
-    assert dim >= 0 and dim < ndim  # pyrefly: ignore [unsupported-operation]
+    if not (dim >= 0 and dim < ndim):  # pyrefly: ignore [unsupported-operation]
+        raise AssertionError(f"dim {dim} out of range for ndim {ndim}")
 
     # Map dim=0 (AKA batch dim) -> packed dim i.e. outer ragged dim - 1.
     # For other dims, subtract 1 to convert to inner space.
     return (
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         ragged_dim - 1 if dim == 0 else dim - 1
     )
 
@@ -93,9 +93,10 @@ def _wrap_jagged_dims(ndim, dims, op_name, ragged_idx=1):
     """
     from torch._prims_common import canonicalize_dims
 
-    assert isinstance(dims, (tuple, list)), (
-        f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
-    )
+    if not isinstance(dims, (tuple, list)):
+        raise AssertionError(
+            f"_wrap_jagged_dims(): cannot iterate over dimensions of type {type(dims)}"
+        )
 
     wrapped_dims = [
         canonicalize_dims(ndim, d) for d in dims
@@ -143,7 +144,7 @@ def check_schema(schema_str: str, func, *args, **kwargs) -> None:
         name, arg_type = named_arg_type.split(": ")
         is_optional = arg_type.endswith("?")
         normalized_arg_type = arg_type[:-1] if is_optional else arg_type
-        if normalized_arg_type not in arg_type_check_fns.keys():
+        if normalized_arg_type not in arg_type_check_fns:
             raise AssertionError(f"Unknown arg type: {normalized_arg_type}")
 
         if i >= len(args):
@@ -249,7 +250,7 @@ def register_func(tables, aten_ops, schema_str):
 register_jagged_func = functools.partial(register_func, JAGGED_OPS_TABLE)
 
 
-def lookup_jagged(func, *args, **kwargs) -> Optional[Callable]:
+def lookup_jagged(func, *args, **kwargs) -> Callable | None:
     dispatch_func = JAGGED_OPS_TABLE.get(func, None)
     if dispatch_func is not None:
         return dispatch_func
@@ -311,7 +312,8 @@ def jagged_unary_pointwise(func, *args, **kwargs):
 
 def jagged_binary_pointwise(func, *args, **kwargs):
     a, b = args[0], args[1]
-    assert isinstance(a, NestedTensor) or isinstance(b, NestedTensor)
+    if not (isinstance(a, NestedTensor) or isinstance(b, NestedTensor)):
+        raise AssertionError("At least one of the arguments must be a NestedTensor")
 
     mismatch_error_msg = (
         "cannot call binary pointwise function {} with inputs of shapes {} and {}"
@@ -400,7 +402,7 @@ def jagged_torch_function(func, *args, **kwargs):
     # Handle flatten() here because it's CompositeImplicit.
     if func.__name__ == "flatten":
 
-        def _flatten_sig(input, start_dim=0, end_dim=-1):
+        def _flatten_sig(input, start_dim=0, end_dim=-1) -> None:
             pass
 
         _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -466,7 +468,7 @@ def jagged_torch_function(func, *args, **kwargs):
     # Handle nested-specific input validation for CompositeImplicit rms_norm
     if func.__name__ == "rms_norm":
 
-        def _rms_norm_sig(input, normalized_shape, weight=None, eps=None):
+        def _rms_norm_sig(input, normalized_shape, weight=None, eps=None) -> None:
             pass
 
         _, new_kwargs = normalize_function(  # type: ignore[misc]
@@ -502,13 +504,13 @@ def jagged_torch_function(func, *args, **kwargs):
     "self: jt_all",
 )
 def tensor_attr_supported_getter(func, *args, **kwargs):
-    if func == torch.ops.aten.is_non_overlapping_and_dense.default:
+    if func is torch.ops.aten.is_non_overlapping_and_dense.default:
         return False
 
-    if func == torch.ops.aten.sym_size.default:
+    if func is torch.ops.aten.sym_size.default:
         return args[0]._size
 
-    if func == torch.ops.aten.dim.default:
+    if func is torch.ops.aten.dim.default:
         return len(args[0]._size)
 
     if func in (torch.ops.aten.sym_numel.default, torch.ops.aten.numel.default):
@@ -516,10 +518,10 @@ def tensor_attr_supported_getter(func, *args, **kwargs):
             return int(sum(args[0]._lengths) * math.prod(args[0]._size[2:]))
         return args[0]._values.numel()
 
-    if func == torch.ops.aten.sym_stride.default:
+    if func is torch.ops.aten.sym_stride.default:
         return args[0]._strides
 
-    if func == torch.ops.aten.sym_storage_offset.default:
+    if func is torch.ops.aten.sym_storage_offset.default:
         return args[0]._values.storage_offset()
 
 
@@ -532,8 +534,8 @@ def prim_layout_default(func, *args, **kwargs):
     [torch.ops.aten.size.default],
     "self: jt_all",
 )
-def tensor_attr_unsupported_getter(func, *args, **kwargs):
-    if func == torch.ops.aten.size.default:
+def tensor_attr_unsupported_getter(func, *args, **kwargs) -> None:
+    if func is torch.ops.aten.size.default:
         raise RuntimeError(
             "NestedTensor does not support directly calling torch.ops.aten.size; "
             "please use `nested_tensor.size()` instead."
@@ -608,9 +610,10 @@ def clone_default(func, *args, **kwargs):
             from .nested_tensor import jagged_from_list
 
             # TODO: We probably want the output to have the same ragged structure / nested int.
-            assert inp._ragged_idx == 1, (
-                "NJT with ragged_idx != 1 not supported for contiguous clone"
-            )
+            if inp._ragged_idx != 1:
+                raise AssertionError(
+                    "NJT with ragged_idx != 1 not supported for contiguous clone"
+                )
             contig, _ = jagged_from_list(inp.unbind(), offsets=None)
             return contig
 
@@ -1138,7 +1141,7 @@ def unbind_int(func, *args, **kwargs):
     lengths = inp.lengths()
     ragged_idx = inp._ragged_idx
 
-    def _torch_check(_lengths: list[int], _offsets: Optional[list[int]] = None):
+    def _torch_check(_lengths: list[int], _offsets: list[int] | None = None) -> None:
         # This torch._check are needed for torch.compile
         # symbolic shapes processing.
         # offsets and lengths are symbolic variables during compilation,
@@ -1242,7 +1245,8 @@ def cat_default(func, *args, **kwargs):
 
     # Convert any non-nested to nested
     nested = [t for t in tensors if t.is_nested]
-    assert len(nested) > 0
+    if len(nested) == 0:
+        raise AssertionError("At least one tensor must be nested")
     first = nested[0]
     tensors = [t if t.is_nested else t.expand_as(first) for t in tensors]
 
@@ -1395,7 +1399,8 @@ def expand_default(func, *args, **kwargs):
     inp = new_kwargs.pop("input")
     size = new_kwargs["size"]
 
-    assert ("implicit" not in new_kwargs) or (not new_kwargs.pop("implicit"))
+    if "implicit" in new_kwargs and new_kwargs.pop("implicit"):
+        raise AssertionError("implicit expand is not supported")
     if not raggedness_matches(inp, size):
         raise RuntimeError(f"expand(): cannot expand shape {inp._size} -> {size}")
 
@@ -1962,7 +1967,10 @@ def index_put_(func, *args, **kwargs):
 
     indices = new_kwargs.pop("indices")
 
-    assert len(indices) <= inp.dim()
+    if len(indices) > inp.dim():
+        raise AssertionError(
+            f"Too many indices: got {len(indices)} but tensor has {inp.dim()} dimensions"
+        )
 
     if len(indices) < inp._ragged_idx + 1:
         if not inp.is_contiguous():
@@ -1995,7 +2003,7 @@ def index_put_(func, *args, **kwargs):
             max_seqlen=max_seqlen,
         )
 
-        if func == torch.ops.aten.index_put_.default:
+        if func is torch.ops.aten.index_put_.default:
             inp._values.copy_(new_njt.values())
             return inp
         return new_njt
@@ -2008,7 +2016,7 @@ def index_put_(func, *args, **kwargs):
     else:
         lengths = inp.lengths()
     torch._assert_async(
-        # pyrefly: ignore  # no-matching-overload
+        # pyrefly: ignore [no-matching-overload]
         torch.all(indices[inp._ragged_idx] < lengths),
         "Some indices in the ragged dimension are out of bounds!",
     )
@@ -2024,7 +2032,7 @@ def index_put_(func, *args, **kwargs):
         + indices[inp._ragged_idx + 1 :]
     )
 
-    if func == torch.ops.aten.index_put_.default:
+    if func is torch.ops.aten.index_put_.default:
         inp._values = func(inp._values, func_indices, **new_kwargs)
         return inp
 
@@ -2066,7 +2074,10 @@ def mean_dim(func, *args, **kwargs):
     )
 
     if reduce_on_ragged and not reduce_on_batch:
-        assert not reduce_on_non_batch
+        if reduce_on_non_batch:
+            raise AssertionError(
+                "Cannot reduce on both ragged and non-batch dimensions without also reducing on batch"
+            )
         # calculate an intermediate sum and leave the dim in for normalization purposes
         keepdim = new_kwargs["keepdim"]
         new_kwargs["keepdim"] = True
@@ -2615,7 +2626,7 @@ def _nested_select_backward_default(func, *args, **kwargs):
 
 
 @register_jagged_func(torch.ops.aten.record_stream.default, "self: jt_all, s: any")
-def record_stream_default(func, *args, **kwargs):
+def record_stream_default(func, *args, **kwargs) -> None:
     inp = args[0]
     stream = args[1]
     # ensure all components live until stream computation completes

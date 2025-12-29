@@ -353,7 +353,7 @@ static PyObject* NodeBase__update_args_kwargs(
     Py_CLEAR(node->_kwargs);
     node->_kwargs = map_aggregate(args[1], visit_fn);
     Py_RETURN_NONE;
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr;
   }
 }
@@ -397,7 +397,7 @@ static PyObject* NodeBase__replace_input_with(
 
     PyObject* update_args[2] = {new_args.get(), new_kwargs.get()};
     return NodeBase__update_args_kwargs(self, update_args, 2);
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr;
   }
 }
@@ -544,19 +544,19 @@ static int NodeBase_set_sort_key(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef NodeBase_methods[] = {
     {"_update_args_kwargs",
-     (PyCFunction)(void*)(NodeBase__update_args_kwargs),
+     (PyCFunction)(void*)NodeBase__update_args_kwargs,
      METH_FASTCALL,
      "Internal method: do not call directly."},
     {"_remove_from_list",
-     (PyCFunction)(void*)(NodeBase__remove_from_list),
+     (PyCFunction)(void*)NodeBase__remove_from_list,
      METH_NOARGS,
      "Internal method: do not call directly."},
     {"_replace_input_with",
-     (PyCFunction)(void*)(NodeBase__replace_input_with),
+     (PyCFunction)(void*)NodeBase__replace_input_with,
      METH_FASTCALL,
      "Internal method: replace occurrences of one input Node with another."},
     {"_prepend",
-     (PyCFunction)(void*)(NodeBase__prepend),
+     (PyCFunction)(void*)NodeBase__prepend,
      METH_O,
      "Internal method: do not call directly."},
     {"__lt__",
@@ -802,7 +802,7 @@ static PyObject* py_map_aggregate(
     // args[0]: aggregate, args[1]: callable fn
     return map_aggregate(
         args[0], [fn](PyObject* a) { return PyObject_CallOneArg(fn, a); });
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr; // error should already be set
   }
 }
@@ -824,7 +824,7 @@ static PyObject* py_map_arg(
       }
       return Py_NewRef(a);
     });
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr; // error should already be set
   }
 }
@@ -832,11 +832,11 @@ static PyObject* py_map_arg(
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
 static PyMethodDef extra_methods[] = {
     {"_fx_map_aggregate",
-     (PyCFunction)(void*)(py_map_aggregate),
+     (PyCFunction)(void*)py_map_aggregate,
      METH_FASTCALL,
      "Recursively apply a function to every element in an aggregate object."},
     {"_fx_map_arg",
-     (PyCFunction)(void*)(py_map_arg),
+     (PyCFunction)(void*)py_map_arg,
      METH_FASTCALL,
      "Recursively apply a function to every Node in an aggregate object."},
     {nullptr, nullptr, 0, nullptr} // Sentinel
