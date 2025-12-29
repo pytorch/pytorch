@@ -41,6 +41,7 @@ from torch.nn.attention.flex_attention import (
     AuxRequest,
     BlockMask,
     create_block_mask,
+    create_varlen_block_mask,
     flex_attention,
     flex_attention_hop,
     noop_mask,
@@ -1742,6 +1743,154 @@ class TestFlexAttention(InductorTestCase):
             0,
             (seqlens_tensor, offset_tensor, query_full, key_full, value_full),
         )
+
+    @supported_platform
+    def test_create_varlen_block_mask(self, device):
+        """Test create_varlen_block_mask creates correct block mask structure."""
+        BLOCK_SIZE = 128
+
+        # Create sequence lengths for 3 documents
+        q_seq_lens = torch.tensor([300, 200, 500], device=device)
+        kv_seq_lens = torch.tensor([300, 200, 500], device=device)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Check that the block mask has correct structure
+        # Expected total Q length: ceil(300/128)*128 + ceil(200/128)*128 + ceil(500/128)*128
+        # = 384 + 256 + 512 = 1152
+        expected_q_len = 384 + 256 + 512
+        expected_kv_len = 384 + 256 + 512
+        self.assertEqual(block_mask.seq_lengths, (expected_q_len, expected_kv_len))
+
+        # Check offsets and limits are populated
+        self.assertIsNotNone(block_mask.q_offsets)
+        self.assertIsNotNone(block_mask.q_limits)
+        self.assertIsNotNone(block_mask.kv_offsets)
+        self.assertIsNotNone(block_mask.kv_limits)
+
+        # Check shapes: 9 total blocks (3 + 2 + 4 for each doc)
+        num_q_blocks = expected_q_len // BLOCK_SIZE  # 9 blocks
+        num_kv_blocks = expected_kv_len // BLOCK_SIZE  # 9 blocks
+        self.assertEqual(block_mask.q_offsets.shape, (1, 1, num_q_blocks))
+        self.assertEqual(block_mask.kv_offsets.shape, (1, 1, num_kv_blocks))
+
+        # Check that limits are reasonable (between 0 and BLOCK_SIZE)
+        self.assertTrue((block_mask.q_limits >= 0).all())
+        self.assertTrue((block_mask.q_limits <= BLOCK_SIZE).all())
+        self.assertTrue((block_mask.kv_limits >= 0).all())
+        self.assertTrue((block_mask.kv_limits <= BLOCK_SIZE).all())
+
+        # Verify offsets are correct
+        # Doc 0: 3 blocks at offsets 0, 128, 256
+        # Doc 1: 2 blocks at offsets 384, 512
+        # Doc 2: 4 blocks at offsets 640, 768, 896, 1024
+        expected_offsets = torch.tensor(
+            [0, 128, 256, 384, 512, 640, 768, 896, 1024],
+            device=device, dtype=torch.int32
+        )
+        self.assertTrue(
+            torch.equal(block_mask.q_offsets[0, 0], expected_offsets),
+            f"q_offsets mismatch: {block_mask.q_offsets[0, 0]} vs {expected_offsets}"
+        )
+
+        # Verify limits: last block of each doc has partial limits
+        # Doc 0: 300 tokens -> blocks have 128, 128, 44 valid
+        # Doc 1: 200 tokens -> blocks have 128, 72 valid
+        # Doc 2: 500 tokens -> blocks have 128, 128, 128, 116 valid
+        expected_limits = torch.tensor(
+            [128, 128, 44, 128, 72, 128, 128, 128, 116],
+            device=device, dtype=torch.int32
+        )
+        self.assertTrue(
+            torch.equal(block_mask.q_limits[0, 0], expected_limits),
+            f"q_limits mismatch: {block_mask.q_limits[0, 0]} vs {expected_limits}"
+        )
+
+        # Verify the block-level dense mask has correct shape
+        # to_dense() returns [B, H, num_q_blocks, num_kv_blocks]
+        dense_block_mask = block_mask.to_dense()
+        self.assertEqual(dense_block_mask.shape, (1, 1, num_q_blocks, num_kv_blocks))
+
+        # Check block-level sparsity pattern:
+        # Doc 0 blocks (0, 1, 2) should only attend to doc 0 blocks (0, 1, 2)
+        # Due to causal mask, block 0 attends to block 0, block 1 to 0-1, block 2 to 0-2
+        # Cross-document blocks should be zero
+        # Block 0 (doc 0) should not attend to blocks 3+ (doc 1, 2)
+        self.assertFalse(
+            dense_block_mask[0, 0, 0, 3].item(),
+            "Block 0 (doc 0) should not attend to block 3 (doc 1)"
+        )
+        self.assertFalse(
+            dense_block_mask[0, 0, 3, 0].item(),
+            "Block 3 (doc 1) should not attend to block 0 (doc 0)"
+        )
+        # Block within same doc should attend (causal allows diagonal and below)
+        self.assertTrue(
+            dense_block_mask[0, 0, 2, 0].item(),
+            "Block 2 (doc 0) should attend to block 0 (doc 0) - causal"
+        )
+        self.assertTrue(
+            dense_block_mask[0, 0, 2, 2].item(),
+            "Block 2 (doc 0) should attend to block 2 (doc 0) - diagonal"
+        )
+
+    @supported_platform
+    def test_create_varlen_block_mask_single_doc(self, device):
+        """Test create_varlen_block_mask with a single document."""
+        BLOCK_SIZE = 64
+
+        q_seq_lens = torch.tensor([100], device=device)
+        kv_seq_lens = torch.tensor([100], device=device)
+
+        def full_attention_mask(b, h, q_idx, kv_idx):
+            return torch.ones((), dtype=torch.bool, device=b.device)
+
+        block_mask = create_varlen_block_mask(
+            full_attention_mask,
+            B=1,
+            H=2,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Expected: ceil(100/64)*64 = 128
+        expected_len = 128
+        self.assertEqual(block_mask.seq_lengths, (expected_len, expected_len))
+
+        # Verify shapes
+        num_blocks = 2  # 128 / 64 = 2 blocks
+        self.assertEqual(block_mask.q_offsets.shape, (1, 2, num_blocks))
+        self.assertEqual(block_mask.kv_offsets.shape, (1, 2, num_blocks))
+
+        # Check limits: first block has 64 valid, second has 36 valid
+        expected_limits = torch.tensor([64, 36], device=device, dtype=torch.int32)
+        self.assertTrue(
+            torch.equal(block_mask.q_limits[0, 0], expected_limits),
+            f"q_limits mismatch: {block_mask.q_limits[0, 0]} vs {expected_limits}"
+        )
+
+        # With full attention mask, all blocks should attend to all blocks
+        # (within valid positions)
+        dense_block_mask = block_mask.to_dense()
+        self.assertEqual(dense_block_mask.shape, (1, 2, num_blocks, num_blocks))
+        # All blocks should be active (full attention within single doc)
+        self.assertTrue(dense_block_mask[0, 0, 0, 0].item())
+        self.assertTrue(dense_block_mask[0, 0, 0, 1].item())
+        self.assertTrue(dense_block_mask[0, 0, 1, 0].item())
+        self.assertTrue(dense_block_mask[0, 0, 1, 1].item())
 
     @supported_platform
     def test_index_multiple(self, device):
