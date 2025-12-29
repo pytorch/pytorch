@@ -182,6 +182,14 @@ def _supports_nontrivial_mask_graphs() -> bool:
     return torch.cuda.get_device_capability()[0] == 10
 
 
+def _is_symbol_from_tensor_shape(symbol: sympy.Symbol, shape_env: Any) -> bool:
+    """Check if a symbol originates from a tensor size/stride (TensorPropertySource)."""
+    from torch._dynamo.source import TensorPropertySource
+
+    sources = shape_env.var_to_sources.get(symbol, [])
+    return any(isinstance(s, TensorPropertySource) for s in sources)
+
+
 def _has_unsupported_captured_scalars(
     score_mod_other_buffers: Sequence[Any],
     mask_mod_other_buffers: Sequence[Any],
@@ -190,15 +198,24 @@ def _has_unsupported_captured_scalars(
 
     When compiling with dynamic=True, captured Python scalars in score_mod or
     mask_mod may become:
-    - sympy expressions (for captured ints)
-    - 0-dim CPU tensors with unbacked symbols (for captured floats)
+    - sympy symbols from LocalSource (captured ints) - NOT from tensor shapes
+    - 0-dim CPU tensors (captured floats)
 
-    The FLASH backend cannot inline these into the CuteDSL template.
+    Symbols from TensorPropertySource (tensor size/stride) are fine because they
+    get resolved at runtime.
+
+    The FLASH backend cannot inline captured scalar symbolic values into the CuteDSL template.
     """
+    from torch._inductor.virtualized import V
+
+    shape_env = V.graph.sizevars.shape_env
+
     for buf in list(score_mod_other_buffers) + list(mask_mod_other_buffers):
-        # Captured int becomes sympy.Expr
+        # Captured int becomes sympy.Symbol - check if it's NOT from a tensor shape
         if isinstance(buf, sympy.Expr):
-            return True
+            for symbol in buf.free_symbols:
+                if not _is_symbol_from_tensor_shape(symbol, shape_env):
+                    return True
         # Captured float becomes 0-dim TensorBox on CPU
         if isinstance(buf, TensorBox):
             device = buf.get_device()
