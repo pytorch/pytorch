@@ -244,7 +244,6 @@ from .misc import (
     MethodWrapperVariable,
     NumpyDTypeVariable,
     NumpyVariable,
-    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -1394,8 +1393,6 @@ class VariableBuilder:
                 self_obj,
                 source=self.source,
             )
-        elif istype(value, object):
-            return ObjectVariable(value, source=self.source)
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
             # using PyGetSetDef. Python, on attribute lookup, can decide to
@@ -3890,8 +3887,6 @@ class SourcelessBuilder:
         ):
             proxy = tx.output.bound_symbols[value.node.expr]
             return SymNodeVariable.create(tx, proxy)
-        elif istype(value, object):
-            return ObjectVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
