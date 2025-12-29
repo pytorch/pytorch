@@ -77,6 +77,7 @@ class Instruction:
     offset: Optional[int] = None
     starts_line: Optional[int] = None
     is_jump_target: bool = False
+    # pyrefly: ignore[missing-attribute]
     positions: Optional["dis.Positions"] = None
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
@@ -157,7 +158,7 @@ elif sys.version_info >= (3, 11):
 
 else:
 
-    def inst_has_op_bits(name: str):
+    def inst_has_op_bits(name: str) -> bool:
         return False
 
 
@@ -637,6 +638,7 @@ def encode_varint(n: int) -> list[int]:
 
 def linetable_311_writer(
     first_lineno: int,
+    # pyrefly: ignore[missing-attribute]
 ) -> tuple[list[int], Callable[[Optional["dis.Positions"], int], None]]:
     """
     Used to create typing.CodeType.co_linetable
@@ -647,6 +649,8 @@ def linetable_311_writer(
     linetable = []
     lineno = first_lineno
 
+    # TODO: Change this to `dis.Positions | None` once we bump to python 3.11
+    # pyrefly: ignore[missing-attribute]
     def update(positions: Optional["dis.Positions"], inst_size: int) -> None:
         nonlocal lineno
         lineno_new = positions.lineno if positions else None
@@ -915,6 +919,7 @@ def devirtualize_jumps(instructions: list[Instruction]) -> None:
                 if sys.version_info < (3, 11):
                     # `arg` is expected to be bytecode offset, whereas `offset` is byte offset.
                     # Divide since bytecode is 2 bytes large.
+                    assert target.offset is not None
                     inst.arg = int(target.offset / 2)
                 else:
                     raise RuntimeError("Python 3.11+ should not have absolute jumps")
@@ -1396,7 +1401,9 @@ def debug_checks(code: types.CodeType) -> None:
     """Make sure our assembler produces same bytes as we start with"""
     dode, _ = transform_code_object(code, lambda x, y: None, safe=True)
     assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
-    assert code.co_lnotab == dode.co_lnotab, debug_bytes(code.co_lnotab, dode.co_lnotab)
+    assert list(code.co_lines()) == list(dode.co_lines()), (
+        "line table mismatch via co_lines()"
+    )
 
 
 HAS_LOCAL = set(dis.haslocal)

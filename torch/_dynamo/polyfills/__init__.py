@@ -6,21 +6,19 @@ Python polyfills for common builtins.
 #       2. While adding a new polyfill module, also add it to POLYFILLED_MODULE_NAMES in loader.py.
 #          Add it in the TYPE_CHECKING block below as well.
 
-# mypy: allow-untyped-defs
-
 import types
 from collections import OrderedDict
-from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Hashable, Iterable, Iterator, Mapping, Sequence
 from itertools import repeat as _repeat
 from operator import eq, ne
 from typing import Any, TYPE_CHECKING
 
 import torch
 
-from ..utils import dict_keys
-
 
 if TYPE_CHECKING:
+    from ..utils import dict_keys
+
     # Load by torch._dynamo.polyfills.loader
     # See also the POLYFILLED_MODULE_NAMES in torch/_dynamo/polyfills/loader.py
     # Put the submodules here to avoid circular imports
@@ -55,11 +53,13 @@ from torch.overrides import BaseTorchFunctionMode
 # These contexts do nothing on enter, but provide the correct exit logic to ensure
 # the stack state is correct.
 class NoEnterTorchFunctionMode(BaseTorchFunctionMode):
-    def __enter__(self):
+    def __enter__(self) -> None:
         pass
 
 
-def index(iterator, item, start=0, end=None):
+def index(
+    iterator: Iterator[Any], item: Any, start: int = 0, end: int | None = None
+) -> int:
     from itertools import islice
 
     for i, elem in islice(enumerate(iterator), start, end):
@@ -69,18 +69,18 @@ def index(iterator, item, start=0, end=None):
     raise ValueError(f"{item} is not in {type(iterator)}")
 
 
-def repeat(item, count):
+def repeat(item: Any, count: int) -> Iterator[Any]:
     for _ in range(count):
         yield item
 
 
-def radians(x):
+def radians(x: float) -> float:
     import math
 
     return math.pi / 180.0 * x
 
 
-def impl_CONTAINS_OP_fallback(a, b):
+def impl_CONTAINS_OP_fallback(a: Any, b: Iterable[Any]) -> bool:
     # performs fallback "a in b"
     if hasattr(b, "__iter__"):
         # use __iter__ if __contains__ is not available
@@ -91,7 +91,7 @@ def impl_CONTAINS_OP_fallback(a, b):
     raise TypeError(f"argument of type {type(b)} is not iterable")
 
 
-def accumulate_grad(x, new_grad):
+def accumulate_grad(x: torch.Tensor, new_grad: torch.Tensor | None) -> None:
     # polyfills according to the Gradient Layout Contract
     if new_grad is None:
         return
@@ -107,7 +107,9 @@ def accumulate_grad(x, new_grad):
 
 # This mirrors
 # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
-def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
+def list_cmp(
+    op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]
+) -> bool:
     """emulate `(1,2,3) > (1,2)` etc"""
 
     # Optimization: For equality, short-circuit if lengths differ
@@ -129,7 +131,7 @@ def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequenc
     return op(left_len, right_len)
 
 
-def dict___eq__(d, other):
+def dict___eq__(d: dict[Any, Any], other: Any) -> bool:
     if (len(d) != len(other)) or (d.keys() != other.keys()):
         return False
 
@@ -143,7 +145,7 @@ def dict___eq__(d, other):
     return True
 
 
-def set_symmetric_difference(set1, set2, cls=set):
+def set_symmetric_difference(set1: Iterable[Any], set2: Iterable[Any], cls=set) -> Any:
     symmetric_difference_set = set()
     for x in set1:
         if x not in set2:
@@ -154,13 +156,13 @@ def set_symmetric_difference(set1, set2, cls=set):
     return cls(symmetric_difference_set)
 
 
-def set_symmetric_difference_update(set1, set2):
+def set_symmetric_difference_update(set1: set[Any], set2: set[Any]) -> None:
     result = set1.symmetric_difference(set2)
     set1.clear()
     set1.update(result)
 
 
-def set_isdisjoint(set1, set2):
+def set_isdisjoint(set1: set[Any], set2: set[Any]) -> bool:
     if not isinstance(set2, Iterable):
         raise TypeError(f"'{type(set2)}' object is not iterable")
 
@@ -173,7 +175,7 @@ def set_isdisjoint(set1, set2):
     return True
 
 
-def set_intersection(set1, *others, cls=set):
+def set_intersection(set1: set[Any], *others: Iterable[Any], cls=set) -> Any:
     if len(others) == 0:
         return set1.copy()
 
@@ -195,13 +197,13 @@ def set_intersection(set1, *others, cls=set):
     return cls(intersection_set)
 
 
-def set_intersection_update(set1, *others):
+def set_intersection_update(set1: set[Any], *others: Iterable[Any]) -> None:
     result = set1.intersection(*others)
     set1.clear()
     set1.update(result)
 
 
-def set_union(set1, *others, cls=None):
+def set_union(set1: set[Any], *others: Iterable[Any], cls: Any | None = None) -> Any:
     # frozenset also uses this function
     if cls is None:
         cls = type(set1)
@@ -224,7 +226,7 @@ def set_union(set1, *others, cls=None):
     return cls(union_set)
 
 
-def set_update(set1, *others):
+def set_update(set1: set[Any], *others: Iterable[Any]) -> set[Any]:
     if len(others) == 0:
         return set1
 
@@ -234,7 +236,7 @@ def set_update(set1, *others):
                 set1.add(x)
 
 
-def set_difference(set1, *others, cls=set):
+def set_difference(set1: set[Any], *others: Iterable[Any], cls=set) -> Any:
     if len(others) == 0:
         return set1.copy()
 
@@ -255,40 +257,50 @@ def set_difference(set1, *others, cls=set):
     return cls(difference_set)
 
 
-def set_difference_update(set1, *others):
+def set_difference_update(set1: set[Any], *others: Iterable[Any]) -> None:
     result = set1.difference(*others)
     set1.clear()
     set1.update(result)
 
 
-def assert_dict_equal(self_, d1, d2, msg=None):
+def assert_dict_equal(
+    self_: Any, d1: dict[Any, Any], d2: dict[Any, Any], msg: str | None = None
+) -> None:
     self_.assertTrue(d1 == d2, msg)
 
 
-def assert_multi_line_equal(self_, first, second, msg=None):
+def assert_multi_line_equal(
+    self_: Any, first: Any, second: Any, msg: str | None = None
+) -> None:
     return self_.assertTrue(first == second, msg)
 
 
 # The original impl. uses difflib
-def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
+def assert_sequence_equal(
+    self_: Any,
+    seq1: Sequence[Any],
+    seq2: Sequence[Any],
+    msg: str | None = None,
+    seq_type: Any | None = None,
+) -> None:
     return self_.assertTrue(seq1 == seq2, msg)
 
 
-def getattr_and_trace(*args, **kwargs):
+def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
     wrapper_obj = args[0]
     attr_name = args[1]
     fn = getattr(wrapper_obj, attr_name)
     return fn(*args[2:], **kwargs)
 
 
-def mapping_get(obj, key, value=None, /):
+def mapping_get(obj: Mapping[Any, Any], key: Any, value: Any | None = None, /) -> Any:
     try:
         return obj.__getitem__(key)
     except KeyError:
         return value
 
 
-def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
+def instantiate_user_defined_class_object(cls, /, *args: Any, **kwargs: Any) -> Any:
     obj = cls.__new__(cls, *args, **kwargs)
 
     # Only call __init__ if the object is an instance of the class
@@ -298,7 +310,7 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     return obj
 
 
-def mutable_mapping_update(self, data=(), /, **kwargs):
+def mutable_mapping_update(self, data: Any = (), /, **kwargs: Any) -> None:
     if isinstance(data, Mapping):
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
@@ -333,13 +345,13 @@ def mutable_mapping_update(self, data=(), /, **kwargs):
 
 
 # Used with something like dict(obj)
-def construct_dict(cls, data=(), /, **kwargs):
+def construct_dict(cls, data: Any = (), /, **kwargs: Any) -> Any:
     self = cls.__new__(cls)
     mutable_mapping_update(self, data, **kwargs)
     return self
 
 
-def foreach_map_fn(*args):
+def foreach_map_fn(*args: Any) -> Any:
     op = args[0]
     new_args: list[Any] = []
     at_least_one_list = False
@@ -361,7 +373,11 @@ def foreach_map_fn(*args):
     return out
 
 
-def foreach_lerp_inplace(self, end, weight):
+def foreach_lerp_inplace(
+    self,
+    end: list[torch.Tensor] | tuple[torch.Tensor, ...] | None,
+    weight: Sequence[bool | complex | float | int],
+) -> None:
     # decompose foreach lerp into constituent ops, prevents a graph break due to
     # converting a value to a scalar when arg[2] is a single tensor
     result = torch._foreach_sub(end, self)
@@ -369,11 +385,15 @@ def foreach_lerp_inplace(self, end, weight):
     return torch._foreach_add_(self, result)
 
 
-def foreach_pow_scalar(scalar, exps):
+def foreach_pow_scalar(
+    scalar: Any, exps: Sequence[bool | complex | float | int]
+) -> tuple[torch.Tensor, ...]:
     return torch._foreach_pow([scalar for _ in exps], exps)
 
 
-def addcmul_inplace(self, tensor1, tensor2, value):
+def addcmul_inplace(
+    self, tensor1: torch.Tensor, tensor2: torch.Tensor, value: Any
+) -> None:
     return self.add_(tensor1 * tensor2 * value)
 
 
@@ -385,7 +405,7 @@ def predicate(obj: Any) -> bool:
     return False
 
 
-def cmp_eq(a, b):
+def cmp_eq(a: Any, b: Any) -> bool:
     # Note that the commented `is` check should ideally be removed. This is a
     # CPython optimization that skips the __eq__ checks it the obj id's are
     # same. But, these lines adds many `is` nodes in the Fx graph for
@@ -400,7 +420,7 @@ def cmp_eq(a, b):
     return result is not NotImplemented and result
 
 
-def cmp_ne(a, b):
+def cmp_ne(a: Any, b: Any) -> bool:
     # Check if __ne__ is overridden
     if isinstance(type(a).__ne__, types.FunctionType):
         result = a.__ne__(b)
@@ -414,21 +434,21 @@ def cmp_ne(a, b):
     return not cmp_eq(a, b)
 
 
-def cmp_lt(a, b):
+def cmp_lt(a: Any, b: Any) -> bool:
     result = a.__lt__(b)
     if result is NotImplemented:
         raise TypeError(f"{type(a)} does not support the < operator")
     return result
 
 
-def cmp_le(a, b):
+def cmp_le(a: Any, b: Any) -> bool:
     # Check if __le__ is overridden
     if isinstance(type(a).__le__, types.FunctionType):
         return a.__le__(b)
     return cmp_eq(a, b) or cmp_lt(a, b)
 
 
-def cmp_gt(a, b):
+def cmp_gt(a: Any, b: Any) -> bool:
     # Check if __gt__ is overridden
     if isinstance(type(a).__gt__, types.FunctionType):
         return a.__gt__(b)
@@ -436,14 +456,16 @@ def cmp_gt(a, b):
     return cmp_lt(b, a)
 
 
-def cmp_ge(a, b):
+def cmp_ge(a: Any, b: Any) -> bool:
     # Check if __ge__ is overridden
     if isinstance(type(a).__ge__, types.FunctionType):
         return a.__ge__(b)
     return cmp_eq(a, b) or cmp_gt(a, b)
 
 
-def group_tensors_by_device_and_dtype(tensorlistlist, with_indices=False):
+def group_tensors_by_device_and_dtype(
+    tensorlistlist: list[list[torch.Tensor | None]], with_indices: bool = False
+) -> dict[tuple[torch.device, torch.dtype], tuple[list[list[Any]], list[int]]]:
     """Pure Python implementation of torch._C._group_tensors_by_device_and_dtype.
 
     Groups tensors by their device and dtype. This is useful before sending
@@ -458,7 +480,9 @@ def group_tensors_by_device_and_dtype(tensorlistlist, with_indices=False):
         A dict mapping (device, dtype) tuples to (grouped_tensorlistlist, indices).
     """
     # Result dict: (device, dtype) -> (list of lists, indices)
-    result: dict[tuple[torch.device, torch.dtype], tuple[list[list], list[int]]] = {}
+    result: dict[
+        tuple[torch.device, torch.dtype], tuple[list[list[Any]], list[int]]
+    ] = {}
 
     if not tensorlistlist or not tensorlistlist[0]:
         return result
