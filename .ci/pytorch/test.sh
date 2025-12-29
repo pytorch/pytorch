@@ -346,6 +346,7 @@ test_python_smoke() {
 test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
   install_flash_attn_cute
+  install_cutlass_api
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
@@ -355,6 +356,7 @@ test_python_smoke_b200() {
       nn/attention/test_open_registry \
       inductor/test_flex_flash \
       inductor/test_torchinductor \
+      inductor/test_nv_universal_gemm \
     $PYTHON_TEST_EXTRA_OPTION \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -368,13 +370,26 @@ test_h100_distributed() {
   assert_git_not_dirty
 }
 
-test_h100_symm_mem() {
+_run_symm_mem_tests() {
   # symmetric memory test
   time python test/run_test.py --include distributed/test_symmetric_memory.py  $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   time python test/run_test.py --include distributed/test_nvshmem_triton.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
-  time python test/run_test.py --include distributed/test_nccl.py $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
+  time python test/run_test.py --include distributed/test_nccl.py -k NCCLSymmetricMemoryTest $PYTHON_TEST_EXTRA_OPTION --upload-artifacts-while-running
   assert_git_not_dirty
+}
+
+test_h100_symm_mem() {
+  # Configure NVSHMEM to use smaller heap and work without NVSwitch
+  # Default heap is 128GB which fails cuMemMap on AWS H100 instances
+  export NVSHMEM_SYMMETRIC_SIZE=4G
+  # Disable NVLink Switch features (not available on AWS H100 instances)
+  export NVSHMEM_DISABLE_NVLS=1
+  _run_symm_mem_tests
+}
+
+test_b200_symm_mem() {
+  _run_symm_mem_tests
 }
 
 test_h100_cutlass_backend() {
@@ -458,6 +473,29 @@ test_inductor_distributed() {
   # this runs on both single-gpu and multi-gpu instance. It should be smart about skipping tests that aren't supported
   # with if required # gpus aren't available
   python test/run_test.py --include distributed/test_dynamo_distributed distributed/test_inductor_collectives distributed/test_aten_comm_compute_reordering distributed/test_compute_comm_reordering --verbose
+  assert_git_not_dirty
+}
+
+test_inductor_core() {
+  time python test/run_test.py \
+    --include-inductor-core-tests \
+    --exclude inductor/test_benchmark_fusion \
+              inductor/test_cutlass_backend \
+              inductor/test_flex_attention \
+              inductor/test_max_autotune \
+              inductor/test_aot_inductor_arrayref \
+              inductor/test_aot_inductor_arrayref \
+              inductor/test_compiled_autograd \
+              inductor/test_compile_subprocess \
+              inductor/test_cpu_cpp_wrapper \
+              inductor/test_cpu_repro \
+              inductor/test_cpu_select_algorithm \
+              inductor/test_torchinductor_dynamic_shapes \
+              inductor/test_torchinductor \
+              inductor/test_mkldnn_pattern_matcher \
+              inductor/test_torchinductor_codegen_dynamic_shapes \
+    --verbose \
+    --upload-artifacts-while-running
   assert_git_not_dirty
 }
 
@@ -760,17 +798,6 @@ test_perf_for_dashboard() {
             "${target_flag[@]}" --"$mode" --"$dtype" --backend "$backend" "$@" \
             --output "$TEST_REPORTS_DIR/${backend}_max_autotune_${suite}_${dtype}_${mode}_${device}_${target}.csv"
       fi
-      if [[ "$DASHBOARD_TAG" == *cudagraphs_low_precision-true* ]] && [[ "$mode" == "inference" ]]; then
-        # TODO: This has a new dtype called quant and the benchmarks script needs to be updated to support this.
-        # The tentative command is as follows. It doesn't work now, but it's ok because we only need mock data
-        # to fill the dashboard.
-        $TASKSET python "benchmarks/dynamo/$suite.py" \
-          "${target_flag[@]}" --"$mode" --quant --backend "$backend" "$@" \
-          --output "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_${device}_${target}.csv" || true
-        # Copy cudagraph results as mock data, easiest choice?
-        cp "$TEST_REPORTS_DIR/${backend}_with_cudagraphs_${suite}_${dtype}_${mode}_${device}_${target}.csv" \
-          "$TEST_REPORTS_DIR/${backend}_cudagraphs_low_precision_${suite}_quant_${mode}_${device}_${target}.csv"
-      fi
     done
   done
 }
@@ -845,6 +872,12 @@ test_inductor_halide() {
 }
 
 test_inductor_pallas() {
+  # Set TPU target for TPU tests
+  if [[ "${TEST_CONFIG}" == *inductor-pallas-tpu* ]]; then
+    export PALLAS_TARGET_TPU=1
+    # Check if TPU backend is available
+    python -c "import jax; devices = jax.devices('tpu'); print(f'Found {len(devices)} TPU device(s)'); assert len(devices) > 0, 'No TPU devices found'"
+  fi
   python test/run_test.py --include inductor/test_pallas.py --verbose
   assert_git_not_dirty
 }
@@ -863,8 +896,14 @@ test_dynamo_benchmark() {
   local shard_id="$1"
   shift
 
+  # Exclude torchrec_dlrm for CUDA 13 as FBGEMM is not compatible
+  local extra_args=()
+  if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+    extra_args=(--exclude-exact torchrec_dlrm)
+  fi
+
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
-    test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
+    test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "${extra_args[@]}" "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
     # TODO (huydhn): Just smoke test some sample models
     if [[ "${TEST_CONFIG}" == *b200* ]]; then
@@ -876,7 +915,7 @@ test_dynamo_benchmark() {
         export TORCHBENCH_ONLY_MODELS="BERT_pytorch"
       fi
     fi
-    test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "$@"
+    test_single_dynamo_benchmark "dashboard" "$suite" "$shard_id" "${extra_args[@]}" "$@"
   else
     if [[ "${TEST_CONFIG}" == *cpu* ]]; then
       local dt="float32"
@@ -884,17 +923,17 @@ test_dynamo_benchmark() {
         dt="amp"
       fi
       if [[ "${TEST_CONFIG}" == *freezing* ]]; then
-        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" --freezing "$@"
+        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" --freezing "${extra_args[@]}" "$@"
       else
-        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" "$@"
+        test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --"$dt" "${extra_args[@]}" "$@"
       fi
     elif [[ "${TEST_CONFIG}" == *aot_inductor* ]]; then
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "${extra_args[@]}" "$@"
     elif [[ "${TEST_CONFIG}" == *max_autotune_inductor* ]]; then
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "${extra_args[@]}" "$@"
     else
-      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "$@"
-      test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
+      test_single_dynamo_benchmark "inference" "$suite" "$shard_id" --inference --bfloat16 "${extra_args[@]}" "$@"
+      test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "${extra_args[@]}" "$@"
     fi
   fi
 }
@@ -1259,7 +1298,7 @@ test_libtorch_agnostic_targetting() {
 
     # Build wheel with current PyTorch (this has TORCH_TARGET_VERSION 2_9_0)
     echo "Building 2.9 extension wheel with current PyTorch..."
-    pushd test/cpp_extensions/libtorch_agnostic_2_9_extension
+    pushd test/cpp_extensions/libtorch_agn_2_9_extension
     time python setup.py bdist_wheel
 
     # Save the wheel
@@ -1716,6 +1755,7 @@ test_linux_aarch64() {
         test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
         test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops profiler/test_memory_profiler \
         distributed/elastic/timer/api_test distributed/elastic/timer/local_timer_example distributed/elastic/timer/local_timer_test \
+        test_linalg \
         --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 
   # Dynamo tests
@@ -1734,6 +1774,7 @@ test_linux_aarch64() {
        inductor/test_split_cat_fx_passes inductor/test_compile inductor/test_torchinductor \
        inductor/test_torchinductor_codegen_dynamic_shapes inductor/test_torchinductor_dynamic_shapes inductor/test_memory \
        inductor/test_triton_cpu_backend inductor/test_triton_extension_backend inductor/test_mkldnn_pattern_matcher inductor/test_cpu_cpp_wrapper \
+       inductor/test_cpu_select_algorithm \
        --shard "$SHARD_NUMBER" "$NUM_TEST_SHARDS" --verbose
 }
 
@@ -1771,7 +1812,8 @@ test_operator_microbenchmark() {
 
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
-  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv optimizer; do
+  # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
+  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv optimizer activation norm; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
@@ -1795,6 +1837,11 @@ test_attention_microbenchmark() {
 
   $TASKSET python score_mod.py --config configs/config_basic.yaml \
     --output-json-for-dashboard "${TEST_REPORTS_DIR}/attention_microbenchmark.json"
+}
+
+test_openreg() {
+  python test/run_test.py --openreg --verbose
+  assert_git_not_dirty
 }
 
 if ! [[ "${BUILD_ENVIRONMENT}" == *libtorch* || "${BUILD_ENVIRONMENT}" == *-bazel-* ]]; then
@@ -1825,6 +1872,12 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     echo "vLLM CI uses TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
     (cd .ci/lumen_cli && python -m pip install -e .)
+
+    if [[ -d "${HF_CACHE}" ]]; then
+        # Enable HF_CACHE directory for vLLM tests. If this works out, we can enable
+        # this for (1) all CI jobs and (2) LF fleet
+        export HF_HOME="${HF_CACHE}"
+    fi
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch
@@ -1901,7 +1954,8 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
   else
     # Do this after checkout_install_torchbench to ensure we clobber any
     # nightlies that torchbench may pull in
-    if [[ "${TEST_CONFIG}" != *cpu* && "${TEST_CONFIG}" != *xpu* ]]; then
+    # Skip torchrec/fbgemm for cuda13 as they're not compatible yet
+    if [[ "${TEST_CONFIG}" != *cpu* && "${TEST_CONFIG}" != *xpu* && "${BUILD_ENVIRONMENT}" != *cuda13* ]]; then
       install_torchrec_and_fbgemm
     fi
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
@@ -1912,6 +1966,8 @@ elif [[ "${TEST_CONFIG}" == *inductor_cpp_wrapper* ]]; then
   if [[ "$SHARD_NUMBER" -eq "1" ]]; then
     test_inductor_aoti_cpp
   fi
+elif [[ "${TEST_CONFIG}" == *inductor_core* ]]; then
+  test_inductor_core
 elif [[ "${TEST_CONFIG}" == *inductor* ]]; then
   install_torchvision
   test_inductor_shard "${SHARD_NUMBER}"
@@ -1973,9 +2029,11 @@ elif [[ "${TEST_CONFIG}" == h100_distributed ]]; then
 elif [[ "${TEST_CONFIG}" == "h100-symm-mem" ]]; then
   test_h100_symm_mem
 elif [[ "${TEST_CONFIG}" == "b200-symm-mem" ]]; then
-  test_h100_symm_mem
+  test_b200_symm_mem
 elif [[ "${TEST_CONFIG}" == h100_cutlass_backend ]]; then
   test_h100_cutlass_backend
+elif [[ "${TEST_CONFIG}" == openreg ]]; then
+  test_openreg
 else
   install_torchvision
   install_monkeytype

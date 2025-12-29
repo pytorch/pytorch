@@ -5,17 +5,13 @@
 
 #include <functional>
 
-#include <c10/core/DeviceGuard.h>
 #include <c10/core/ScalarType.h>
-#include <c10/core/StreamGuard.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Logging.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/autograd/engine.h>
 #include <torch/csrc/autograd/function_hook.h>
-#include <torch/csrc/autograd/functions/accumulate_grad.h>
-#include <torch/csrc/autograd/profiler.h>
 #include <torch/csrc/autograd/utils/grad_layout_contract.h>
 #include <torch/csrc/autograd/utils/lambda_post_hook.h>
 #include <torch/csrc/distributed/c10d/comm.hpp>
@@ -1151,6 +1147,9 @@ void Reducer::initialize_buckets(
         }
         if (!options.has_dtype()) {
           options = options.dtype(variable.dtype());
+          if (variable.is_complex()) {
+            bucket.is_complex_bucket = true;
+          }
         } else {
           REDUCER_CHECK(
               variable.dtype() == options.dtype(),
@@ -1201,6 +1200,10 @@ void Reducer::initialize_buckets(
         LOG(INFO)
             << "Reducer: comm-optimized memory allocator not found, using regular one";
         bucket.gradients = at::empty({bucketSize}, options);
+
+        if (bucket.is_complex_bucket) {
+          bucket.gradients = at::view_as_real(bucket.gradients).reshape({-1});
+        }
       }
 
       // Note:  "Gradient Layout Contract"
@@ -1267,21 +1270,55 @@ void Reducer::initialize_bucket_views(Reducer::Bucket& bucket) {
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
 
-    if (v.is_non_overlapping_and_dense()) {
-      // If the param's memory is dense, match its layout, anticipating
-      // the autograd engine (AccumulateGrad) will also create gradients
-      // matching its layout.
-      bucket.bucket_views_in.push_back(
-          gradients.as_strided(v.sizes(), v.strides(), offset));
+    if (v.is_complex() && bucket.is_complex_bucket) {
+      const auto real_offset = offset * 2;
+      const auto real_length = length * 2;
+
+      if (v.is_non_overlapping_and_dense()) {
+        auto complex_strides = v.strides();
+        std::vector<int64_t> real_strides;
+        real_strides.reserve(complex_strides.size() + 1);
+        for (auto s : complex_strides) {
+          real_strides.push_back(s * 2);
+        }
+        real_strides.push_back(1);
+
+        auto complex_sizes = v.sizes();
+        std::vector<int64_t> real_sizes(
+            complex_sizes.begin(), complex_sizes.end());
+        real_sizes.push_back(2);
+
+        auto real_view =
+            gradients.as_strided(real_sizes, real_strides, real_offset);
+        auto complex_view = at::view_as_complex(real_view);
+        bucket.bucket_views_in.push_back(complex_view);
+      } else {
+        auto real_view = gradients.narrow(
+            0,
+            static_cast<int64_t>(real_offset),
+            static_cast<int64_t>(real_length));
+        auto complex_view = at::view_as_complex(
+            real_view.reshape({static_cast<int64_t>(length), 2}));
+        bucket.bucket_views_in.push_back(complex_view.view(v.sizes()));
+      }
     } else {
-      // Fall back to a C-style contiguous view, again anticipating
-      // AccumulateGrad will do the same when stashing grads for non-dense
-      // params.
-      bucket.bucket_views_in.push_back(
-          gradients
-              .narrow(
-                  0, static_cast<int64_t>(offset), static_cast<int64_t>(length))
-              .view(v.sizes()));
+      if (v.is_non_overlapping_and_dense()) {
+        // If the param's memory is dense, match its layout, anticipating
+        // the autograd engine (AccumulateGrad) will also create gradients
+        // matching its layout.
+        bucket.bucket_views_in.push_back(
+            gradients.as_strided(v.sizes(), v.strides(), offset));
+      } else {
+        // Fall back to a C-style contiguous view, again anticipating
+        // AccumulateGrad will do the same when stashing grads for non-dense
+        // params.
+        bucket.bucket_views_in.push_back(gradients
+                                             .narrow(
+                                                 0,
+                                                 static_cast<int64_t>(offset),
+                                                 static_cast<int64_t>(length))
+                                             .view(v.sizes()));
+      }
     }
     // By default `bucket_views_out` and `bucket_views_in` are
     // essentially the same thing.
@@ -1322,21 +1359,54 @@ void Reducer::populate_bucket_views_out(
     const auto offset = bucket.offsets[i];
     const auto length = bucket.lengths[i];
 
-    if (v.is_non_overlapping_and_dense()) {
-      // If the param's memory is dense, match its layout, anticipating
-      // the autograd engine (AccumulateGrad) will also create gradients
-      // matching its layout.
-      bucket.bucket_views_out.push_back(
-          tensor.as_strided(v.sizes(), v.strides(), offset));
+    if (v.is_complex() && bucket.is_complex_bucket) {
+      const auto real_offset = offset * 2;
+
+      if (v.is_non_overlapping_and_dense()) {
+        auto complex_strides = v.strides();
+        std::vector<int64_t> real_strides;
+        real_strides.reserve(complex_strides.size() + 1);
+        for (auto s : complex_strides) {
+          real_strides.push_back(s * 2);
+        }
+        real_strides.push_back(1);
+
+        auto complex_sizes = v.sizes();
+        std::vector<int64_t> real_sizes(
+            complex_sizes.begin(), complex_sizes.end());
+        real_sizes.push_back(2);
+
+        auto real_view =
+            tensor.as_strided(real_sizes, real_strides, real_offset);
+        bucket.bucket_views_out.push_back(at::view_as_complex(real_view));
+      } else {
+        const auto real_length = length * 2;
+        auto real_view = tensor.narrow(
+            0,
+            static_cast<int64_t>(real_offset),
+            static_cast<int64_t>(real_length));
+        auto complex_view = at::view_as_complex(
+            real_view.reshape({static_cast<int64_t>(length), 2}));
+        bucket.bucket_views_out.push_back(complex_view.view(v.sizes()));
+      }
     } else {
-      // Fall back to a C-style contiguous view, again anticipating
-      // AccumulateGrad will do the same when stashing grads for non-dense
-      // params.
-      bucket.bucket_views_out.push_back(
-          tensor
-              .narrow(
-                  0, static_cast<int64_t>(offset), static_cast<int64_t>(length))
-              .view(v.sizes()));
+      if (v.is_non_overlapping_and_dense()) {
+        // If the param's memory is dense, match its layout, anticipating
+        // the autograd engine (AccumulateGrad) will also create gradients
+        // matching its layout.
+        bucket.bucket_views_out.push_back(
+            tensor.as_strided(v.sizes(), v.strides(), offset));
+      } else {
+        // Fall back to a C-style contiguous view, again anticipating
+        // AccumulateGrad will do the same when stashing grads for non-dense
+        // params.
+        bucket.bucket_views_out.push_back(tensor
+                                              .narrow(
+                                                  0,
+                                                  static_cast<int64_t>(offset),
+                                                  static_cast<int64_t>(length))
+                                              .view(v.sizes()));
+      }
     }
   }
 }

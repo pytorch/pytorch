@@ -53,6 +53,7 @@ num_comprehensive_padding = 0
 num_matches_for_scatter_upon_const_tensor = 0
 
 num_loop_reordering = 0
+num_auto_chunking: int = 0
 
 # counter for parallel reduction.
 parallel_reduction_count = 0
@@ -73,6 +74,7 @@ def reset() -> None:
     global num_loop_reordering
     global parallel_reduction_count
     global codegen_mix_order_reduction
+    global num_auto_chunking
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -87,6 +89,7 @@ def reset() -> None:
     num_loop_reordering = 0
     parallel_reduction_count = 0
     codegen_mix_order_reduction = 0
+    num_auto_chunking = 0
 
 
 @dataclass

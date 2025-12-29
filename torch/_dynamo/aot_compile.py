@@ -4,7 +4,7 @@ import io
 import logging
 import pickle
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING
@@ -78,6 +78,7 @@ class AOTCompilePickler(pickle.Pickler):
 class AOTCompiledFunction:
     _artifacts: CompileArtifacts
     _guard_check_enabled: bool = True
+    _extra_globals: Optional[dict[str, object]] = None
 
     def guard_check(self, *args: Any, **kwargs: Any) -> bool:
         f_locals: dict[str, Any] = {}
@@ -101,7 +102,9 @@ class AOTCompiledFunction:
 
         # pyrefly: ignore [read-only]
         self.fn = self._artifacts.runtime_env.forward_callable(
-            self._artifacts.backend_id, self._artifacts.compiled_fn
+            self._artifacts.backend_id,
+            self._artifacts.compiled_fn,
+            extra_globals=self._extra_globals,
         )
 
         if self._artifacts.guard_manager is None:
@@ -149,7 +152,9 @@ class AOTCompiledFunction:
         return buf.getvalue()
 
     @classmethod
-    def deserialize(cls, data: bytes) -> "AOTCompiledFunction":
+    def deserialize(
+        cls, data: bytes, f_globals: Optional[dict[str, object]] = None
+    ) -> "AOTCompiledFunction":
         from torch._dynamo.package import SerializedCode
 
         state = pickle.loads(data)
@@ -163,7 +168,7 @@ class AOTCompiledFunction:
         state["original_code"] = SerializedCode.to_code_object(state["original_code"])
 
         artifacts = CompileArtifacts(**state)
-        return cls(artifacts)
+        return cls(artifacts, _extra_globals=f_globals)
 
     def disable_guard_check(self) -> None:
         self._guard_check_enabled = False
@@ -195,8 +200,8 @@ def aot_compile_fullgraph(
             from torch._dynamo.types import GuardFilterEntry
 
             def new_guard_filter_fn(
-                guard_entries: list[GuardFilterEntry],
-            ) -> list[bool]:
+                guard_entries: Sequence[GuardFilterEntry],
+            ) -> Sequence[bool]:
                 return [
                     (
                         not (
@@ -226,6 +231,7 @@ def aot_compile_fullgraph(
             torch._guards.tracing(tracing_context),
             torch._functorch.config.patch(
                 {
+                    "bypass_autograd_cache_key": True,
                     "bundled_autograd_cache": True,
                     "force_non_lazy_backward_lowering": True,
                 }
@@ -271,7 +277,9 @@ def aot_compile_fullgraph(
             device_type=device_type,
             backend_name=getattr(backend, "compiler_name", "unknown"),
         )
-        aot_compiled_fn = AOTCompiledFunction(_artifacts=artifacts)
+        aot_compiled_fn = AOTCompiledFunction(
+            _artifacts=artifacts, _extra_globals=fn.__globals__
+        )
 
     return aot_compiled_fn
 
