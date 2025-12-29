@@ -41,7 +41,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented
+from .exc import unimplemented
 from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -249,10 +249,16 @@ class SideEffects:
         if self.is_reconstructing_generator():
             # This is missing the case where one mutates a tensor. See
             # test_generator.py::test_reconstruct_generator_tensor_mutation
-            raise SideEffectsError(
-                "Cannot reconstruct a generator with variable mutations. "
+            unimplemented(
+                gb_type="Generator reconstruction with mutations",
+                context=f"mutating object: {item}",
+                explanation="Cannot reconstruct a generator with variable mutations. "
                 "Dynamo needs to fully exhaust the generator, which may cause "
-                "unintended variable modifications."
+                "unintended variable modifications.",
+                hints=[
+                    "Remove mutations from the generator.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
             )
         assert item.mutation_type is not None
         if not is_side_effect_safe(item.mutation_type):

@@ -201,13 +201,9 @@ class GraphModule(torch.nn.Module):
         d = {1: t}
         fn(t, d)
         self.assertEqual(len(counters["unimplemented"]), 1)
-        self.assertEqual(
-            dict(counters["unimplemented"]),
-            {
-                "Cannot reconstruct a generator with variable mutations. "
-                "Dynamo needs to fully exhaust the generator, which may cause "
-                "unintended variable modifications.": 1
-            },
+        self.assertIn(
+            "Cannot reconstruct a generator with variable mutations",
+            next(iter(counters["unimplemented"].keys())),
         )
 
     def test_reconstruct_generator_with_dict_mutation_before(self):
@@ -255,13 +251,9 @@ class GraphModule(torch.nn.Module):
         c = Counter()
         fn(t, c)
         self.assertEqual(len(counters["unimplemented"]), 1)
-        self.assertEqual(
-            dict(counters["unimplemented"]),
-            {
-                "Cannot reconstruct a generator with variable mutations. "
-                "Dynamo needs to fully exhaust the generator, which may cause "
-                "unintended variable modifications.": 1
-            },
+        self.assertIn(
+            "Cannot reconstruct a generator with variable mutations",
+            next(iter(counters["unimplemented"].keys())),
         )
 
     def test_reconstruct_generator_with_object_mutation_before(self):
