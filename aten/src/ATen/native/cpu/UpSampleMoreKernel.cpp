@@ -236,6 +236,9 @@ void cpu_upsample_nearest_backward_channels_last(
   auto grad_output = grad_output_.contiguous(channels_last_memory_format);
   auto grad_input = grad_input_.contiguous(channels_last_memory_format);
 
+  // zero grad_input before acc
+  grad_input.zero_();
+
   auto grad_output_data = grad_output.const_data_ptr<scalar_t>();
   auto grad_input_data = grad_input.mutable_data_ptr<scalar_t>();
 
@@ -265,6 +268,10 @@ void cpu_upsample_nearest_backward_channels_last(
     }
 
     for (const auto n : c10::irange(begin, end)) {
+      //reset per batch for per-thread acc buffer
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>){
+        memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
+      }
       int64_t input_offset = buffer_data.get() == nullptr ? n * input_slice_size : 0;
       for (const auto oh : c10::irange(output_height)) {
         int64_t ih = nearest_idx_fn(oh, input_height, output_height, scales[0]);
@@ -296,6 +303,10 @@ void cpu_upsample_nearest_backward_channels_last(
     }
 
     for (const auto n : c10::irange(begin, end)) {
+      //reset per batch for per-thread acc buffer
+      if constexpr (!std::is_same_v<scalar_t, opmath_t>){
+        memset(acc_data_ptr, 0, sizeof(opmath_t) * input_slice_size);
+      }
       int64_t input_offset = buffer_data.get() == nullptr ? n * input_slice_size : 0;
       for (int64_t od = 0; od < output_depth; od++) {
         int64_t id = nearest_idx_fn(od, input_depth, output_depth, scales[0]);
