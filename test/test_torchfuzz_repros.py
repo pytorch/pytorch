@@ -13,7 +13,6 @@ import pytest
 
 import torch
 from torch.testing._internal.common_utils import run_tests, TestCase
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON
 
 
 class TestFuzzerCompileIssues(TestCase):

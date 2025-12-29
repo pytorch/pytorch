@@ -3,7 +3,6 @@
 #include <c10/cuda/CUDAFunctions.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <cuda_runtime.h>
 
 #include <memory>
 #include <string>
@@ -136,7 +135,7 @@ std::string c10_retrieve_device_side_assertion_info() {
     // Something failed, let's talk about that
     oss << failures_found
         << " CUDA device-side assertion failures were found on GPU #"
-        << device_num << "!" << std::endl;
+        << device_num << '!' << std::endl;
     if (assertion_data_for_device.assertion_count >
         C10_CUDA_DSA_ASSERTION_COUNT) {
       oss << "But at least " << assertion_data_for_device.assertion_count
@@ -151,17 +150,17 @@ std::string c10_retrieve_device_side_assertion_info() {
       oss << "Assertion failure " << i << std::endl;
       oss << "  GPU assertion failure message = " << self.assertion_msg
           << std::endl;
-      oss << "  File containing assertion = " << self.filename << ":"
+      oss << "  File containing assertion = " << self.filename << ':'
           << self.line_number << std::endl;
       oss << "  Device function containing assertion = " << self.function_name
           << std::endl;
-      oss << "  Thread ID that failed assertion = [" << self.thread_id[0] << ","
-          << self.thread_id[1] << "," << self.thread_id[2] << "]" << std::endl;
-      oss << "  Block ID that failed assertion = [" << self.block_id[0] << ","
-          << self.block_id[1] << "," << self.block_id[2] << "]" << std::endl;
+      oss << "  Thread ID that failed assertion = [" << self.thread_id[0] << ','
+          << self.thread_id[1] << ',' << self.thread_id[2] << ']' << std::endl;
+      oss << "  Block ID that failed assertion = [" << self.block_id[0] << ','
+          << self.block_id[1] << ',' << self.block_id[2] << ']' << std::endl;
       if (launch_info.generation_number == self.caller) {
         oss << "  File containing kernel launch = "
-            << launch_info.launch_filename << ":" << launch_info.launch_linenum
+            << launch_info.launch_filename << ':' << launch_info.launch_linenum
             << std::endl;
         oss << "  Function containing kernel launch = "
             << launch_info.launch_function << std::endl;
@@ -175,7 +174,7 @@ std::string c10_retrieve_device_side_assertion_info() {
         if (launch_registry.gather_launch_stacktrace) {
           oss << "Launch stacktracing disabled." << std::endl;
         } else {
-          oss << "\n" << launch_info.launch_stacktrace << std::endl;
+          oss << '\n' << launch_info.launch_stacktrace << std::endl;
         }
       } else {
         oss << "  CPU launch site info: Unavailable, the circular queue wrapped around. Increase `CUDAKernelLaunchRegistry::max_size`."

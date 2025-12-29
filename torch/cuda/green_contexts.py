@@ -32,11 +32,11 @@ class GreenContext(_GreenContext):
 
     # Note that these functions are bypassed by we define them here
     # for Sphinx documentation purposes
-    def set_context(self) -> None:
+    def set_context(self) -> None:  # pylint: disable=useless-parent-delegation
         r"""Make the green context the current context."""
         return super().set_context()  # type: ignore[misc]
 
-    def pop_context(self) -> None:
+    def pop_context(self) -> None:  # pylint: disable=useless-parent-delegation
         r"""Assuming the green context is the current context, pop it from the
         context stack and restore the previous context.
         """

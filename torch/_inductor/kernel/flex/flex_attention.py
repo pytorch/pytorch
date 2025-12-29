@@ -7,12 +7,13 @@ import logging
 import math
 from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 
 import torch
 from torch._inductor.virtualized import V
+from torch.nn.attention.flex_attention import _Backend
 
 from ...ir import ComputedBuffer, ExternKernel, FixedLayout, TensorBox
 from ...lowering import empty, empty_strided, lowerings, register_lowering
@@ -21,6 +22,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
+from ...utils import can_use_tma
 from .common import (
     build_subgraph_buffer,
     create_indices_fake,
@@ -38,7 +40,10 @@ from .flex_cpu import lower_cpu
 from .flex_decoding import _use_flex_decoding, create_flex_decoding_kernel
 from .flex_flash_attention import (
     _use_flex_flash_attention,
+    _use_flex_flash_attention_backward,
+    create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
+    is_trivial_mask_graph,
 )
 
 
@@ -49,6 +54,17 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 Expr = sympy.Expr
+
+
+def _sanitize_kernel_options_for_triton(
+    kernel_options: dict[str, Any],
+) -> tuple[dict[str, Any], _Backend]:
+    """We always strip quotes around str values, we only need this in lowering, so we pop it here
+    to avoid passing to triton constexpr dict
+    """
+    sanitized = dict(kernel_options)
+    backend = cast(_Backend, sanitized.pop("BACKEND", "AUTO"))
+    return sanitized, backend
 
 
 @SymbolicGridFn
@@ -93,7 +109,7 @@ def flex_attention(
     subgraph,
     block_mask,
     scale,
-    kernel_options,
+    kernel_options: dict[str, Any],
     score_mod_other_buffers,
     mask_mod_other_buffers,
 ):
@@ -170,7 +186,7 @@ def flex_attention(
     )
     freeze_irnodes(mask_graph_buffer)
 
-    kernel_options = dict(kernel_options)
+    kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
@@ -180,7 +196,19 @@ def flex_attention(
     enable_gqa = V.graph.sizevars.evaluate_expr(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
-    if _use_flex_decoding(query, kv_indices, value, kernel_options, enable_gqa):
+
+    can_use_decode = _use_flex_decoding(
+        query, kv_indices, value, kernel_options, enable_gqa
+    )
+    use_decode = (backend == "TRITON_DECODE") or (backend == "AUTO" and can_use_decode)
+
+    if backend == "TRITON_DECODE" and not can_use_decode:
+        raise RuntimeError(
+            "BACKEND='TRITON_DECODE' was specified but flex_decoding cannot be used for this input. "
+            "flex_decoding is only available for short sequence lengths with specific configurations."
+        )
+
+    if use_decode:
         return create_flex_decoding_kernel(
             query,
             key,
@@ -227,6 +255,7 @@ def flex_attention(
         mask_graph,
         kernel_options,
         num_score_mod_placeholders=len(placeholder_inps),
+        backend=backend,
     ):
         return create_flex_flash_attention_kernel(
             query,
@@ -354,8 +383,9 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", False)
+        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+            cur_kernel_options["USE_TMA"] = False
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
@@ -635,7 +665,14 @@ def flex_attention_backward(*args, **kwargs):
         f"Bq and Bkv must broadcastable. Got Bq={Bq} and Bkv={Bkv}"
     )
 
-    kernel_options = dict(kernel_options)
+    kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    # Add check for mixed dtypes
+    if query.dtype != key.dtype or query.dtype != value.dtype:
+        raise ValueError(
+            f"Backward pass with mixed query, key, and value dtype is not supported, "
+            f"got query.dtype={query.dtype}, key.dtype={key.dtype}, "
+            f"and value.dtype={value.dtype}"
+        )
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
@@ -697,6 +734,33 @@ def flex_attention_backward(*args, **kwargs):
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
     freeze_irnodes(mask_graph_buffer)
+
+    if _use_flex_flash_attention_backward(
+        fw_graph,
+        mask_graph,
+        backend=backend,
+        joint_outputs=joint_outputs,
+        score_mod_other_buffers=score_mod_other_buffers,
+    ):
+        needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
+        return create_flex_flash_attention_backward_kernel(
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            scale,
+            kernel_options,
+            fw_subgraph_buffer=fw_subgraph_buffer,
+            joint_subgraph_buffer=joint_outputs.grad_input,
+            score_mod_other_buffers=list(score_mod_other_buffers),
+            mask_graph_buffer=mask_graph_buffer if needs_block_mask else None,
+            q_num_blocks=q_num_blocks if needs_block_mask else None,
+            q_indices=q_indices if needs_block_mask else None,
+            full_q_num_blocks=full_q_num_blocks if needs_block_mask else None,
+            full_q_indices=full_q_indices if needs_block_mask else None,
+        )
 
     # Construct layout with stride order matching K
     key_size = [Bq, Hkv, seq_len_kv, qk_head_dim]

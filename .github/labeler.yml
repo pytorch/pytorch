@@ -91,13 +91,6 @@
 "ciflow/trunk":
 - .ci/docker/ci_commit_pins/triton.txt
 
-"oncall: distributed":
-- torch/csrc/distributed/**
-- torch/distributed/**
-- torch/nn/parallel/**
-- test/distributed/**
-- torch/testing/_internal/distributed/**
-
 "release notes: distributed (checkpoint)":
 - torch/distributed/checkpoint/**
 - test/distributed/checkpoint/**
@@ -134,6 +127,12 @@
 "ciflow/vllm":
 - .github/ci_commit_pins/vllm.txt
 
+"ciflow/inductor-pallas":
+- torch/_inductor/codegen/pallas.py
+- test/inductor/test_pallas.py
+- test/inductor/pallas_expected_failures/**
+- .github/workflows/inductor-pallas.yml
+
 "ciflow/b200":
 - test/test_matmul_cuda.py
 - test/test_scaled_matmul_cuda.py
@@ -156,7 +155,7 @@
 - test/inductor/test_max_autotune.py
 - third_party/fbgemm
 
-"ciflow/rocm":
+"ciflow/rocm-mi300":
 - test/test_matmul_cuda.py
 - test/test_scaled_matmul_cuda.py
 - test/inductor/test_fp8.py

@@ -74,7 +74,7 @@ def mesh_scatter(
     async_op: bool = False,
     *,
     group_src: int = 0,
-) -> Optional[Work]:
+) -> Work | None:
     """
     scatter a list of tensors to a device mesh dimension. We by default
     use the first rank of the mesh dimension as the source of truth, i.e
@@ -135,7 +135,7 @@ def mesh_broadcast(
     async_op: bool = False,
     *,
     group_src: int = 0,
-) -> Optional[Work]:
+) -> Work | None:
     """
     broadcast the tensor to a device mesh dimension. We by default
     use the first rank of the mesh dimension as the source of truth, i.e
@@ -344,28 +344,53 @@ def redistribute_cost(
     # Transformation that considered for redistribute cost:
     # 1. allgather 2. alltoall
     # 3. allreduce 4. reduce_scatter
-    for i, (current, target) in enumerate(
-        zip(current_spec.placements, target_spec.placements)
-    ):
+    from torch.distributed._functional_collectives import _are_we_tracing
+    from torch.distributed.tensor._redistribute import (
+        _gen_transform_infos,
+        _gen_transform_infos_non_cached,
+    )
+
+    # No redistribution needed when placements are already identical.
+    # This also prevents potential failures in _gen_transform_infos for certain configurations
+    # (e.g., sub-meshes) where finding a transform path between identical states may error out.
+    if current_spec.placements == target_spec.placements:
+        return cost
+
+    # TODO(zpcore): Support _StridedShard redistribution. Remove the temporary
+    # fix, which is to prevent StridedShard erroring out.
+    if current_spec.shard_order is None or target_spec.shard_order is None:
+        return float("inf")
+
+    if _are_we_tracing():
+        transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
+    else:
+        transform_infos = _gen_transform_infos(current_spec, target_spec)
+    for transform_info in transform_infos:
+        assert current_spec.tensor_meta is not None, (
+            "spec should have tensor meta defined!"
+        )
+        current = transform_info.src_dst_placements[0]
+        target = transform_info.src_dst_placements[1]
         if current == target:
             continue
-
-        num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[i]
+        mesh_dim = transform_info.mesh_dim
+        num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
         if current.is_shard() and target.is_replicate():
             # allgather gives larger comm bytes
             comm_bytes_gb *= num_devices_on_mesh_dim
             # add up allgather comm cost
-            cost += allgather_cost(comm_bytes_gb, mesh_topo, i)
+            cost += allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim)
         elif current.is_shard() and target.is_shard():
-            # should be alltoall comm, since we haven't implement it yet, add penalty
+            # should be alltoall comm, since we haven't implement it yet, add 1.0 as penalty
             # to favor allgather instead
-            cost += allgather_cost(comm_bytes_gb, mesh_topo, i) + 1.0
+            # TODO: add alltoall_cost
+            cost += allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim) + 1.0
         elif current.is_partial() and target.is_replicate():
             # add up allreduce comm cost
-            cost += allreduce_cost(comm_bytes_gb, mesh_topo, i)
+            cost += allreduce_cost(comm_bytes_gb, mesh_topo, mesh_dim)
         elif current.is_partial() and target.is_shard():
             # add up reduce_scatter comm cost
-            cost += reduce_scatter_cost(comm_bytes_gb, mesh_topo, i)
+            cost += reduce_scatter_cost(comm_bytes_gb, mesh_topo, mesh_dim)
             # after reduce_scatter the comm bytes for further collectives halved.
             comm_bytes_gb /= num_devices_on_mesh_dim
         elif current.is_shard() and target.is_partial():

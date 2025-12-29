@@ -16,6 +16,10 @@ class SerializableCallable(abc.ABC):
     def deserialize_compile_artifacts(cls, data: bytes) -> Any:
         pass
 
+    @abc.abstractmethod
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        pass
+
 
 class BundledAOTAutogradSerializableCallable(SerializableCallable):
     """
