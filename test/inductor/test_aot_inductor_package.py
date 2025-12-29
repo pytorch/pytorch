@@ -320,7 +320,6 @@ class TestAOTInductorPackage(TestCase):
 
     @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfXpu  # doesn't support multi-arch binary
     def test_compile_after_package_multi_arch(self):
         if self.device != GPU_TYPE:
             raise unittest.SkipTest("Only meant to test GPU_TYPE")
@@ -364,7 +363,6 @@ class TestAOTInductorPackage(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @requires_triton_ptxas_compat
-    @skipIfXpu  # build system may be different
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_after_package_static(self):
         # compile_standalone will set package_cpp_only=True
@@ -424,7 +422,6 @@ class TestAOTInductorPackage(TestCase):
 
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @requires_triton_ptxas_compat
-    @skipIfXpu  # build system may be different
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_standalone_cos(self):
         # compile_standalone will set package_cpp_only=True
@@ -456,9 +453,9 @@ class TestAOTInductorPackage(TestCase):
                 a_path = build_path / "libcos.a"
                 self.assertTrue(a_path.exists())
 
+    @skipIfXpu(msg="Standalone compile API in _Exporter is not supported on XPU yet")
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @requires_triton_ptxas_compat
-    @skipIfXpu  # doesn't support multi-arch binary
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter(self):
         self.check_package_cpp_only()
@@ -511,9 +508,9 @@ class TestAOTInductorPackage(TestCase):
                             " 0  0  0\n 0  0  0\n[ CPUFloatType{3,3} ]\n",
                         )
 
+    @skipIfXpu(msg="Standalone compile API in _Exporter is not supported on XPU yet")
     @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
-    @skipIfXpu  # doesn't support multi-arch binary
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
     def test_compile_with_exporter_weights(self):
         self.check_package_cpp_only()

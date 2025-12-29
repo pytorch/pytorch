@@ -114,11 +114,13 @@ static std::unique_ptr<sycl::kernel> _createKernel(
     const void* start,
     const void* end,
     const std::string& funcName,
-    uint32_t sharedMemBytes) {
+    uint32_t sharedMemBytes,
+    bool isSpirv) {
   size_t size = reinterpret_cast<const uint8_t*>(end) -
       reinterpret_cast<const uint8_t*>(start);
 
-  auto mod = _createModule(reinterpret_cast<const uint8_t*>(start), size);
+  auto mod =
+      _createModule(reinterpret_cast<const uint8_t*>(start), size, isSpirv);
 
   return _createKernel(mod, funcName.c_str());
 }
