@@ -1394,8 +1394,6 @@ class VariableBuilder:
                 self_obj,
                 source=self.source,
             )
-        elif istype(value, object):
-            return ObjectVariable(value, source=self.source)
         elif isinstance(value, types.GetSetDescriptorType):
             # GetSet descriptors are C functions attached to an attribute lookup
             # using PyGetSetDef. Python, on attribute lookup, can decide to
@@ -1713,6 +1711,8 @@ class VariableBuilder:
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
             else:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
+        elif istype(value, object):
+            return ObjectVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -1932,7 +1932,10 @@ class VariableBuilder:
                 gb_type="Attempted to wrap RNN, GRU, or LSTM",
                 context=str(value),
                 explanation="Dynamo does not support RNN, GRU, or LSTM.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[
+                    "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         if getattr(value, "_is_fsdp_managed_module", False):

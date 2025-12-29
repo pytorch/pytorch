@@ -413,7 +413,7 @@ class SideEffects:
 
     def track_object_new(
         self,
-        cls_source: Source,
+        cls_source: Source | None,
         user_cls: Any,
         variable_cls: Any,
         options: dict[str, Any],
