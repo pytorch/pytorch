@@ -207,8 +207,15 @@ class NVUniversalGemmKernel(Kernel):
             raw_args.append(None)
 
         # Generate the kernel call using triton=True for Python-based kernels
+        # Pass raw_keys as None list to match raw_args length
+        # TODO(nikhilap)  We don't use autotune_args like the Triton path
         wrapper.generate_kernel_call(
-            name, call_args, triton=True, arg_types=arg_types, raw_args=raw_args
+            name,
+            call_args,
+            triton=True,
+            arg_types=arg_types,
+            raw_args=raw_args,
+            raw_keys=[None] * len(raw_args),
         )
 
         # Deallocate workspace after kernel call
