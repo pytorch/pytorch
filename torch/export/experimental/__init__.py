@@ -398,17 +398,24 @@ class _ExportPackage:
         example_inputs_map: dict[str, int] | None = (
             {} if package_example_inputs else None
         )
-        use_cuda = False
         for name, ep in self._method_overloads:
             name = name.replace(":", "__")
             # TODO: also dump kwargs
             # TODO: currently only support list of Tensors and they need to be on the same device
             if not ep.example_inputs:
                 continue
+
+            device_type = "cpu"
             for inp in ep.example_inputs[0]:
-                if isinstance(inp, torch.Tensor) and inp.device.type == "cuda":
+                if isinstance(inp, torch.Tensor) and inp.device.type != "cpu":
                     # TODO: more carefully determine the device type
-                    use_cuda = True
+                    if device_type == "cpu":
+                        device_type = inp.device.type
+                    else:
+                        assert device_type == inp.device.type, (
+                            "Mixed device types in example inputs are not supported yet."
+                        )
+
             if package_example_inputs:
                 assert example_inputs_map is not None
                 example_inputs_map[name] = len(ep.example_inputs[0])
@@ -416,15 +423,13 @@ class _ExportPackage:
                     path = Path(base_directory) / f"{name}_input_{i}.pt"
                     torch.save(t, path)
 
-        # Detect if ROCm is being used
-        is_hip = torch.version.hip is not None
-        cmake_file_str = _get_make_file(package_name, model_names, use_cuda, is_hip)
+        cmake_file_str = _get_make_file(package_name, model_names, device_type)
 
         with open(Path(base_directory) / "CMakeLists.txt", "w") as file:
             file.write(cmake_file_str)
 
         main_file_str = _get_main_cpp_file(
-            package_name, model_names, use_cuda, example_inputs_map, is_hip
+            package_name, model_names, example_inputs_map, device_type=device_type
         )
         with open(Path(base_directory) / "main.cpp", "w") as file:
             file.write(main_file_str)
