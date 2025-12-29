@@ -140,17 +140,15 @@ jobs:
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/setup-linux
 
+      - name: Login to ECR
+        if: inputs.build_environment != 'linux-s390x-binary-manywheel'
+        uses: ./.github/actions/ecr-login
+
       - name: Chown workspace
         if: inputs.build_environment != 'linux-s390x-binary-manywheel'
         uses: ./.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
-
-      - name: Clean workspace
-        shell: bash
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
 
       - name: Checkout PyTorch to pytorch dir
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
