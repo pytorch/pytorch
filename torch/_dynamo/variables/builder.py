@@ -504,6 +504,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
+            TorchScriptObjectVariable
         }
 
     def get_source(self):

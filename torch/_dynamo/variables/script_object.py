@@ -265,7 +265,19 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 return real_obj  # pyrefly: ignore[bad-return]
 
             constant_val = method(*args_const, **kwargs_const)
-            return ConstantVariable(constant_val)
+
+            if self.source:
+                # convert to tuple to make it hashable
+                kwargs_tuple = tuple(sorted(kwargs_const.items()))
+                call_source = CallMethodSource(
+                    self.source,
+                    name,
+                    tuple(args_const),
+                    kwargs_tuple,  # pyrefly: ignore[bad-argument-type]
+                )
+                return VariableBuilder(tx, call_source)(constant_val)
+            else:
+                return SourcelessBuilder.create(tx, constant_val)
 
         if is_opaque_value_type(value_type):
             return call_method_and_return_constant(self.value)

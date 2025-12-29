@@ -128,6 +128,7 @@ from .source import (
     AttrSource,
     CallFunctionNoArgsSource,
     CallMethodItemSource,
+    CallMethodSource,
     ChainedSource,
     ClosureSource,
     CodeSource,
@@ -1673,6 +1674,17 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
+        elif istype(source, CallMethodSource):
+            assert base_guard_manager  # to make mypy happy
+            method_name = source.method_name
+            args = source.args
+            kwargs = dict(source.kwargs)
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: getattr(x, method_name)(*args, **kwargs),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
         elif istype(source, FloatTensorSource):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
@@ -2267,7 +2279,7 @@ class GuardBuilder(GuardBuilderBase):
         )
 
         if torch.distributed.is_available():
-            from torch.distributed.device_mesh import DeviceMesh
+            from torch.distributed.device_mesh import _MeshLayout, DeviceMesh
             from torch.distributed.tensor.placement_types import (
                 _StridedShard,
                 Partial,
@@ -2281,6 +2293,7 @@ class GuardBuilder(GuardBuilderBase):
                 Partial,
                 DeviceMesh,
                 _StridedShard,
+                _MeshLayout,
             )
 
         from torch.export.dynamic_shapes import _IntWrapper
