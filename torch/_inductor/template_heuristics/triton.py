@@ -45,6 +45,9 @@ if TYPE_CHECKING:
 
     from triton import Config as TritonConfig
 
+else:
+    from torch._inductor.runtime.triton_compat import Config as TritonConfig
+
 
 # Gemm Configs
 @dataclasses.dataclass
@@ -58,7 +61,7 @@ class BaseConfig:
     block_k: int
     num_stages: int
     num_warps: int
-    hint_override: Optional[int] = None
+    hint_override: Optional[int] = dataclasses.field(kw_only=True, default=None)
 
 
 @dataclasses.dataclass
@@ -67,7 +70,7 @@ class GemmConfig(BaseConfig):
     Gemm configuration used for most backends (CPU, CUDA)
     """
 
-    group_m: int = 8
+    group_m: int = dataclasses.field(kw_only=True, default=8)
 
 
 ConvConfig = BaseConfig
@@ -251,7 +254,9 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         # Exhaustive search for mm configs
         self.exhaustive_configs: list[BaseConfig] = [
-            GemmConfig(BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, group_m)
+            GemmConfig(
+                BLOCK_M, BLOCK_N, BLOCK_K, num_stages, num_warps, group_m=group_m
+            )
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
             )
@@ -623,18 +628,26 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
 
             for c in configs:
-                scaled_config = dataclasses.replace(
-                    c,
-                    block_m=max(min(int(c.block_m * scale), m_hint), min_block_size),
-                    block_n=max(min(int(c.block_n * scale), n_hint), min_block_size),
-                    block_k=max(min(int(c.block_k * scale), k_hint), min_block_size_k),
-                    hint_override=hint_override,
-                )
+                block_m = max(min(int(c.block_m * scale), m_hint), min_block_size)
+                block_n = max(min(int(c.block_n * scale), n_hint), min_block_size)
+                block_k = max(min(int(c.block_k * scale), k_hint), min_block_size_k)
+                if not exclude(block_m, block_n, block_k):
+                    # This copy is expensive, so avoid it if we can.
+                    if (block_m, block_n, block_k, hint_override) != (
+                        c.block_m,
+                        c.block_n,
+                        c.block_k,
+                        c.hint_override,
+                    ):
+                        c = dataclasses.replace(
+                            c,
+                            block_m=block_m,
+                            block_n=block_n,
+                            block_k=block_k,
+                            hint_override=hint_override,
+                        )
 
-                if not exclude(
-                    scaled_config.block_m, scaled_config.block_n, scaled_config.block_k
-                ):
-                    scaled_configs.append(scaled_config)
+                    scaled_configs.append(c)
 
         return scaled_configs
 
@@ -649,9 +662,13 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         try:
             device = torch.cuda.current_device()
             props = torch.cuda.get_device_properties(device)
-            if not hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+            if hasattr(props, "shared_memory_per_block_optin"):  # for NVidia GPUs
+                sm_available = int(props.shared_memory_per_block_optin)
+            elif hasattr(props, "shared_memory_per_block"):  # for ROCm
+                sm_available = int(props.shared_memory_per_block)
+            else:
                 return None
-            sm_available = int(props.shared_memory_per_block_optin)
+
         except Exception:
             # If CUDA is not available or properties cannot be queried, return None
             return None
@@ -747,8 +764,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
     def triton_config(
         self, num_stages: int, num_warps: int, **kwargs: Any
     ) -> TritonConfig:
-        from triton import Config as TritonConfig  # type: ignore[attr-defined]
-
         return TritonConfig(kwargs, num_stages=num_stages, num_warps=num_warps)
 
     def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
@@ -906,7 +921,6 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
 
     def __init__(self) -> None:
         super().__init__()
-
         self.sm_120_default_flex_config = {
             (torch.float32, 64): FlexConfig(128, 32, 2, 4),
             (torch.float32, 128): FlexConfig(128, 32, 2, 4),
@@ -981,7 +995,7 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
             if dtype == torch.float32:
                 default_config = FlexConfig(64, 64, 3, 4)
             else:
-                default_config = FlexConfig(128, 64, 3, 4)
+                default_config = FlexConfig(64, 64, 3, 4)
             if capability >= (12, 0):
                 default_config = self.sm_120_default_flex_config.get(
                     (dtype, head_dim), default_config
@@ -1014,7 +1028,6 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
     ) -> list[FlexBwDConfig]:
         capability = torch.cuda.get_device_capability()
         flex_attn_bwd_configs: list[FlexBwDConfig] = []
-
         if config.max_autotune:
             if config.max_autotune_flex_search_space == "EXHAUSTIVE":
                 return self.exhaustive_flex_attn_bwd_configs
@@ -1023,6 +1036,8 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
         major, minor = capability
         if dtype == torch.float32:
             capability_class = "float32"
+        elif major == 12:
+            capability_class = "sm12x"
         elif major >= 10:
             capability_class = "sm10x"
         elif capability == (9, 0):
@@ -1047,6 +1062,13 @@ class CUDAConfigHeuristic(BaseConfigHeuristic):
                 FlexBwDConfig(64, 64, 64, 64, 1, 4)
             ),
             "sm8x": lambda h: (
+                FlexBwDConfig(32, 128, 128, 32, 3, 4)
+                if h < 64
+                else FlexBwDConfig(
+                    64, 64, 64, 64, 3 if minor == 6 and h == 128 else 2, 4
+                )
+            ),
+            "sm12x": lambda h: (
                 FlexBwDConfig(32, 128, 128, 32, 3, 4)
                 if h < 64
                 else FlexBwDConfig(
@@ -1169,10 +1191,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 BLOCK_K,
                 num_stages,
                 num_warps,
-                group_m,
-                matrix_instr_nonkdim,
-                waves_per_eu,
-                kpack,
+                group_m=group_m,
+                matrix_instr_nonkdim=matrix_instr_nonkdim,
+                waves_per_eu=waves_per_eu,
+                kpack=kpack,
             )
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
@@ -1271,7 +1293,16 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
         configs: list[BaseConfig],
         dtype_size: int,
     ) -> list[BaseConfig]:
-        return configs
+        # these cause AMD compile to crash
+        pruned_configs = [
+            c
+            for c in configs
+            if not (
+                getattr(c, "matrix_instr_nonkdim", 0) == 2
+                and getattr(c, "kpack", 0) == 2
+            )
+        ]
+        return pruned_configs
 
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
@@ -1322,6 +1353,9 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
 
             # Check if gemm specific arg exists - add to key if does
             group_m = getattr(conf, "group_m", None)
+            # AMD GPU crashes if group_m = 0
+            if group_m is not None and group_m <= 0:
+                group_m = 8
             if group_m is not None:
                 key += (group_m,)
 
@@ -1642,21 +1676,18 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     def _convert_config_to_template_kwargs(
         self,
         triton_config: TritonConfig,
-        m: sympy.Integer,
-        n: sympy.Integer,
-        k: sympy.Integer,
+        m: sympy.Integer | sympy.Symbol,
+        n: sympy.Integer | sympy.Symbol,
+        k: sympy.Integer | sympy.Symbol,
         out_dtype: torch.dtype,
     ) -> dict[str, Any]:
         """
         Convert triton config to template kwargs.
         Moved from mm_common.mm_options.
         """
-        # Calculate EVEN_K symbolic
-        even_k_symbolic = (
-            # it isn't worth guarding on this
-            sympy.gcd(k, triton_config.kwargs["BLOCK_K"])
-            == triton_config.kwargs["BLOCK_K"]
-        )
+        # Calculate EVEN_K symbolic. (It isn't worth guarding on this)
+        even_k_symbolic = (k % triton_config.kwargs["BLOCK_K"]) == 0
+        even_k_symbolic = V.graph.sizevars.statically_known_true(even_k_symbolic)
 
         # Build options dict
 
@@ -1777,6 +1808,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "TMA_SIZE": TMA_DESCRIPTOR_SIZE,
             "TMA_EXPERIMENTAL_API": not has_triton_stable_tma_api(),
             "tma_store": config.triton.enable_template_tma_store,
+            "transpose_discontiguous_tensor_descriptors_override": True,
         }
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(

@@ -45,6 +45,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     scoped_load_inline,
     skipIfWindows,
+    skipIfXpu,
 )
 from torch.testing._internal.hop_db import hop_db
 from torch.testing._internal.inductor_utils import (
@@ -52,9 +53,13 @@ from torch.testing._internal.inductor_utils import (
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
     HAS_GPU,
+    HAS_XPU_AND_TRITON,
 )
 from torch.testing._internal.logging_utils import logs_to_string
-from torch.testing._internal.triton_utils import requires_cuda_and_triton
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu_and_triton,
+)
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -2348,7 +2353,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_basic_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_basic",
+            name=f"test_autograd_cpp_node_basic_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2425,7 +2430,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_id_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_id",
+            name=f"test_autograd_cpp_node_id_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2542,7 +2547,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_basic_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_saved_basic",
+            name=f"test_autograd_cpp_node_saved_basic_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2608,7 +2613,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_dynamic_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_saved_dynamic",
+            name=f"test_autograd_cpp_node_saved_dynamic_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2676,7 +2681,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_int_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_saved_int",
+            name=f"test_autograd_cpp_node_saved_int_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2743,7 +2748,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_saved_float_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_saved_float",
+            name=f"test_autograd_cpp_node_saved_float_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -2846,7 +2851,7 @@ TORCH_LIBRARY(test_autograd_cpp_node_data_dependent_$is_traceable, m) {
         )
 
         module = load_inline(
-            name="test_autograd_cpp_node_data_dependent",
+            name=f"test_autograd_cpp_node_data_dependent_{is_traceable}",
             cpp_sources=cpp_source.substitute(
                 is_traceable="true" if is_traceable else "false"
             ),
@@ -3034,7 +3039,8 @@ main()
             self.assertNotIn("skipping cudagraphs", stderr_msgs.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
-    def test_cudagraphs_cpu_graph(self):
+    @parametrize("graph_partition", [False, True])
+    def test_cudagraphs_cpu_graph(self, graph_partition):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
         model = torch.nn.Linear(10, 10, dtype=torch.float16)
@@ -3042,20 +3048,26 @@ main()
         out = model(inputs)
         loss = reduce_to_scalar_loss(out)
 
-        with compiled_autograd._enable(compiler_fn):
+        with (
+            torch._inductor.config.patch(graph_partition=graph_partition),
+            compiled_autograd._enable(compiler_fn),
+        ):
             torch._inductor.config.triton.cudagraphs = True
             loss.backward()
             torch._inductor.config.triton.cudagraphs = False
 
+        # CPU-only graphs skip cudagraphs regardless of graph_partition setting
+        # (no GPU devices to use cudagraphs with)
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
-    @requires_cuda_and_triton
+    @skipIfXpu(msg="cudagraphs not supported on xpu for now!")
+    @requires_gpu_and_triton
     def test_cudagraphs_sdpa(self):
         query = torch.rand(
-            32, 8, 128, 64, dtype=torch.float16, device="cuda", requires_grad=True
+            32, 8, 128, 64, dtype=torch.float16, device=GPU_TYPE, requires_grad=True
         )
-        key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
-        value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device="cuda")
+        key = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=GPU_TYPE)
+        value = torch.rand(32, 8, 128, 64, dtype=torch.float16, device=GPU_TYPE)
         out = torch.nn.functional.scaled_dot_product_attention(query, key, value)
 
         with (
@@ -3747,7 +3759,7 @@ class CompiledAutograd0(torch.nn.Module):
         self.assertTrue(isinstance(view_nodes[0].args[1][0], torch.fx.Node))
         self.assertTrue(isinstance(view_nodes[1].args[1][0], torch.fx.Node))
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_flex_attention(self):
         def _squared(score, b, h, m, n):
             """Joint graph needed for correctness"""
@@ -3765,7 +3777,7 @@ class CompiledAutograd0(torch.nn.Module):
                     a * b,
                     b,
                     dtype=torch.bfloat16,
-                    device="cuda",
+                    device=GPU_TYPE,
                     requires_grad=True,
                 )
                 fwd_bwd(v)
@@ -5098,11 +5110,29 @@ def wrap_test_class(orig_cls):
 
     cls = type(
         orig_cls.__name__ + "WithCompiledAutograd",
-        orig_cls.__bases__,
+        (orig_cls,),
         dct,
     )
     cls.__file__ = __file__
     return cls
+
+
+class WrapTestClassTests(TestCase):
+    def test_wrap_preserves_inheritance_and_super(self):
+        class DummyTest(unittest.TestCase):
+            def runTest(self):
+                pass
+
+            def tearDown(self):
+                self.super_called = True
+                super().tearDown()
+
+        wrapped = wrap_test_class(DummyTest)
+        self.assertTrue(issubclass(wrapped, DummyTest))
+        test = wrapped("runTest")
+        test.setUp()
+        test.tearDown()
+        self.assertTrue(getattr(test, "super_called", False))
 
 
 known_graph_breaks_tests = {
@@ -5333,12 +5363,13 @@ if IS_S390X:
 test_autograd = load_test_module("test_autograd")
 test_custom_ops = load_test_module("test_custom_ops")
 test_higher_order_ops = load_test_module("dynamo/test_higher_order_ops")
-
-TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
+if not HAS_XPU_AND_TRITON:
+    TestAutogradWithCompiledAutograd = wrap_test_class(test_autograd.TestAutograd)
 TestNestedCheckpointWithCompiledAutograd = wrap_test_class(
     test_autograd.TestNestedCheckpoint
 )
-TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
+if not HAS_XPU_AND_TRITON:
+    TestCustomOpWithCompiledAutograd = wrap_test_class(test_custom_ops.TestCustomOp)
 HigherOrderOpTestsWithCompiledAutograd = wrap_test_class(
     test_higher_order_ops.HigherOrderOpTests
 )
@@ -5367,6 +5398,7 @@ class TestCompiledAutogradOpInfo(TestCase):
         super(TestCase, self).tearDown()
         reset()
 
+    @skipIfXpu(msg="NotImplementedError: The operator 'testlib::mutating_custom_op'")
     @ops(
         list(filter(lambda op: op.name not in xfail_hops, hop_db)),
         allowed_dtypes=(torch.float,),
@@ -5419,7 +5451,7 @@ class TestCompiledAutogradOpInfo(TestCase):
             self.assertEqual(expected, actual)
 
 
-instantiate_device_type_tests(TestCompiledAutogradOpInfo, globals())
+instantiate_device_type_tests(TestCompiledAutogradOpInfo, globals(), allow_xpu=True)
 instantiate_parametrized_tests(TestCompiledAutograd)
 
 if __name__ == "__main__":

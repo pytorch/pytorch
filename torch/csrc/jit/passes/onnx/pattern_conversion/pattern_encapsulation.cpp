@@ -1,8 +1,5 @@
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
-#include <torch/csrc/jit/passes/onnx.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/common.h>
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/pattern_encapsulation.h>
-#include <torch/csrc/jit/passes/onnx/remove_inplace_ops_for_onnx.h>
 
 // EDITING THIS FILE? READ THIS FIRST!
 // see Note [Edit Pattern Encapsulation] in pattern_encapsulation.h

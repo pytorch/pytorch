@@ -326,7 +326,7 @@ std::unordered_map<std::string, std::string> RpcAgent::getDebugInfo() {
 
 std::ostream& operator<<(std::ostream& os, const WorkerInfo& workerInfo) {
   return os << "WorkerInfo(id=" << workerInfo.id_
-            << ", name=" << workerInfo.name_ << ")";
+            << ", name=" << workerInfo.name_ << ')';
 }
 
 } // namespace torch::distributed::rpc

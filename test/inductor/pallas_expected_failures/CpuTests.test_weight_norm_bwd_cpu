@@ -1,0 +1,2 @@
+ERROR
+TypeError: mul got incompatible shapes for broadcasting: (1025, 2), (2, 2).

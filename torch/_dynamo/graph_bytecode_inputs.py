@@ -25,6 +25,11 @@ def has_user_objects() -> bool:
     return bool(index_to_bytecode_constructor)
 
 
+def stash_graph_created_object(obj: Any) -> Any:
+    keep_alive.append(obj)
+    return obj
+
+
 def get_external_object_by_index(index: int) -> Any:
     assert index in index_to_external_object_weakref, (
         "Index not registered in index_to_user_object_weakref"

@@ -8,7 +8,6 @@
 #include <ATen/Operators.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
-#include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <torch/library.h>

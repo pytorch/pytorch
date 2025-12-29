@@ -1,6 +1,5 @@
 #include <ATen/core/Vitals.h>
 #include <c10/util/env.h>
-#include <cstdlib>
 #include <iostream>
 
 namespace at::vitals {
@@ -9,8 +8,8 @@ APIVitals VitalsAPI;
 
 std::ostream& operator<<(std::ostream& os, TorchVital const& tv) {
   for (const auto& m : tv.attrs) {
-    os << "[TORCH_VITAL] " << tv.name << "." << m.first << "\t\t "
-       << m.second.value << "\n";
+    os << "[TORCH_VITAL] " << tv.name << '.' << m.first << "\t\t "
+       << m.second.value << '\n';
   }
   return os;
 }

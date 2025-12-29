@@ -379,7 +379,11 @@ C10_API std::string GetExceptionString(const std::exception& e);
 // ----------------------------------------------------------------------------
 
 #ifdef STRIP_ERROR_MESSAGES
-#define TORCH_RETHROW(e, ...) throw
+#define TORCH_RETHROW(e, ...)                       \
+  do {                                              \
+    (void)e; /* Suppress unused variable warning */ \
+    throw;                                          \
+  } while (false)
 #else
 #define TORCH_RETHROW(e, ...)               \
   do {                                      \

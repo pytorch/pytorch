@@ -1534,7 +1534,7 @@ class TestClassType(JitTestCase):
 
     def test_class_attribute_wrong_type(self):
         """
-        Test that the error message displayed when convering a class type
+        Test that the error message displayed when converting a class type
         to an IValue that has an attribute of the wrong type.
         """
 

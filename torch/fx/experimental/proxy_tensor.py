@@ -84,7 +84,7 @@ if TYPE_CHECKING:
 
     from torch._ops import OpOverload
     from torch.fx._symbolic_trace import PHBase
-    from torch.types import IntLikeType
+    from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
 __all__ = [
     "PythonKeyTracer",
@@ -274,7 +274,10 @@ def set_proxy_slot(  # type: ignore[no-redef]
         # on a tensor, and it affects the metadata on the proxy.
         assert isinstance(proxy, _ProxyTensor)
         # see NOTE [Do not clobber inplace ops]
-        if not _is_proxy_tensor_update_tensor_tracker_disabled():
+        if (
+            obj not in tracer.tensor_tracker
+            or not _is_proxy_tensor_update_tensor_tracker_disabled()
+        ):
             tracer.tensor_tracker[obj] = proxy
     elif isinstance(obj, (_AnyScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
@@ -458,7 +461,7 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
 
 def _build_proxy_for_sym_expr(
     tracer: _ProxyTracer, expr: sympy.Expr, out: PySymType | None = None
-) -> PySymType | None:
+) -> IntLikeType | FloatLikeType | BoolLikeType | None:
     """
     Decompose `expr` and look for the pieces as inputs. If `out` is provided
     then that will be the resulting SymNode (and `out.expr` must be the same as
@@ -531,6 +534,13 @@ def _build_proxy_for_sym_expr(
     if (value := tracer.sympy_expr_tracker.get(expr)) is not None:
         assert not out
         return value.value
+
+    if isinstance(expr, (int, float, bool)):
+        return expr
+    if expr.is_Integer:
+        return int(expr)
+    if expr.is_Float:
+        return float(expr)
 
     args = []
     for arg in expr.args:
@@ -837,6 +847,7 @@ def track_tensor_tree(
                     return None
                 else:
                     assert isinstance(c, (list, tuple))
+                    # pyrefly: ignore [bad-return]
                     return c[idx]
 
             for idx, ee in enumerate(e):
@@ -1536,7 +1547,9 @@ ORIGINAL_ATEN: Optional[object] = None
 
 
 @contextmanager
-def set_original_aten_op(func: OpOverload) -> Generator[None, None, None]:
+def set_original_aten_op(
+    func: OpOverload | torch._ops.HigherOrderOperator,
+) -> Generator[None, None, None]:
     global ORIGINAL_ATEN
     if ORIGINAL_ATEN is None and fx_traceback.has_preserved_node_meta():
         ORIGINAL_ATEN = func
@@ -2116,6 +2129,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 assert "_modules" in self.__dict__
                 submodules = self.__dict__["_modules"]
                 assert isinstance(submodules, dict)
+                # pyrefly: ignore [bad-return]
                 return {
                     key: (
                         AttrProxy(value, tracer.proxy_paths[self] + "." + str(key))  # type: ignore[misc]
@@ -2203,6 +2217,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             mod = obj
 
             # Get the parent module
+            # pyrefly: ignore [bad-assignment]
             for item in path:
                 if not hasattr(mod, item):
                     return False
@@ -2623,6 +2638,24 @@ class _MakefxTracer:
         # Create a new tracer based on parent's config
         sub_tracer = _MakefxTracer(
             self.decomposition_table,
+            "real",
+            self._allow_non_fake_inputs,
+            self.pre_dispatch,
+            self.record_module_stack,
+            self._allow_fake_constant,
+            self._error_on_data_dependent_ops,
+            parent_tracer=self,
+        )
+        with sub_tracer._init_modes_from_parent(self):
+            return sub_tracer._trace_inner(f, *args)
+
+    def trace_subgraph_custom_decomp(
+        self, f: Callable, decomp_table: Mapping[OpOverload, Callable], *args
+    ) -> GraphModule:
+        assert isinstance(decomp_table, Mapping)
+        # Create a new tracer based on parent's config, but use a different decomposition table
+        sub_tracer = _MakefxTracer(
+            decomp_table,
             "real",
             self._allow_non_fake_inputs,
             self.pre_dispatch,

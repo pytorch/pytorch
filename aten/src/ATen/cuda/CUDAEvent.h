@@ -238,11 +238,18 @@ private:
   }
 
   void moveHelper(CUDAEvent&& other) {
-    std::swap(flags_, other.flags_);
-    std::swap(is_created_, other.is_created_);
-    std::swap(was_recorded_, other.was_recorded_);
-    std::swap(device_index_, other.device_index_);
-    std::swap(event_, other.event_);
+    // Transfer ownership of all state from other to this
+    flags_ = other.flags_;
+    is_created_ = other.is_created_;
+    was_recorded_ = other.was_recorded_;
+    external_ = other.external_;
+    device_index_ = other.device_index_;
+    event_ = other.event_;
+
+    // Reset other to a valid empty state to prevent double-free
+    // The moved-from object must not attempt to destroy the event
+    other.is_created_ = false;
+    other.event_ = cudaEvent_t{};
   }
 };
 

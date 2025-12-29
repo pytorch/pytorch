@@ -432,6 +432,9 @@ try:
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
             return self._ops.mod(p, q)
 
+        def python_mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
+            return self._ops.mod(p, q)
+
         def ceil_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
             return self._ops.ceil(x)
 

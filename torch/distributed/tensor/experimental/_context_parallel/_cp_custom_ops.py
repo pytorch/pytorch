@@ -7,7 +7,7 @@ import torch.distributed.distributed_c10d as c10d
 
 @torch.library.custom_op("cplib::flex_cp_allgather", mutates_args=())
 def flex_cp_allgather(
-    k: torch.Tensor, v: torch.Tensor, seq_dim: int, pg_name: str
+    k: torch.Tensor, v: torch.Tensor, seq_dim: int, pg_name: c10d.GroupName
 ) -> tuple[torch.Tensor, torch.Tensor]:
     k = k.contiguous()
     v = v.contiguous()
@@ -22,7 +22,7 @@ def flex_cp_allgather(
 
 @flex_cp_allgather.register_fake
 def _(
-    k: torch.Tensor, v: torch.Tensor, seq_dim: int, pg_name: str
+    k: torch.Tensor, v: torch.Tensor, seq_dim: int, pg_name: c10d.GroupName
 ) -> tuple[torch.Tensor, torch.Tensor]:
     shape_k = list(k.shape)
     shape_v = list(v.shape)
@@ -38,7 +38,7 @@ def flex_cp_allgather_backward(
     grad_full_k: torch.Tensor,
     grad_full_v: torch.Tensor,
     seq_dim: int,
-    pg_name: str,
+    pg_name: c10d.GroupName,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     grad_k = funcol.reduce_scatter_tensor(grad_full_k, "sum", seq_dim, pg_name)
     if isinstance(grad_k, funcol.AsyncCollectiveTensor):
@@ -55,7 +55,7 @@ def _(
     grad_full_k: torch.Tensor,
     grad_full_v: torch.Tensor,
     seq_dim: int,
-    pg_name: str,
+    pg_name: c10d.GroupName,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     shape_k = list(grad_full_k.shape)
     shape_v = list(grad_full_v.shape)

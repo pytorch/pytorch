@@ -5529,10 +5529,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ),
         ),
         ("cudaDeviceGetLimit", ("hipDeviceGetLimit", CONV_DEVICE, API_RUNTIME)),
-        (
-            "cudaProfilerInitialize",
-            ("hipProfilerInitialize", CONV_OTHER, API_RUNTIME, HIP_UNSUPPORTED),
-        ),
         ("cudaProfilerStart", ("hipProfilerStart", CONV_OTHER, API_RUNTIME)),
         ("cudaProfilerStop", ("hipProfilerStop", CONV_OTHER, API_RUNTIME)),
         (
@@ -9168,6 +9164,14 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         (
             "CUDACachingAllocator::setUseOnOOM",
             ("HIPCachingAllocatorMasqueradingAsCUDA::setUseOnOOM", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::setNoSplit",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::setNoSplit", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::setNoSplit",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::setNoSplit", API_PYTORCH),
         ),
         (
             "cuda::CUDACachingAllocator::getPoolUseCount",

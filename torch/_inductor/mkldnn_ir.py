@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Sequence
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import sympy
 
@@ -22,7 +22,6 @@ from .ir import (
     MultiOutputLayout,
     MutationOutput,
     NoneLayout,
-    ShapeAsConstantBuffer,
     TensorBox,
 )
 from .utils import convert_shape_to_inductor, pad_listlike, SUPPORTED_MKLDNN_DEVICES
@@ -603,7 +602,7 @@ class QConvPointWisePT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qconv_pointwise.default,
+            op_overload=torch.ops.onednn.qconv_pointwise.tensor,
             cpp_kernel_name=f"aoti_torch_{self.device_type}__qconv_pointwise_tensor",
         )
 
@@ -619,11 +618,11 @@ class QConvPointWisePT2E(ExternKernelAlloc):
     def create(
         cls,
         qx: "TensorBox",
-        x_scale: Union["ShapeAsConstantBuffer", "TensorBox"],
-        x_zero_point: Union["ShapeAsConstantBuffer", "TensorBox"],
+        x_scale: "TensorBox",
+        x_zero_point: "TensorBox",
         qw: "TensorBox",  # qw
         w_scale: "TensorBox",
-        w_zero_point: "TensorBox",
+        w_zero_point,
         bias: "TensorBox",
         stride: list[int],
         padding: list[int],
@@ -711,7 +710,7 @@ class QConvPointWiseBinaryPT2E(ExternKernelAlloc):
             inputs,
             constant_args,
             None,
-            op_overload=torch.ops.onednn.qconv2d_pointwise.binary,
+            op_overload=torch.ops.onednn.qconv2d_pointwise.binary_tensor,
             cpp_kernel_name=(
                 f"aoti_torch_{self.device_type}__qconv2d_pointwise_binary_tensor"
             ),

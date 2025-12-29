@@ -652,7 +652,7 @@ struct NamedPolicy {
       std::ostringstream ss;
       for (const auto i : c10::irange(cursors.size())) {
         if (i > 0) {
-          ss << ".";
+          ss << '.';
         }
         ss << nameFragment(cursors[i]);
       }

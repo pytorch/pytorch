@@ -1,7 +1,5 @@
 """Item operator implementation."""
 
-from typing import Optional
-
 from torchfuzz.operators.base import Operator
 from torchfuzz.tensor_fuzzer import ScalarSpec, Spec, TensorSpec
 
@@ -13,7 +11,7 @@ class ItemOperator(Operator):
         super().__init__("item")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Item is a tensor method, not a direct torch operation."""
         return None
 

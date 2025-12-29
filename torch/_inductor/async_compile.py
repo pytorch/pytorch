@@ -637,6 +637,50 @@ class AsyncCompile:
             future = self.submit(task)
             return LambdaFuture(lambda: future.result())
 
+    def nv_universal_gemm(self, kernel_name: str, source_code: str):
+        """
+        Compile NVIDIA Universal GEMM kernels.
+
+        Args:
+            kernel_name: Name of the kernel to be defined
+            source_code: Source code of the kernel, as a string
+
+        Note:
+            NVIDIA Universal GEMM kernels are Python code that calls the cutlass_api library.
+            We use the PyCodeCache to write the source code to a file and load it.
+        """
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
+            NVUniversalGemmKernelWrapper,
+        )
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_scheduling import (
+            MAIN_SUFFIX,
+        )
+
+        kernel_code_log.info("NVIDIA Universal GEMM Kernel:\n%s", source_code)
+
+        def task():
+            key, path = torch._inductor.codecache.PyCodeCache.write(source_code)
+            mod = torch._inductor.codecache.PyCodeCache.load_by_key_path(key, path)
+
+            # Find our special entry point named function
+            main_func_name = f"{kernel_name}_{MAIN_SUFFIX}"
+            if not hasattr(mod, main_func_name):
+                available = [name for name in dir(mod) if callable(getattr(mod, name))]
+                raise RuntimeError(
+                    f"Could not find NVIDIA Universal GEMM main kernel function "
+                    f"'{main_func_name}'. Available callables: {available}"
+                )
+
+            return NVUniversalGemmKernelWrapper(
+                getattr(mod, main_func_name), kernel_path=path
+            )
+
+        if get_compile_threads() <= 1:
+            return task()
+        else:
+            future = self.submit(task)
+            return LambdaFuture(lambda: future.result())
+
     def wait(self, scope: dict[str, Any]) -> None:
         if get_compile_threads() > 1:
             with dynamo_timed(

@@ -8,7 +8,7 @@
 
 import math
 from collections.abc import Iterator, Sized
-from typing import cast, Optional, TypeVar
+from typing import cast, TypeVar
 
 import torch
 from torch.utils.data import Dataset
@@ -44,8 +44,8 @@ class ElasticDistributedSampler(DistributedSampler[T]):
     def __init__(
         self,
         dataset: Dataset[T],
-        num_replicas: Optional[int] = None,
-        rank: Optional[int] = None,
+        num_replicas: int | None = None,
+        rank: int | None = None,
         start_index: int = 0,
     ):
         super().__init__(dataset=dataset, num_replicas=num_replicas, rank=rank)

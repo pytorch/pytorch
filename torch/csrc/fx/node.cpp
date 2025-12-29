@@ -353,7 +353,7 @@ static PyObject* NodeBase__update_args_kwargs(
     Py_CLEAR(node->_kwargs);
     node->_kwargs = map_aggregate(args[1], visit_fn);
     Py_RETURN_NONE;
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr;
   }
 }
@@ -397,7 +397,7 @@ static PyObject* NodeBase__replace_input_with(
 
     PyObject* update_args[2] = {new_args.get(), new_kwargs.get()};
     return NodeBase__update_args_kwargs(self, update_args, 2);
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr;
   }
 }
@@ -802,7 +802,7 @@ static PyObject* py_map_aggregate(
     // args[0]: aggregate, args[1]: callable fn
     return map_aggregate(
         args[0], [fn](PyObject* a) { return PyObject_CallOneArg(fn, a); });
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr; // error should already be set
   }
 }
@@ -824,7 +824,7 @@ static PyObject* py_map_arg(
       }
       return Py_NewRef(a);
     });
-  } catch (const PythonError& e) {
+  } catch (const PythonError&) {
     return nullptr; // error should already be set
   }
 }

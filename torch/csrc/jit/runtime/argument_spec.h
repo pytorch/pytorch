@@ -402,12 +402,12 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentInfo& info) {
   }
   out << "Tensor(device=" << info.device() << ", type=" << toString(info.type())
       << ", requires_grad=" << info.requires_grad() << ", dims=" << info.dim()
-      << ")";
+      << ')';
   return out;
 }
 
 inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
-  out << "{";
+  out << '{';
   for (const auto i : c10::irange(spec.numTensors())) {
     if (i > 0)
       out << ", ";
@@ -419,7 +419,7 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
       out << ", ";
     out << spec.isPresent(i);
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
@@ -431,20 +431,20 @@ inline std::ostream& operator<<(
   }
   out << "Tensor(device=" << info.device() << ", type=" << toString(info.type())
       << ", requires_grad=" << info.requires_grad()
-      << ", sizes=" << info.sizes() << ", strides=" << info.strides() << ")";
+      << ", sizes=" << info.sizes() << ", strides=" << info.strides() << ')';
   return out;
 }
 
 inline std::ostream& operator<<(
     std::ostream& out,
     const CompleteArgumentSpec& spec) {
-  out << "{";
+  out << '{';
   for (const auto i : c10::irange(spec.size())) {
     if (i > 0)
       out << ", ";
     out << spec.at(i);
   }
-  out << "}";
+  out << '}';
   return out;
 }
 

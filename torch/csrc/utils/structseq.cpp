@@ -66,7 +66,7 @@ PyObject* returned_structseq_repr(PyStructSequence* obj) {
       ss << ",\n";
     }
   }
-  ss << ")";
+  ss << ')';
 
   return PyUnicode_FromString(ss.str().c_str());
 }

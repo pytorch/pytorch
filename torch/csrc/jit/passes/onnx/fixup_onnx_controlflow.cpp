@@ -3,9 +3,7 @@
 #include <ATen/InitialTensorOptions.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/onnx/helper.h>
-#include <torch/csrc/jit/passes/onnx/peephole.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 
 namespace torch::jit {
