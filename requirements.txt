@@ -18,3 +18,4 @@ spin
 sympy>=1.13.3
 typing-extensions>=4.15.0
 wheel
+tabulate
