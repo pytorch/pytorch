@@ -27,6 +27,7 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON, HAS_GPU
 from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
 
+
 # Conditional patch for decompose_k tests - override to 10 on ROCm, no-op elsewhere
 _DECOMPOSE_K_PATCH_ROCM = (
     {"triton.num_decompose_k_splits": 10} if torch.version.hip else {}
@@ -944,7 +945,9 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             self.setup_lookup_table("mm", tensors, [config])
             add_preprocessing_fn(
                 partial(
-                    verify_choice_names, pattern="decompose_k|bmm_dtype", expected_count=1
+                    verify_choice_names,
+                    pattern="decompose_k|bmm_dtype",
+                    expected_count=1,
                 )
             )
 
