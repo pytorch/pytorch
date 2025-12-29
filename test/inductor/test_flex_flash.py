@@ -282,8 +282,8 @@ def cuda_kernel_profiler(kernel_pattern="flash_attncute"):
     result["found"] = any(kernel_pattern in name for name in kernel_names)
 
 
-def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
-    compiled_fn = torch.compile(flex_attention)
+def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2, *, dynamic=False):
+    compiled_fn = torch.compile(flex_attention, dynamic=dynamic)
     enable_gqa = q.shape[1] != k.shape[1]
 
     out_ref_fp32 = flex_attention(
@@ -1007,9 +1007,8 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
     def _run_dynamic_test(
         self, seq_lens, score_mod=None, block_mask_factory=None, requires_grad=False
     ):
-        """Helper to run a test with multiple sequence lengths using dynamic=True."""
+        """Helper to run dynamic=True tests across multiple sequence lengths."""
         torch._dynamo.reset()
-        compiled_fn = torch.compile(flex_attention, dynamic=True)
 
         for seq_len in seq_lens:
             q, k, v = create_test_tensors(
@@ -1018,18 +1017,18 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
                 dtype=torch.float16,
                 requires_grad=requires_grad,
             )
-            kwargs = {"kernel_options": {"BACKEND": "FLASH"}}
-            if score_mod is not None:
-                kwargs["score_mod"] = score_mod
-            if block_mask_factory is not None:
-                kwargs["block_mask"] = block_mask_factory(seq_len)
+            block_mask = block_mask_factory(seq_len) if block_mask_factory else None
+            flash_vs_triton(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                dynamic=True,
+            )
 
-            out = compiled_fn(q, k, v, **kwargs)
-            self.assertEqual(out.shape, q.shape)
-
-            if requires_grad:
-                out.sum().backward()
-                self.assertEqual(q.grad.shape, q.shape)
+    def _flash_triton_dynamic(self, q, k, v, **kwargs):
+        flash_vs_triton(q, k, v, dynamic=True, **kwargs)
 
     def test_dynamic_seq_len_no_score_mod(self):
         """Test dynamic sequence lengths without score_mod."""
@@ -1070,14 +1069,11 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
     def test_dynamic_batch_size(self):
         """Test dynamic batch sizes."""
         torch._dynamo.reset()
-        compiled_fn = torch.compile(flex_attention, dynamic=True)
-
         for batch_size in [1, 2, 4, 8]:
             q, k, v = create_test_tensors(
                 batch_size=batch_size, seq_len=256, device="cuda", dtype=torch.float16
             )
-            out = compiled_fn(q, k, v, kernel_options={"BACKEND": "FLASH"})
-            self.assertEqual(out.shape, q.shape)
+            self._flash_triton_dynamic(q, k, v)
 
     def test_dynamic_backward(self):
         """Test backward with dynamic sequence lengths."""
@@ -1113,8 +1109,6 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
     def test_dynamic_gqa(self):
         """Test GQA with dynamic sequence lengths."""
         torch._dynamo.reset()
-        compiled_fn = torch.compile(flex_attention, dynamic=True)
-
         q_heads, kv_heads = 8, 2
         for seq_len in [128, 256, 512]:
             q = torch.randn(2, q_heads, seq_len, 64, device="cuda", dtype=torch.float16)
@@ -1124,16 +1118,11 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             v = torch.randn(
                 2, kv_heads, seq_len, 64, device="cuda", dtype=torch.float16
             )
-            out = compiled_fn(
-                q, k, v, enable_gqa=True, kernel_options={"BACKEND": "FLASH"}
-            )
-            self.assertEqual(out.shape, q.shape)
+            self._flash_triton_dynamic(q, k, v, score_mod=None, block_mask=None)
 
     def test_dynamic_mqa(self):
         """Test MQA with dynamic sequence lengths."""
         torch._dynamo.reset()
-        compiled_fn = torch.compile(flex_attention, dynamic=True)
-
         q_heads, kv_heads = 8, 1
         for seq_len in [128, 256, 512]:
             q = torch.randn(2, q_heads, seq_len, 64, device="cuda", dtype=torch.float16)
@@ -1143,35 +1132,26 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             v = torch.randn(
                 2, kv_heads, seq_len, 64, device="cuda", dtype=torch.float16
             )
-            out = compiled_fn(
-                q, k, v, enable_gqa=True, kernel_options={"BACKEND": "FLASH"}
-            )
-            self.assertEqual(out.shape, q.shape)
+            self._flash_triton_dynamic(q, k, v)
 
     def test_dynamic_non_divisible_seq_len(self):
         """Test non-block-divisible sequence lengths with dynamic shapes."""
         torch._dynamo.reset()
-        compiled_fn = torch.compile(flex_attention, dynamic=True)
-
         for seq_len in [127, 255, 383, 511, 513]:
             q, k, v = create_test_tensors(
                 seq_len=seq_len, device="cuda", dtype=torch.float16
             )
-            out = compiled_fn(q, k, v, kernel_options={"BACKEND": "FLASH"})
-            self.assertEqual(out.shape, q.shape)
+            self._flash_triton_dynamic(q, k, v)
 
     def test_dynamic_asymmetric_qkv_lengths(self):
         """Test asymmetric Q and KV lengths with dynamic shapes."""
         torch._dynamo.reset()
-        compiled_fn = torch.compile(flex_attention, dynamic=True)
-
         test_cases = [(256, 512), (512, 256), (128, 1024)]
         for q_len, kv_len in test_cases:
             q = torch.randn(2, 4, q_len, 64, device="cuda", dtype=torch.float16)
             k = torch.randn(2, 4, kv_len, 64, device="cuda", dtype=torch.float16)
             v = torch.randn(2, 4, kv_len, 64, device="cuda", dtype=torch.float16)
-            out = compiled_fn(q, k, v, kernel_options={"BACKEND": "FLASH"})
-            self.assertEqual(out.shape, (2, 4, q_len, 64))
+            self._flash_triton_dynamic(q, k, v)
 
     def test_captured_float_fails_with_dynamic(self):
         """Test that captured Python float fails with dynamic=True (unbacked_bindings)."""
@@ -1186,6 +1166,23 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
 
         with self.assertRaisesRegex(Exception, r"unbacked_bindings"):
+            compiled_fn(
+                q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
+            )
+
+    def test_captured_int_fails_with_dynamic(self):
+        """Captured Python int should fail with dynamic=True (index_expr-style error)."""
+        torch._dynamo.reset()
+
+        val = 2  # Captured int
+
+        def score_mod(score, _b, _h, _q, _k):
+            return score * val
+
+        compiled_fn = torch.compile(flex_attention, dynamic=True)
+        q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
+
+        with self.assertRaisesRegex(Exception, r"(index_expr|unbacked_bindings)"):
             compiled_fn(
                 q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
             )
