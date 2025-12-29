@@ -320,6 +320,8 @@ def mark_nodes_dislike_padding(
 
 
 def is_mkldnn_conv(note: Node) -> bool:
+    # When mkldnn_fusion is enabled, conv will be replaced by the lowering pattern function.
+    # See _register_unary_fusion_lowering in torch/_inductor/fx_passes/mkldnn_fusion.py.
     if (
         isinstance(note.target, functools.partial)
         and len(note.target.args) > 0
@@ -690,8 +692,6 @@ class GraphLowering(torch.fx.Interpreter):
             n for n in gm.graph.nodes if n.target is torch.ops.aten.convolution.default
         ]
 
-        # When mkldnn_fusion is enabled, conv will be replaced by the lowering pattern function.
-        # See _register_unary_fusion_lowering in torch/_inductor/fx_passes/mkldnn_fusion.py.
         if (
             getattr(torch.ops, "mkldnn", None) is not None
             and getattr(torch.ops.mkldnn, "_convolution_pointwise", None) is not None
@@ -1673,8 +1673,8 @@ class GraphLowering(torch.fx.Interpreter):
             log.debug("lowering %s %s", LazyString(n.format_node), msg)  # type: ignore[arg-type]
 
         def mark_use_channels_last_layout(
-                result: ir.TensorBox, n: torch.fx.Node
-        ) -> ir.TensorBox:
+            result: ir.IRNode, n: torch.fx.Node
+        ) -> ir.IRNode:
             dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
             strides = n.meta["val"].stride()
             unbacked_symbols_in_strides = len(free_unbacked_symbols(strides)) > 0
@@ -1948,7 +1948,7 @@ class GraphLowering(torch.fx.Interpreter):
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()
 
-                data = result.data
+                data = result.data  # type: ignore[attr-defined]
                 while hasattr(data, "data") and not isinstance(data, StorageBox):
                     data = data.data
                 if isinstance(data, StorageBox) and data.should_realize_on_reuse(
