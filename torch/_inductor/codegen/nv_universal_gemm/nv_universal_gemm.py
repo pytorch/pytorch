@@ -85,7 +85,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         kernel = self.kernel
 
         def run_kernel():
-            kernel.run(args, artifact, assume_supported_args=True)
+            stream = torch.cuda.current_stream()
+            kernel.run(args, artifact, stream=stream, assume_supported_args=True)
 
         return run_kernel
 
