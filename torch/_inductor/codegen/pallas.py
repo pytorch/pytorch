@@ -1531,6 +1531,15 @@ class PallasKernel(SIMDKernel):
                     not isinstance(c, int | float) for c in coefficients
                 )
 
+                # Only skip strided indexing for non-contiguous buffers when size matches
+                # (i.e., just a strided view, not a slice). For slices (size mismatch),
+                # we need strided indexing regardless of buffer contiguity.
+                skip_for_non_contiguous = (
+                    is_known_non_contiguous
+                    and not is_tpu
+                    and buf_numel == output_numel
+                )
+
                 if (
                     output_numel > 0
                     and (
@@ -1539,11 +1548,7 @@ class PallasKernel(SIMDKernel):
                         or has_non_unit_strides
                     )
                     and len(used_vars) > 0
-                    # Don't use strided indexing for known non-contiguous buffers
-                    # on CPU/CUDA, since .contiguous() will reorder the data
-                    and not (is_known_non_contiguous and not is_tpu)
-                    # Don't use strided indexing if coefficients are symbolic
-                    # (_generate_strided_index doesn't support symbolic coefficients)
+                    and not skip_for_non_contiguous
                     and not has_symbolic_coef
                 ):
                     index_str = self._generate_strided_index(index)
@@ -2896,9 +2901,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
         )
         code.writeline(kernel_signature)
 
-        # Emit the kernel body with proper indentation
         with code.indent():
-            # Copy lines from kernel_body (which was already collected)
             for line in kernel_body._lines:
                 if isinstance(line, str):
                     # Remove any existing indentation and re-add with code's indentation
