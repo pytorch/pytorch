@@ -2,8 +2,7 @@
 #include <ATen/native/group_norm.h>
 
 #include <type_traits>
-
-#include <thrust/tuple.h>
+#include <thrust/pair.h>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/AccumulateType.h>
