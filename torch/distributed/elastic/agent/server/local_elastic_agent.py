@@ -12,6 +12,7 @@ import json
 import os
 import signal
 import socket
+import tempfile
 import time
 import uuid
 from string import Template
@@ -170,7 +171,9 @@ class LocalElasticAgent(SimpleElasticAgent):
         watchdog_file_path = os.getenv(watchdog_file_env_name)
         if watchdog_enabled is not None and str(watchdog_enabled) == "1":
             if watchdog_file_path is None:
-                watchdog_file_path = "/tmp/watchdog_timer_" + str(uuid.uuid4())
+                watchdog_file_path = os.path.join(
+                    tempfile.gettempdir(), "watchdog_timer_" + str(uuid.uuid4())
+                )
             logger.info("Starting a FileTimerServer with %s ...", watchdog_file_path)
             if not envs:
                 logger.warning(

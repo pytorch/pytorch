@@ -263,7 +263,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(self.value.__qualname__)
         elif name == "__dict__":
             options = {"source": source}
-            return variables.GetAttrVariable(self, name, **options)
+            return variables.GetAttrVariable(self, name, None, **options)
         elif name == "__mro__":
             attr_source = self.source and TypeMROSource(self.source)
             return VariableTracker.build(tx, self.value.__mro__, attr_source)
@@ -296,7 +296,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return super().var_getattr(tx, name)
 
         if name in cmp_name_to_op_mapping and not isinstance(obj, types.FunctionType):
-            return variables.GetAttrVariable(self, name, source=source)
+            return variables.GetAttrVariable(self, name, None, source=source)
 
         if isinstance(obj, staticmethod):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
@@ -1535,7 +1535,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if name == "__dict__":
             options_dict = {"source": source}
-            return variables.GetAttrVariable(self, name, **options_dict)
+            return variables.GetAttrVariable(self, name, None, **options_dict)
 
         # TODO(anijain2305) - Investigate if we need specialization for more
         # dunder attrs. inspect.getattr_static does not return correct value for
@@ -1792,7 +1792,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 or is_cython_function(subobj)
             ):
                 options = {"source": source}
-                return variables.GetAttrVariable(self, name, **options)
+                return variables.GetAttrVariable(self, name, None, **options)
             if source:
                 if is_accessible_from_type_mro:
                     source = self.get_source_by_walking_mro(name)
@@ -2168,7 +2168,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             and inspect.ismethoddescriptor(method)
             and len(kwargs) == 0
         ):
-            self.exc_vt.args = args
+            self.exc_vt.args = tuple(args)
             # pyrefly: ignore[missing-attribute]
             self.value.args = args
             return variables.ConstantVariable(None)
@@ -2186,6 +2186,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
 
     @property
     def __context__(self) -> "ConstantVariable":
+        # type: ignore[return-value]
         return self.exc_vt.__context__
 
     @property
