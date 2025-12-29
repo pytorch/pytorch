@@ -2263,9 +2263,18 @@ class OutputGraph(OutputGraphCommon):
                 # a lot of fake_tensor ownership assumptions and runs afoul of detect_fake_mode
                 self.tracing_context.fake_mode = backend_fake_mode
 
-                example_inputs = self._transfer_example_inputs_to_mode(
-                    self.example_inputs(), backend_fake_mode
-                )
+                # Only transfer example inputs to the new mode when doing AOT compile
+                # with an outer fake mode. For regular compilation, the example inputs
+                # are already in the correct mode. Transferring them incorrectly breaks
+                # nested tensors with symbolic shapes (e.g., s26 + 1) because the inner
+                # tensors get transferred with static_shapes=True, losing the connection
+                # to the original symbols.
+                if outer_fake_mode is not None and config.enable_aot_compile:
+                    example_inputs = self._transfer_example_inputs_to_mode(
+                        self.example_inputs(), backend_fake_mode
+                    )
+                else:
+                    example_inputs = self.example_inputs()
             else:
                 example_inputs = self.example_inputs()
 

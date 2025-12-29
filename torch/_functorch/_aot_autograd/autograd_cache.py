@@ -779,7 +779,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                         time.time_ns(),
                         forward_symints=symints,
                     )
-                elif should_bundle_autograd_cache():
+                elif should_bundle_autograd_cache() and cache_state != "bypass":
                     aot_config.cache_info = AOTAutogradCacheInfo(
                         "bundled_cache_placeholder",
                         time.time_ns(),

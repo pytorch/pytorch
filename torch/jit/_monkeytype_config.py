@@ -148,7 +148,7 @@ if _IS_MONKEYTYPE_INSTALLED:
 
         def trace_logger(self) -> JitTypeTraceStoreLogger:
             """Return a JitCallTraceStoreLogger that logs to the configured trace store."""
-            # pyrefly: ignore [bad-argument-count]
+            # pyrefly: ignore [bad-argument-count, bad-return]
             return JitTypeTraceStoreLogger(self.trace_store())
 
         def trace_store(self) -> CallTraceStore:
