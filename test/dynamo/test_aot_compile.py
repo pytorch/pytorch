@@ -1,9 +1,14 @@
 # Owner(s): ["module: dynamo"]
 
+import copy
 import functools
 import inspect
+import multiprocessing as mp
 import os
 import pickle
+import tempfile
+import unittest
+from collections import namedtuple
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -11,18 +16,29 @@ import torch
 import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
+import torch.distributed as c10d
 import torch.onnx.operators
 import torch.utils.cpp_extension
-from torch._dynamo.aot_compile import ModelInput, SerializableCallable
+from torch._dynamo.aot_compile import AOTCompiledModel, ModelInput, SerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch.fx._graph_pickler import GraphPickler
-from torch.testing._internal.common_utils import instantiate_parametrized_tests
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    TEST_CUDA,
+)
 
 
 MY_LAMBDA = lambda x: x + 1  # noqa: E731
+
+EPS = torch.tensor(1e-7)
+
+
+class MooType:
+    def __init__(self, x):
+        self.x = x
 
 
 class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
@@ -97,6 +113,180 @@ class TextModel(torch.nn.Module):
 class TestVLLMModel(MultiModalMixin, TextModel):
     def forward(self, x):
         return super().forward(x)
+
+
+def _subprocess_entry(fn, queue):
+    try:
+        fn()
+    except BaseException as exc:  # noqa: BLE001
+        import traceback
+
+        queue.put((type(exc).__name__, str(exc), traceback.format_exc()))
+        raise
+    else:
+        queue.put(None)
+
+
+def _run_in_subprocess(fn):
+    ctx = mp.get_context("spawn")
+    queue = ctx.Queue()
+    proc = ctx.Process(target=_subprocess_entry, args=(fn, queue))
+    proc.start()
+    proc.join()
+    result = queue.get()
+    if result is not None:
+        name, msg, tb = result
+        raise AssertionError(f"Subprocess failure ({name}: {msg})\n{tb}")
+
+
+def _subprocess_disable_guard_check():
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+
+        def fn(x, y):
+            return x + y
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        prev_grad = torch.is_grad_enabled()
+        try:
+            torch.set_grad_enabled(not prev_grad)
+            try:
+                compiled_fn(*inputs)
+            except RuntimeError as exc:  # pragma: no cover
+                if "GuardManager check failed" not in str(exc):
+                    raise
+            else:  # pragma: no cover
+                raise AssertionError("Guard check should have failed")
+            compiled_fn.disable_guard_check()
+            actual = compiled_fn(*inputs)
+            assert torch.allclose(actual, expected)
+        finally:
+            torch.set_grad_enabled(prev_grad)
+
+
+def _subprocess_grad_mode_after_prior_compile():
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+
+        def warmup_fn(x, y):
+            return x + y
+
+        def target_fn(x, y):
+            return x - y
+
+        torch.compile(warmup_fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        torch._dynamo.reset()
+
+        with torch.no_grad():
+            compiled_fn = torch.compile(target_fn, fullgraph=True).aot_compile(
+                ((torch.randn(3, 4), torch.randn(3, 4)), {})
+            )
+
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        with torch.no_grad():
+            actual = compiled_fn(*inputs)
+            expected = target_fn(*inputs)
+            assert torch.allclose(actual, expected)
+
+
+def _subprocess_aot_compile_module():
+    import torch
+    from torch._dynamo import config
+
+    with config.patch(enable_aot_compile=True):
+        mod = SimpleLinearModule()
+        model = torch.compile(
+            mod,
+            fullgraph=True,
+            backend="inductor",
+            options={
+                "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
+            },
+        )
+
+        @contextmanager
+        def train_mode(mdl):
+            mdl.train()
+            yield
+
+        @contextmanager
+        def eval_mode(mdl):
+            mdl.eval()
+            yield
+
+        inputs = [
+            ModelInput(
+                args=(torch.randn(3, 3),),
+                kwargs={},
+                contexts=[torch.no_grad(), eval_mode(model)],
+            ),
+            ModelInput(
+                args=(torch.randn(3, 3),), kwargs={}, contexts=[train_mode(model)]
+            ),
+        ]
+        assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
+        model._aot_compile(inputs)
+
+        with torch.compiler.set_stance("fail_on_recompile"):
+            model.eval()
+            eager_inputs = (torch.randn(3, 3),)
+            expected = mod(*eager_inputs)
+            actual = model(*eager_inputs)
+            assert torch.allclose(expected, actual)
+            model.train()
+            expected.sum().backward()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "model.pt")
+            model._save_aot_compiled_module(path)
+            torch._dynamo.reset()
+            model = torch.compile(
+                mod,
+                fullgraph=True,
+                backend="inductor",
+                options={
+                    "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
+                },
+            )
+            assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
+            with open(path, "rb") as f:
+                data = f.read()
+                model._load_aot_compiled_module(data)
+
+            with torch.compiler.set_stance("fail_on_recompile"):
+                model.eval()
+                eager_inputs = (torch.randn(3, 3),)
+                expected = mod(*eager_inputs)
+                actual = model(*eager_inputs)
+                assert torch.allclose(expected, actual)
+
+
+class RedistributeModel(torch.nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.linear = torch.nn.Linear(32, 32)
+
+    def forward(self, x, d_x, mesh):
+        x = self.linear(x)
+
+        # need to do local import since tests don't always have c10d
+        # and precompile needs this class to be available at the module
+        # level.
+        from torch.distributed.tensor import Replicate
+
+        y = d_x.redistribute(mesh, placements=(Replicate(), Replicate()))
+
+        return x, y
 
 
 @torch._dynamo.config.patch("enable_aot_compile", True)
@@ -253,20 +443,10 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             self.assertEqual(expected, actual)
 
     def test_aot_compile_disable_guard_check(self):
-        def fn(x, y):
-            return x + y
+        _run_in_subprocess(_subprocess_disable_guard_check)
 
-        with torch.no_grad():
-            compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
-                ((torch.randn(3, 4), torch.randn(3, 4)), {})
-            )
-        inputs = (torch.randn(3, 4), torch.randn(3, 4))
-        expected = fn(*inputs)
-        with self.assertRaisesRegex(RuntimeError, "GuardManager check failed"):
-            compiled_fn(*inputs)
-        compiled_fn.disable_guard_check()
-        actual = compiled_fn(*inputs)
-        self.assertEqual(expected, actual)
+    def test_aot_compile_grad_mode_after_prior_compile(self):
+        _run_in_subprocess(_subprocess_grad_mode_after_prior_compile)
 
     def test_aot_compile_source_info(self):
         from torch._dynamo.package import SourceInfo
@@ -376,83 +556,7 @@ from user code:
             self.assertEqual(expected, actual)
 
     def test_aot_compile_module(self):
-        mod = SimpleLinearModule()
-
-        model = torch.compile(
-            mod,
-            fullgraph=True,
-            backend="inductor",
-            options={
-                "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
-            },
-        )
-
-        @contextmanager
-        def train_mode(model):
-            """
-            Context manager that sets the model to training mode before entering the context.
-            """
-            model.train()
-            yield
-
-        @contextmanager
-        def eval_mode(model):
-            """
-            Context manager that sets the model to evaluation mode before entering the context.
-            """
-            model.eval()
-            yield
-
-        inputs = [
-            ModelInput(
-                args=(torch.randn(3, 3),),
-                kwargs={},
-                contexts=[torch.no_grad(), eval_mode(model)],
-            ),
-            ModelInput(
-                args=(torch.randn(3, 3),), kwargs={}, contexts=[train_mode(model)]
-            ),
-        ]
-        assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
-        model._aot_compile(
-            inputs,
-        )
-        with torch.compiler.set_stance("fail_on_recompile"):
-            model.eval()
-            inputs = (torch.randn(3, 3),)
-            expected = mod(*inputs)
-            actual = model(*inputs)
-            self.assertEqual(expected, actual)
-
-            # Shouldn't recompile
-            model.train()
-            expected.sum().backward()
-
-        model._save_aot_compiled_module(self.path())
-        torch._dynamo.reset()
-        model = torch.compile(
-            mod,
-            fullgraph=True,
-            backend="inductor",
-            options={
-                "guard_filter_fn": torch.compiler.skip_guard_on_globals_unsafe,
-            },
-        )
-        assert isinstance(model, torch._dynamo.eval_frame.OptimizedModule)
-        with open(self.path(), "rb") as f:
-            data = f.read()
-            model._load_aot_compiled_module(data)
-
-        with torch.compiler.set_stance("fail_on_recompile"):
-            model.eval()
-            inputs = (torch.randn(3, 3),)
-            expected = mod(*inputs)
-            actual = model(*inputs)
-            self.assertEqual(expected, actual)
-
-            # Shouldn't recompile
-            model.train()
-            expected.sum().backward()
+        _run_in_subprocess(_subprocess_aot_compile_module)
 
     def test_aot_module_simplified_serializable_autograd(self):
         mod = SimpleLinearModule()
@@ -468,6 +572,27 @@ from user code:
         )
         assert hasattr(backend_result.compiled_fn, "serialize")
         self.assertIsNotNone(backend_result.compiled_fn.serialize)
+
+    def test_aot_compile_portable_guards_unsafe(self):
+        def fn(xy):
+            return xy[0] + xy[1]
+
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+            options={"guard_filter_fn": torch.compiler.keep_portable_guards_unsafe},
+        ).aot_compile((((torch.randn(3, 4), torch.randn(3, 4)),), {}))
+        Tup = namedtuple("Tup", ["x", "y"])
+
+        inputs = Tup(torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(inputs)
+        actual = compiled_fn(inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(f)
+        actual = compiled_fn(inputs)
+        self.assertEqual(expected, actual)
 
     def test_aot_module_simplified_serializable_inference(self):
         def fn(x):
@@ -582,6 +707,18 @@ from user code:
         actual = compiled_fn(fn, *inputs)
         self.assertEqual(expected, actual)
 
+    def test_aot_compile_with_global_tensor(self):
+        def fn(x, y):
+            return x + y + EPS
+
+        def make_inputs():
+            return (torch.randn(3, 4), torch.randn(3, 4))
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))
+
+        test_inputs = make_inputs()
+        self.assertEqual(compiled_fn(*test_inputs), fn(*test_inputs))
+
     def test_aot_compile_with_default_args(self):
         def fn(x, y=1):
             return x + x
@@ -598,6 +735,178 @@ from user code:
             compiled_fn = torch.compiler.load_compiled_function(f)
         actual = compiled_fn(*inputs)
         self.assertEqual(expected, actual)
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_aot_compile_with_aoti(self):
+        with torch.device("cuda"):
+            from torch._dynamo.hooks import Hooks
+
+            def fn(x, y):
+                return x + y
+
+            def make_inputs():
+                return (torch.randn(3, 4), torch.randn(3, 4))
+
+            compiled_fn = torch._dynamo.aot_compile.aot_compile_fullgraph(
+                fn,
+                (make_inputs(), {}),
+                Hooks(),
+                torch._TorchCompileAOTInductorWrapper(None, None, None),
+            )
+
+            test_inputs = make_inputs()
+            expected = fn(*test_inputs)
+            actual = compiled_fn(*test_inputs)
+            self.assertEqual(expected, actual)
+            compiled_fn.save_compiled_function(self.path())
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*test_inputs)
+            self.assertEqual(expected, actual)
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_aot_compile_with_aoti_module(self):
+        with torch.device("cuda"):
+            from torch._dynamo.hooks import Hooks
+
+            mod = SimpleLinearModule()
+
+            def make_inputs():
+                return (torch.randn(4, 3),)
+
+            compiled_mod = torch._dynamo.aot_compile.aot_compile_module(
+                mod,
+                [ModelInput(make_inputs(), {}, [])],
+                Hooks(),
+                torch._TorchCompileAOTInductorWrapper(None, None, None),
+            )
+
+            def get_grads(m: torch.nn.Module):
+                return {name: p.grad for name, p in m.named_parameters()}
+
+            original_mod = copy.deepcopy(mod)
+            test_inputs = make_inputs()
+            expected = mod(*test_inputs)
+            expected.sum().backward()
+            expected_grads = get_grads(mod)
+
+            actual = compiled_mod(*test_inputs)
+            self.assertEqual(expected, actual)
+            serialized = compiled_mod.serialize()
+            compiled_fn = AOTCompiledModel.deserialize(original_mod, serialized)
+            actual = compiled_fn(*test_inputs)
+            actual.sum().backward()
+            self.assertEqual(get_grads(original_mod), expected_grads)
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_aot_compile_with_aoti_torch_compile(self):
+        with torch.device("cuda"):
+
+            def fn(x, y):
+                return x + y
+
+            def make_inputs():
+                return (torch.randn(3, 4), torch.randn(3, 4))
+
+            compiled_fn = torch.compile(
+                fn, fullgraph=True, options={"use_aoti": True}
+            ).aot_compile((make_inputs(), {}))
+            test_inputs = make_inputs()
+            expected = fn(*test_inputs)
+            actual = compiled_fn(*test_inputs)
+            self.assertEqual(expected, actual)
+            compiled_fn.save_compiled_function(self.path())
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*test_inputs)
+            self.assertEqual(compiled_fn._artifacts.backend_name, "aotinductor")
+            self.assertEqual(expected, actual)
+
+    @unittest.skipIf(not c10d.is_available(), "requires c10d")
+    def test_aot_compile_with_redistribute(self):
+        from torch.distributed.device_mesh import init_device_mesh
+        from torch.distributed.tensor import DTensor, Replicate
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        fake_store = FakeStore()
+        torch.distributed.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=4
+        )
+        try:
+            mesh = init_device_mesh("cpu", (2, 2), mesh_dim_names=("dp", "tp"))
+            input_tensor = torch.randn(32, 32, device="cpu")
+            placements = (Replicate(), Replicate())
+            d_input_tensor = DTensor.from_local(input_tensor, mesh, placements)
+            mod = RedistributeModel()
+
+            compiled_fn = torch.compile(
+                mod,
+                fullgraph=True,
+            ).forward.aot_compile(((input_tensor, d_input_tensor, mesh), {}))
+            inputs = (input_tensor, d_input_tensor, mesh)
+            expected = mod(*inputs)
+            actual = compiled_fn(mod, *inputs)
+            self.assertEqual(expected, actual)
+            compiled_fn.save_compiled_function(self.path())
+            torch._dynamo.reset()
+            with torch.compiler.set_stance("fail_on_recompile"):
+                with open(self.path(), "rb") as f:
+                    compiled_fn = torch.compiler.load_compiled_function(f)
+                actual = compiled_fn(mod, *inputs)
+                self.assertEqual(expected, actual)
+        finally:
+            torch.distributed.destroy_process_group()
+
+    def test_aot_compile_with_checkpoint(self):
+        from torch.utils.checkpoint import checkpoint
+
+        def fn(x, y):
+            def compute(x, y):
+                return x * 2 + y * 3
+
+            return checkpoint(compute, x, y, use_reentrant=False)
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
+            ((torch.randn(3, 4), torch.randn(3, 4)), {})
+        )
+        inputs = (torch.randn(3, 4), torch.randn(3, 4))
+        expected = fn(*inputs)
+        actual = compiled_fn(*inputs)
+        self.assertEqual(expected, actual)
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+        with torch.compiler.set_stance("fail_on_recompile"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+            actual = compiled_fn(*inputs)
+            self.assertEqual(expected, actual)
+
+    def test_external_refs_validation(self):
+        """Test that external refs tracking and f_globals parameter work correctly"""
+
+        def fn(x, y):
+            return MooType(x + y)
+
+        def make_inputs():
+            return (torch.randn(3, 4), torch.randn(3, 4))
+
+        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile((make_inputs(), {}))
+        test_inputs = make_inputs()
+        expected = fn(*test_inputs)
+        actual = compiled_fn(*test_inputs)
+        self.assertEqual(expected.x, actual.x)
+        compiled_fn.save_compiled_function(self.path())
+
+        with self.assertRaisesRegex(RuntimeError, "Missing required external ref"):
+            with open(self.path(), "rb") as f:
+                compiled_fn = torch.compiler.load_compiled_function(f)
+
+        with open(self.path(), "rb") as f:
+            compiled_fn = torch.compiler.load_compiled_function(
+                f, f_globals=fn.__globals__
+            )
+        actual = compiled_fn(*test_inputs)
+        self.assertEqual(expected.x, actual.x)
 
 
 if __name__ == "__main__":

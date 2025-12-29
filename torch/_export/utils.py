@@ -24,6 +24,8 @@ from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 
 
 if TYPE_CHECKING:
+    import sympy
+
     from torch._export.passes.lift_constants_pass import ConstantAttrMap
     from torch._ops import OperatorBase
     from torch.export import ExportedProgram
@@ -433,8 +435,6 @@ def _check_symint(
 def _check_input_constraints_for_graph(
     input_placeholders: list[torch.fx.Node], flat_args_with_path, range_constraints
 ) -> None:
-    import sympy  # noqa: TC002
-
     if len(flat_args_with_path) != len(input_placeholders):
         raise RuntimeError(
             "Unexpected number of inputs "

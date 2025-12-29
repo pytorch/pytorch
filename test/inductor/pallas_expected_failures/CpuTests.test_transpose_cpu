@@ -1,0 +1,1 @@
+Square matrix transpose requires output layout info at load time, which is unavailable

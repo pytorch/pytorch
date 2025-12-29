@@ -245,6 +245,9 @@ class TORCH_API TensorBase {
   size_t weak_use_count() const noexcept {
     return impl_.weak_use_count();
   }
+  bool is_uniquely_owned() const noexcept {
+    return impl_.is_uniquely_owned();
+  }
 
   std::string toString() const;
 

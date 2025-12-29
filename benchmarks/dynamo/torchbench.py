@@ -173,6 +173,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         return self._config["dtype"]["force_fp16_for_bf16_models"]
 
     @property
+    def amp_dtype_bfloat16(self):
+        return self._config["dtype"]["amp_dtype_bfloat16"]
+
+    @property
     def skip_accuracy_checks_large_models_dashboard(self):
         if self.args.dashboard or self.args.accuracy:
             return self._accuracy["skip"]["large_models"]

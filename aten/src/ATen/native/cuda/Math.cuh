@@ -816,7 +816,7 @@ const auto erfcx_string = jiterator_stringify(
     with the usual checks for overflow etcetera.
 
     Performance-wise, it seems to be substantially faster than either
-    the SLATEC DERFC function [or an erfcx function derived therefrom]
+    the SLATEC DERFC function [or an erfcx function derived there from]
     or Cody's CALERF function (from netlib.org/specfun), while
     retaining near machine precision in accuracy.
   */

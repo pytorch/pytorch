@@ -22,10 +22,6 @@
 // respective
 //   C stdlib functions
 
-#include <cctype>
-#include <cerrno>
-#include <cmath>
-#include <cstring>
 #include <locale>
 
 namespace torch::jit {

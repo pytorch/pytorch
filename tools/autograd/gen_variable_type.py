@@ -261,6 +261,7 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "diagonal",
     "alias",
     "atan",
+    "ldexp",
     "log",
     "log10",
     "log1p",
@@ -421,7 +422,7 @@ RESET_GRAD_ACCUMULATOR = {"set_", "resize_"}
 #      inplace or out-variants)
 # If the function does not modify its arguments, we also check the following properties
 # pertaining to its output:
-#   2) Its TensorImpl has use_count of 1
+#   2) Its TensorImpl has use_count of 1 (or 2 if it has a PyObject)
 #   3) If the function is a view function, it has the same StorageImpl as that of
 #      the input it is aliased with. Otherwise, its StorageImpl has use_count of 1
 #
@@ -496,10 +497,10 @@ if (${tensor_name}_impl_saved && !at::impl::dispatch_mode_enabled() && !at::impl
 """
 )
 
-ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE = CodeTemplate(
+ENFORCE_TENSOR_IMPL_USE_COUNT = CodeTemplate(
     """\
 if (!at::impl::dispatch_mode_enabled() && !at::impl::tensor_has_dispatch(${tensor_name}))
-  TORCH_INTERNAL_ASSERT(${tensor_name}.use_count() <= 1, "function: ${fn_name}");
+  TORCH_INTERNAL_ASSERT(${tensor_name}.use_count() == expected_fresh_use_count(${tensor_name}), "function: ${fn_name}");
 """
 )
 
@@ -1003,7 +1004,7 @@ def gen_variable_type_func(
                 result[f"type_derived_method_definitions_{key}"] = [type_definition]
                 result[f"wrapper_registrations_{key}"] = [wrapper_registration]
             else:
-                for key in fn.info.keys():
+                for key in fn.info:
                     type_definition = METHOD_DEFINITION.substitute(
                         return_type=cpp.returns_type(
                             f.func.returns, symint=True
@@ -1664,7 +1665,7 @@ def emit_body(
 
                     if type_wrapper_name(f) not in DONT_ENFORCE_TENSOR_IMPL_USE_COUNT:
                         stmts_after_call += [
-                            ENFORCE_TENSOR_IMPL_USE_COUNT_LT_OR_EQ_ONE.substitute(
+                            ENFORCE_TENSOR_IMPL_USE_COUNT.substitute(
                                 tensor_name=ret_name, fn_name=type_wrapper_name(f)
                             )
                         ]

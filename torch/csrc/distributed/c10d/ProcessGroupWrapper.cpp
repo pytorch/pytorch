@@ -2,15 +2,11 @@
 
 #ifdef USE_C10D_GLOO
 
-#include <c10/core/Allocator.h>
-#include <c10/core/DeviceType.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/TensorOptions.h>
 #include <c10/util/Exception.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
-#include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
 #include <optional>
 #include <stdexcept>
 #include <utility>
@@ -174,7 +170,7 @@ struct CollectiveFingerPrint {
           ss << "Detected mismatch between collectives on ranks. Rank "
              << backend->getRank() << " is running collective: " << *this
              << ", but Rank " << rank
-             << " is running collective: " << rank_fingerprint << ".";
+             << " is running collective: " << rank_fingerprint << '.';
           auto diff_result = compute_collective_diff(rank_fingerprint);
           if (std::get<0>(diff_result)) {
             ss << std::get<1>(diff_result);
@@ -354,9 +350,9 @@ std::ostream& operator<<(
         ", TensorShape=[",
         c10::Join(", ", size_strs),
         "], TensorDtypes=",
-        (dtype_strs),
+        dtype_strs,
         ", TensorDeviceTypes=",
-        (device_type_strs),
+        device_type_strs,
         ")");
   } else {
     collectiveInfo = c10::str(

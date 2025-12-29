@@ -866,7 +866,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
     ):
         if qconfig_dict is None:
             qconfig_dict = torch.ao.quantization.get_default_qconfig_mapping()
-        if prepare_fn == prepare_fx:
+        if prepare_fn is prepare_fx:
             m.eval()
         else:
             m.train()
@@ -929,7 +929,7 @@ class FXNumericSuiteQuantizationTestCase(QuantizationTestCase):
     ):
         if qconfig_dict is None:
             qconfig_dict = torch.ao.quantization.get_default_qconfig_mapping()
-        if prepare_fn == prepare_fx:
+        if prepare_fn is prepare_fx:
             m.eval()
         else:
             m.train()
@@ -1082,7 +1082,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Conv2d(1, 1, 1),
         ).eval()
         qconfig_dict = None
-        if prepare_fn == prepare_qat_fx:
+        if prepare_fn is prepare_qat_fx:
             qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
         expected_occurrence = {
             ns.call_module(OutputLogger): 2,
@@ -1103,7 +1103,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def _test_match_activations_fun_impl(self, prepare_fn=prepare_fx):
         m = LinearReluLinearFunctional().eval()
         qconfig_dict = None
-        if prepare_fn == prepare_qat_fx:
+        if prepare_fn is prepare_qat_fx:
             qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
         expected_occurrence = {
             ns.call_module(OutputLogger): 2,
@@ -1165,7 +1165,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
             nn.Conv2d(1, 1, 1),
         ).eval()
         qconfig_dict = None
-        if prepare_fn == prepare_qat_fx:
+        if prepare_fn is prepare_qat_fx:
             qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
         res = self._test_match_shadow_activations(
             m, (torch.randn(1, 1, 4, 4),), results_len=2,
@@ -1182,7 +1182,7 @@ class TestFXNumericSuiteCoreAPIs(FXNumericSuiteQuantizationTestCase):
     def _test_add_shadow_loggers_fun_impl(self, prepare_fn=prepare_fx):
         m = LinearReluLinearFunctional()
         qconfig_dict = None
-        if prepare_fn == prepare_qat_fx:
+        if prepare_fn is prepare_qat_fx:
             qconfig_dict = {'': torch.ao.quantization.get_default_qat_qconfig('fbgemm')}
         res = self._test_match_shadow_activations(
             m, (torch.randn(4, 4),), results_len=2, prepare_fn=prepare_fn,

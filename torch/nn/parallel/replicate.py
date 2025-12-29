@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from collections.abc import Iterator, Sequence
-from typing import cast, TYPE_CHECKING, TypeVar, Union
+from typing import cast, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeIs
 
 import torch
@@ -82,7 +82,7 @@ def _replicatable_module(module: Module, memo: set[Module] | None = None) -> boo
 
 def _broadcast_coalesced_reshape(
     tensors: Sequence[torch.Tensor],
-    devices: Sequence[Union[int, torch.device]],
+    devices: Sequence[int | torch.device],
     detach: bool = False,
 ) -> list[list[torch.Tensor]]:
     from torch.nn.parallel._functions import Broadcast
@@ -106,7 +106,7 @@ T = TypeVar("T", bound=Module)
 
 def replicate(
     network: T,
-    devices: Sequence[Union[int, torch.device]],
+    devices: Sequence[int | torch.device],
     detach: bool = False,
 ) -> list[T]:
     if not _replicatable_module(network):

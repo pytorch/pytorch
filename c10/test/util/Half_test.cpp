@@ -96,10 +96,10 @@ TEST(HalfConversionTest, TestPorableConversion) {
   for (auto x : inputs) {
     auto target = c10::detail::fp16_ieee_to_fp32_value(x);
     EXPECT_EQ(halfbits2float(x), target)
-        << "Test failed for uint16 to float " << x << "\n";
+        << "Test failed for uint16 to float " << x << '\n';
     EXPECT_EQ(
         float2halfbits(target), c10::detail::fp16_ieee_from_fp32_value(target))
-        << "Test failed for float to uint16" << target << "\n";
+        << "Test failed for float to uint16" << target << '\n';
   }
 }
 

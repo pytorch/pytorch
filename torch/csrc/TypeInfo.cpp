@@ -2,18 +2,14 @@
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/object_ptr.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
-#include <torch/csrc/utils/tensor_dtypes.h>
 
 #include <ATen/Dispatch_v2.h>
 
 #include <c10/util/Exception.h>
 
-#include <structmember.h>
-#include <cstring>
 #include <limits>
 #include <sstream>
 
@@ -254,7 +250,7 @@ static PyObject* THPFInfo_str(THPFInfo* self) {
       << PyFloat_AsDouble(THPFInfo_smallest_normal(self, nullptr));
   oss << ", tiny=" << PyFloat_AsDouble(THPFInfo_tiny(self, nullptr));
   if (dtypeStr != nullptr) {
-    oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ")";
+    oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ')';
   }
   return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;
 }
@@ -266,7 +262,7 @@ static PyObject* THPIInfo_str(THPIInfo* self) {
   oss << "iinfo(min=" << PyLong_AsDouble(THPIInfo_min(self, nullptr));
   oss << ", max=" << PyLong_AsDouble(THPIInfo_max(self, nullptr));
   if (dtypeStr) {
-    oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ")";
+    oss << ", dtype=" << PyUnicode_AsUTF8(dtypeStr) << ')';
   }
 
   return !PyErr_Occurred() ? THPUtils_packString(oss.str().c_str()) : nullptr;

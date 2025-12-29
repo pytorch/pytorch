@@ -1,0 +1,5 @@
+FAIL
+AssertionError: Tensor-likes are not close!
+Mismatched elements: 32 / 32 (100.0%)
+Greatest absolute difference: 0.7895 at index (1, 2)
+Numerical issue with multi-axis std reduction

@@ -225,9 +225,11 @@ class ApiTest(unittest.TestCase):
                 raise_child_failure_error_fn("trainer", trainer_error_file)
             pf = cm.exception.get_first_failure()[1]
             # compare worker error file with reply file and overridden error code
-            expect = json.load(open(pf.error_file))
+            with open(pf.error_file) as f:
+                expect = json.load(f)
             expect["message"]["errorCode"] = pf.exitcode
-            actual = json.load(open(self.test_error_file))
+            with open(self.test_error_file) as f:
+                actual = json.load(f)
             self.assertTrue(
                 json.dumps(expect, sort_keys=True),
                 json.dumps(actual, sort_keys=True),

@@ -2,7 +2,7 @@
 import copy
 import operator
 from collections.abc import Sequence
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensor
@@ -273,7 +273,7 @@ def _create_placement_strategy(
     node: Node,
     mesh: DeviceMesh,
     placements: tuple[Placement, ...],
-    input_specs: Optional[Sequence[DTensorSpec]] = None,
+    input_specs: Sequence[DTensorSpec] | None = None,
 ) -> OpSpec:
     """
     Util function to construct an OpSpec for a given node.

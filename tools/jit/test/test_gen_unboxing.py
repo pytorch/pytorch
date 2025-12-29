@@ -28,18 +28,17 @@ class TestGenUnboxing(unittest.TestCase):
         mock_parse_native_yaml: NonCallableMock,
         mock_get_custom_build_selector: NonCallableMock,
     ) -> None:
-        temp_file = tempfile.NamedTemporaryFile()
-        temp_file.write(b"- aten::add.Tensor")
-        temp_file.seek(0)
-        args = [
-            f"--TEST-ONLY-op-registration-allowlist-yaml-path={temp_file.name}",
-            "--op-selection-yaml-path=path2",
-        ]
-        gen_unboxing.main(args)
-        mock_get_custom_build_selector.assert_called_once_with(
-            ["aten::add.Tensor"], "path2"
-        )
-        temp_file.close()
+        with tempfile.NamedTemporaryFile() as temp_file:
+            temp_file.write(b"- aten::add.Tensor")
+            temp_file.seek(0)
+            args = [
+                f"--TEST-ONLY-op-registration-allowlist-yaml-path={temp_file.name}",
+                "--op-selection-yaml-path=path2",
+            ]
+            gen_unboxing.main(args)
+            mock_get_custom_build_selector.assert_called_once_with(
+                ["aten::add.Tensor"], "path2"
+            )
 
     def test_get_custom_build_selector_with_both_allowlist_and_yaml(
         self,
@@ -48,17 +47,16 @@ class TestGenUnboxing(unittest.TestCase):
         mock_parse_native_yaml: NonCallableMock,
         mock_get_custom_build_selector: NonCallableMock,
     ) -> None:
-        temp_file = tempfile.NamedTemporaryFile()
-        temp_file.write(b"- aten::add.Tensor")
-        temp_file.seek(0)
-        args = [
-            "--op-registration-allowlist=op1",
-            f"--TEST-ONLY-op-registration-allowlist-yaml-path={temp_file.name}",
-            "--op-selection-yaml-path=path2",
-        ]
-        gen_unboxing.main(args)
-        mock_get_custom_build_selector.assert_called_once_with(["op1"], "path2")
-        temp_file.close()
+        with tempfile.NamedTemporaryFile() as temp_file:
+            temp_file.write(b"- aten::add.Tensor")
+            temp_file.seek(0)
+            args = [
+                "--op-registration-allowlist=op1",
+                f"--TEST-ONLY-op-registration-allowlist-yaml-path={temp_file.name}",
+                "--op-selection-yaml-path=path2",
+            ]
+            gen_unboxing.main(args)
+            mock_get_custom_build_selector.assert_called_once_with(["op1"], "path2")
 
 
 if __name__ == "__main__":

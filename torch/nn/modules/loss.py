@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable
-from typing import Optional, Union
 from typing_extensions import deprecated
 
 from torch import Tensor
@@ -50,14 +49,14 @@ class _Loss(Module):
 class _WeightedLoss(_Loss):
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         reduce=None,
         reduction: str = "mean",
     ) -> None:
         super().__init__(size_average, reduce, reduction)
         self.register_buffer("weight", weight)
-        self.weight: Optional[Tensor]
+        self.weight: Tensor | None
 
 
 class L1Loss(_Loss):
@@ -122,9 +121,6 @@ class L1Loss(_Loss):
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
@@ -244,7 +240,7 @@ class NLLLoss(_WeightedLoss):
 
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         ignore_index: int = -100,
         reduce=None,
@@ -275,7 +271,7 @@ class NLLLoss(_WeightedLoss):
 class NLLLoss2d(NLLLoss):
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         ignore_index: int = -100,
         reduce=None,
@@ -452,9 +448,7 @@ class GaussianNLLLoss(_Loss):
         self.full = full
         self.eps = eps
 
-    def forward(
-        self, input: Tensor, target: Tensor, var: Union[Tensor, float]
-    ) -> Tensor:
+    def forward(self, input: Tensor, target: Tensor, var: Tensor | float) -> Tensor:
         """
         Runs the forward pass.
         """
@@ -625,9 +619,6 @@ class MSELoss(_Loss):
 
     __constants__ = ["reduction"]
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
-
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
         Runs the forward pass.
@@ -712,15 +703,6 @@ class BCELoss(_WeightedLoss):
 
     __constants__ = ["reduction"]
 
-    def __init__(
-        self,
-        weight: Optional[Tensor] = None,
-        size_average=None,
-        reduce=None,
-        reduction: str = "mean",
-    ) -> None:
-        super().__init__(weight, size_average, reduce, reduction)
-
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """
         Runs the forward pass.
@@ -792,7 +774,8 @@ class BCEWithLogitsLoss(_Loss):
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
-            of each batch element. If given, has to be a Tensor of size `nbatch`.
+            of each batch element. The dimension of weight supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+            with respect to the output (and target) shape.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
@@ -834,17 +817,17 @@ class BCEWithLogitsLoss(_Loss):
 
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         reduce=None,
         reduction: str = "mean",
-        pos_weight: Optional[Tensor] = None,
+        pos_weight: Tensor | None = None,
     ) -> None:
         super().__init__(size_average, reduce, reduction)
         self.register_buffer("weight", weight)
         self.register_buffer("pos_weight", pos_weight)
-        self.weight: Optional[Tensor]
-        self.pos_weight: Optional[Tensor]
+        self.weight: Tensor | None
+        self.pos_weight: Tensor | None
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -905,6 +888,14 @@ class HingeEmbeddingLoss(_Loss):
           operates over all the elements.
         - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the input
+
+    Examples:
+
+        >>> loss = nn.HingeEmbeddingLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5).sign()
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["margin", "reduction"]
@@ -985,9 +976,6 @@ class MultiLabelMarginLoss(_Loss):
 
     __constants__ = ["reduction"]
 
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
-
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
         return F.multilabel_margin_loss(input, target, reduction=self.reduction)
@@ -1063,6 +1051,14 @@ class SmoothL1Loss(_Loss):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
+
+    Examples:
+
+        >>> loss = nn.SmoothL1Loss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
@@ -1127,6 +1123,14 @@ class HuberLoss(_Loss):
         - Input: :math:`(*)` where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
+
+    Examples:
+
+        >>> loss = nn.HuberLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction", "delta"]
@@ -1171,12 +1175,16 @@ class SoftMarginLoss(_Loss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
           shape as input.
 
+    Examples:
+
+        >>> loss = nn.SoftMarginLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5).sign()
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(self, size_average=None, reduce=None, reduction: str = "mean") -> None:
-        super().__init__(size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -1370,7 +1378,7 @@ class CrossEntropyLoss(_WeightedLoss):
 
     def __init__(
         self,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         ignore_index: int = -100,
         reduce=None,
@@ -1430,18 +1438,17 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
         - Target: :math:`(N, C)`, label targets must have the same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+
+    Examples:
+
+        >>> loss = nn.MultiLabelSoftMarginLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.empty(3, 5).random_(2)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
-
-    def __init__(
-        self,
-        weight: Optional[Tensor] = None,
-        size_average=None,
-        reduce=None,
-        reduction: str = "mean",
-    ) -> None:
-        super().__init__(weight, size_average, reduce, reduction)
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
@@ -1658,7 +1665,7 @@ class MultiMarginLoss(_WeightedLoss):
         self,
         p: int = 1,
         margin: float = 1.0,
-        weight: Optional[Tensor] = None,
+        weight: Tensor | None = None,
         size_average=None,
         reduce=None,
         reduction: str = "mean",
@@ -1901,7 +1908,7 @@ class TripletMarginWithDistanceLoss(_Loss):
     def __init__(
         self,
         *,
-        distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = None,
+        distance_function: Callable[[Tensor, Tensor], Tensor] | None = None,
         margin: float = 1.0,
         swap: bool = False,
         reduction: str = "mean",
@@ -1911,7 +1918,8 @@ class TripletMarginWithDistanceLoss(_Loss):
             raise ValueError(
                 f"TripletMarginWithDistanceLoss: expected margin to be greater than 0, got {margin} instead"
             )
-        self.distance_function: Optional[Callable[[Tensor, Tensor], Tensor]] = (
+        self.distance_function: Callable[[Tensor, Tensor], Tensor] | None = (
+            # pyrefly: ignore [bad-assignment]
             distance_function if distance_function is not None else PairwiseDistance()
         )
         self.margin = margin

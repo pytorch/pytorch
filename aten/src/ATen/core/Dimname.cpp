@@ -10,7 +10,7 @@ std::ostream& operator<<(std::ostream& out, const Dimname& dimname) {
   if (dimname.type() == NameType::WILDCARD) {
     out << "None";
   } else {
-    out << "'" << dimname.symbol().toUnqualString() << "'";
+    out << '\'' << dimname.symbol().toUnqualString() << '\'';
   }
   return out;
 }

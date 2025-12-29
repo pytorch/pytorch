@@ -1,8 +1,10 @@
 # Owner(s): ["oncall: pt2"]
 import functools
+import os
 import re
 import sys
 import unittest
+from unittest import mock
 
 import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -11,8 +13,18 @@ from torch._inductor import config
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS
-from torch.testing._internal.inductor_utils import HAS_PALLAS
+from torch.utils._pallas import has_cpu_pallas, has_cuda_pallas, has_tpu_pallas
 from torch.utils._triton import has_triton
+
+
+# Load pallas expected failures from sentinel files
+_pallas_expected_failures_dir = os.path.join(
+    os.path.dirname(__file__), "pallas_expected_failures"
+)
+if os.path.isdir(_pallas_expected_failures_dir):
+    PALLAS_EXPECTED_FAILURES = set(os.listdir(_pallas_expected_failures_dir))
+else:
+    PALLAS_EXPECTED_FAILURES = set()
 
 
 if IS_WINDOWS and IS_CI:
@@ -37,6 +49,17 @@ def make_pallas(cls):
     """Create a test class variant that uses Pallas backend."""
     suffix = "_pallas"
     cls_prefix = "Pallas"
+
+    # Mark tests as expected failures based on sentinel files
+    # Sentinel file format: TestClassName.test_method_name
+    # Must set attribute on the underlying function object in __dict__
+    for name in cls.__dict__:
+        if name.startswith("test_"):
+            fn = cls.__dict__[name]
+            if callable(fn):
+                key = f"{cls.__name__}.{name}"
+                if key in PALLAS_EXPECTED_FAILURES:
+                    fn._expected_failure_pallas = True
 
     test_class = make_test_cls_with_patches(
         cls,
@@ -383,6 +406,204 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    def test_stride_non_contiguous_1d(self):
+        """Test 1D non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_1d = torch.arange(256, dtype=torch.float32, device=self.DEVICE)
+        for x in [base_1d[::2], base_1d[::4], base_1d[::2][::2]]:
+            self.assertFalse(x.is_contiguous())
+            self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_2d_row_stride(self):
+        """Test 2D row-strided input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d[::2, :]  # (16, 32) with stride (64, 1)
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_2d_col_stride(self):
+        """Test 2D col-strided input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d[:, ::2]  # (32, 16) with stride (32, 2)
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_2d_both_stride(self):
+        """Test 2D both-strided input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d[::2, ::2]  # (16, 16) with stride (64, 2)
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_2d_transpose(self):
+        """Test 2D transposed input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d.t()  # (32, 32) with stride (1, 32)
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_3d(self):
+        """Test 3D non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_3d = torch.randn(8, 8, 8, device=self.DEVICE)
+        x = base_3d[::2, ::2, ::2]
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_permuted(self):
+        """Test permuted non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_3d = torch.randn(8, 8, 8, device=self.DEVICE)
+        x = base_3d.permute(2, 0, 1)
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_channels_last(self):
+        """Test channels-last (NHWC) non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        x = torch.randn(2, 3, 4, 5, device=self.DEVICE).to(
+            memory_format=torch.channels_last
+        )
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_diagonal(self):
+        """Test diagonal (large stride) non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d.diagonal()
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_as_strided(self):
+        """Test as_strided (custom layout) non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_flat = torch.randn(256, device=self.DEVICE)
+        x = torch.as_strided(base_flat, size=(4, 8), stride=(16, 2))
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_select_stride(self):
+        """Test select then stride on non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d[3, ::2]
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_unsqueeze(self):
+        """Test unsqueeze on strided non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d[::2, ::2].unsqueeze(0)
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_dtypes(self):
+        """Test non-contiguous patterns with various dtypes."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        for dtype in [torch.float64, torch.int32, torch.complex64]:
+            if dtype == torch.int32:
+                base = torch.arange(32, dtype=dtype, device=self.DEVICE)
+            else:
+                base = torch.randn(32, dtype=dtype, device=self.DEVICE)
+            x = base[::2]
+            self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    @unittest.skip(
+        "Expanded tensors (stride=0) generate index expressions that don't match "
+        "the contiguous layout after .contiguous() is called at runtime, causing "
+        "gather ops on GPU which aren't supported by Pallas GPU lowering"
+    )
+    def test_stride_expanded_tensors(self):
+        """Test expanded tensors with stride=0 (distinct code path)."""
+        compiled = self._compile(lambda x, y: x + y)
+
+        # Single dim expansion
+        x = torch.randn(1, 16, device=self.DEVICE).expand(8, 16)
+        y = torch.randn(8, 16, device=self.DEVICE)
+        self.assertEqual(x.stride()[0], 0)
+        self.assertEqual(compiled(x, y), x + y)
+
+        # Multi-dim expansion
+        x = torch.randn(1, 1, 16, device=self.DEVICE).expand(4, 8, 16)
+        self.assertEqual(compiled(x, x), x + x)
+
+    def test_stride_multiple_inputs(self):
+        """Test multiple strided inputs and broadcasting."""
+        compiled = self._compile(lambda a, b, c: a * b + c)
+
+        # Use separate base tensors to create strided inputs with the SAME stride pattern
+        # This avoids triggering scatter operations which aren't supported in Pallas GPU lowering
+        base_a = torch.randn(32, 32, device=self.DEVICE)
+        base_b = torch.randn(32, 32, device=self.DEVICE)
+
+        # Multiple strided inputs with the same stride pattern
+        a = base_a[::2, ::2]  # (16, 16) with stride (64, 2)
+        b = base_b[::2, ::2]  # (16, 16) with stride (64, 2)
+        c = torch.randn(16, 16, device=self.DEVICE)
+        self.assertEqual(a.stride(), b.stride())
+        self.assertFalse(a.is_contiguous())
+        self.assertFalse(b.is_contiguous())
+        self.assertEqual(compiled(a, b, c), a * b + c)
+
+        # Broadcasting with strided
+        x = base_a[::2, ::2]  # (16, 16)
+        y = torch.randn(16, device=self.DEVICE)  # broadcasts
+        s = torch.tensor(2.0, device=self.DEVICE)  # scalar
+        compiled_bcast = self._compile(lambda x, y, s: x + y * s)
+        self.assertEqual(compiled_bcast(x, y, s), x + y * s)
+
+    def test_non_power_of_2_sizes(self):
+        """Test that non-power-of-2 tensor sizes work with masked ops on GPU.
+
+        On GPU (Triton backend), Pallas requires power-of-2 sizes. We use masked
+        loads/stores to handle non-power-of-2 tensors by allocating power-of-2
+        blocks and masking out invalid elements.
+        """
+
+        def fn(a, b):
+            return a + b
+
+        compiled = self._compile(fn)
+
+        # Test a specific non-power-of-2 size (10)
+        a = torch.randn(10, device=self.DEVICE)
+        b = torch.randn(10, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_non_power_of_2_multiple_ops(self):
+        """Test non-power-of-2 sizes with multiple operations."""
+
+        def fn(x, y):
+            return x.sin() + y.cos() - (x * y)
+
+        compiled = self._compile(fn)
+
+        # Non-power-of-2 size: 17
+        x = torch.randn(17, device=self.DEVICE)
+        y = torch.randn(17, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
     def test_complex_indexing_gather(self):
         """Test complex indexing with gather-like operations."""
 
@@ -423,28 +644,378 @@ class PallasTestsMixin:
         expected = fn(x, row_indices)
         self.assertEqual(result, expected)
 
+    def test_complex64_mul(self):
+        """Test complex64 multiplication."""
 
-@unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
-class PallasTestsCUDA(PallasTestsMixin, TestCase):
-    DEVICE = "cuda"
+        def fn(a, b):
+            return a * b
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        b = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_complex_conj(self):
+        """Test complex conjugate."""
+
+        def fn(x):
+            return torch.conj(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_real(self):
+        """Test extracting real part of complex tensor."""
+
+        def fn(x):
+            return torch.real(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_imag(self):
+        """Test extracting imaginary part of complex tensor."""
+
+        def fn(x):
+            return torch.imag(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_abs(self):
+        """Test complex absolute value (magnitude)."""
+
+        def fn(x):
+            return torch.abs(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex128_conj(self):
+        """Test complex128 conjugate operation."""
+
+        def fn(x):
+            return torch.conj(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex128, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_mul_scalar(self):
+        """Test complex multiplication with scalar."""
+
+        def fn(x):
+            return x * 2.5
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_complex_conj_mul(self):
+        """Test conjugate followed by multiplication."""
+
+        def fn(x, y):
+            return torch.conj(x) * y
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        y = torch.randn(16, dtype=torch.complex64, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_where(self):
+        """Test torch.where operation."""
+
+        def fn(x, y):
+            return torch.where(x > 0, x, y)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        y = torch.randn(16, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_clamp(self):
+        """Test torch.clamp operation."""
+
+        def fn(x):
+            return torch.clamp(x, -1.0, 1.0)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE) * 2
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_comparison_ops(self):
+        """Test comparison operations."""
+
+        def fn(a, b):
+            gt = a > b
+            lt = a < b
+            eq = a == b
+            return gt.float() + lt.float() + eq.float()
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(16, device=self.DEVICE)
+        b = torch.randn(16, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_logical_ops(self):
+        """Test logical operations."""
+
+        def fn(a, b):
+            return torch.logical_and(a > 0, b > 0).float()
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(16, device=self.DEVICE)
+        b = torch.randn(16, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_sign(self):
+        """Test sign operation."""
+
+        def fn(x):
+            return torch.sign(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_reciprocal(self):
+        """Test reciprocal operation."""
+
+        def fn(x):
+            return torch.reciprocal(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE) + 1.0  # Avoid zeros
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_square(self):
+        """Test square operation."""
+
+        def fn(x):
+            return torch.square(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_erf(self):
+        """Test erf operation."""
+        if self.DEVICE == "cuda":
+            self.skipTest("erf not supported in Pallas GPU (Triton) backend")
+
+        def fn(x):
+            return torch.erf(x)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_atan2(self):
+        """Test atan2 operation."""
+
+        def fn(a, b):
+            return torch.atan2(a, b)
+
+        compiled = self._compile(fn)
+
+        a = torch.randn(16, device=self.DEVICE)
+        b = torch.randn(16, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_sum_reduction(self):
+        """Test sum reduction."""
+
+        def fn(x):
+            return x.sum()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_max_reduction(self):
+        """Test max reduction."""
+
+        def fn(x):
+            return x.max()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_min_reduction(self):
+        """Test min reduction."""
+
+        def fn(x):
+            return x.min()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_prod_reduction(self):
+        """Test prod reduction."""
+        if self.DEVICE == "cuda":
+            self.skipTest("prod reduction not supported in Pallas GPU (Triton) backend")
+
+        def fn(x):
+            # Use smaller values to avoid overflow
+            return (x * 0.1).prod()
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_arange_multi_output(self):
+        """Test arange with view and multiple outputs."""
+
+        def fn(x):
+            rng1 = torch.arange(8 * 8, dtype=torch.float32, device=x.device).view(8, 8)
+            rng2 = torch.arange(10, 18, device=x.device)
+            tmp = x * rng1
+            return tmp, tmp + rng2
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(8, 8, device=self.DEVICE)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(len(result), len(expected))
+        for r, e in zip(result, expected):
+            self.assertEqual(r, e)
+
+    def test_dtype_bitcast(self):
+        """Test dtype bitcast (view tensor as different dtype)."""
+
+        def fn(x):
+            # View float32 tensor as int32 (same byte size)
+            return x.view(torch.int32)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE, dtype=torch.float32)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
+
+    def test_dtype_bitcast_float16_to_int16(self):
+        """Test dtype bitcast from float16 to int16."""
+
+        def fn(x):
+            return x.view(torch.int16)
+
+        compiled = self._compile(fn)
+
+        x = torch.randn(16, device=self.DEVICE, dtype=torch.float16)
+        result = compiled(x)
+        expected = fn(x)
+        self.assertEqual(result, expected)
 
 
-@unittest.skipUnless(HAS_PALLAS, "requires jax and pallas")
-class PallasTestsCPU(PallasTestsMixin, TestCase):
-    DEVICE = "cpu"
+if test_torchinductor.RUN_CPU and has_cpu_pallas():
 
+    class PallasTestsCPU(PallasTestsMixin, TestCase):
+        DEVICE = "cpu"
 
-if test_torchinductor.HAS_CPU and HAS_PALLAS:
     make_pallas(test_torchinductor.SweepInputsCpuTest)
-    # make_pallas(test_torchinductor.CpuTests)
+    make_pallas(test_torchinductor.CpuTests)
 
 
-if test_torchinductor.HAS_GPU and HAS_PALLAS:
+if test_torchinductor.RUN_GPU and has_cuda_pallas():
+
+    class PallasTestsCUDA(PallasTestsMixin, TestCase):
+        DEVICE = "cuda"
+
     # make_pallas(test_torchinductor.SweepInputsGPUTest)
     # make_pallas(test_torchinductor.GPUTests)
-    pass
+
+if test_torchinductor.RUN_TPU and has_tpu_pallas():
+
+    @config.patch({"_debug_cpu_to_tpu_pallas": True})
+    class PallasTestsTPU(PallasTestsMixin, TestCase):
+        DEVICE = "cpu"
+
+        @mock.patch("torch._inductor.codegen.pallas.has_tpu_pallas", return_value=False)
+        def test_tpu_not_available_raises_error(self, mock_has_tpu_pallas):
+            def fn(a, b):
+                return a + b
+
+            with self.assertRaisesRegex(
+                RuntimeError,
+                (
+                    "PALLAS_TARGET_TPU is set, but no TPU device was found. "
+                    "Please make sure that you have a TPU available and that JAX is configured correctly."
+                ),
+            ):
+                torch.compile(
+                    fn, backend="inductor", options={"cpu_backend": "pallas"}
+                )(torch.randn(16), torch.randn(16))
 
 
 if __name__ == "__main__":
-    if HAS_PALLAS:
-        run_tests(needs="filelock")
+    run_tests(needs="filelock")
