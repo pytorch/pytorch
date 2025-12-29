@@ -91,6 +91,5 @@ def generate_print_python(
 CUSTOM_EXTERN_KERNEL_CODEGEN: dict[str, CustomCodegen] = {
     "torch.ops.higher_order.print": CustomCodegen(
         python=generate_print_python,
-        # cpp=generate_print_cpp,  # Add C++ implementation when needed
     ),
 }

@@ -2447,10 +2447,10 @@ class OutputGraph(OutputGraphCommon):
                     "Report an issue to the backend compiler repo.",
                 ],
             )
-        except SkipFrame as e:
+        except SkipFrame:
             # The backend compiler has requested that we skip the frame, instead of
             # aborting execution.
-            raise e
+            raise
         except Exception as e:
             raise BackendCompilerFailed(
                 self.compiler_fn, e, inspect.currentframe()
