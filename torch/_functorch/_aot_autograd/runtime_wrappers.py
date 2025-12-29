@@ -13,16 +13,14 @@ import contextlib
 import copy
 import functools
 import itertools
+import logging
 import pprint
-from collections.abc import Callable
+import typing
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Optional, TYPE_CHECKING, Union
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch.fx as fx
@@ -39,6 +37,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
@@ -96,6 +95,53 @@ from .utils import (
 
 
 zip = strict_zip
+
+aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
+
+
+def _describe_arg_for_logging(arg: object) -> str:
+    from torch._library import opaque_object
+
+    try:
+        is_dtensor = isinstance(arg, torch.distributed._tensor.DTensor)
+    except AttributeError:
+        is_dtensor = False
+
+    if is_dtensor:
+        arg = typing.cast(torch.distributed._tensor.DTensor, arg)
+        mesh = arg.device_mesh
+        return (
+            f"DTensor(shape={arg.shape}, dtype={arg.dtype}, "
+            f"device={arg.device}, mesh_shape={mesh.shape}, "
+            f"placements={arg.placements})"
+        )
+    elif isinstance(arg, torch.Tensor):
+        return f"Tensor(shape={arg.shape}, dtype={arg.dtype}, device={arg.device})"
+    elif opaque_object.is_opaque_type(type(arg)):
+        return f"Opaque: {type(arg).__name__}"
+    else:
+        return f"{type(arg).__name__}: {arg}"
+
+
+def _log_input_metadata(runtime_metadata: ViewAndMutationMeta) -> None:
+    aot_graphs_log.debug(
+        "Expected input metadata (count=%s):", len(runtime_metadata.subclass_inp_meta)
+    )
+    for i, meta in enumerate(runtime_metadata.subclass_inp_meta):
+        aot_graphs_log.debug("  [%s] %s", i, meta)
+
+
+def _log_args_list(args: Sequence[object], label: str) -> None:
+    aot_graphs_log.debug("%s (count=%s):", label, len(args))
+    for i, arg in enumerate(args):
+        aot_graphs_log.debug("  [%s] %s", i, _describe_arg_for_logging(arg))
+
+
+def _log_args_maybe_list(arg: object, label: str) -> None:
+    if isinstance(arg, (list, tuple)):
+        _log_args_list(arg, label)
+    else:
+        aot_graphs_log.debug("%s: %s", label, _describe_arg_for_logging(arg))
 
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
@@ -373,10 +419,9 @@ def _create_runtime_wrapper(
         )
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
-        num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices
-        if num_mutations_to_apply > 0:
-            updated_inputs = all_outs[:num_mutations_to_apply]
-            fw_outs = all_outs[num_mutations_to_apply:]
+        if num_mutated_runtime_inps > 0:
+            updated_inputs = all_outs[:num_mutated_runtime_inps]
+            fw_outs = all_outs[num_mutated_runtime_inps:]
 
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
                 meta = runtime_metadata.input_info[inpt_idx]
@@ -685,14 +730,31 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: list[Any]):
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                aot_graphs_log.debug(
+                    "=== AOTDispatchSubclassWrapper.inner_fn START ==="
+                )
+                _log_input_metadata(runtime_metadata)
+                _log_args_list(args, "Incoming args")
+
             unwrapped_args = runtime_unwrap_tensor_subclasses(
                 args,
                 subclass_metas=runtime_metadata.subclass_inp_meta,
                 append_symints=True,
             )
+
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                _log_args_list(unwrapped_args, "After unwrapping, unwrapped_args")
+
             args.clear()
             # expectation: runtime_fn is a boxed fn
             unwrapped_outs = compiled_fn(unwrapped_args)
+
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                _log_args_maybe_list(
+                    unwrapped_outs, "After compiled_fn, unwrapped_outs"
+                )
+
             wrapped_outs = wrap_tensor_subclasses(
                 unwrapped_outs,
                 subclass_metas=subclass_metas,
@@ -700,6 +762,11 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 is_runtime=True,
                 included_subclass_symints=True,
             )
+
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                _log_args_maybe_list(wrapped_outs, "After wrapping, wrapped_outs")
+                aot_graphs_log.debug("=== AOTDispatchSubclassWrapper.inner_fn END ===")
+
             return wrapped_outs
 
         # box it
