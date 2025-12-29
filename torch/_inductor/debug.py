@@ -10,6 +10,7 @@ import logging
 import os
 import os.path
 import pickle
+import tempfile
 import pstats
 import shutil
 import traceback
@@ -1190,7 +1191,7 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     with the saved arguments using load_args_and_run_compile_fx_inner.
     """
 
-    folder = "/tmp/inductor_saved_args"
+    folder = os.path.join(tempfile.gettempdir(), "inductor_saved_args")
     if not os.path.exists(folder):
         os.mkdir(folder)
 
