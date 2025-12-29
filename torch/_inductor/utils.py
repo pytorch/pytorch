@@ -3148,6 +3148,8 @@ def device_need_guard(device: str) -> bool:
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
     if dtype == torch.bfloat16 and torch.cuda.is_available():
         return torch.cuda.get_device_capability() < (9, 0)
+    elif dtype == torch.bfloat16 and torch.xpu.is_available():
+        return True
     else:
         return dtype in (torch.int64, torch.bool)
 
