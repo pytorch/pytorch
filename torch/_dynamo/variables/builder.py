@@ -323,7 +323,8 @@ from typing import TypeVar
 
 # Placeholder for a VariableTracker to be used in proxy
 # creation so that we don't type erase
-VariableTrackerType = TypeVar("VariableTrackerType")
+VTTypeAlias = TypeVar("VTTypeAlias")
+T = TypeVar("T")
 
 DimList = list
 
@@ -404,7 +405,6 @@ class GraphArg:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, GraphArg):
             return False
-        assert isinstance(other, GraphArg)
         if self.source is None:
             return other.source is None
         else:
@@ -2981,15 +2981,15 @@ def cache_real_value_when_export(
 # SOMETHING INTO THE GRAPH.  This is sort of obvious, because you can't call
 # this function without a proxy.
 def wrap_fx_proxy_cls(
-    target_cls: type[VariableTrackerType],
+    target_cls: type[VTTypeAlias],
     tx: "InstructionTranslatorBase",
     proxy: Any,
     example_value: Any | None = None,
     subclass_type: type | None = None,
     **options: Any,
-) -> VariableTrackerType:
+) -> VTTypeAlias:
     if example_value is None:
-        out: VariableTrackerType = _wrap_fx_proxy(
+        out: VTTypeAlias = _wrap_fx_proxy(
             target_cls, tx, proxy, example_value, subclass_type, **options
         )
     elif isinstance(example_value, torch.Tensor):
@@ -3021,13 +3021,13 @@ def wrap_fx_proxy_cls(
 
 # This is 1 above (wrapping a preexisting tensor)
 def _wrap_fx_preexisting_tensor(
-    target_cls: type[VariableTrackerType],
+    target_cls: type[VTTypeAlias],
     tx: "InstructionTranslatorBase",
     proxy: torch.fx.Proxy,
     tensor: torch.Tensor,
     subclass_type: type | None = None,
     **options: Any,
-) -> VariableTrackerType:
+) -> VTTypeAlias:
     from ..symbolic_convert import InstructionTranslatorBase
 
     assert isinstance(tensor, torch.Tensor), (
@@ -3093,13 +3093,13 @@ def _wrap_fx_preexisting_tensor(
 
 # This is 2 in the above comment (wrapping the output of a traced op)
 def _wrap_fx_proxy(
-    target_cls: type[VariableTrackerType],
+    target_cls: type[VTTypeAlias],
     tx: "InstructionTranslatorBase",
     proxy: torch.fx.Proxy,
     example_value: Any | None = None,
     subclass_type: type | None = None,
     **options: Any,
-) -> VariableTrackerType:
+) -> VTTypeAlias:
     from ..symbolic_convert import InstructionTranslatorBase
 
     assert isinstance(tx, InstructionTranslatorBase)
@@ -3134,7 +3134,7 @@ def handle_traced_output(
     proxy: torch.fx.Proxy,
     options: dict[str, Any],
     subclass_type: type | None,
-    target_cls: type[VariableTrackerType],
+    target_cls: type[VTTypeAlias],
 ) -> VariableTracker:
     import torch._functorch.vmap
     import torch._subclasses.fake_tensor
@@ -3366,7 +3366,7 @@ def handle_traced_output(
         )
 
 
-def infer_subclass_type(value: Any) -> type | None:
+def infer_subclass_type(value: T) -> type[T] | None:
     if type(value) in (
         torch.Tensor,
         torch.nn.Parameter,
@@ -3421,13 +3421,13 @@ def get_specialized_props(
 
 
 def construct_tensor_variable(
-    target_cls: type[VariableTrackerType],
+    target_cls: type[VTTypeAlias],
     tx: "InstructionTranslatorBase",
     proxy: torch.fx.Proxy,
     example_value: Any,
     subclass_type: type | None,
     options: dict[str, Any],
-) -> VariableTrackerType:
+) -> VTTypeAlias:
     """
     Actually construct a tensor variable after all the pre-processing from
     wrapping a pre-existing or newly created tensor value.
@@ -4128,7 +4128,7 @@ class SourcelessBuilder:
             )
         )
 
-        def passthrough(tx: "InstructionTranslator", value: Any) -> Any:
+        def passthrough(tx: "InstructionTranslator", value: T) -> T:
             return value
 
         for cls in VariableTrackerMeta.all_subclasses:
