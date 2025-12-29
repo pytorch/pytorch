@@ -720,6 +720,26 @@ class TritonTemplateKernel(TritonKernel):
     def gen_defines(self):
         return self.defines
 
+    def get_output(self):
+        """Get the output buffer variable name for use in templates."""
+        if self.output_node is None:
+            raise ValueError("No output node available")
+        buf_name = self.output_node.get_name()
+        # First ensure the output is registered in args
+        if buf_name not in self.args.output_buffers:
+            self.args.output(buf_name)
+        output = self.args.output_buffers.get(buf_name, None)
+        if output is None:
+            raise ValueError(f"Output buffer '{buf_name}' not found in args")
+        return output
+
+    def output_stride(self, index):
+        """Get the stride of the output buffer at the given index."""
+        if self.output_node is None:
+            raise ValueError("No output node available")
+        val = self.output_node.get_stride()
+        return val[index]
+
     def def_kernel(self, *argnames):
         """
         Hook called from template code to generate function def and
@@ -1428,6 +1448,8 @@ class TritonTemplateKernel(TritonKernel):
                 self.modification,
                 self.gen_argdefs,
                 self.gen_defines,
+                self.get_output,
+                self.output_stride,
                 *self.extra_template_env_fns,
             ]
         }

@@ -538,15 +538,16 @@ force_same_precision: bool = Config(
 multi_kernel_hints: list[int] = []
 
 # Specify candidate backends for gemm autotune.
-# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CKTILE, CPP.
+# Possible choices are combinations of: ATen, Triton, CUTLASS, CK, CKTILE, GLUON, CPP.
 # ATen: default Pytorch ATen kernels.
 # Triton: Triton templates defined in torch inductor (AMD and NVidia GPUs).
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
+# GLUON: Gluon kernels from Triton project (NVidia Blackwell GPUs only).
 # CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
-    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,CPP"
+    "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,GLUON,CPP"
 ).upper()
 
 
@@ -1076,6 +1077,11 @@ quiesce_async_compile_time: int = Config(
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
 
+# Alias of use_static_cuda_launcher, used by both CUDA/XPU.
+use_static_triton_launcher: bool = Config(
+    alias="torch._inductor.config.use_static_cuda_launcher"
+)
+
 # Attempt to statically launch user defined triton kernels
 # Requires use_static_cuda_launcher
 static_launch_user_defined_triton_kernels: bool = Config(
@@ -1087,6 +1093,11 @@ static_launch_user_defined_triton_kernels: bool = Config(
 # Raise error if we bypass the launcher
 strict_static_cuda_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_STRICT_STATIC_CUDA_LAUNCHER", "0") == "1"
+)
+
+# Alias of strict_static_cuda_launcher, used by both CUDA/XPU.
+strict_static_triton_launcher: bool = Config(
+    alias="torch._inductor.config.strict_static_cuda_launcher"
 )
 
 # gemm autotuning global cache dir
