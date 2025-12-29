@@ -163,7 +163,6 @@ dtensor_fails = {
     xfail("dist"),
     xfail("expand_copy"),
     xfail("exponential"),
-    xfail("equal"),
     xfail("eye"),
     xfail("fft.fft2"),
     xfail("fft.fft"),
