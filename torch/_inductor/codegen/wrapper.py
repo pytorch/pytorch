@@ -1320,7 +1320,7 @@ class PythonWrapperCodegen(CodeGen):
             if config.triton.autotune_at_compile_time:
                 self.kernel_autotune_calls.writeline(f"{var} = {meta}")
                 self._meta_vars.add(var)
-        # pyrefly: ignore [index-error]
+        # pyrefly: ignore [bad-index, index-error]
         return self._metas[meta]
 
     @cache_on_self
@@ -2195,8 +2195,6 @@ class PythonWrapperCodegen(CodeGen):
                 return
 
             import pickle
-
-            assert isinstance(value, torch.ScriptObject)
 
             output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
 

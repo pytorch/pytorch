@@ -1176,14 +1176,14 @@ class TestFlexDecoding(InductorTestCase):
             (2, 2, 128, 4),
             dtype=dtype,
             device=device,
-            requires_grad=True,
+            requires_grad=False,
         )
         make_q = functools.partial(
             torch.randn,
             (2, 2, 8, 4),
             dtype=dtype,
             device=device,
-            requires_grad=True,
+            requires_grad=False,
         )
         query, key, value = make_q(), make_kv(), make_kv()
         # floor_div is not decomposed in decomposition_table is empty

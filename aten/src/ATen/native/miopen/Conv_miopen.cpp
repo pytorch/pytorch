@@ -27,7 +27,7 @@
 
 #if !AT_ROCM_ENABLED()
 
-namespace at { namespace native {
+namespace at::native {
 
 // See Note [ATen preprocessor philosophy]
 
@@ -134,7 +134,7 @@ at::Tensor miopen_convolution_relu(
   TORCH_CHECK(false, "miopen_convolution_relu: ATen not compiled with MIOpen support");
 }
 
-}}
+}
 
 #else  // AT_ROCM_ENABLED
 
@@ -605,7 +605,7 @@ Workspace chooseAlgorithm(
   search::wsscache().find(args.params, &workspace_size);
   try {
     return Workspace(workspace_size);
-  } catch (const std::exception& e) {
+  } catch (const std::exception&) {
     std::ignore = hipGetLastError(); // clear OOM error
 
     // switch to default algorithm and record it in the cache to prevent
@@ -626,7 +626,7 @@ Workspace chooseSolution(const ConvolutionArgs& args, uint64_t* solution_id)
   try {
     *solution_id = solution.solution_id;
     return Workspace(solution.workspace_size);
-  } catch (const std::exception& e) {
+  } catch (const std::exception&) {
     std::ignore = hipGetLastError(); // clear OOM error
 
     // switch to default algorithm

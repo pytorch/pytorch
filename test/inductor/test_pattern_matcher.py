@@ -40,7 +40,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
-    skipIfRocm,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -371,7 +370,8 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": "False",
+            "benchmark_fusion": False,
+            "benchmark_epilogue_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -1216,70 +1216,6 @@ class TestPatternMatcher(TestCase):
         _, (code) = run_and_get_code(fn2, args[0], args[1], args[2])
         FileCheck().check_not("extern_kernels.addmm(").run(code[0])
 
-    @skipIfRocm
-    def test_addmm_activation_fusion(self):
-        """
-        Test whether Activation(Addmm) implies _addmm_activation
-        """
-
-        b = torch.rand(4, device=GPU_TYPE)
-        m1 = torch.rand(3, 2, device=GPU_TYPE)
-        m2 = torch.rand(2, 4, device=GPU_TYPE)
-        alphas = ({"alpha": 0.8}, {})  # **{} -> alpha=1
-        betas = ({"beta": 1}, {})  # **{} -> beta=1
-
-        # Cases Activation(Addmm) -> _addmm_activation
-        fusable_activations = (
-            torch.nn.functional.relu,
-            # NOTE: only approximate="tanh" is fusable
-            lambda *args, **kwargs: torch.nn.functional.gelu(
-                *args, approximate="tanh", **kwargs
-            ),
-        )
-        for activation in fusable_activations:
-
-            def f(b, m1, m2, beta, alpha):
-                return activation(torch.addmm(b, m1, m2, **beta, **alpha))
-
-            fc = torch.compile(f)
-
-            for beta, alpha in itertools.product(betas, alphas):
-                expected = f(b, m1, m2, beta, alpha)
-                actual = fc(b, m1, m2, beta, alpha)
-                torch.testing.assert_close(expected, actual)
-
-                _, (code) = run_and_get_code(fc, b, m1, m2, beta, alpha)
-                self.assertIn("_addmm_activation", code[0])
-
-            # Check no disruptions in the gemm autotune process
-            _, (code) = run_and_get_code(
-                torch.compile(f, options={"max_autotune_gemm": True}),
-                b,
-                m1,
-                m2,
-                beta,
-                alpha,
-            )
-            self.assertNotIn("_addmm_activation", code[0])
-
-        # Cases Activation(Addmm) -> Activation(Addmm)
-        non_fusable_activations = (
-            torch.nn.functional.gelu,  # implies approximate="none"
-            lambda *args, **kwargs: torch.nn.functional.gelu(
-                *args, approximate="none", **kwargs
-            ),
-        )
-        for activation in non_fusable_activations:
-
-            def f(b, m1, m2, beta, alpha):
-                return activation(torch.addmm(b, m1, m2, **beta, **alpha))
-
-            fc = torch.compile(f)
-
-            for beta, alpha in itertools.product(betas, alphas):
-                _, (code) = run_and_get_code(fc, b, m1, m2, beta, alpha)
-                self.assertNotIn("_addmm_activation", code[0])
-
     def test_addmm_alpha_beta_with_pointwise(self):
         # Test that addmm with alpha/beta != 1 is unfused correctly with pointwise ops
         # See https://github.com/pytorch/pytorch/issues/167313
@@ -1288,7 +1224,7 @@ class TestPatternMatcher(TestCase):
         b = torch.rand(3, 2, device=GPU_TYPE)
 
         def f(x, a, b):
-            return torch.abs(torch.addmm(x, a, b, alpha=0.8, beta=0.2))
+            return torch.nn.functional.relu(torch.addmm(x, a, b, alpha=0.8, beta=0.2))
 
         fc = torch.compile(f)
 
@@ -1305,7 +1241,7 @@ class TestPatternMatcher(TestCase):
 
         # Test with alpha=1, beta=1 (default) - should also unfuse
         def f_default(x, a, b):
-            return torch.abs(torch.addmm(x, a, b))
+            return torch.nn.functional.relu(torch.addmm(x, a, b))
 
         fc_default = torch.compile(f_default)
         expected_default = f_default(x, a, b)
@@ -1911,7 +1847,7 @@ class TestPatternMatcher(TestCase):
                     count += 1
             return count
 
-        device = "cuda" if HAS_GPU else "cpu"
+        device = GPU_TYPE if HAS_GPU else "cpu"
         input_tensor = torch.randn(8, 16, device=device)
 
         with inductor_config.patch(remove_pre_grad_passes=None):
@@ -2025,6 +1961,48 @@ class TestPatternMatcher(TestCase):
         fn_replaced_result = fn_replaced(*x)
         self.assertEqual(count, 1)
         self.assertEqual(fn_result, fn_replaced_result)
+
+    def test_empty_like_pattern_matching(self):
+        def pattern(x):
+            y = torch.empty(x.shape, device=x.device, dtype=x.dtype)
+            z = y * 2
+            return x + z
+
+        def replacement(x):
+            return x * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [torch.randn(4, 4, device=GPU_TYPE)]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = my_patterns.apply(graph)
+            return count
+
+        def replacement(x):
+            return x * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [torch.randn(4, 4, device=GPU_TYPE)]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            z = y * 2
+            return x + z
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, fullgraph=True, options={"post_grad_custom_post_pass": custom_pass}
+        )
+
+        result = compiled_fn(x)
+        self.assertEqual(result, x * 3)
+        self.assertEqual(count, 1)
 
 
 class TestPatternMatcherLogging(LoggingTestCase):

@@ -1,7 +1,7 @@
 ARG CUDA_VERSION=12.9.1
 ARG PYTHON_VERSION=3.12
 
-# BUILD_BASE_IMAGE: used to setup python build xformers, and vllm wheels, It can be replaced with a different base image from local machine,
+# BUILD_BASE_IMAGE: used to build vllm wheels, It can be replaced with a different base image from local machine,
 # by default, it uses the torch-nightly-base stage from this docker image
 ARG BUILD_BASE_IMAGE=torch-nightly-base
 ARG FINAL_BASE_IMAGE=nvidia/cuda:${CUDA_VERSION}-devel-ubuntu22.04
@@ -116,28 +116,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system -r requirements/common.txt
 
-ARG max_jobs=16
-ENV MAX_JOBS=${max_jobs}
-
-RUN --mount=type=cache,target=/root/.cache/uv bash - <<'BASH'
-    export TORCH_CUDA_ARCH_LIST='7.5 8.0+PTX 9.0a'
-    git clone https://github.com/facebookresearch/xformers.git
-
-    pushd xformers
-    git checkout v0.0.33.post1
-    git submodule update --init --recursive
-    python3 setup.py bdist_wheel --dist-dir=../xformers-dist --verbose
-    popd
-
-    rm -rf xformers
-BASH
-
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system xformers-dist/*.whl
-
 RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio' > torch_build_versions.txt
 RUN cat torch_build_versions.txt
-RUN pip freeze | grep -E 'torch|xformers|torchvision|torchaudio'
+RUN pip freeze | grep -E 'torch|torchvision|torchaudio'
 #################### BASE BUILD IMAGE ####################
 
 
@@ -240,7 +221,6 @@ RUN if command -v apt-get >/dev/null; then \
 
 # Get the torch versions, and whls used in previous stage
 COPY --from=base /workspace/torch_build_versions.txt ./torch_build_versions.txt
-COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
 RUN echo "[INFO] Listing current directory before torch install step:" && \
     ls -al && \
@@ -290,13 +270,9 @@ RUN --mount=type=cache,target=/root/.cache/uv \
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv pip install --system /wheels/vllm/*.whl --verbose
 
-# Install xformers wheel from previous stage
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system /wheels/xformers/*.whl --verbose
-
 # Logging to confirm the torch versions
-RUN pip freeze | grep -E 'torch|xformers|vllm'
-RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio\|^xformers\|^vllm' > build_summary.txt
+RUN pip freeze | grep -E 'torch|vllm'
+RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio\|^vllm' > build_summary.txt
 ################### VLLM INSTALLED IMAGE ####################
 
 
@@ -304,6 +280,5 @@ RUN uv pip freeze | grep -i '^torch\|^torchvision\|^torchaudio\|^xformers\|^vllm
 FROM scratch as export-wheels
 
 # Just copy the wheels we prepared in previous stages
-COPY --from=base /workspace/xformers-dist /wheels/xformers
 COPY --from=build /workspace/vllm-dist /wheels/vllm
 COPY --from=vllm-base /workspace/build_summary.txt /wheels/build_summary.txt

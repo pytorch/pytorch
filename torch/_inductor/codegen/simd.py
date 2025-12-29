@@ -1748,9 +1748,12 @@ class SIMDScheduling(BaseScheduling):
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
 
-            V.graph.wrapper_code.writeline(
-                f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
-            )
+            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+            # The workspace tensor is in torch.float, need a cast if the buffer is
+            # not.
+            if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
+                final_reduce += f".to({buffer_dtype})"
+            V.graph.wrapper_code.writeline(final_reduce)
             # mark the buffer as allocated, so we don't try to allocate
             # it again when it's later used
             V.graph.wrapper_code.allocated.add(buffer_name)

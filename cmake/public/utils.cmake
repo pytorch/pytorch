@@ -383,7 +383,11 @@ function(torch_compile_options libname)
       -Wno-strict-aliasing
       )
     if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-      list(APPEND private_compile_options -Wredundant-move -Wno-interference-size)
+      list(APPEND private_compile_options -Wredundant-move)
+      # -Wno-interference-size only exists in GCC 12+
+      if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL 12)
+        list(APPEND private_compile_options -Wno-interference-size)
+      endif()
     endif()
     if(CMAKE_CXX_COMPILER_ID MATCHES "Clang")
       list(APPEND private_compile_options -Wextra-semi -Wmove)

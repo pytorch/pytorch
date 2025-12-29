@@ -1,8 +1,10 @@
-import math
-import os
-
 import torch
 from torch._inductor.utils import get_device_tflops, get_gpu_dram_gbps
+from torch.fx.experimental.symbolic_shapes import (
+    has_hint,
+    hint_int,
+    statically_known_true,
+)
 from torch.utils._ordered_set import OrderedSet
 
 from .flop_counter import flop_registry
@@ -17,12 +19,6 @@ _FLOAT_TYPES = OrderedSet(
         torch.float32,
         torch.float64,
     ]
-)
-
-# This value is hard-coded here:
-# https://github.com/pytorch/pytorch/blob/5fba5d83f0703ff8077ab65448a998e9ad6598fd/c10/cuda/CUDACachingAllocator.cpp#L117
-_PYTORCH_MIN_ALLOCATE = (
-    2**9 if int(os.environ.get("PYTORCH_NO_CUDA_MEMORY_CACHING", 0)) == 0 else 1
 )
 
 # No fall-back kernel needed/exists for view ops
@@ -122,9 +118,16 @@ def get_num_bytes(t: torch.Tensor) -> int:
     Returns:
         int: The memory consumption of the tensor in bytes.
     """
-    num_bytes = t.untyped_storage().nbytes()
-    mem_consumed = math.ceil(num_bytes / _PYTORCH_MIN_ALLOCATE) * _PYTORCH_MIN_ALLOCATE
-    return mem_consumed
+    real_numel = 1
+    for size, stride in zip(t.shape, t.stride()):
+        if not has_hint(size) or not has_hint(stride):
+            return 0
+
+        # For dims with stride=0 (expanded/broadcast), only 1 element accessed
+        if not statically_known_true(stride == 0):
+            real_numel *= hint_int(size)
+
+    return real_numel * t.element_size()
 
 
 def get_transfer_time(flat_args_kwargs, flat_outs) -> float:  # type: ignore[no-untyped-def]

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -136,10 +135,10 @@ class MultivariateNormal(Distribution):
     def __init__(
         self,
         loc: Tensor,
-        covariance_matrix: Optional[Tensor] = None,
-        precision_matrix: Optional[Tensor] = None,
-        scale_tril: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        covariance_matrix: Tensor | None = None,
+        precision_matrix: Tensor | None = None,
+        scale_tril: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         if loc.dim() < 1:
             raise ValueError("loc must be at least one-dimensional.")
@@ -185,6 +184,7 @@ class MultivariateNormal(Distribution):
         self.loc = loc.expand(batch_shape + (-1,))
 
         event_shape = self.loc.shape[-1:]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
         if scale_tril is not None:

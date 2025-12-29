@@ -3048,6 +3048,7 @@
     CPU: _fft_c2r_mkl
     CUDA: _fft_c2r_cufft
     MPS: _fft_c2r_mps
+  tags: core
 
 - func: _fft_c2r.out(Tensor self, int[] dim, int normalization, SymInt last_dim_size, *, Tensor(a!) out) -> Tensor(a!)
   variants: function

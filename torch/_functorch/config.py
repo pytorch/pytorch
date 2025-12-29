@@ -139,6 +139,9 @@ ban_recompute_reductions = True
 # Prevents the partitioner from ever saving views (i.e. always recompute them).
 # Generally a good idea since views are free to recompute.
 recompute_views = False
+# Set this flag to enable considering non-built-in ops, including triton and custom
+# ops, for recomputation during the knapsack optimization solver.
+is_non_builtin_to_include = False
 
 # Rematerialize AC nodes for graphs with forward+loss+backward in one graph.
 # This optimization minimizes activation checkpoint node lifetimes by computing them

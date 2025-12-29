@@ -14,9 +14,7 @@ from pathlib import Path
 from typing import Optional
 
 from torch._dynamo.exc import BackendCompilerFailed
-from torch._inductor.codegen.cutlass.serialization import (
-    get_cutlass_operation_serializer,
-)
+from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
 from torch._inductor.utils import clear_caches
 from torch.export import Dim
 from torch.testing._internal.logging_utils import log_settings
@@ -34,8 +32,11 @@ import torch.version
 from torch._dynamo import config as dynamo_config
 from torch._dynamo.utils import counters
 from torch._inductor import config
-from torch._inductor.codegen.cutlass.cuda_kernel import CUDATemplateCaller
-from torch._inductor.codegen.cutlass.utils import _gen_ops_cached, get_max_alignment
+from torch._inductor.codegen.cuda.cuda_kernel import CUDATemplateCaller
+from torch._inductor.codegen.cuda.cutlass_utils import (
+    _gen_ops_cached,
+    get_max_alignment,
+)
 from torch._inductor.exc import InductorError
 from torch._inductor.ir import FixedLayout
 from torch._inductor.select_algorithm import NoValidChoicesError
@@ -132,10 +133,10 @@ use_evt_config = config.patch(
     {
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
-        "cutlass.cutlass_max_profiling_configs": 1,
+        "cuda.cutlass_max_profiling_configs": 1,
         "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-        "cutlass.cutlass_tma_only": True,
-        "cutlass.cutlass_epilogue_fusion_enabled": True,
+        "cuda.cutlass_tma_only": True,
+        "cuda.cutlass_epilogue_fusion_enabled": True,
     }
 )
 
@@ -143,9 +144,9 @@ fp8_config = config.patch(
     {
         "max_autotune": True,
         "max_autotune_gemm_backends": "CUTLASS",
-        "cutlass.cutlass_max_profiling_configs": 1,
+        "cuda.cutlass_max_profiling_configs": 1,
         "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-        "cutlass.cutlass_tma_only": True,
+        "cuda.cutlass_tma_only": True,
     }
 )
 
@@ -205,7 +206,7 @@ class TestCutlassBackend(TestCase):
     def test_check_paths(self):
         cutlass_mock_imports_path = os.path.join(
             os.path.dirname(torch.__file__),
-            "_inductor/codegen/cutlass/lib_extensions/cutlass_mock_imports",
+            "_inductor/codegen/cuda/cutlass_lib_extensions/cutlass_mock_imports",
         )
         cutlass_mock_cuda_path = os.path.join(cutlass_mock_imports_path, "cuda")
         cutlass_mock_pydot_path = os.path.join(cutlass_mock_imports_path, "pydot")
@@ -233,8 +234,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cutlass.cutlass_backend_min_gemm_size": 100000,
-                "cutlass.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_backend_min_gemm_size": 100000,
+                "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
             with mock.patch(
@@ -250,7 +251,7 @@ class TestCutlassBackend(TestCase):
 
     @mock.patch.dict(os.environ, {"PATH": _get_path_without_sccache()})
     def test_import_cutlass(self):
-        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
+        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 
         self.assertTrue(try_import_cutlass())
 
@@ -258,7 +259,7 @@ class TestCutlassBackend(TestCase):
         import cutlass_library  # noqa: F401
 
     def test_cutlass_key(self):
-        from torch._inductor.codegen.cutlass.utils import try_import_cutlass
+        from torch._inductor.codegen.cuda.cutlass_utils import try_import_cutlass
 
         self.assertTrue(try_import_cutlass())
         from torch._inductor.codecache import cutlass_key
@@ -286,7 +287,7 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cutlass.cutlass_max_profiling_configs": 4,
+                "cuda.cutlass_max_profiling_configs": 4,
             }
         ):
             Y_compiled = torch.compile(torch.mm)(a, b)
@@ -323,7 +324,7 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cutlass.cutlass_max_profiling_configs": 4,
+                "cuda.cutlass_max_profiling_configs": 4,
             }
         ):
             for x_shape in x_shapes:
@@ -353,7 +354,7 @@ class TestCutlassBackend(TestCase):
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
                 "compile_threads": 4,
-                "cutlass.cutlass_max_profiling_configs": 4,
+                "cuda.cutlass_max_profiling_configs": 4,
             }
         ):
             Y_compiled = torch.compile(torch.bmm)(a, b)
@@ -385,7 +386,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cutlass.cutlass_max_profiling_configs": 1,
+                "cuda.cutlass_max_profiling_configs": 1,
             }
         ):
             from torch._inductor.utils import run_and_get_code
@@ -427,8 +428,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cutlass.cutlass_max_profiling_configs": 1,
-                "cutlass.cutlass_max_profiling_swizzle_options": [
+                "cuda.cutlass_max_profiling_configs": 1,
+                "cuda.cutlass_max_profiling_swizzle_options": [
                     1,
                     2,
                     4,
@@ -504,7 +505,7 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                    "cutlass.cutlass_max_profiling_configs": 2,
+                    "cuda.cutlass_max_profiling_configs": 2,
                 }
             ),
             dynamo_config.patch({"error_on_recompile": dynamic}),
@@ -594,9 +595,9 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                    "cutlass.cutlass_max_profiling_configs": 2,
+                    "cuda.cutlass_max_profiling_configs": 2,
                     "benchmark_epilogue_fusion": False,  # EVT doesn't support benchmark fusion yet
-                    "cutlass.cutlass_tma_only": True,
+                    "cuda.cutlass_tma_only": True,
                 }
             ),
             dynamo_config.patch({"error_on_recompile": dynamic}),
@@ -676,7 +677,7 @@ class TestCutlassBackend(TestCase):
                     {
                         "max_autotune": True,
                         "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                        "cutlass.cutlass_max_profiling_configs": 2,
+                        "cuda.cutlass_max_profiling_configs": 2,
                     }
                 ),
                 dynamo_config.patch({"error_on_recompile": dynamic}),
@@ -745,7 +746,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cutlass.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
             expected = [model(*input) for input in inputs]
@@ -774,8 +775,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cutlass.cutlass_max_profiling_configs": 2,
-                "cutlass.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+                "cuda.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
             }
         ):
             for M, K, N in (
@@ -818,7 +819,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+                "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
             }
         ):
             with self.assertRaisesRegex(InductorError, r".*NoValidChoicesError.*"):
@@ -848,8 +849,8 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cutlass.cutlass_max_profiling_configs": 1,
-                    "cutlass.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
+                    "cuda.cutlass_max_profiling_configs": 1,
+                    "cuda.cutlass_op_allowlist_regex": "stream_k",  # only stream-k GEMM Kernels
                 }
             ):
                 _ = compiled_model(a, b)
@@ -883,7 +884,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cutlass.cutlass_max_profiling_configs": 4,
+                "cuda.cutlass_max_profiling_configs": 4,
                 "cuda.version": "12.2",  # required to enable the Kernels we need
             }
         ):
@@ -982,7 +983,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cutlass.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
             Y_compiled = torch.compile(mm, dynamic=dynamic)(a, b)
@@ -1001,7 +1002,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
             model = MyModel()
@@ -1039,7 +1040,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
             model = MyModel()
@@ -1072,8 +1073,8 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": False,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
-                "cutlass.cutlass_max_profiling_configs": 1,
+                "cuda.cutlass_op_allowlist_regex": "128x256x64.*stream_k_warpspecialized_cooperative_epi_nosmem",
+                "cuda.cutlass_max_profiling_configs": 1,
             }
         ):
             model = MyModel()
@@ -1116,7 +1117,7 @@ class TestCutlassBackend(TestCase):
                 "max_autotune": True,
                 "autotune_in_subproc": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_max_profiling_configs": 2,
                 "autotune_local_cache": True,
             }
         ):
@@ -1156,9 +1157,9 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cutlass.cutlass_max_profiling_configs": 2,
-                    "cutlass.cutlass_op_allowlist_regex": "",
-                    "cutlass.cutlass_op_denylist_regex": "pingpong",
+                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cuda.cutlass_op_allowlist_regex": "",
+                    "cuda.cutlass_op_denylist_regex": "pingpong",
                 }
             ):
                 with mock.patch(
@@ -1201,9 +1202,9 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cutlass.cutlass_max_profiling_configs": 2,
-                    "cutlass.cutlass_op_allowlist_regex": "pingpong",
-                    "cutlass.cutlass_op_denylist_regex": None,
+                    "cuda.cutlass_max_profiling_configs": 2,
+                    "cuda.cutlass_op_allowlist_regex": "pingpong",
+                    "cuda.cutlass_op_denylist_regex": None,
                 }
             ):
                 with mock.patch(
@@ -1272,7 +1273,7 @@ class TestCutlassBackend(TestCase):
                     {
                         "max_autotune": True,
                         "max_autotune_gemm_backends": "CUTLASS",
-                        "cutlass.cutlass_max_profiling_configs": 2,
+                        "cuda.cutlass_max_profiling_configs": 2,
                     }
                 ):
                     with mock.patch(
@@ -1349,7 +1350,7 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cutlass.cutlass_max_profiling_configs": 2,
+                    "cuda.cutlass_max_profiling_configs": 2,
                 }
             ),
             mock.patch(
@@ -1460,13 +1461,13 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cutlass.cutlass_max_profiling_configs": 2,
-                "cutlass.generate_test_runner": True,  # put standalone runner in the generated code
+                "cuda.cutlass_max_profiling_configs": 2,
+                "cuda.generate_test_runner": True,  # put standalone runner in the generated code
             }
         ):
             from tempfile import NamedTemporaryFile
 
-            from torch._inductor.codegen.cutlass.utils import (
+            from torch._inductor.codegen.cuda.cutlass_utils import (
                 cuda_standalone_runner_compile_command,
                 CUDACompileSourceCapturingContext,
             )
@@ -1543,7 +1544,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "ATEN,TRITON,CUTLASS",
-                "cutlass.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_max_profiling_configs": 2,
                 # needed for log searching
                 "fx_graph_cache": False,
                 "fx_graph_remote_cache": False,
@@ -1552,7 +1553,7 @@ class TestCutlassBackend(TestCase):
             with (
                 log_settings("+inductor"),
                 self.assertLogs(
-                    logger="torch._inductor.codegen.cutlass", level=logging.DEBUG
+                    logger="torch._inductor.codegen.cuda", level=logging.DEBUG
                 ) as test_log,
             ):
                 Y_compiled = torch.compile(mm, dynamic=False)(a, b)
@@ -1590,7 +1591,7 @@ class TestCutlassBackend(TestCase):
         expected = model(A, B)
 
         # Track render calls
-        from torch._inductor.codegen.cutlass.gemm_template import CUTLASSGemmTemplate
+        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
 
         original_render = CUTLASSGemmTemplate.render
         render_call_count = 0
@@ -1607,8 +1608,8 @@ class TestCutlassBackend(TestCase):
                     "max_autotune_gemm_backends": "CUTLASS",
                     "fx_graph_cache": False,
                     "fx_graph_remote_cache": False,
-                    "cutlass.enable_caching_codegen": True,
-                    "cutlass.cutlass_max_profiling_configs": 2,
+                    "cuda.enable_caching_codegen": True,
+                    "cuda.cutlass_max_profiling_configs": 2,
                 }
             ):
                 compiled_model = torch.compile(model, fullgraph=True)
@@ -1644,7 +1645,7 @@ class TestCutlassBackend(TestCase):
         d = torch.randn(64, 128).cuda().half().t()
 
         # Track render calls
-        from torch._inductor.codegen.cutlass.gemm_template import CUTLASSGemmTemplate
+        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
 
         original_render = CUTLASSGemmTemplate.render
         render_call_count = 0
@@ -1659,10 +1660,10 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cutlass.cutlass_max_profiling_configs": 2,
+                    "cuda.cutlass_max_profiling_configs": 2,
                     "fx_graph_cache": False,
                     "fx_graph_remote_cache": False,
-                    "cutlass.enable_caching_codegen": True,
+                    "cuda.enable_caching_codegen": True,
                 }
             ):
                 # Get expected results
@@ -1705,7 +1706,7 @@ class TestCutlassBackend(TestCase):
         b = torch.randn(32, 64).cuda().half().t()
 
         # Track render calls
-        from torch._inductor.codegen.cutlass.gemm_template import CUTLASSGemmTemplate
+        from torch._inductor.codegen.cuda.gemm_template import CUTLASSGemmTemplate
 
         original_render = CUTLASSGemmTemplate.render
         render_call_count = 0
@@ -1720,10 +1721,10 @@ class TestCutlassBackend(TestCase):
                 {
                     "max_autotune": True,
                     "max_autotune_gemm_backends": "CUTLASS",
-                    "cutlass.cutlass_max_profiling_configs": 2,
+                    "cuda.cutlass_max_profiling_configs": 2,
                     "fx_graph_cache": False,
                     "fx_graph_remote_cache": False,
-                    "cutlass.enable_caching_codegen": True,
+                    "cuda.enable_caching_codegen": True,
                 }
             ):
                 # Get expected results
@@ -1751,7 +1752,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cutlass.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
             compiled = torch.compile(torch.mm)
@@ -1770,7 +1771,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": max_autotune_gemm_backends,
-                "cutlass.cutlass_max_profiling_configs": 2,
+                "cuda.cutlass_max_profiling_configs": 2,
             }
         ):
             compiled = torch.compile(torch.mm)
@@ -1794,7 +1795,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_max_profiling_configs": 1,
+                "cuda.cutlass_max_profiling_configs": 1,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1816,7 +1817,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_max_profiling_configs": 1,
+                "cuda.cutlass_max_profiling_configs": 1,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1844,7 +1845,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_max_profiling_configs": 1,
+                "cuda.cutlass_max_profiling_configs": 1,
             }
         ):
             _ = torch.compile(model)(B)
@@ -1870,7 +1871,7 @@ class TestCutlassBackend(TestCase):
             {
                 "max_autotune": True,
                 "max_autotune_gemm_backends": "CUTLASS",
-                "cutlass.cutlass_max_profiling_configs": 1,
+                "cuda.cutlass_max_profiling_configs": 1,
             }
         ):
             if use_aoti:
@@ -1967,7 +1968,7 @@ class TestCutlassBackend(TestCase):
 
         # baseline is cutlass kernel + triton
         # matches expected casting behavior
-        with config.patch({"cutlass.cutlass_epilogue_fusion_enabled": False}):
+        with config.patch({"cuda.cutlass_epilogue_fusion_enabled": False}):
             ref_result = torch.compile(model)(a, b, extra_args)
 
         self.assertEqual(
@@ -2376,7 +2377,7 @@ class TestCutlassBackend(TestCase):
                         "max_autotune_gemm_backends": "CUTLASS",
                         # needed for log searching
                         "force_disable_caches": True,
-                        "cutlass.cutlass_max_profiling_swizzle_options": [2],
+                        "cuda.cutlass_max_profiling_swizzle_options": [2],
                     }
                 ):
                     with mock.patch(

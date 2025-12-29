@@ -731,7 +731,6 @@ class TestFP8Matmul(TestCase):
         ):
             self._test_tautological_mm(device, out_dtype=e5m2_type)
 
-
     def test_float8_scale(self, device) -> None:
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)

@@ -669,6 +669,9 @@ class AOTInductorTestsTemplate:
 
     @requires_gpu
     def test_device_moved_constant(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
         # testing both directions
         device_movements = [
             (torch.device(type=GPU_TYPE, index=0), torch.device("cpu")),
@@ -6666,7 +6669,16 @@ class AOTInductorTestsTemplate:
 
         model = Model()
         example_inputs = (torch.tensor([1.0], device=self.device),)
-        self.check_model(model, example_inputs)
+        package_path = AOTIRunnerUtil.compile(model, example_inputs)
+        optimized = torch._inductor.aoti_load_package(package_path)
+
+        # First call: predicate is False
+        result1 = optimized(*example_inputs)
+        self.assertEqual(result1.item(), 1.0)
+
+        # Second call: predicate is now True
+        result2 = optimized(*example_inputs)
+        self.assertEqual(result2.item(), 2.0)
 
     @unittest.skipIf(
         IS_FBCODE,

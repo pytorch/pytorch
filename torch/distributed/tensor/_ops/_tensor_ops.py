@@ -143,9 +143,13 @@ def equal_strategy(op_schema: OpSchema) -> StrategyType:
     return equal_strategy
 
 
+register_op_strategy(
+    aten.empty_like.default, schema_info=RuntimeSchemaInfo(1, ["dtype"])
+)(propagate_single_input_strategy)
+
+
 @register_op_strategy(
     [
-        aten.empty_like.default,
         aten.ones_like.default,
         aten.rand_like.default,
         aten.randn_like.default,
@@ -1006,6 +1010,7 @@ def prop_index_put(op_schema: OpSchema) -> StrategyType:
             cost_values_spec = generate_redistribute_costs(values_spec, new_values_spec)
             op_strategy.strategies.append(
                 OpSpec(
+                    # pyrefly: ignore [bad-argument-type]
                     input_specs=(
                         new_in_spec,
                         *new_indices_spec,  # type: ignore[arg-type]

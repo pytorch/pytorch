@@ -3354,6 +3354,44 @@ def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_gr
             error_type=ValueError,
             error_regex="num_layers must be greater than zero"
         ),
+        # Test bias parameter type validation
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias=0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias=1)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, bias="True")),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="bias should be of type bool, got: str"
+        ),
+        # Test batch_first parameter type validation
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first=0)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first=1)),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: int"
+        ),
+        ErrorModuleInput(
+            ModuleInput(constructor_input=FunctionInput(3, 5, batch_first="False")),
+            error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
+            error_type=TypeError,
+            error_regex="batch_first should be of type bool, got: str"
+        ),
     ]
     return samples
 

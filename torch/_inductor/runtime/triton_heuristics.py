@@ -51,6 +51,7 @@ from .runtime_utils import (
     get_first_attr,
     get_max_y_grid,
     get_num_bytes,
+    last_power_of_2,
     next_power_of_2,
     triton_cache_dir,
     triton_config_to_hashable,
@@ -868,7 +869,7 @@ class CachingAutotuner(KernelInterface):
         # for some (complicated) custom Triton kernels, a register-spilling
         # config may yield the best latency.
         if not self.custom_kernel and launcher.n_spills > self.inductor_meta.get(
-            "spill_threshold", 32 if torch.version.hip else 16
+            "spill_threshold", 16
         ):
             log.debug(
                 "Skip config %s because of register spilling: %d",
@@ -2443,7 +2444,6 @@ def triton_config_reduction(
     num_stages=1,
     num_warps=None,
     register_intensive=False,
-    waves_per_eu=None,
     dynamic_scale_rblock=True,
     reduction_hint=None,
     min_num_warps=None,
@@ -2502,18 +2502,12 @@ def triton_config_reduction(
     cfg = _get_config({"x": x, **rnumels})
     check_max_block(cfg)
     check_config(cfg, xnumel=size_hints["x"])
-    config = InductorConfig(
+    return InductorConfig(
         cfg,
         num_warps=num_warps,
         num_stages=num_stages,
         dynamic_scale_rblock=dynamic_scale_rblock,
     )
-
-    if torch.version.hip:
-        if waves_per_eu is not None:
-            config.kwargs["waves_per_eu"] = waves_per_eu
-
-    return config
 
 
 def _get_config(numels: dict[str, int]) -> dict[str, int]:
@@ -2525,7 +2519,7 @@ def _get_config(numels: dict[str, int]) -> dict[str, int]:
 
 
 def triton_config_tiled_reduction(
-    size_hints, x, y, r, num_stages=1, register_intensive=False, waves_per_eu=None
+    size_hints, x, y, r, num_stages=1, register_intensive=False
 ):
     """
     Construct a tile reduction triton config with some adjustment
@@ -2562,11 +2556,7 @@ def triton_config_tiled_reduction(
     )
     check_config(cfg, xnumel=size_hints["x"], ynumel=size_hints["y"])
     check_max_block(cfg)
-    config = Config(cfg, num_warps=num_warps, num_stages=num_stages)
-    if torch.version.hip:
-        if waves_per_eu is not None:
-            config.kwargs["waves_per_eu"] = waves_per_eu
-    return config
+    return Config(cfg, num_warps=num_warps, num_stages=num_stages)
 
 
 def _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs: list[Config]):
@@ -2659,24 +2649,25 @@ def pointwise(
             ]
             # Additional configs appended for ROCm builds
             if torch.version.hip:
-                configs.extend(
-                    [
-                        triton_config_with_settings(
-                            size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
-                        ),
-                        triton_config_with_settings(
-                            size_hints,
-                            4096,  # wrt: better than the max_block for some kernel
-                        ),
-                        triton_config_with_settings(
-                            size_hints,
-                            2048,
-                            num_warps=8,
-                            num_stages=2,
-                            waves_per_eu=1,  # 20% improvement
-                        ),
-                    ]
-                )
+                if inductor_meta.get("max_autotune_pointwise"):
+                    configs.extend(
+                        [
+                            triton_config_with_settings(
+                                size_hints, TRITON_MAX_BLOCK["X"], waves_per_eu=2
+                            ),
+                            triton_config_with_settings(
+                                size_hints,
+                                4096,  # wrt: better than the max_block for some kernel
+                            ),
+                            triton_config_with_settings(
+                                size_hints,
+                                2048,
+                                num_warps=8,
+                                num_stages=2,
+                                waves_per_eu=1,  # 20% improvement
+                            ),
+                        ]
+                    )
                 if inductor_meta.get("atomic_add_found"):
                     configs.extend(
                         [
@@ -2728,7 +2719,7 @@ def pointwise(
                     ]
                 )
     if len(size_hints) == 3:
-        if not inductor_meta.get("autotune_pointwise", True):
+        if not inductor_meta.get("max_autotune_pointwise"):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
             configs = [
@@ -2825,11 +2816,6 @@ def _reduction_configs(
     # Convert reductions to 1D, to simplify heuristics.
     rnumel = get_total_reduction_numel(size_hints)
 
-    # Is max autotune enabled
-    max_autotune_enabled = inductor_meta.get("max_autotune") or inductor_meta.get(
-        "max_autotune_pointwise"
-    )
-
     register_intensive = False
     MAX_R0_BLOCK = 2048
     loads_and_red = inductor_meta.get("num_load", 0) + inductor_meta.get(
@@ -2872,7 +2858,6 @@ def _reduction_configs(
         num_stages=1,
         register_intensive=False,
         dynamic_scale_rblock=True,
-        waves_per_eu=None,
     ):
         # For 3D case with tiling scores, create an adapted version
         if "y" in size_hints:
@@ -2885,7 +2870,6 @@ def _reduction_configs(
                 num_warps=num_warps,
                 num_stages=num_stages,
                 register_intensive=register_intensive,
-                waves_per_eu=waves_per_eu,
             )
         else:
             # For other cases, use the original function
@@ -2896,7 +2880,6 @@ def _reduction_configs(
                 num_warps=num_warps,
                 num_stages=num_stages,
                 register_intensive=register_intensive,
-                waves_per_eu=waves_per_eu,
                 dynamic_scale_rblock=dynamic_scale_rblock,
                 reduction_hint=reduction_hint,
             )
@@ -2978,12 +2961,12 @@ def _reduction_configs(
         )
         configs.append(c)
 
-    result_configs = []
-
     # For 3d tiling, default to more autotuning initially
     if "y" in size_hints:
         pass
-    elif max_autotune_enabled:
+    elif inductor_meta.get("max_autotune") or inductor_meta.get(
+        "max_autotune_pointwise"
+    ):
         pass  # skip all these cases
     elif reduction_hint == ReductionHint.INNER:
         return configs + [contiguous_config]
@@ -2992,10 +2975,7 @@ def _reduction_configs(
     elif reduction_hint == ReductionHint.OUTER_TINY:
         return configs + [tiny_config]
 
-    # We continue here under the following conditions:
-    # - max_autotune_enabled is True
-    # - max_autotune_enabled is False and reduction_hint is NOT one of the above cases
-    result_configs = configs + [
+    return configs + [
         contiguous_config,
         outer_config,
         tiny_config,
@@ -3006,16 +2986,6 @@ def _reduction_configs(
         # is quite heavy. E.g. https://gist.github.com/shunting314/189a8ef69f90db9d614a823385147a72
         make_config(64, 4, num_warps=8),
     ]
-
-    if torch.version.hip:
-        result_configs.extend(
-            [
-                make_config(1024, 8, num_warps=4, num_stages=1, waves_per_eu=2),
-                make_config(512, 8, num_warps=4, num_stages=1, waves_per_eu=1),
-            ]
-        )
-
-    return result_configs
 
 
 def match_target_block_product(
@@ -3073,7 +3043,6 @@ def adapt_config_for_tiling(
     num_stages=1,
     register_intensive=False,
     persistent_reduction=False,
-    waves_per_eu=None,
 ) -> Config:
     """
     Create an adapted configuration based on tiling scores,
@@ -3092,7 +3061,6 @@ def adapt_config_for_tiling(
         block_sizes["r0_"],
         num_stages=num_stages,
         register_intensive=register_intensive,
-        waves_per_eu=waves_per_eu,
     )
 
 
@@ -3260,8 +3228,12 @@ def cooperative_reduction(
     )
     xnumel, rnumel = size_hints["x"], size_hints["r0_"]
 
-    # TODO(jansel): we should base target on the SM count of the local GPU
-    target = 64
+    # Note that we must never create more CTAs than there are SMs, because we
+    # depend on synchronizing between the CTAs in x_grid_barrier, and that will
+    # deadlock if some of the CTAs are not running. In order to maximize use of
+    # the GPU, we want to create as many CTAs as possible, while keeping things
+    # in powers of 2.
+    target = last_power_of_2(triton_meta["device"].multi_processor_count)
     split = max(1, min(target // xnumel, TRITON_MAX_RSPLIT))
     assert rnumel >= split
     assert split <= TRITON_MAX_RSPLIT
@@ -3375,9 +3347,20 @@ def _persistent_reduction_configs(
             if rnumel > 1024 or xnumel // 8 < 128 or inductor_meta.get("RSPLIT_SIZE"):
                 configs = configs[:1]
             else:
-                num_warps, min_num_warps = 1, 1
-                x_block = min(1024 // rnumel, 8)
-
+                if not torch.cuda.is_available():
+                    # TODO(Intel): CUDA uses num_warps = 1 to disable shared memory.
+                    # We apply different configurations from #168335.
+                    # We currently let cost model in Triton to decide whether to use shared memory.
+                    loads_and_stores = inductor_meta.get(
+                        "num_load", 0
+                    ) + inductor_meta.get("num_store", 0)
+                    x_block = 8
+                    if xnumel // x_block < 128 or loads_and_stores >= 5:
+                        x_block = 1
+                    num_warps, min_num_warps, reduction_hint = None, None, None
+                else:
+                    x_block = min(1024 // rnumel, 8)
+                    num_warps, min_num_warps = 1, 1
                 configs = [
                     triton_config_reduction(
                         size_hints,
@@ -3448,7 +3431,12 @@ def persistent_reduction(
             c.kwargs["XBLOCK"] = x_block
 
             num_iters = rsplit_size // x_block
-            c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), 3)
+
+            # With large rnumel, we have higher chance of out-of-shared memory
+            # To avoid adding too much autotuning overhead, we just constrain NUM_STAGES
+            # if rnumel is large
+            MAX_NUM_STAGES = 2 if rnumel_hint > 8192 else 3
+            c.kwargs["NUM_STAGES"] = min(max(num_iters // 4, 1), MAX_NUM_STAGES)
 
             if rnumel_hint <= 1024:
                 c.num_warps //= 2

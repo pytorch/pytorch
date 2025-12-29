@@ -591,6 +591,14 @@
       ]
     }
   ],
+  "GB8656": [
+    {
+      "Gb_type": "Opaque object with custom __getattr__ not supported",
+      "Context": "{value_type.__name__} with custom __getattr__",
+      "Explanation": "Dynamo does not support opaque objects types with custom __getattr__ methods",
+      "Hints": []
+    }
+  ],
   "GB0061": [
     {
       "Gb_type": "Failed to unpack object for BUILD_LIST_UNPACK",
@@ -649,6 +657,26 @@
     }
   ],
   "GB0067": [
+    {
+      "Gb_type": "HOP: Unsafe side effect",
+      "Context": "Attempted to mutate {item}",
+      "Explanation": "Mutating a variable from outside the scope of this HOP is not supported.",
+      "Hints": [
+        "If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a ",
+        "side effect in forward method. Eager activation checkpointing replays that side-effect while ",
+        "recomputing the forward in the backward. If you are ok with side-effect not replayed in the ",
+        "backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`"
+      ]
+    },
+    {
+      "Gb_type": "HOP: Unsafe side effect",
+      "Context": "Attempted to mutate {item}",
+      "Explanation": "Mutating a variable from outside the scope of this HOP is not supported.",
+      "Hints": [
+        "If the HOP is activation checkpointing, try setting ",
+        "`torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`"
+      ]
+    },
     {
       "Gb_type": "HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
       "Context": "",
@@ -1129,6 +1157,16 @@
       ]
     }
   ],
+  "GB4778": [
+    {
+      "Gb_type": "nested function with closure in output",
+      "Context": "as_python_constant for out_spec",
+      "Explanation": "Cannot return a nested function with closure from a compiled function. Dynamo cannot reconstruct the function.",
+      "Hints": [
+        "Define the function at module scope instead of inside another function"
+      ]
+    }
+  ],
   "GB0116": [
     {
       "Gb_type": "Unexpected type in sourceless builder",
@@ -1234,6 +1272,16 @@
       "Context": "call_method {self} resize_ {args} {kwargs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.resize_()`.",
       "Hints": []
+    }
+  ],
+  "GB9528": [
+    {
+      "Gb_type": "Attempted to reconstruct a nested function with closure which is not supported",
+      "Context": "str(self.fn_name)",
+      "Explanation": "Shouldn't reconstruct {str(self.fn_name)}, a nested function with closure",
+      "Hints": [
+        "Define the function at module level"
+      ]
     }
   ],
   "GB0127": [
@@ -2978,6 +3026,14 @@
       "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
       "Explanation": "logging.Logger methods are not supported for non-export cases.",
       "Hints": [
+        "Add the logging method to `torch._dynamo.config.ignore_logging_functions`."
+      ]
+    },
+    {
+      "Gb_type": "logging.Logger method not supported for non-export cases",
+      "Context": "method: {self.value}.{name}, args: {args}, kwargs: {kwargs}",
+      "Explanation": "logging.Logger methods are not supported for non-export cases.",
+      "Hints": [
         "Add the logging method to `torch._dynamo.config.ignore_logger_methods."
       ]
     }
@@ -3157,6 +3213,16 @@
       "Explanation": "torch.cond expects 4 positional arguments (got {len(args)}) and no keyword arguments (got {len(kwargs)}) Usage: cond(pred, cond_fn, body_fn, operands)",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB2078": [
+    {
+      "Gb_type": "Attempted to access unregistered member on an OpaqueObject",
+      "Context": "value={self.value}, attr={name}",
+      "Explanation": "Member '{name}' is not registered for this opaque object type.",
+      "Hints": [
+        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
       ]
     }
   ],
@@ -3517,6 +3583,12 @@
   "GB0346": [
     {
       "Gb_type": "autograd.Function.apply: non-function or method forward",
+      "Context": "str(fn)",
+      "Explanation": "Expected {method_name} to be a function or method.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "autograd.Function.apply: non-function or method forward",
       "Context": "str(self.fwd_graph)",
       "Explanation": "Expected forward function to be a function or method.",
       "Hints": []
@@ -3728,6 +3800,27 @@
       "Explanation": "Dynamo does not know the equality comparison of the underlying python object for {self}",
       "Hints": [
         "Consider using a different type of object as the dictionary key instead of {self.python_type()}.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0368": [
+    {
+      "Gb_type": "Frozen dataclass with __post_init__",
+      "Context": "dataclass={dataclass_cls.__name__}",
+      "Explanation": "Cannot reconstruct frozen dataclass with __post_init__ method, as it may have side effects that would be incorrectly replayed.",
+      "Hints": [
+        "Remove the __post_init__ method from the frozen dataclass.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0369": [
+    {
+      "Gb_type": "Frozen dataclass with missing field",
+      "Context": "dataclass={dataclass_cls.__name__}, field={field.name}",
+      "Explanation": "Cannot reconstruct frozen dataclass: field '{field.name}' was not tracked during tracing.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }

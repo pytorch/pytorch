@@ -1355,11 +1355,11 @@ static bool get_local_results(
             " in DTensor op is not supported");
         result.push_back(default_tensor(item));
       }
-      stack->push_back(std::move(result));
+      stack->emplace_back(std::move(result));
     };
 
     if (py::isinstance(spec, get_dtensor_spec_class())) {
-      stack->push_back(default_tensor(spec));
+      stack->emplace_back(default_tensor(spec));
     } else if (PyList_Check(spec.ptr())) {
       handle_sequence(py::reinterpret_borrow<py::list>(spec));
     } else if (PyTuple_Check(spec.ptr())) {
@@ -1863,9 +1863,9 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     // to say that nearly all our remaining time spent is spent
     // calling back into Python.
     const auto& cpp_placement = placement.cast<const distributed::Placement&>();
-    if (const auto* cpp_shard =
-            dynamic_cast<const distributed::Shard*>(&cpp_placement)) {
-      const auto shard_dim = cpp_shard->dim;
+    if (typeid(cpp_placement) == typeid(distributed::Shard) ||
+        typeid(cpp_placement) == typeid(distributed::StridedShard)) {
+      const auto shard_dim = py::cast<int64_t>(placement.attr("dim"));
       TORCH_CHECK(
           shard_dim >= 0,
           "Shard placements should have negative dims normalized in the user-facing APIs: ",

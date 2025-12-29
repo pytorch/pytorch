@@ -33,6 +33,7 @@ if not is_available():
         pass
 
     sys.modules["torch.distributed.device_mesh"].DeviceMesh = _DeviceMeshStub  # type: ignore[attr-defined]
+    # pyrefly: ignore [missing-attribute]
     sys.modules[
         "torch.distributed.device_mesh"
     ].init_device_mesh = _init_device_mesh_stub  # type: ignore[attr-defined]
@@ -206,16 +207,6 @@ else:
                     )
                 if isinstance(mesh, torch.Tensor) and mesh.device.type != "cpu":
                     raise ValueError(f"`mesh` must be a CPU tensor, got {mesh}")
-
-                # Store concrete mesh to be used for __repr__
-                if isinstance(mesh, torch.Tensor):
-                    from torch._subclasses.fake_tensor import unset_fake_temporarily
-
-                    with unset_fake_temporarily():
-                        self._concrete_mesh = mesh.detach().cpu().tolist()
-                else:
-                    self._concrete_mesh = mesh  # pyrefly: ignore[bad-assignment]
-
                 mesh_tensor = (
                     mesh.detach().to(dtype=torch.int).contiguous()
                     if isinstance(mesh, torch.Tensor)
@@ -228,13 +219,6 @@ else:
                     raise TypeError(
                         "The mesh argument is required except for PRIVATE USAGE ONLY!"
                     )
-
-                # Store concrete mesh to be used for __repr__
-                from torch._subclasses.fake_tensor import unset_fake_temporarily
-
-                with unset_fake_temporarily():
-                    full_mesh = _layout.remap_to_tensor(_rank_map)
-                    self._concrete_mesh = full_mesh.tolist()
 
             assert _layout.check_non_overlap(), (
                 "Please use a non-overlapping layout when creating a DeviceMesh."
@@ -535,19 +519,6 @@ else:
                 device_mesh_repr += f", Mesh: {self.mesh.tolist()}"
             return f"{device_mesh_repr})"
 
-        def __fx_eval__(self):
-            """
-            Returns FX-evaluable repr and required globals for DeviceMesh.
-            Needed for passing this type as an opaque object input to a custom op.
-            """
-            device_mesh_repr = f"torch.distributed.device_mesh.DeviceMesh('{self.device_type}', {self._concrete_mesh!r}"
-
-            if self._mesh_dim_names:
-                device_mesh_repr += f", mesh_dim_names={self._mesh_dim_names!r}"
-
-            device_mesh_repr += ")"
-            return device_mesh_repr, {}
-
         def __hash__(self):
             # lazily compute hash
             self._hash = getattr(self, "_hash", None)
@@ -567,6 +538,7 @@ else:
             if self is other:
                 return True
             if not isinstance(other, DeviceMesh):
+                raise RuntimeError(f"other not a DeviceMesh, instead got {type(other)}")
                 return False
             return (
                 self._flatten_rank_map == other._flatten_rank_map

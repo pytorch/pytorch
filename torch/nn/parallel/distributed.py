@@ -1950,7 +1950,7 @@ class DistributedDataParallel(Module, Joinable):
             buffer_comm_hook_location=comm_hook_location,
         )
 
-    def register_comm_hook(self, state: object, hook: Callable):
+    def register_comm_hook(self, state: object, hook: Callable) -> None:
         r"""
         Register communication hook for user-defined DDP aggregation of gradients across multiple workers.
 

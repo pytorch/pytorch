@@ -1016,6 +1016,7 @@ class TritonKernelWrapperMutation(HigherOrderOperator):
         tma_descriptor_metadata: TMADescriptorMetadata,
         kwargs: dict[str, Any],
     ) -> Any:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
@@ -1042,6 +1043,7 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
         kwargs: dict[str, Any],
         tensors_to_clone: list[str],
     ) -> dict[str, Any]:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(
             kernel_idx=kernel_idx,
             constant_args_idx=constant_args_idx,
@@ -1053,6 +1055,10 @@ class TritonKernelWrapperFunctional(HigherOrderOperator):
 
 
 triton_kernel_wrapper_functional = TritonKernelWrapperFunctional()
+
+
+def get_kernel(kernel_idx: int) -> "TritonKernelType":
+    return kernel_side_table.get_kernel(kernel_idx)
 
 
 @triton_kernel_wrapper_mutation.py_impl(DispatchKey.CompositeExplicitAutograd)
@@ -1136,7 +1142,7 @@ def triton_kernel_wrapper_mutation_dense(
         else:
             break
 
-    # pyrefly: ignore [index-error]
+    # pyrefly: ignore [bad-index, index-error]
     kernel[grid_fn](*args, **kwargs, **constant_args)
 
 
@@ -2105,7 +2111,7 @@ class TraceableTritonKernelWrapper:
             )
         else:
             assert self.kernel is not None
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             return self.kernel[self.grid](*args, **kwargs)
 
     def specialize_symbolic(self, arg: Sequence[Any]) -> Any:

@@ -466,7 +466,7 @@ class OpDispatcher:
                         arg_spec,
                         # pyrefly: ignore [bad-argument-type]
                         reshard_arg_spec,
-                        message=f"Implicit redistribution occurred for {op_info.schema} "
+                        message_fn=lambda: f"Implicit redistribution occurred for {op_info.schema} "
                         "while ExplicitRedistributionContext was active",
                     )
                     with redistribute_context:
@@ -569,6 +569,7 @@ class OpDispatcher:
         )
         op_info = OpInfo(
             compute_mesh,
+            # pyrefly: ignore [bad-argument-type]
             OpSchema(
                 op_call,
                 (
@@ -608,6 +609,7 @@ class OpDispatcher:
             )
             res_list = []
             for e, s in zip(res, spec):
+                # pyrefly: ignore [bad-argument-type]
                 res_list.append(OpDispatcher.wrap(e, s))
 
             return tuple(res_list) if isinstance(res, tuple) else res_list

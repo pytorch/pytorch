@@ -593,7 +593,7 @@ class GraphLowering(torch.fx.Interpreter):
             isinstance(node, ir.ComputedBuffer)
             and node.name in self.buffer_to_padded_size
         ):
-            # pyrefly: ignore [index-error]
+            # pyrefly: ignore [bad-index, index-error]
             return self.buffer_to_padded_size[node.name]
         else:
             return node.get_size()
@@ -1302,7 +1302,9 @@ class GraphLowering(torch.fx.Interpreter):
                     #
                     # TODO: should really switch to "needs_fixed_stride" constraint on these
                     # and identify them one by one.
-                    decided_constraint = require_contiguous  # type: ignore[assignment]
+                    decided_constraint: Optional[Callable[..., tuple[Any, Any]]] = (
+                        require_contiguous
+                    )
                 else:
                     default_tag: torch._C.Tag = get_layout_constraint_tag(
                         target, with_default=True
