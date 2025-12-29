@@ -702,6 +702,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                         f"`torch._dynamo.allow_in_graph({self.get_name()})`",
                         *graph_break_hints.DYNAMO_BUG,
                     ],
+                    from_exc=e,
                 )
         return super().call_function(tx, args, kwargs)
 
