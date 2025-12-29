@@ -40,7 +40,7 @@ struct DummyGraphImpl : public at::GraphImplInterface {
 };
 
 namespace at {
-REGISTER_GRAPH_IMPL(DUMMY, DummyGraphImpl);
+REGISTER_GRAPH_IMPL(DUMMY, DummyGraphImpl)
 }
 
 TEST(AcceleratorGraphTest, graphRegistrationAndCapture) {
