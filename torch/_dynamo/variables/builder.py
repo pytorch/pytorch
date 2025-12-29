@@ -1929,7 +1929,10 @@ class VariableBuilder:
                 gb_type="Attempted to wrap RNN, GRU, or LSTM",
                 context=str(value),
                 explanation="Dynamo does not support RNN, GRU, or LSTM.",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[
+                    "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
             )
 
         if getattr(value, "_is_fsdp_managed_module", False):
