@@ -255,6 +255,7 @@ def create_replacement(match: Match, input_tensor, indices, values) -> None:
         return input_tensor + reduced
 
     counters["inductor"]["partitioned_scatter_applied"] += 1
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [input_tensor, index_node, values])
 
 
