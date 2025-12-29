@@ -1150,7 +1150,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             self._flash_triton_dynamic(q, k, v)
 
     def test_captured_float_fails_with_dynamic(self):
-        """Test that captured Python float fails with dynamic=True (unbacked_bindings)."""
+        """Test that captured Python float fails with dynamic=True."""
         val = 2.0  # Captured float
 
         def score_mod(score, _b, _h, _q, _k):
@@ -1159,13 +1159,15 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         compiled_fn = torch.compile(flex_attention, dynamic=True)
         q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
 
-        with self.assertRaisesRegex(Exception, r"unbacked_bindings"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"captures a dynamic scalar \(SymInt/SymFloat\)"
+        ):
             compiled_fn(
                 q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
             )
 
     def test_captured_int_fails_with_dynamic(self):
-        """Captured Python int should fail with dynamic=True (index_expr-style error)."""
+        """Captured Python int should fail with dynamic=True."""
         val = 2  # Captured int
 
         def score_mod(score, _b, _h, _q, _k):
@@ -1174,7 +1176,9 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         compiled_fn = torch.compile(flex_attention, dynamic=True)
         q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
 
-        with self.assertRaisesRegex(Exception, r"(index_expr|unbacked_bindings)"):
+        with self.assertRaisesRegex(
+            RuntimeError, r"captures a dynamic scalar \(SymInt/SymFloat\)"
+        ):
             compiled_fn(
                 q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
             )

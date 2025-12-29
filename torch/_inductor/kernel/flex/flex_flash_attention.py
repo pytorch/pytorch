@@ -182,8 +182,37 @@ def _supports_nontrivial_mask_graphs() -> bool:
     return torch.cuda.get_device_capability()[0] == 10
 
 
+def _has_unsupported_captured_scalars(
+    score_mod_other_buffers: Sequence[Any],
+    mask_mod_other_buffers: Sequence[Any],
+) -> bool:
+    """Check if any captured buffers are dynamic scalars that cannot be inlined.
+
+    When compiling with dynamic=True, captured Python scalars in score_mod or
+    mask_mod may become:
+    - sympy expressions (for captured ints)
+    - 0-dim CPU tensors with unbacked symbols (for captured floats)
+
+    The FLASH backend cannot inline these into the CuteDSL template.
+    """
+    for buf in list(score_mod_other_buffers) + list(mask_mod_other_buffers):
+        # Captured int becomes sympy.Expr
+        if isinstance(buf, sympy.Expr):
+            return True
+        # Captured float becomes 0-dim TensorBox on CPU
+        if isinstance(buf, TensorBox):
+            device = buf.get_device()
+            size = buf.get_size()
+            if device is not None and device.type == "cpu" and len(size) == 0:
+                # 0-dimensional CPU tensor (scalar) - can't be inlined into CUDA kernel
+                return True
+    return False
+
+
 def _can_use_flex_flash_attention(
-    subgraph: Subgraph, mask_graph: Subgraph, num_score_mod_placeholders: int
+    subgraph: Subgraph,
+    mask_graph: Subgraph,
+    num_score_mod_placeholders: int,
 ) -> tuple[bool, str]:
     """Check if flex flash attention can be used for the given inputs.
 
@@ -198,6 +227,7 @@ def _can_use_flex_flash_attention(
             False,
             "Input buffers require gradients (not supported by flash attention)",
         )
+
     mask_trivial = is_trivial_mask_graph(mask_graph.graph_module)
 
     if mask_trivial:
@@ -236,7 +266,9 @@ def _use_flex_flash_attention(
         return False
 
     can_use, reason = _can_use_flex_flash_attention(
-        subgraph, mask_graph, num_score_mod_placeholders
+        subgraph,
+        mask_graph,
+        num_score_mod_placeholders,
     )
 
     if not can_use:
