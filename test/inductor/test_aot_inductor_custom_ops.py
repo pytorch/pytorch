@@ -20,7 +20,6 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
@@ -413,7 +412,6 @@ class AOTInductorTestsTemplate:
         self.assertEqual(len(inps), 0)
         self.assertTrue(sentinel_seen)
 
-    @skipIfXpu
     @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
     def test_custom_op_square(self) -> None:
         class Model(torch.nn.Module):
@@ -435,6 +433,11 @@ class AOTInductorTestsTemplate:
                         """
                 AOTITorchError
                 aoti_torch_cuda_fn_square(
+                    AtenTensorHandle input,
+                    AtenTensorHandle* ret)""",
+                        """
+                AOTITorchError
+                aoti_torch_xpu_fn_square(
                     AtenTensorHandle input,
                     AtenTensorHandle* ret)""",
                     ],

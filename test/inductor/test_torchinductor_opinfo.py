@@ -294,19 +294,8 @@ inductor_expected_failures_single_sample["xpu"] = {
         i32,
         i64,
     },  # align with cuda.
-    ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
-    # [Begin] Incorrect XPU reference due to new driver.
-    "masked.prod": {b8, i32, i64},
-    "masked.amin": {i64},
-    "masked.amax": {i64},
-    "amax": {i64},
-    "amin": {i64},
-    "std": {f64},
-    "var": {f64},
-    "std_mean": {f64},
-    "var_mean": {f64},
     # [End]
 }
 

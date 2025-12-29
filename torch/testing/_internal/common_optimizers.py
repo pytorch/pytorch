@@ -1535,6 +1535,7 @@ optim_db: list[OptimizerInfo] = [
                 "CompiledOptimizerParityTests",
                 "test_correctness",
                 device_type="xpu",
+                active_if=lambda kwargs: kwargs.get("use_closure", False),
             ),
             DecorateInfo(
                 skipIfTorchDynamo("See #133268 regarding dtype being None"),

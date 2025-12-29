@@ -167,7 +167,7 @@ class TritonBundler:
     def put_static_autotuner(cls, key: str, kernel: "CachingAutotuner") -> None:  # type: ignore[name-defined] # noqa: F821
         from torch._inductor import config
 
-        assert config.use_static_cuda_launcher
+        assert config.use_static_triton_launcher
         if (entries := cls._static_autotuners) is not None:
             # Clear a bunch of unpicklable values and make a copy to save
             # for FXGraphCache
@@ -299,7 +299,7 @@ class TritonBundler:
                             log.debug("failed to collect triton kernel", exc_info=True)
                         extension = os.path.splitext(filename)[1]
                         if extension in GPU_KERNEL_BIN_EXTS.values():
-                            # Each kernel has bunch of files like .cubin(for cuda), .spv(for xpu), .json, .ttir
+                            # Each kernel has bunch of files like .cubin(for cuda), .zebin(for xpu), .json, .ttir
                             # Just append one of them without the extension
                             kernel_names.append(Path(filename).stem)
                     if artifacts:
@@ -310,7 +310,7 @@ class TritonBundler:
                                 artifacts,
                             )
                         )
-                if config.use_static_cuda_launcher:
+                if config.use_static_triton_launcher:
                     static_autotuners, static_kernel_names = (
                         cls.collect_static_autotuners()
                     )
@@ -379,7 +379,7 @@ class TritonBundler:
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"] += 1
                     extension = os.path.splitext(artifact.filename)[1]
                     if extension in GPU_KERNEL_BIN_EXTS.values():
-                        # Each kernel has bunch of files like .cubin(for cuda), spv(for xpu), .json, .ttir
+                        # Each kernel has bunch of files like .cubin(for cuda), zebin(for xpu), .json, .ttir
                         # Just append one of them without the extension
                         kernel_names.append(Path(artifact.filename).stem)
 
@@ -395,7 +395,7 @@ class TritonBundler:
                     except OSError:
                         log.warning("Directory %s is not empty - skipping!", tmp_dir)
 
-            if config.use_static_cuda_launcher:
+            if config.use_static_triton_launcher:
                 static_kernel_names = TritonBundler.load_autotuners(
                     bundle.static_autotuners
                 )
