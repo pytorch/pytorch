@@ -2684,14 +2684,21 @@ def forward(self, arg0_1, arg1_1):
             "BLOCK_SIZE": 256,
         }
 
-        ttir_module, _ = generate_ttir(copy_kernel, kwargs, tma_descriptor_metadata={})
+        ttir_module, ordered_arg_names = generate_ttir(
+            copy_kernel, kwargs, tma_descriptor_metadata={}
+        )
         ttir_str = str(ttir_module)
 
         # `constexpr` values get inlined, and do not appear as function parameters.
-        self.assertIn("src_ptr", ttir_str)
-        self.assertIn("dst_ptr", ttir_str)
-        self.assertIn("n_elements", ttir_str)
-        self.assertIn("stride", ttir_str)
+        # Non-constexpr arguments should appear either in the TTIR string (older Triton)
+        # or in the ordered_arg_names list (newer Triton).
+        for arg_name in ["src_ptr", "dst_ptr", "n_elements", "stride"]:
+            self.assertTrue(
+                arg_name in ttir_str or arg_name in ordered_arg_names,
+                f"{arg_name} should appear in TTIR or ordered_arg_names",
+            )
+        # BLOCK_SIZE is constexpr, so it should not appear in ordered_arg_names or TTIR.
+        self.assertNotIn("BLOCK_SIZE", ordered_arg_names)
         self.assertNotIn("BLOCK_SIZE", ttir_str)
 
 
