@@ -43,7 +43,6 @@ class ExportableModule(torch.nn.Module, abc.ABC):
             def dynamic_shapes(self):
                 return ({0: "batch_size"},)
 
-
         exportable_module = MyExportableModule()
         onnx_program = exportable_module.to_onnx()
         # The model can also be supplied directly to torch.onnx.export
