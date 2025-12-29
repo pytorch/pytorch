@@ -2,6 +2,7 @@
 
 import copyreg
 import os.path as _osp
+import weakref
 
 import torch
 from torch.utils import (
@@ -39,6 +40,23 @@ def swap_tensors(t1, t2):
 
     This will not work if t1 and t2 have different slots.
     """
+    # Import FakeTensor lazily to avoid circular imports
+    from torch._subclasses.fake_tensor import FakeTensor
+
+    # FakeTensorMode tracks tensors via weakrefs, so we allow weakrefs for FakeTensors.
+    # For regular tensors, we keep the check to ensure proper behavior with systems
+    # like Dynamo that use weakrefs for tracking.
+    is_fake = isinstance(t1, FakeTensor) or isinstance(t2, FakeTensor)
+    if not is_fake:
+        if weakref.getweakrefs(t1):
+            raise RuntimeError(
+                "Cannot swap t1 because it has weakref associated with it"
+            )
+        if weakref.getweakrefs(t2):
+            raise RuntimeError(
+                "Cannot swap t2 because it has weakref associated with it"
+            )
+
     t1_slots = set(copyreg._slotnames(t1.__class__))  # type: ignore[attr-defined]
     t2_slots = set(copyreg._slotnames(t2.__class__))  # type: ignore[attr-defined]
     if t1_slots != t2_slots:
