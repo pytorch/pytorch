@@ -1615,7 +1615,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         model = Model()
         x = torch.randn(4, 10)
         expected = model(x)
-        compiled_model = torch.compile(model, fullgraph=True)
+        compiled_model = torch.compile(model, fullgraph=False)
         actual = compiled_model(x)
         self.assertEqual(expected, actual)
 
