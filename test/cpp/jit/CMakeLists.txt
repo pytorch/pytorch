@@ -109,7 +109,6 @@ if(USE_ASAN)
   target_link_libraries(test_jit PRIVATE "-fsanitize=undefined")
 endif()
 
-torch_compile_options(test_jit)
 target_link_libraries(
   test_jit PRIVATE flatbuffers)
 
