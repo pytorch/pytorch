@@ -533,7 +533,9 @@ def _recursive_joint_graph_passes(
 ) -> GraphModule:
     def _run_on_sub_graph_module(subgraph_name: str) -> None:
         subgraph = getattr(gm, subgraph_name)
-        new_subgraph = _recursive_joint_graph_passes(subgraph, skip_invoke_subgraph, input_device)
+        new_subgraph = _recursive_joint_graph_passes(
+            subgraph, skip_invoke_subgraph, input_device
+        )
         setattr(gm, subgraph_name, new_subgraph)
 
     with dynamo_timed(
@@ -2213,9 +2215,7 @@ def partition_fn(
         # in partitioning.
         inputs_devices = get_inputs_devices(joint_inputs, gm)
         gm = _recursive_joint_graph_passes(
-            gm,
-            skip_invoke_subgraph=True,
-            input_device=next(iter(inputs_devices))
+            gm, skip_invoke_subgraph=True, input_device=next(iter(inputs_devices))
         )
 
     static_lifetime_input_indices: Optional[list[int]] = kwargs.pop(  # type: ignore[assignment]
@@ -2321,9 +2321,7 @@ def compile_fx_forward(
         )
 
         inputs_devices = get_inputs_devices(example_inputs, gm)
-        gm = _recursive_joint_graph_passes(
-            gm, input_device=next(iter(inputs_devices))
-        )
+        gm = _recursive_joint_graph_passes(gm, input_device=next(iter(inputs_devices)))
 
         trace_structured(
             "artifact",
