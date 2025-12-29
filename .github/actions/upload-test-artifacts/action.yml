@@ -1,10 +1,14 @@
 name: Upload test artifacts
 
-description: Upload various artifacts produced by our testing process
+description: |
+  Upload various artifacts produced by our testing process.
+  Attempts to upload to S3 first, and falls back to GitHub Actions artifacts if S3 upload fails.
 
 inputs:
   use-gha:
-    description: If set to any value, upload GHA. Otherwise upload to S3.
+    description: |
+      Deprecated: This input is no longer used. The action now automatically
+      attempts S3 upload first and falls back to GHA if S3 fails.
     required: false
   file-suffix:
     description: |
@@ -12,60 +16,54 @@ inputs:
       workflow job id, see [Job id in artifacts].
     required: true
   s3-bucket:
-    description: S3 bucket to download builds
+    description: S3 bucket to upload artifacts to
     required: false
     default: "gha-artifacts"
 
 runs:
   using: composite
   steps:
-    # Mac/Linux zip
-    - name: Zip JSONs for upload
-      if: runner.os != 'Windows' && !inputs.use-gha
-      shell: bash
-      env:
-        FILE_SUFFIX: ${{ inputs.file-suffix }}
-      run: |
-        # Remove any previous test jsons if they exist
-        rm -f test-jsons-*.zip
-        zip -r "test-jsons-${FILE_SUFFIX}.zip" test/test-reports -i '*.json'
+    # Always set up uv and zip files first (needed for S3, reusable for GHA fallback)
+    - name: Setup uv
+      if: runner.os != 'Windows'
+      uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+      with:
+        python-version: 3.12
 
-    - name: Zip test reports for upload
-      if: runner.os != 'Windows' && !inputs.use-gha
+    - name: Zip artifacts for upload
+      if: runner.os != 'Windows'
       shell: bash
       env:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
       run: |
-        # Remove any previous test reports if they exist
-        rm -f test-reports-*.zip
-        zip -r "test-reports-${FILE_SUFFIX}.zip" test/test-reports -i '*.xml' -i '*.csv'
-
-    - name: Zip usage log for upload
-      if: runner.os != 'Windows' && !inputs.use-gha
-      shell: bash
-      env:
-        FILE_SUFFIX: ${{ inputs.file-suffix }}
-      run: |
-        # Remove any previous usage logs if they exist
-        rm -f logs-*.zip
-        zip "logs-${FILE_SUFFIX}.zip" 'usage_log.txt' || true
-        zip -r "logs-${FILE_SUFFIX}.zip" test/test-reports -i '*.log' || true
-
-    - name: Zip debugging artifacts for upload
-      if: runner.os != 'Windows' && !inputs.use-gha
-      shell: bash
-      env:
-        FILE_SUFFIX: ${{ inputs.file-suffix }}
-      run: |
-        # Remove any previous debugging artifacts if they exist
-        rm -f debug-*.zip
+        set -euo pipefail
+        rm -f test-jsons-*.zip test-reports-*.zip logs-*.zip debug-*.zip
+        ZIP_CMD='
+        import sys, zipfile, os
+        from pathlib import Path
+        d = Path(sys.argv[1])
+        o = Path(sys.argv[2])
+        p = sys.argv[3:]
+        with zipfile.ZipFile(o, "w", zipfile.ZIP_DEFLATED) as z:
+            for pat in p:
+                for f in d.glob(pat):
+                    if f.is_file():
+                        z.write(f, os.path.relpath(f, d))
+        '
+        uv run --no-project python -c "$ZIP_CMD" \
+          test/test-reports "test-jsons-${FILE_SUFFIX}.zip" '**/*.json'
+        uv run --no-project python -c "$ZIP_CMD" \
+          . "test-reports-${FILE_SUFFIX}.zip" 'test/test-reports/**/*.xml' 'test/test-reports/**/*.csv'
+        uv run --no-project python -c "$ZIP_CMD" \
+          . "logs-${FILE_SUFFIX}.zip" 'usage_log.txt' 'test/test-reports/**/*.log'
         if [ -d 'test/debug' ]; then
-          zip -r "debug-${FILE_SUFFIX}.zip" test/debug
+          uv run --no-project python -c "$ZIP_CMD" \
+            test/debug "debug-${FILE_SUFFIX}.zip" '**/*'
         fi
 
     # Windows zip
     - name: Zip JSONs for upload
-      if: runner.os == 'Windows' && !inputs.use-gha
+      if: runner.os == 'Windows'
       shell: powershell
       env:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
@@ -74,7 +72,7 @@ runs:
         7z a "test-jsons-$Env:FILE_SUFFIX.zip" -ir'!test\test-reports\*.json'
 
     - name: Zip test reports for upload
-      if: runner.os == 'Windows' && !inputs.use-gha
+      if: runner.os == 'Windows'
       shell: powershell
       env:
         FILE_SUFFIX: ${{ inputs.file-suffix }}
@@ -83,7 +81,7 @@ runs:
         7z a "test-reports-$Env:FILE_SUFFIX.zip" -ir'!test\test-reports\*.xml' -ir'!test\test-reports\*.csv'
 
     - name: Zip usage log for upload
-      if: runner.os == 'Windows' && !inputs.use-gha
+      if: runner.os == 'Windows'
       continue-on-error: true
       shell: powershell
       env:
@@ -92,10 +90,13 @@ runs:
         # -ir => recursive include all files in pattern
         7z a "logs-$Env:FILE_SUFFIX.zip" 'usage_log.txt' -ir'!test\test-reports\*.log'
 
-    # S3 upload
+    # ===========================================
+    # S3 upload (primary path)
+    # ===========================================
     - name: Store Test Downloaded JSONs on S3
+      id: s3-upload-jsons
       uses: seemethere/upload-artifact-s3@v5
-      if: ${{ !inputs.use-gha }}
+      continue-on-error: true
       with:
         s3-bucket: ${{ inputs.s3-bucket }}
         s3-prefix: |
@@ -105,19 +106,20 @@ runs:
         path: test-jsons-*.zip
 
     - name: Store Test Reports on S3
+      id: s3-upload-reports
       uses: seemethere/upload-artifact-s3@v5
-      if: ${{ !inputs.use-gha }}
+      continue-on-error: true
       with:
         s3-bucket: ${{ inputs.s3-bucket }}
         s3-prefix: |
           ${{ github.repository }}/${{ github.run_id }}/${{ github.run_attempt }}/artifact
         retention-days: 14
-        if-no-files-found: error
+        if-no-files-found: warn
         path: test-reports-*.zip
 
     - name: Store Usage Logs on S3
+      id: s3-upload-logs
       uses: seemethere/upload-artifact-s3@v5
-      if: ${{ !inputs.use-gha }}
       continue-on-error: true
       with:
         s3-bucket: ${{ inputs.s3-bucket }}
@@ -128,8 +130,8 @@ runs:
         path: logs-*.zip
 
     - name: Store Debug Artifacts on S3
+      id: s3-upload-debug
       uses: seemethere/upload-artifact-s3@v5
-      if: ${{ !inputs.use-gha }}
       continue-on-error: true
       with:
         s3-bucket: ${{ inputs.s3-bucket }}
@@ -139,10 +141,25 @@ runs:
         if-no-files-found: ignore
         path: debug-*.zip
 
-    # GHA upload
-    - name: Store Test Downloaded JSONs on Github
+    # Check if S3 upload failed (test-reports is the critical one)
+    - name: Check S3 upload status
+      id: check-s3
+      shell: bash
+      run: |
+        if [[ "${{ steps.s3-upload-reports.outcome }}" == "failure" ]]; then
+          echo "S3 upload failed, will fallback to GHA"
+          echo "s3-failed=true" >> "$GITHUB_OUTPUT"
+        else
+          echo "S3 upload succeeded"
+          echo "s3-failed=false" >> "$GITHUB_OUTPUT"
+        fi
+
+    # ===========================================
+    # GHA upload (fallback path if S3 failed)
+    # ===========================================
+    - name: Store Test Downloaded JSONs on Github (fallback)
       uses: actions/upload-artifact@v4
-      if: inputs.use-gha
+      if: steps.check-s3.outputs.s3-failed == 'true'
       continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
@@ -151,23 +168,22 @@ runs:
         if-no-files-found: warn
         path: test/**/*.json
 
-    - name: Store Test Reports on Github
+    - name: Store Test Reports on Github (fallback)
       uses: actions/upload-artifact@v4
-      if: inputs.use-gha
+      if: steps.check-s3.outputs.s3-failed == 'true'
       continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
         name: test-reports-runattempt${{ github.run_attempt }}-${{ inputs.file-suffix }}.zip
         retention-days: 14
-        # Don't want to fail the workflow here because not all workflows have csv files
-        if-no-files-found: ignore
+        if-no-files-found: warn
         path: |
           test/**/*.xml
           test/**/*.csv
 
-    - name: Store Usage Logs on Github
+    - name: Store Usage Logs on Github (fallback)
       uses: actions/upload-artifact@v4
-      if: inputs.use-gha
+      if: steps.check-s3.outputs.s3-failed == 'true'
       continue-on-error: true
       with:
         # Add the run attempt, see [Artifact run attempt]
