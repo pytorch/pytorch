@@ -189,8 +189,7 @@ def all_gather(
             raise RuntimeError(  # type: ignore[misc]
                 error_msg,
                 exception_list,
-                # pyrefly: ignore [invalid-inheritance]
-            ) from exception_list[0]
+            ) from exception_list[0]  # pyrefly: ignore [bad-raise, invalid-inheritance]
         return ret_list
     else:
         if not sync_obj.success:

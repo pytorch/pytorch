@@ -2443,7 +2443,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([4, 4])"]
+                assert str(n.meta["val"].size()) == "torch.Size([4, 4])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2480,7 +2480,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([u0, 4])"]
+                assert str(n.meta["val"].size()) == "torch.Size([u0, 4])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2501,7 +2501,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_reduce_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([s75, s75])"]
+                assert str(n.meta["val"].size()) == "torch.Size([s75, s75])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2555,7 +2555,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([8, 1])"]
+                assert str(n.meta["val"].size()) == "torch.Size([8, 1])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2592,7 +2592,7 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert str(n.meta["val"].size()) in ["torch.Size([4*u0, 4])"]
+                assert str(n.meta["val"].size()) == "torch.Size([4*u0, 4])"
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2615,9 +2615,9 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
         g = gm.graph
         for n in g.nodes:
             if is_all_to_all_tensor(n):
-                assert str(n.meta["val"].size()) in [
-                    "torch.Size([2*(((s75**2)//2)), s75])"
-                ]
+                assert (
+                    str(n.meta["val"].size()) == "torch.Size([2*(((s75**2)//2)), s75])"
+                )
                 from torch._inductor.comm_analysis import (
                     estimate_nccl_collective_runtime_from_fx_node,
                 )
@@ -2676,6 +2676,122 @@ class TestSyncDecisionCrossRanks(MultiProcessTestCase):
                     n, use_nccl_estimator=True
                 )
                 assert est_ms_nccl > 0
+
+    @skip_if_lt_x_gpu(2)
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(not SM80OrLater, "bfloat16")
+    def test_schedule_overlap_benchmark(self):
+        store = c10d.FileStore(self.file_name, self.world_size)
+        torch.cuda.set_device(self.rank)
+        c10d.init_process_group(
+            backend="nccl", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = c10d.distributed_c10d._get_default_group()
+        group_name = "default"
+        torch._C._distributed_c10d._register_process_group(
+            group_name, torch.distributed.group.WORLD
+        )
+        group_size = group.size()
+
+        def func(x, w, ag_0, ag_1, ag_2, ag_3, group_size, group_name):
+            # do some unrelated matmuls
+            y = torch.mm(x, w)
+
+            # cast the inputs
+            ag_0_cast = ag_0.to(torch.bfloat16)
+            ag_1_cast = ag_1.to(torch.bfloat16)
+
+            # allgather
+            group_name = (
+                torch.distributed.distributed_c10d._get_default_group().group_name
+            )
+            ag_0_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_0_cast, group_size, group_name
+            )
+            ag_1_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_1_cast, group_size, group_name
+            )
+
+            # wait op
+            ag_0_out = torch.ops.c10d_functional.wait_tensor(ag_0_out)
+            ag_1_out = torch.ops.c10d_functional.wait_tensor(ag_1_out)
+
+            rs_0_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_0_cast, "sum", group_size, group_name
+            )
+            rs_1_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_1_cast, "sum", group_size, group_name
+            )
+
+            # wait op
+            rs_0_out = torch.ops.c10d_functional.wait_tensor(rs_0_out)
+            rs_1_out = torch.ops.c10d_functional.wait_tensor(rs_1_out)
+            y += torch.mm(2 * x, 2 * w)
+
+            # cast the inputs
+            ag_2_cast = ag_2.to(torch.bfloat16)
+            ag_3_cast = ag_3.to(torch.bfloat16)
+            ag_2_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_2_cast, group_size, group_name
+            )
+            ag_3_out = torch.ops._c10d_functional.all_gather_into_tensor(
+                ag_3_cast, group_size, group_name
+            )
+
+            # wait op
+            ag_2_out = torch.ops.c10d_functional.wait_tensor(ag_2_out)
+            ag_3_out = torch.ops.c10d_functional.wait_tensor(ag_3_out)
+
+            #
+            rs_2_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_2_cast, "sum", group_size, group_name
+            )
+            rs_3_out = torch.ops._c10d_functional.reduce_scatter_tensor(
+                ag_3_cast, "sum", group_size, group_name
+            )
+
+            # wait op
+            rs_2_out = torch.ops.c10d_functional.wait_tensor(rs_2_out)
+            rs_3_out = torch.ops.c10d_functional.wait_tensor(rs_3_out)
+            return (
+                y,
+                ag_0_out,
+                ag_1_out,
+                ag_2_out,
+                ag_3_out,
+                rs_0_out,
+                rs_1_out,
+                rs_2_out,
+                rs_3_out,
+            )
+
+        x = torch.ones(4, 384, device=self.device, dtype=torch.float32)
+        w = torch.ones(384, 512, device=self.device, dtype=torch.float32)
+        ag_0 = torch.ones(1024, 512, device=self.device, dtype=torch.float32)
+        ag_1 = torch.ones(512, 1024, device=self.device, dtype=torch.float32)
+        ag_2 = torch.ones(1024, 512, device=self.device, dtype=torch.float32)
+        ag_3 = torch.ones(512, 1024, device=self.device, dtype=torch.float32)
+        inputs = [x, w, ag_0, ag_1, ag_2, ag_3]
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def _pass(
+            gm: torch.fx.Graph,
+        ) -> torch.fx.GraphModule:
+            return schedule_overlap_bucketing(
+                gm.owning_module,
+                collective_bucketing=True,
+                insert_overlap_deps=True,
+                max_memory_increase_ratio=0.0,
+                collective_estimator="benchmark",
+                log_final_collectives_estimations=True,
+            )
+
+        torch._inductor.config.post_grad_custom_post_pass = _pass
+        torch.compile(func, backend="inductor", fullgraph=True)(
+            *inputs, group_size, group_name
+        )
 
 
 if __name__ == "__main__":

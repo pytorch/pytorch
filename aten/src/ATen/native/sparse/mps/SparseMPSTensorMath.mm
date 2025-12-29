@@ -1,6 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/SparseTensorUtils.h>
+#include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <ATen/native/sparse/SparseStubs.h>
 #include <ATen/native/sparse/SparseBinaryOpIntersectionCommon.h>
@@ -26,8 +28,12 @@
 #include <ATen/ops/mul_native.h>
 #include <ATen/ops/empty_native.h>
 #include <ATen/ops/zeros_native.h>
+#include <ATen/ops/index_select_native.h>
+#include <ATen/ops/remainder_native.h>
 #include <ATen/ops/ones_like.h>
 #include <ATen/ops/argsort.h>
+#include <ATen/ops/searchsorted_native.h>
+#include <ATen/ops/_sparse_sum_backward_native.h>
 #include <ATen/ops/result_type.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/addmm_native.h>
@@ -1115,6 +1121,245 @@ Tensor sparse_sparse_matmul_mps(const Tensor& mat1_, const Tensor& mat2_) {
   return result;
 }
 
+
+Tensor _sparse_sum_backward_mps(const Tensor& grad_, const SparseTensor& input_, IntArrayRef dims_to_sum) {
+  TORCH_CHECK(grad_.is_mps(), "_sparse_sum_backward_mps: expected 'grad_' to be MPS tensor, but got ", grad_.device());
+  TORCH_CHECK(input_.is_mps(), "_sparse_sum_backward_mps: expected 'input_' to be MPS tensor, but got ", input_.device());
+
+  if (((grad_.is_sparse() || sparse_csr::is_sparse_compressed(grad_)) && !grad_._nnz()) || !grad_.numel()) {
+    return at::zeros_like(input_);
+  }
+
+  auto input = input_.coalesce();
+  const auto input_dim = input.dim();
+
+  auto dims_to_sum_v = dims_to_sum.vec();
+  maybe_wrap_dims(dims_to_sum_v, input_dim);
+  std::vector<bool> dims_to_sum_b(static_cast<size_t>(input_dim), false);
+  for (auto d : dims_to_sum_v) {
+    dims_to_sum_b[static_cast<size_t>(d)] = true;
+  }
+
+  auto input_indices = input._indices();
+  auto input_values = input._values();
+  auto input_sizes = input.sizes();
+  const auto input_sparse_dim = input.sparse_dim();
+  const auto input_dense_dim = input.dense_dim();
+  const auto input_nnz = input._nnz();
+
+  int64_t sparse_dims_to_sum_size = 0;
+  std::vector<int64_t> sparse_dims_to_keep_v;
+  std::vector<int64_t> dense_dims_to_sum_v;
+
+  for (auto d = 0; d < input_dim; d++) {
+    if (dims_to_sum_b[static_cast<size_t>(d)]) {
+      if (d < input_sparse_dim) {
+        sparse_dims_to_sum_size++;
+      } else {
+        dense_dims_to_sum_v.emplace_back(d + 1 - input_sparse_dim);
+      }
+    } else if (d < input_sparse_dim) {
+      sparse_dims_to_keep_v.emplace_back(d);
+    }
+  }
+
+  const auto sum_all_sparse_dim = (input_sparse_dim == sparse_dims_to_sum_size);
+  const auto sum_dense_dim = !dense_dims_to_sum_v.empty();
+  const auto sum_sparse_dim = (sparse_dims_to_sum_size > 0);
+
+  if (sum_all_sparse_dim) {
+    TORCH_CHECK(!grad_.is_sparse(), "_sparse_sum_backward_mps: expected grad Tensor to be dense since all sparse dims are summed");
+
+    auto grad_input_values = grad_.contiguous();
+    auto expand_size = input_values.sizes().vec();
+
+    if (sum_dense_dim) {
+      auto dense_expand_size = std::vector<int64_t>(expand_size.begin() + 1, expand_size.end());
+      for (auto d : dense_dims_to_sum_v) {
+        grad_input_values = grad_input_values.unsqueeze(d - 1);
+      }
+      grad_input_values = grad_input_values.expand(dense_expand_size);
+    }
+    grad_input_values = grad_input_values.expand(expand_size).clone(at::MemoryFormat::Contiguous);
+
+    return at::_sparse_coo_tensor_with_dims_and_tensors(
+        input_sparse_dim, input_dense_dim, input_sizes,
+        input_indices.clone(at::MemoryFormat::Contiguous),
+        grad_input_values, input.options().dtype(grad_.dtype()));
+  }
+
+  TORCH_CHECK(grad_.is_sparse(), "_sparse_sum_backward_mps: expected 'grad_' Tensor to be sparse when not all sparse dims are summed");
+  auto grad = grad_.coalesce();
+  auto grad_indices = grad._indices();
+  auto grad_values = grad._values();
+  const auto grad_sparse_dim = grad.sparse_dim();
+  const auto grad_nnz = grad._nnz();
+
+  auto grad_values_expand = grad_values;
+  if (sum_dense_dim) {
+    auto expand_size = input_values.sizes().vec();
+    expand_size[0] = grad_values.size(0);
+    for (auto d : dense_dims_to_sum_v) {
+      grad_values_expand = grad_values_expand.unsqueeze(d);
+    }
+    grad_values_expand = grad_values_expand.expand(expand_size).clone(at::MemoryFormat::Contiguous);
+  }
+
+  Tensor grad_input_values;
+  if (!sum_sparse_dim) {
+    grad_input_values = grad_values_expand;
+  } else {
+    auto grad_keys = at::sparse::flatten_indices(
+        grad_indices.contiguous(),
+        grad.sizes().slice(0, grad_sparse_dim)).to(at::TensorOptions().dtype(at::kInt).memory_format(at::MemoryFormat::Contiguous));
+
+    std::vector<int64_t> sizes_keep;
+    sizes_keep.reserve(sparse_dims_to_keep_v.size());
+    for (auto d : sparse_dims_to_keep_v) {
+      sizes_keep.push_back(input_sizes[d]);
+    }
+
+    auto keep_idx = at::tensor(sparse_dims_to_keep_v, at::device(input_indices.device()).dtype(at::kLong));
+    auto input_indices_keep = input_indices.index_select(0, keep_idx).contiguous();
+    auto input_keys = at::sparse::flatten_indices(
+        input_indices_keep, IntArrayRef(sizes_keep)).to(at::kInt).contiguous();
+
+    auto idx_in_grad = searchsorted_mps(grad_keys, input_keys);
+    auto idx_in_grad_clamped = idx_in_grad.clamp_max(grad_nnz - 1);
+    auto matched_mask = grad_keys.index_select(0, idx_in_grad_clamped).eq(input_keys);
+
+    grad_input_values = grad_values_expand.index_select(0, idx_in_grad_clamped);
+
+    if (grad_input_values.dim() > 1) {
+      auto reshape_mask_size = std::vector<int64_t>(grad_input_values.dim(), 1);
+      reshape_mask_size[0] = input_nnz;
+      matched_mask = matched_mask.view(reshape_mask_size);
+    }
+    grad_input_values.masked_fill_(matched_mask.logical_not(), 0);
+  }
+
+  return at::_sparse_coo_tensor_with_dims_and_tensors(
+      input_sparse_dim, input_dense_dim, input_sizes,
+      input_indices,
+      grad_input_values, grad.options());
+}
+
+Tensor index_select_sparse_mps(const Tensor& self_, int64_t dim, const Tensor& index) {
+  TORCH_CHECK(self_.is_sparse(), "index_select_sparse_mps: expected a sparse COO tensor");
+  TORCH_CHECK(self_.is_mps(), "index_select_sparse_mps: expected 'self' to be on MPS, got ", self_.device());
+  TORCH_CHECK(
+      index.dim() == 1 && index.dtype() == at::kLong && index.layout() == at::kStrided,
+      "index_select() argument index must be 1-D strided (non-sparse) long-tensor.");
+
+  const auto ndim = self_.dim();
+  TORCH_CHECK_INDEX(ndim, "index_select() cannot be applied to a 0-dim tensor.");
+  dim = maybe_wrap_dim(dim, ndim);
+
+  std::vector<int64_t> out_sizes = self_.sizes().vec();
+  const auto index_len = index.numel();
+  out_sizes[dim] = index_len;
+
+  const auto sd = self_.sparse_dim();
+  const auto dd = self_.dense_dim();
+  const auto nnz = self_._nnz();
+
+  // Indexing into dense dimensions only affects values
+  if (dim >= sd) {
+    const int64_t values_dim = dim - sd + 1;
+    TORCH_CHECK(values_dim >= 1 && values_dim < (1 + dd),
+                "index_select_sparse_mps: invalid dense dimension to select: ", dim);
+
+    Tensor out_values = self_._values().index_select(values_dim, index);
+    return _sparse_coo_tensor_unsafe(self_._indices(), out_values, out_sizes, self_.options());
+  }
+
+  // Selecting along a sparse dimension
+  const auto I = self_.size(dim);
+  TORCH_CHECK(I >= 0, "index_select_sparse_mps: invalid size for selected dim");
+
+  if (I == 0) {
+    TORCH_CHECK(
+        index_len == 0,
+        "index_select(): index has to be empty when selecting from an empty dimension");
+    auto empty_idx = empty({sd, 0}, at::device(self_.device()).dtype(kLong));
+    auto tmpl_vals = self_._values();
+    std::vector<int64_t> val_sizes = tmpl_vals.sizes().vec();
+    val_sizes[0] = 0;
+    auto empty_vals = at::empty(val_sizes, tmpl_vals.options());
+    return _sparse_coo_tensor_unsafe(empty_idx, empty_vals, out_sizes, self_.options());
+  }
+
+  if (index_len > 0) {
+    TORCH_CHECK(index.min().item<int64_t>() >= -I && index.max().item<int64_t>() < I,
+                "index_select(): index out of bounds for dimension with size ", I);
+  }
+  // Normalize negative indices
+  auto nneg_index = remainder(index, I).contiguous();
+
+  if (index_len == 0 || nnz == 0) {
+    auto empty_idx = empty({sd, 0}, at::device(self_.device()).dtype(kLong));
+    auto tmpl_vals = self_._values();
+    std::vector<int64_t> val_sizes = tmpl_vals.sizes().vec();
+    val_sizes[0] = 0;
+    auto empty_vals = empty(val_sizes, tmpl_vals.options());
+    return _sparse_coo_tensor_unsafe(empty_idx, empty_vals, out_sizes, self_.options());
+  }
+
+  auto indices = self_._indices().contiguous();
+  auto values = self_._values().contiguous();
+
+  auto dim_indices = indices.select(0, dim).contiguous();
+
+  Tensor sorted_dim_indices, argsort_dim_indices;
+  if (dim == 0 && self_.is_coalesced()) {
+    sorted_dim_indices = dim_indices;
+    argsort_dim_indices = arange(nnz, at::device(self_.device()).dtype(kLong));
+  } else {
+    std::tie(sorted_dim_indices, argsort_dim_indices) = dim_indices.sort();
+  }
+
+  // Build row_ptr for lower/upper bound lookups
+  auto batch_ptr = tensor({0LL, nnz}, at::device(self_.device()).dtype(kLong));
+  auto row_ptr = empty({I + 1}, at::device(self_.device()).dtype(kLong));
+  build_row_ptr_per_batch_mps(sorted_dim_indices, batch_ptr, /*B=*/1, /*I=*/I, row_ptr);
+
+  auto lower = row_ptr.index_select(0, nneg_index);
+  auto nneg_index_plus1 = nneg_index.add(1);
+  auto upper = row_ptr.index_select(0, nneg_index_plus1);
+  auto counts = upper.sub(lower);
+
+  const int64_t M = counts.sum().item<int64_t>();
+  if (M == 0) {
+    auto empty_idx = empty({sd, 0}, at::device(self_.device()).dtype(kLong));
+    auto tmpl_vals = values;
+    std::vector<int64_t> val_sizes = tmpl_vals.sizes().vec();
+    val_sizes[0] = 0;
+    auto empty_vals = empty(val_sizes, tmpl_vals.options());
+    return _sparse_coo_tensor_unsafe(empty_idx, empty_vals, out_sizes, self_.options());
+  }
+
+  // Expand counts into group ids for each output element
+  auto group_ids = repeat_interleave_mps(counts);
+
+  auto offsets = cumsum(counts, /*dim=*/0).sub(counts);
+  auto offsets_gather = offsets.index_select(0, group_ids);
+  auto within = arange(M, at::device(self_.device()).dtype(kLong)).sub(offsets_gather);
+
+  auto start_pos = lower.index_select(0, group_ids);
+  auto pos_sorted = start_pos.add(within);
+  auto selected_dim_indices = argsort_dim_indices.index_select(0, pos_sorted);
+
+  // group_ids become the new indices for the selected dimension
+  auto res_dim_indices = group_ids.contiguous();
+
+  auto out_indices = indices.index_select(1, selected_dim_indices).contiguous();
+  out_indices.select(0, dim).copy_(res_dim_indices);
+
+  auto out_values = values.index_select(0, selected_dim_indices);
+
+  return _sparse_coo_tensor_unsafe(out_indices, out_values, out_sizes, self_.options());
+}
+
 static Tensor softmax_sparse_mps_impl(
     const Tensor& input_,
     const int64_t dim_,
@@ -1164,7 +1409,7 @@ static Tensor softmax_sparse_mps_impl(
         auto pso = lib.getPipelineStateForFunc("mark_segments");
         auto enc = stream->commandEncoder();
         [enc setComputePipelineState:pso];
-        mtl_setArgs(enc, sorted_pool_indices, mask, nnz_u);
+        mtl_setArgs(enc, sorted_pool_indices, mask);
 
         auto gridSize = MTLSizeMake(nnz, 1, 1);
         auto threadGroupSize = MTLSizeMake(std::min<uint64_t>(nnz, pso.maxTotalThreadsPerThreadgroup), 1, 1);
@@ -1277,7 +1522,7 @@ static Tensor softmax_backward_sparse_mps_impl(
         auto pso = lib.getPipelineStateForFunc("mark_segments");
         auto enc = stream->commandEncoder();
         [enc setComputePipelineState:pso];
-        mtl_setArgs(enc, sorted_pool_indices, mask, nnz_u);
+        mtl_setArgs(enc, sorted_pool_indices, mask);
         auto gridSize = MTLSizeMake(nnz, 1, 1);
         auto threadGroupSize = MTLSizeMake(std::min<uint64_t>(nnz, pso.maxTotalThreadsPerThreadgroup), 1, 1);
         [enc dispatchThreads:gridSize threadsPerThreadgroup:threadGroupSize];
@@ -1344,7 +1589,6 @@ Tensor softmax_backward_sparse_mps(const Tensor& grad, const Tensor& output, int
 Tensor log_softmax_backward_sparse_mps(const Tensor& grad, const Tensor& output, int64_t dim, const Tensor& input) {
   return softmax_backward_sparse_mps_impl(grad, output, dim, input, true);
 }
-
 
 REGISTER_MPS_DISPATCH(sparse_mask_intersection_out_stub, &sparse_mask_intersection_out_mps_kernel);
 REGISTER_MPS_DISPATCH(sparse_mask_projection_out_stub, &sparse_mask_projection_out_mps_kernel);

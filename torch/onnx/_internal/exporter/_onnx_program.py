@@ -158,7 +158,7 @@ def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValu
             float: np.float32,
         }
         # pyrefly: ignore [no-matching-overload]
-        dtype = dtype_mapping.get(type(input), None)
+        dtype = dtype_mapping.get(type(input))
         return ort.OrtValue.ortvalue_from_numpy(np.array(input, dtype=dtype))
 
     if input.dtype == torch.bfloat16 or input.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:

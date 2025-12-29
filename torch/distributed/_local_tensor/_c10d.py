@@ -271,7 +271,7 @@ def _local_functional_all_to_all_single(
 
         for i, dst in enumerate(group_ranks):
             splits = []
-            for j, src in enumerate(group_ranks):
+            for src in group_ranks:
                 splits.append(split_local_tensors[src][i])
             output_local_tensors[dst] = torch.cat(splits)
 
@@ -279,15 +279,6 @@ def _local_functional_all_to_all_single(
     output = LocalTensor(output_local_tensors)
 
     return output
-
-
-def _local_functional_wait_tensor(tensor: torch.Tensor) -> torch.Tensor:
-    # "wait_tensor(Tensor input) -> Tensor"
-    from . import LocalTensor
-
-    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
-
-    return tensor
 
 
 def _local_broadcast_(
@@ -1031,7 +1022,7 @@ def local_p2p_op(
     dst: torch.SymInt,
     tensor: torch.Tensor,
     op: Callable[[torch.Tensor, int], Work | None],
-) -> Work | None | list[Work | None]:
+) -> Work | list[Work | None] | None:
     """
     Runs a point-to-point (P2P) operation for all combinations of source and destination ranks.
     """
@@ -1050,7 +1041,7 @@ def local_p2p_op(
     return w
 
 
-def wait_all(work: Work | None | list[Work | None]) -> None:
+def wait_all(work: Work | list[Work | None] | None) -> None:
     """
     Waits for all work objects in the input to complete.
 
