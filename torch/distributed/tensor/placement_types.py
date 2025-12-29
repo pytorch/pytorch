@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+import functools
 from dataclasses import dataclass, field
 from typing import cast, Optional
 
@@ -26,6 +27,15 @@ __all__ = ["Placement", "Shard", "Replicate", "Partial", "MaskPartial"]
 
 # Appease TestPublicBindings.test_correct_module_names
 Placement.__module__ = "torch.distributed.tensor.placement_types"
+
+
+def raise_error(method_name, _):
+    raise RuntimeError(f"Placement {method_name} should not be called")
+
+
+Placement.__eq__ = functools.partial(raise_error, method_name="__eq__")
+Placement.__hash__ = functools.partial(raise_error, method_name="__hash__")
+Placement.__fx_repr__ = functools.partial(raise_error, method_name="__fx_repr__")
 
 
 class Shard(torch._C._distributed.Shard):
@@ -489,6 +499,13 @@ class Shard(torch._C._distributed.Shard):
         """
         return f"Shard(dim={self.dim})"
 
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Shard placement.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return f"torch.distributed.tensor.placement_types.Shard(dim={self.dim})", {}
+
     def __str__(self) -> str:
         """human readable representation of the Shard placement"""
         return f"S({self.dim})"
@@ -569,6 +586,16 @@ class _StridedShard(torch._C._distributed.StridedShard):
     @maybe_run_for_local_tensor
     def _select_shard(shards: list[torch.Tensor], shard_index) -> torch.Tensor:
         return shards[shard_index].clone()
+
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Shard placement.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor.placement_types._StridedShard(dim={self.dim}, sf={self.split_factor})",  # noqa: B950
+            {},
+        )
 
     @classmethod
     def _make_shard_tensor(
@@ -849,6 +876,13 @@ class Replicate(torch._C._distributed.Replicate):
         """
         return "Replicate()"
 
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Replicate placement.
+        Needed for passing this type as an opaque object input to a custom op.
+        """
+        return "torch.distributed.tensor.placement_types.Replicate()", {}
+
     def __str__(self) -> str:
         """
         human readable representation of the Replicate placement
@@ -956,6 +990,16 @@ class Partial(torch._C._distributed.Partial):
         machine readable representation of the Partial placement
         """
         return f"Partial({self.reduce_op})"
+
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Partial placement.
+        Needed for passing this type as an input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor.placement_types.Partial({self.reduce_op!r})",
+            {},
+        )
 
     def __str__(self) -> str:
         """
@@ -1112,3 +1156,21 @@ class MaskPartial(Partial):
         human readable representation of the MaskPartial placement
         """
         return f"MaskP({self.reduce_op}, {self.offset_shape}, {self.offset_dim})"
+
+    def __fx_repr__(self):
+        """
+        Returns FX-evaluable repr and required globals for Partial placement.
+        Needed for passing this type as an input to a custom op.
+        """
+        return (
+            f"torch.distributed.tensor.placement_types.MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})",  # noqa: B950
+            {},
+        )
+
+
+torch._library.opaque_object.register_opaque_type(Placement, typ="value")
+torch._library.opaque_object.register_opaque_type(Shard, typ="value")
+torch._library.opaque_object.register_opaque_type(Replicate, typ="value")
+torch._library.opaque_object.register_opaque_type(Partial, typ="value")
+torch._library.opaque_object.register_opaque_type(_StridedShard, typ="value")
+torch._library.opaque_object.register_opaque_type(MaskPartial, typ="value")

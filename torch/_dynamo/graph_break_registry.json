@@ -591,6 +591,14 @@
       ]
     }
   ],
+  "GB8656": [
+    {
+      "Gb_type": "Opaque object with custom __getattr__ not supported",
+      "Context": "{value_type.__name__} with custom __getattr__",
+      "Explanation": "Dynamo does not support opaque objects types with custom __getattr__ methods",
+      "Hints": []
+    }
+  ],
   "GB0061": [
     {
       "Gb_type": "Failed to unpack object for BUILD_LIST_UNPACK",
