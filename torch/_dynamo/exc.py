@@ -81,7 +81,7 @@ class TorchDynamoException(RuntimeError):
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: Optional[DynamoTracerOutput] = None
-        self.frame_exec_strategy: Optional[FrameExecStrategy] = None
+        self.frame_exec_strategy: FrameExecStrategy | None = None
 
 
 class InternalTorchDynamoError(TorchDynamoException):

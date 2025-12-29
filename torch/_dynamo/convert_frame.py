@@ -48,7 +48,7 @@ import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, NoReturn, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -1688,7 +1688,7 @@ def _compile(
                 troubleshooting_url,
             )
 
-            def raise_unimplemented_cache_limit_exceeded():
+            def raise_unimplemented_cache_limit_exceeded() -> NoReturn:
                 unimplemented(
                     gb_type="Dynamo recompile limit exceeded",
                     context=f"Limit type: {limit_type}",
@@ -1704,28 +1704,23 @@ def _compile(
                     ],
                 )
 
-            if config.fail_on_recompile_limit_hit:
-                try:
-                    raise_unimplemented_cache_limit_exceeded()
-                except Unsupported as e:
-                    raise FailOnRecompileLimitHit(
-                        "Hard failure due to fail_on_recompile_limit_hit"
-                    ) from e
-            elif one_graph:
-                try:
-                    raise_unimplemented_cache_limit_exceeded()
-                except Unsupported as e:
-                    raise FailOnRecompileLimitHit(
-                        "Hard failure due to fullgraph=True"
-                    ) from e
             try:
                 raise_unimplemented_cache_limit_exceeded()
             except Unsupported as e:
-                # Set frame execution strategy to RUN_ONLY for this recompile limit case
-                e.frame_exec_strategy = FrameExecStrategy(
-                    FrameAction.RUN_ONLY, FrameAction.RUN_ONLY
-                )
-                raise
+                if config.fail_on_recompile_limit_hit:
+                    raise FailOnRecompileLimitHit(
+                        "Hard failure due to fail_on_recompile_limit_hit"
+                    ) from e
+                elif one_graph:
+                    raise FailOnRecompileLimitHit(
+                        "Hard failure due to fullgraph=True"
+                    ) from e
+                else:
+                    # Set frame execution strategy to RUN_ONLY for this recompile limit case
+                    e.frame_exec_strategy = FrameExecStrategy(
+                        FrameAction.RUN_ONLY, FrameAction.RUN_ONLY
+                    )
+                    raise
 
         log.debug(
             "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
