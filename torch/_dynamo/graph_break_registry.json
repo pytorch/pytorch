@@ -1961,6 +1961,14 @@
   "GB0181": [
     {
       "Gb_type": "dtype mismatch between tensor and its gradient",
+      "Context": "tensor dtype: {value.dtype}; grad dtype: {grad_str}",
+      "Explanation": "Inconsistent dtype between tensor and its gradient. This can happen in FSDP and crashes meta tensor creation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "dtype mismatch between tensor and its gradient",
       "Context": "tensor dtype: {value.dtype}; grad dtype: {safe_grad(value).dtype}",
       "Explanation": "Inconsistent dtype between tensor and its gradient. This can happen in FSDP and crashes meta tensor creation.",
       "Hints": [

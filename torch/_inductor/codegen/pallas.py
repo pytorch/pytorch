@@ -2851,9 +2851,41 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                     except (TypeError, ValueError):
                         length_val = None
 
-                    # For symbolic lengths, generate a simple arange
-                    # The renamed length expression uses kernel parameter names
+                    # For symbolic lengths, still need to reshape for broadcasting
+                    # if there are multiple broadcast dimensions
                     if length_val is None:
+                        if num_broadcast_dims > 1 and idx != total_var_idx:
+                            # Symbolic var in multi-broadcast case needs reshape
+                            broadcast_idx = next(
+                                (
+                                    i
+                                    for i, (vidx, _, _, _) in enumerate(broadcast_vars)
+                                    if vidx == idx
+                                ),
+                                None,
+                            )
+                            if broadcast_idx is not None:
+                                # Same logic as concrete case
+                                has_reduction_vars = any(
+                                    str(v).startswith("r")
+                                    for _, v, _, _ in broadcast_vars
+                                )
+                                has_pointwise_vars = any(
+                                    not str(v).startswith("r")
+                                    for _, v, _, _ in broadcast_vars
+                                )
+                                is_mixed = has_reduction_vars and has_pointwise_vars
+                                if is_mixed:
+                                    axis_idx = broadcast_idx
+                                else:
+                                    axis_idx = num_broadcast_dims - 1 - broadcast_idx
+                                shape_parts = ["1"] * num_broadcast_dims
+                                shape_parts[axis_idx] = length_str
+                                shape_str = ", ".join(shape_parts)
+                                kernel_body.writeline(
+                                    f"{var_name} = jnp.arange({length_str}).reshape({shape_str})"
+                                )
+                                continue
                         kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
                         continue
 
@@ -2874,13 +2906,28 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                             for i, (vidx, _, _, _) in enumerate(broadcast_vars)
                             if vidx == idx
                         )
-                        # Reshape for broadcasting with other iteration vars
-                        # Order: outermost to innermost should match the output shape
-                        # Reverse the order so first var (smallest index) is innermost
-                        # and last var (largest index) is outermost
-                        reversed_idx = num_broadcast_dims - 1 - broadcast_idx
+                        # Reshape for broadcasting with other iteration vars.
+                        # The axis placement depends on whether we have a MIX of
+                        # reduction vars (r*) and pointwise vars (x*):
+                        # - Mixed case: pointwise vars go to first axes, reduction vars
+                        #   to last axes. This ensures reshape to output works correctly.
+                        # - Same-type case (all r* or all x*): reverse the order so
+                        #   first var is innermost, matching codegen conventions.
+                        has_reduction_vars = any(
+                            str(v).startswith("r") for _, v, _, _ in broadcast_vars
+                        )
+                        has_pointwise_vars = any(
+                            not str(v).startswith("r") for _, v, _, _ in broadcast_vars
+                        )
+                        is_mixed = has_reduction_vars and has_pointwise_vars
+                        if is_mixed:
+                            # Mixed kernel: pointwise vars first, reduction vars last
+                            axis_idx = broadcast_idx
+                        else:
+                            # Same-type: reverse order (first var -> innermost)
+                            axis_idx = num_broadcast_dims - 1 - broadcast_idx
                         shape_parts = ["1"] * num_broadcast_dims
-                        shape_parts[reversed_idx] = length_str
+                        shape_parts[axis_idx] = length_str
                         shape_str = ", ".join(shape_parts)
                         kernel_body.writeline(
                             f"{var_name} = jnp.arange({length_str}).reshape({shape_str})"

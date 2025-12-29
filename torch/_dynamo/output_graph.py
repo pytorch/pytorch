@@ -400,7 +400,9 @@ class ExportMetaData:
     # maps graph input index to its' source which is later
     # used in export to map to correct user input. In its' flat form,
     # just looks like GetItem(base=LocalSource("foo", idx=0))
-    graph_input_idx_to_local_source: dict[int, Source] = dc_field(default_factory=dict)
+    graph_input_idx_to_local_source: dict[int, Source | None] = dc_field(
+        default_factory=dict
+    )
     # maps user output idx to what type of output it is. There are 3 options:
     # 1) graph out
     # 2) user input
@@ -2487,6 +2489,7 @@ class OutputGraph(OutputGraphCommon):
 
     def example_inputs(self) -> list[torch.Tensor]:
         result = [arg.example for arg in self.graphargs]
+        # pyrefly: ignore[bad-return]
         return result
 
     def remove_unused_get_attr_nodes(self) -> None:
