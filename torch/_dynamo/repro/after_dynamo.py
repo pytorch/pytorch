@@ -442,6 +442,7 @@ def run_load_args(options: Any, mod: torch.nn.Module, load_args: Any) -> list[An
     nop_reader = NopInputReader()
     load_args(nop_reader)
 
+    # pyrefly: ignore[bad-context-manager]
     with tqdm(desc="Loading inputs", total=nop_reader.total) as pbar:
         input_reader = InputReader(save_dir=options.save_dir, pbar=pbar)
         load_args(input_reader)

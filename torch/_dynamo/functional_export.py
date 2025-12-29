@@ -105,8 +105,8 @@ def clean_nn_module_stack_and_source_fn(
     """
 
     def _process_nn_module_stack(
-        nn_module_stack: dict[str, tuple[str, T]],
-    ) -> dict[str, tuple[str, T]]:
+        nn_module_stack: dict[str, tuple[str, Any]],
+    ) -> dict[str, tuple[str, Any]]:
         if "L__self____export_root" in nn_module_stack:
             del nn_module_stack["L__self____export_root"]
 
@@ -126,7 +126,7 @@ def clean_nn_module_stack_and_source_fn(
             cleaned_stack[clean_key] = (clean_name, child_class)
         return cleaned_stack
 
-    def _process_source_fn(source_fn_stack: Iterable[T]) -> Iterable[T]:
+    def _process_source_fn(source_fn_stack: Iterable[Any]) -> Iterable[Any]:
         cleaned_stack = []
         for item in source_fn_stack:
             if isinstance(item, tuple) and len(item) == 2:

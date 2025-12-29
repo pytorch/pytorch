@@ -930,7 +930,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         @register(torch.jit.annotate)
         def handle_jit_annotate(
-            self, tx: "InstructionTranslator", the_type: Any, the_value: V
+            self, tx: "InstructionTranslator", the_type: T, the_value: V
         ) -> V:
             return the_value
 
@@ -2510,7 +2510,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         return hash(self.value)
 
     def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, VariableTracker):
+        if not isinstance(other, TorchInGraphFunctionVariable):
             return False
         return self.as_python_constant() == other.as_python_constant()
 

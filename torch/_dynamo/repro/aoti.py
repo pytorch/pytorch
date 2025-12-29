@@ -290,6 +290,7 @@ def repro_load_args(load_args: Any, save_dir: Optional[str]) -> tuple[Any]:
     nop_reader = NopInputReader()
     load_args(nop_reader)
 
+    # pyrefly: ignore[bad-context-manager]
     with tqdm(desc="Loading inputs", total=nop_reader.total) as pbar:
         input_reader = InputReader(save_dir=save_dir, pbar=pbar)
         load_args(input_reader)

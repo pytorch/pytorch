@@ -636,19 +636,24 @@ def encode_varint(n: int) -> list[int]:
     return b
 
 
-if sys.version_info >= (3, 11):
+def linetable_311_writer(
+    first_lineno: int,
+    # pyrefly: ignore[missing-attribute]
+) -> tuple[list[int], Callable[[Optional["dis.Positions"], int], None]]:
+    """
+    Used to create typing.CodeType.co_linetable
+    See https://github.com/python/cpython/blob/3.11/Objects/locations.md
+    This is the internal format of the line number table for Python 3.11
+    """
+    assert sys.version_info >= (3, 11)
+    linetable = []
+    lineno = first_lineno
 
-    def linetable_311_writer(
-        first_lineno: int,
-    ) -> tuple[list[int], Callable[[dis.Positions | None, int], None]]:
-        """
-        Used to create typing.CodeType.co_linetable
-        See https://github.com/python/cpython/blob/3.11/Objects/locations.md
-        This is the internal format of the line number table for Python 3.11
-        """
-        assert sys.version_info >= (3, 11)
-        linetable = []
-        lineno = first_lineno
+    # TODO: Change this to `dis.Positions | None` once we bump to python 3.11
+    # pyrefly: ignore[missing-attribute]
+    def update(positions: Optional["dis.Positions"], inst_size: int) -> None:
+        nonlocal lineno
+        lineno_new = positions.lineno if positions else None
 
         def update(positions: dis.Positions | None, inst_size: int) -> None:
             nonlocal lineno
@@ -1400,11 +1405,9 @@ def debug_checks(code: types.CodeType) -> None:
     """Make sure our assembler produces same bytes as we start with"""
     dode, _ = transform_code_object(code, lambda x, y: None, safe=True)
     assert code.co_code == dode.co_code, debug_bytes(code.co_code, dode.co_code)
-    # TODO: reenable after better understanding how to handle sourceless
-    # (None) codes
-    # assert list(code.co_lines()) == list(dode.co_lines()), (
-    #     "line table mismatch via co_lines()"
-    # )
+    assert list(code.co_lines()) == list(dode.co_lines()), (
+        "line table mismatch via co_lines()"
+    )
 
 
 HAS_LOCAL = set(dis.haslocal)

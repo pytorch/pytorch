@@ -1,6 +1,6 @@
 # A Pyrefly configuration for PyTorch
 # Based on https://github.com/pytorch/pytorch/blob/main/mypy.ini
-python-version = "3.12"
+python-version = "3.10"
 
 project-includes = [
     "torch",
@@ -140,10 +140,11 @@ permissive-ignores = true
 replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*"]
 search-path = ["tools/experimental"]
 
-# Dynamo sub-config - note, we experiment with stricter typing here
 [[sub-config]]
 matches = "torch/_dynamo/**"
+# All errors enabled by (default)
 [sub-config.errors]
+bad-argument-count = false
 implicit-import = false
 implicit-any = true
 # TODO: Turn on in later version

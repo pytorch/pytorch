@@ -4978,6 +4978,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
 
         source = None
         if self.parent_source:
+            # pyrefly: ignore[unexpected-keyword]
             source = AttrSource(self.parent_source, member=method_name)
 
         if method_name == "forward":

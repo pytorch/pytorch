@@ -247,6 +247,7 @@ def bind_args_cached(
         elif name in spec.kwdefaults:
             kwdefault_source = None
             if fn_source:
+                # pyrefly: ignore[unexpected-keyword]
                 kwdefault_source = DefaultsSource(fn_source, name, is_kw=True)
             ba[name] = wrap_bound_arg(tx, spec.kwdefaults[name], kwdefault_source)
         else:
@@ -2065,7 +2066,7 @@ class SkipFunctionVariable(VariableTracker):
 
     def is_python_equal(self, other: object) -> bool:
         return (
-            isinstance(other, VariableTracker)
+            isinstance(other, SkipFunctionVariable)
             and self.as_python_constant() == other.as_python_constant()
         )
 
