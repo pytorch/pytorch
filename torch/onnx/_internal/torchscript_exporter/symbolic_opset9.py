@@ -15,7 +15,6 @@ import math
 import sys
 import warnings
 from typing import TYPE_CHECKING
-from typing_extensions import deprecated
 
 import torch
 import torch._C._onnx as _C_onnx
@@ -1971,8 +1970,8 @@ def wrap_logical_op_with_cast_to(to_type):
     def decorator(fn):
         @functools.wraps(fn)
         def wrap_with_cast(g, input, other):
-            to_cast_func = globals()[f"_cast_{to_type}"]
-            return fn(g, to_cast_func(g, input, False), to_cast_func(g, other, False))
+            to_i = symbolic_helper.cast_pytorch_to_onnx[to_type]
+            return fn(g, g.op("Cast", input, to_i=to_i), g.op("Cast", other, to_i=to_i))
 
         return wrap_with_cast
 
@@ -3336,60 +3335,6 @@ def _unique2(
     g: jit_utils.GraphContext, input, sorted, return_inverse, return_counts
 ) -> None:
     symbolic_helper._onnx_opset_unsupported("_unique2", 9, 11, input)
-
-
-@_onnx_symbolic("aten::_cast_Byte")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Byte(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.UINT8)
-
-
-@_onnx_symbolic("aten::_cast_Char")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Char(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT8)
-
-
-@_onnx_symbolic("aten::_cast_Short")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Short(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT16)
-
-
-@_onnx_symbolic("aten::_cast_Int")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Int(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT32)
-
-
-@_onnx_symbolic("aten::_cast_Long")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Long(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.INT64)
-
-
-@_onnx_symbolic("aten::_cast_Half")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Half(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT16)
-
-
-@_onnx_symbolic("aten::_cast_Float")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Float(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.FLOAT)
-
-
-@_onnx_symbolic("aten::_cast_Double")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Double(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.DOUBLE)
-
-
-@_onnx_symbolic("aten::_cast_Bool")
-@deprecated("Avoid using this function and create a Cast node instead")
-def _cast_Bool(g: jit_utils.GraphContext, input, non_blocking):
-    return g.op("Cast", input, to_i=_C_onnx.TensorProtoDataType.BOOL)
 
 
 @_onnx_symbolic("aten::empty")

@@ -4810,7 +4810,7 @@ std::vector<Tensor> unflatten_dense_tensors(
     // This can avoid the unflattened empty tensor to share the same storage
     // with other unflatten tensors.
     if (numel == 0) {
-      outputs.push_back(at::empty({0}, flat.options()));
+      outputs.push_back(at::empty(tensor.sizes(), flat.options()));
     } else {
       outputs.push_back(flat.narrow(0, offset, numel).view(tensor.sizes()));
       offset += numel;

@@ -22,6 +22,7 @@ import torch
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import config, metrics
+from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -59,6 +60,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipXPUIf,
 )
+from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton, has_triton_tma_device
 
@@ -1305,6 +1307,9 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
+    @skipCPUIf(
+        not torch.cpu._is_avx2_supported(), "CPU flex attention requires AVX2 support"
+    )
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
@@ -1477,7 +1482,6 @@ class TestFlexAttention(InductorTestCase):
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     @skip_on_rocm  # TODO: NaNs on ROCM
-    @skip_on_xpu  # TODO: NaNs on XPU like ROCM, need another PR to fix.
     def test_GQA(self, device, dtype: torch.dtype, score_mod: Callable):
         inputs = (
             score_mod,
@@ -1863,7 +1867,7 @@ class TestFlexAttention(InductorTestCase):
             (2, 2, 128, 4),
             device=device,
             dtype=torch.float64,
-            requires_grad=True,
+            requires_grad=False,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         # floor_div is not decomposed in decomposition_table is empty
@@ -2753,14 +2757,161 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(causal_njt, dtype, device=device)
 
     @supported_platform
-    def test_mixed_dtypes_fails(self, device):
-        query = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
+    def test_mixed_dtypes_eager(self, device):
+        query = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
+            torch.float8_e4m3fn
+        )
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
+            torch.float8_e4m3fn
+        )
+        out = flex_attention(query, key, value, _identity)
+        self.assertEqual(out.shape, query.shape)
+        self.assertEqual(out.dtype, query.dtype)
+
+    @supported_platform
+    def test_mixed_dtypes_compiled(self, device):
+        query = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
+            torch.float8_e4m3fn
+        )
+        value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
+            torch.float8_e4m3fn
+        )
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        if device == "cpu":
+            with self.assertRaisesRegex(
+                InductorError,
+                "Mixed query, key, and value dtype is not supported on this platform",
+            ):
+                compiled_fn(query, key, value, _identity)
+        else:
+            out = compiled_fn(query, key, value, _identity)
+            self.assertEqual(out.shape, query.shape)
+            self.assertEqual(out.dtype, query.dtype)
+
+    @skip_on_cpu
+    @supported_platform
+    def test_mixed_dtypes_sqnr_per_tensor(self, device):
+        query_ref = torch.testing.make_tensor(
+            (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        key_ref = torch.testing.make_tensor(
+            (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        value_ref = torch.testing.make_tensor(
+            (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+
+        key_scale = torch.max(torch.abs(key_ref)) / torch.finfo(torch.float8_e4m3fn).max
+        value_scale = (
+            torch.max(torch.abs(value_ref)) / torch.finfo(torch.float8_e4m3fn).max
+        )
+
+        key_fp8 = (key_ref / key_scale).to(torch.float8_e4m3fn)
+        value_fp8 = (value_ref / value_scale).to(torch.float8_e4m3fn)
+
+        def score_mod(score, b, h, m, n):
+            # Dequantize keys inside the attention score computation
+            return score * key_scale
+
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        out = compiled_fn(query_ref, key_fp8, value_fp8, score_mod) * value_scale
+        out_ref = compiled_fn(query_ref, key_ref, value_ref, _identity)
+        _, _, sqnr = _snr(out_ref, out)
+        self.assertGreater(sqnr, 15)
+
+    @skip_on_cpu
+    @supported_platform
+    def test_mixed_dtypes_sqnr_per_head(self, device):
+        query_ref = torch.testing.make_tensor(
+            (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        key_ref = torch.testing.make_tensor(
+            (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        value_ref = torch.testing.make_tensor(
+            (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+
+        fp8_max = torch.finfo(torch.float8_e4m3fn).max
+        key_scale = torch.amax(torch.abs(key_ref), dim=(-2, -1)) / fp8_max  # (B, H)
+        value_scale = torch.amax(torch.abs(value_ref), dim=(-2, -1)) / fp8_max  # (B, H)
+
+        key_scale_b = key_scale[..., None, None]  # (B, H, 1, 1) for broadcasting
+        value_scale_b = value_scale[..., None, None]
+
+        key_fp8 = (key_ref / key_scale_b).to(torch.float8_e4m3fn)
+        value_fp8 = (value_ref / value_scale_b).to(torch.float8_e4m3fn)
+
+        def score_mod(score, b, h, m, n):
+            # Dequantize keys inside the attention score computation
+            return score * key_scale[b, h]
+
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        out = compiled_fn(query_ref, key_fp8, value_fp8, score_mod) * value_scale_b
+        out_ref = compiled_fn(query_ref, key_ref, value_ref, _identity)
+        _, _, sqnr = _snr(out_ref, out)
+        self.assertGreater(sqnr, 15)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_mixed_dtype_backwards_eager(self, device):
+        q = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        )
+        k = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        ).to(torch.float8_e4m3fn)
+        v = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        ).to(torch.float8_e4m3fn)
+        out = flex_attention(q, k, v, _identity).mean()
         with self.assertRaisesRegex(
-            ValueError, "Expected query, key, and value to have the same dtype"
+            ValueError,
+            "Backward pass with mixed query, key, and value dtype is not supported",
         ):
-            flex_attention(query, key, value, _identity)
+            out.backward()
+
+    @supported_platform
+    @skip_on_cpu
+    def test_mixed_dtype_backwards_compiled(self, device):
+        q = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        )
+        k = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        ).to(torch.float8_e4m3fn)
+        v = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=torch.bfloat16,
+            device=device,
+            requires_grad=True,
+        ).to(torch.float8_e4m3fn)
+
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+
+        with self.assertRaisesRegex(
+            InductorError,
+            "Backward pass with mixed query, key, and value dtype is not supported",
+        ):
+            out_mixed = (compiled_fn(q, k, v, _identity)).mean()
+            out_mixed.backward()
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
@@ -4414,7 +4565,7 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "f64[2, 2, 128, 4]", primals_2: "f64[2, 2, 128, 4]", primals_3: "f64[2, 2, 128, 4]", full: "i32[1, 1, 1]", full_default: "i32[1, 1, 1, 1]", convert_element_type: "i32[1, 1, 1]", convert_element_type_1: "i32[1, 1, 1, 1]", getitem_2: "f64[2, 2, 128, 4]", getitem_3: "f32[2, 2, 128]", tangents_1: "f64[2, 2, 128, 4]"):
-        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+        full_default_4: "f32[2, 2, 128]" = torch.ops.aten.full.default([2, 2, 128], 0, dtype = torch.float32, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
@@ -4438,7 +4589,7 @@ class GraphModule(torch.nn.Module):
 
     class mask_graph0(torch.nn.Module):
         def forward(self, arg0_1: "i32[]", arg1_1: "i32[]", arg2_1: "i32[]", arg3_1: "i32[]"):
-            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='cuda', index=0), pin_memory = False)
+            full_default: "b8[]" = torch.ops.aten.full.default([], True, dtype = torch.bool, layout = torch.strided, device = device(type='GPU_TYPE', index=0), pin_memory = False)
             return full_default
 """.replace(  # noqa: B950
                 "GPU_TYPE", torch.device(device).type
@@ -5022,11 +5173,11 @@ class GraphModule(torch.nn.Module):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
         kernel_options_1 = {
-            "BLOCK_M": 128,
-            "BLOCK_N": 128,
+            "BLOCK_M": 32,
+            "BLOCK_N": 32,
             "USE_TMA": False,
         }
-        kernel_options_2 = {"BLOCK_M": 128, "BLOCK_N": 128, "USE_TMA": True}
+        kernel_options_2 = {"BLOCK_M": 32, "BLOCK_N": 32, "USE_TMA": True}
 
         flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
         out_compiled = flex_compile(query, key, value, kernel_options=kernel_options_1)
@@ -5112,6 +5263,31 @@ class GraphModule(torch.nn.Module):
         finally:
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
             fa._WARNINGS_SHOWN = original_warnings_shown
+
+    @supported_platform
+    def test_mask_mod_functools_partial(self, device):
+        """Test that functools.partial wrapped mask_mod works with flex_attention.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/170489
+        """
+        B, H, S, D = 1, 8, 64, 64
+
+        def causal_mask_with_offset(b, h, q_idx, kv_idx, offset):
+            return (q_idx + offset) >= kv_idx
+
+        offset = 31
+        mask_mod = functools.partial(causal_mask_with_offset, offset=offset)
+
+        query = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+        key = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+        value = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+
+        block_mask = create_block_mask(mask_mod, B, H, S, S, device=device)
+
+        flex_compiled = torch.compile(flex_attention)
+        out = flex_compiled(query, key, value, block_mask=block_mask)
+
+        self.assertEqual(out.shape, (B, H, S, D))
 
 
 class TestBlockMask(InductorTestCase):

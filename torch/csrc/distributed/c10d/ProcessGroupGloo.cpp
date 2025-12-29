@@ -29,6 +29,7 @@
 #include <c10/util/StringUtil.h>
 #include <c10/util/intrusive_ptr.h>
 #include <c10/util/irange.h>
+#include <c10/util/thread_name.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/rendezvous/prefix_store.h>
 
@@ -230,18 +231,30 @@ c10::intrusive_ptr<c10::ivalue::Future> ProcessGroupGloo::AsyncWork::
 }
 
 std::chrono::milliseconds ProcessGroupGloo::AsyncWork::getTimeout() const {
-  return context_->getTimeout();
+  return timeout_ == kUnsetTimeout ? context_->getTimeout() : timeout_;
 }
 
 namespace {
 c10::intrusive_ptr<c10::ivalue::Future> createFutureAsOutput(
     const std::vector<std::vector<at::Tensor>>& outputTensors) {
+  // We need to set device in future construction otherwise CUDA streams in
+  // futures are ignored.
+  std::vector<at::Device> devices{};
+  for (const auto& outputTensor : outputTensors) {
+    for (const auto& tensor : outputTensor) {
+      auto device = tensor.device();
+      if (!device.is_cpu()) {
+        devices.push_back(device);
+      }
+    }
+  }
   if (outputTensors.size() > 1) {
     return c10::make_intrusive<c10::ivalue::Future>(
-        c10::ListType::create(c10::ListType::create(c10::TensorType::get())));
+        c10::ListType::create(c10::ListType::create(c10::TensorType::get())),
+        devices);
   }
   return c10::make_intrusive<c10::ivalue::Future>(
-      c10::ListType::create(c10::TensorType::get()));
+      c10::ListType::create(c10::TensorType::get()), devices);
 }
 
 void returnFutureWithOutput(
@@ -384,7 +397,7 @@ ProcessGroupGloo::RecvWork::RecvWork(
           std::optional<std::vector<at::Tensor>>({tensor})),
       tensor_(tensor),
       buffer_(std::move(buffer)),
-      srcRank_(-1),
+
       seq_(seq) {}
 
 uint64_t ProcessGroupGloo::RecvWork::getSequencenumber() const {
@@ -424,7 +437,7 @@ void ProcessGroupGloo::RecvWork::abort() {
 }
 
 ProcessGroupGloo::Options::Options(std::chrono::milliseconds timeout)
-    : Backend::Options(GLOO_BACKEND_NAME, timeout), threads(2) {}
+    : Backend::Options(GLOO_BACKEND_NAME, timeout) {}
 
 namespace {
 
@@ -580,8 +593,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     : Backend(rank, size),
       store_(new GlooStore(store)),
       options_(std::move(options)),
-      stop_(false),
-      collectiveCounter_(0),
+
       local_id_(process_group_id++) {
   auto& devices = options_->devices;
   if (devices.empty()) {
@@ -678,6 +690,7 @@ std::shared_ptr<::gloo::Context> ProcessGroupGloo::getContext(uint32_t tag) {
 }
 
 void ProcessGroupGloo::runLoop(int workerIndex) {
+  c10::setThreadName("pt_gloo_runloop");
   std::unique_lock<std::mutex> lock(workMutex_);
 
   while (!stop_) {
@@ -839,7 +852,7 @@ class AsyncBroadcastWork : public ProcessGroupGloo::AsyncWork {
     gloo::BroadcastOptions opts(context_);
     opts.setRoot(rootRank);
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
     GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensor);
     gloo::broadcast(opts);
   }
@@ -1179,7 +1192,7 @@ class AsyncReduceWork : public ProcessGroupGloo::AsyncWork {
     opts.setRoot(rootRank);
     opts.setTag(tag);
     opts.setReduceFunction(getFunction(scalarType, reduceOp));
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
     GENERATE_ALL_TYPES(scalarType, setOutput, opts, tensor);
     gloo::reduce(opts);
 
@@ -1370,7 +1383,7 @@ class AsyncAllgatherWork : public ProcessGroupGloo::AsyncWork {
     const auto& scalarType = inputs[0].scalar_type();
     gloo::AllgatherOptions opts(context_);
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
 
     // Use single flattened input tensor.
     at::Tensor flatInputTensor = flattenDenseTensors(inputs);
@@ -1656,7 +1669,7 @@ class AsyncAllgatherCoalescedWork : public ProcessGroupGloo::AsyncWork {
     const auto& scalarType = input_list[0].scalar_type();
     gloo::AllgatherOptions opts(context_);
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
 
     // Use single flattened input tensor.
     at::Tensor flatInputTensor = flattenDenseTensors(input_list);
@@ -1810,7 +1823,7 @@ class AsyncGatherWork : public ProcessGroupGloo::AsyncWork {
     gloo::GatherOptions opts(context_);
     opts.setRoot(root);
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
 
     // Set single temporary tensor on root process.
     // This is later scattered to the separate output tensors.
@@ -2041,7 +2054,7 @@ class AsyncScatterWork : public ProcessGroupGloo::AsyncWork {
     gloo::ScatterOptions opts(context_);
     opts.setRoot(root);
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
 
     // Set list of input tensors on root process
     if (context_->rank == root) {
@@ -2299,7 +2312,7 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
       // Gloo alltoall
       gloo::AlltoallOptions opts(context_);
       opts.setTag(tag);
-      opts.setTimeout(timeout_);
+      opts.setTimeout(getTimeout());
       GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor);
       GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputTensor);
       gloo::alltoall(opts);
@@ -2317,7 +2330,7 @@ class AsyncAlltoallWork : public ProcessGroupGloo::AsyncWork {
           outputCounts, outputTensor, &recvCounts, &recvOffsets);
       gloo::AlltoallvOptions opts(context_);
       opts.setTag(tag);
-      opts.setTimeout(timeout_);
+      opts.setTimeout(getTimeout());
       GENERATE_ALL_TYPES(scalarType, setInput, opts, inputTensor, sendCounts);
       GENERATE_ALL_TYPES(scalarType, setOutput, opts, outputTensor, recvCounts);
       gloo::alltoallv(opts);
@@ -2594,7 +2607,7 @@ class AsyncBarrierWork : public ProcessGroupGloo::AsyncWork {
 
     gloo::BarrierOptions opts(context_);
     opts.setTag(tag);
-    opts.setTimeout(timeout_);
+    opts.setTimeout(getTimeout());
     gloo::barrier(opts);
   }
 };
