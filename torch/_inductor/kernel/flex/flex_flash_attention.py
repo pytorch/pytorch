@@ -455,7 +455,7 @@ def create_flex_flash_attention_backward_kernel(
         raise RuntimeError("CUTE flash attention not available")
 
     batch_size, num_heads, seq_len_q, head_dim = query.get_size()
-    v_head_dim = value.get_size()[-1]
+    _, num_heads_kv, seq_len_kv, v_head_dim = value.get_size()
     device = query.get_device()
     dtype = query.get_dtype()
     assert device is not None
@@ -471,25 +471,26 @@ def create_flex_flash_attention_backward_kernel(
     )
 
     grad_key_strides = infer_dense_strides(
-        [batch_size, num_heads, value.get_size()[2], head_dim], key.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, head_dim], key.get_stride()
     )
     grad_key = empty_strided(
-        size=[batch_size, num_heads, value.get_size()[2], head_dim],
+        size=[batch_size, num_heads_kv, seq_len_kv, head_dim],
         stride=grad_key_strides,
         dtype=dtype,
         device=device,
     )
 
     grad_value_strides = infer_dense_strides(
-        [batch_size, num_heads, value.get_size()[2], v_head_dim], value.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, v_head_dim], value.get_stride()
     )
     grad_value = empty_strided(
-        size=[batch_size, num_heads, value.get_size()[2], v_head_dim],
+        size=[batch_size, num_heads_kv, seq_len_kv, v_head_dim],
         stride=grad_value_strides,
         dtype=dtype,
         device=device,
     )
 
+    # we use dq as the output layout
     output_layout = FixedLayout(
         device=device,
         dtype=dtype,

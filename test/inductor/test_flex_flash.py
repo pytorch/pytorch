@@ -232,11 +232,14 @@ def create_test_tensors(
     dtype=torch.float16,
     device="cuda",
     requires_grad=False,
+    num_heads_kv=None,
 ):
-    shape = (batch_size, num_heads, seq_len, dim)
-    q = torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
-    k = torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
-    v = torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    num_heads_kv = num_heads_kv if num_heads_kv is not None else num_heads
+    q_shape = (batch_size, num_heads, seq_len, dim)
+    kv_shape = (batch_size, num_heads_kv, seq_len, dim)
+    q = torch.randn(q_shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    k = torch.randn(kv_shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    v = torch.randn(kv_shape, device=device, dtype=dtype, requires_grad=requires_grad)
     return q, k, v
 
 
@@ -281,6 +284,7 @@ def cuda_kernel_profiler(kernel_pattern="flash_attncute"):
 
 def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
     compiled_fn = torch.compile(flex_attention)
+    enable_gqa = q.shape[1] != k.shape[1]
 
     out_ref_fp32 = flex_attention(
         q.to(torch.float32),
@@ -288,6 +292,7 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
         v.to(torch.float32),
         score_mod=score_mod,
         block_mask=block_mask,
+        enable_gqa=enable_gqa,
     ).to(q.dtype)
 
     out_flash = compiled_fn(
@@ -296,6 +301,7 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
         v,
         score_mod=score_mod,
         block_mask=block_mask,
+        enable_gqa=enable_gqa,
         kernel_options={"BACKEND": "FLASH"},
     )
     out_triton = compiled_fn(
@@ -304,6 +310,7 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
         v,
         score_mod=score_mod,
         block_mask=block_mask,
+        enable_gqa=enable_gqa,
         kernel_options={"BACKEND": "TRITON"},
     )
 
@@ -363,6 +370,7 @@ class ScoreModCase:
     score_mod_factory: Callable[[torch.dtype, str], Callable | None]
     batch_size: int = 2
     num_heads: int = 4
+    num_heads_kv: int | None = None
     seq_len: int = 512
     dim: int = 64
     requires_grad: bool = False
@@ -374,6 +382,7 @@ class MaskModCase:
     mask_mod_factory: Callable[[torch.dtype, str], Callable]
     batch_size: int = 2
     num_heads: int = 4
+    num_heads_kv: int | None = None
     block_mask_num_heads: int | None = None
     seq_len: int = 512
     dim: int = 64
@@ -500,6 +509,62 @@ SCORE_MOD_CASES = [
         seq_len=257,
         requires_grad=True,
     ),
+    ScoreModCase(
+        "gqa_basic",
+        lambda _dtype, _device: None,
+        num_heads=8,
+        num_heads_kv=2,
+    ),
+    ScoreModCase(
+        "gqa_causal",
+        lambda _dtype, _device: _causal,
+        num_heads=8,
+        num_heads_kv=2,
+    ),
+    ScoreModCase(
+        "mqa_basic",
+        lambda _dtype, _device: None,
+        num_heads=8,
+        num_heads_kv=1,
+    ),
+    ScoreModCase(
+        "mqa_causal",
+        lambda _dtype, _device: _causal,
+        num_heads=8,
+        num_heads_kv=1,
+    ),
+    ScoreModCase(
+        "backward_gqa_basic",
+        lambda _dtype, _device: None,
+        num_heads=8,
+        num_heads_kv=2,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_gqa_times_two",
+        lambda _dtype, _device: _times_two,
+        num_heads=8,
+        num_heads_kv=2,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_mqa_basic",
+        lambda _dtype, _device: None,
+        num_heads=8,
+        num_heads_kv=1,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_mqa_times_two",
+        lambda _dtype, _device: _times_two,
+        num_heads=8,
+        num_heads_kv=1,
+        seq_len=257,
+        requires_grad=True,
+    ),
 ]
 
 
@@ -575,6 +640,73 @@ MASK_MOD_CASES = [
     ),
 ]
 
+GQA_MQA_BLOCK_MASK_CASES = [
+    MaskModCase(
+        "gqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=1,
+    ),
+    MaskModCase(
+        "gqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=8,
+    ),
+    MaskModCase(
+        "backward_gqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=1,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "backward_gqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=8,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "mqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=1,
+    ),
+    MaskModCase(
+        "mqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=8,
+    ),
+    MaskModCase(
+        "backward_mqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=1,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "backward_mqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=8,
+        seq_len=257,
+        requires_grad=True,
+    ),
+]
+
 
 @unittest.skipIf(
     not ensure_flash_available(), "Flash attention (CUTE) library is not available"
@@ -586,6 +718,7 @@ class TestFlexFlash(InductorTestCase):
         q, k, v = create_test_tensors(
             batch_size=case.batch_size,
             num_heads=case.num_heads,
+            num_heads_kv=case.num_heads_kv,
             seq_len=case.seq_len,
             dim=case.dim,
             dtype=dtype,
@@ -610,6 +743,44 @@ class TestFlexFlash(InductorTestCase):
         q, k, v = create_test_tensors(
             batch_size=case.batch_size,
             num_heads=case.num_heads,
+            num_heads_kv=case.num_heads_kv,
+            seq_len=case.seq_len,
+            dim=case.dim,
+            dtype=dtype,
+            device=device,
+            requires_grad=case.requires_grad,
+        )
+        flash_vs_triton(
+            q,
+            k,
+            v,
+            score_mod=(
+                case.score_mod_factory(dtype, device)
+                if case.score_mod_factory
+                else None
+            ),
+            block_mask=_create_block_mask_for_device(
+                case.mask_mod_factory(dtype, device),
+                case.batch_size,
+                case.block_mask_num_heads or case.num_heads,
+                case.seq_len,
+                case.seq_len,
+                device=device,
+            ),
+        )
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
+    def test_flash_attention_gqa_mqa_block_mask_cases(self, device, dtype, case):
+        if case.requires_grad:
+            major, _ = torch.cuda.get_device_capability()
+            if major != 10:
+                self.skipTest("block sparse only supported on blackwell for now")
+
+        q, k, v = create_test_tensors(
+            batch_size=case.batch_size,
+            num_heads=case.num_heads,
+            num_heads_kv=case.num_heads_kv,
             seq_len=case.seq_len,
             dim=case.dim,
             dtype=dtype,
