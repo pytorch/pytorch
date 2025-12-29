@@ -209,6 +209,12 @@ struct XPUGuardImpl final : public c10::impl::DeviceGuardImplInterface {
     xpu_stream.synchronize();
   }
 
+  bool isStreamCapturing(const Stream& stream) const override {
+    const XPUStream xpu_stream{stream};
+    return xpu_stream.queue().ext_oneapi_get_state() ==
+        sycl::ext::oneapi::experimental::queue_state::recording;
+  }
+
   void synchronizeEvent(void* event) const override {
     if (!event)
       return;

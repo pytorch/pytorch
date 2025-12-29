@@ -17,6 +17,12 @@ void Stream::synchronize() const {
   impl.synchronizeStream(*this);
 }
 
+// Return whether this stream is currently under graph capturing mode.
+bool Stream::is_capturing() const {
+  impl::VirtualGuardImpl impl{device_.type()};
+  return impl.isStreamCapturing(*this);
+}
+
 // Not very parsable, but I don't know a good compact syntax for streams.
 // Feel free to change this into something more compact if needed.
 std::ostream& operator<<(std::ostream& stream, const Stream& s) {
