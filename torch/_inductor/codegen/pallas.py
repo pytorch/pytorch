@@ -942,6 +942,9 @@ class PallasKernel(SIMDKernel):
         if not self.range_trees:
             return "..."
 
+        # Rename symbolic sizes to kernel parameter names upfront
+        index = self.rename_indexing(index)
+
         # Check for ModularIndexing - this is NOT contiguous access
         # ModularIndexing is used for roll/wrap-around operations
         if index.has(ModularIndexing):
@@ -1616,7 +1619,10 @@ class PallasKernel(SIMDKernel):
                 load_expr = f"pltriton.load({buf}.at[{index_str}])"
             else:
                 # CPU: use JAX array indexing
-                load_expr = f"{buf}[...].flatten()[{index_str}]"
+                # Cast to int64 if Min/Max ops may have introduced floats
+                has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
+                idx = f"({index_str}).astype(jnp.int64)" if has_minmax else index_str
+                load_expr = f"{buf}[...].flatten()[{idx}]"
         else:
             # Direct indexing for contiguous access
             load_expr = f"{buf}[{index_str}]"
@@ -1702,12 +1708,14 @@ class PallasKernel(SIMDKernel):
             try:
                 return int(coeff)
             except (TypeError, ValueError):
-                return 0
+                # Symbolic coefficient - treat as outer dimension
+                return float("inf")
 
         used_iter_vars = sorted(used_iter_vars_set, key=get_coefficient, reverse=True)
         iter_coeffs = [get_coefficient(var) for var in used_iter_vars]
 
-        index_str = self.kexpr(index)
+        # Rename symbolic sizes to kernel parameter names
+        index_str = self.kexpr(self.rename_indexing(index))
         indirect_var_syms = [s for s in free_symbols if str(s).startswith("tmp")]
         indirect_vars = [str(sym) for sym in indirect_var_syms]
 
@@ -2582,6 +2590,10 @@ class PallasKernel(SIMDKernel):
                 and pointwise_numel > 1
                 and reduction_numel
             )
+            # Also check for symbolic partial reduction (has both pw and reduction vars)
+            is_symbolic_partial = (
+                has_pointwise and n_reduction_dims > 0 and pointwise_numel is None
+            )
             if is_partial_reduction:
                 # For partial reductions, we need to:
                 # 1. Find which axes are reduction axes (contiguous axes whose product = reduction_numel)
@@ -2591,6 +2603,9 @@ class PallasKernel(SIMDKernel):
                 reduction_op = reduction_ops[reduction_type]
                 # Use a helper to find reduction axes by product matching
                 reduction_expr = f"_pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
+            elif is_symbolic_partial:
+                # Symbolic sizes: use axis-based reduction (axis=0 for outer reduction)
+                reduction_expr = f"{reduction_ops[reduction_type]}({value}, axis=0)"
             else:
                 # Full reduction to scalar
                 reduction_expr = f"{reduction_ops[reduction_type]}({value})"
