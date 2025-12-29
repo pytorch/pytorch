@@ -365,7 +365,16 @@ class FakeTensorConverter:
         symbolic_context: Optional[SymbolicContext] = None,
         trace: bool = True,
     ) -> FakeTensor:
-        if isinstance(t, FakeTensor) and t.fake_mode is not fake_mode:
+        # Handle FakeTensors from a different FakeTensorMode, but only if they
+        # don't have symbolic shapes. Symbolic shapes are tied to a specific
+        # ShapeEnv and cannot be safely transferred between modes.
+        # TODO: Support cloning ShapeEnv to enable cross-mode transfer of
+        # tensors with symbolic shapes.
+        if (
+            isinstance(t, FakeTensor)
+            and t.fake_mode is not fake_mode
+            and not t._has_symbolic_sizes_strides
+        ):
             with in_kernel_invocation_manager(t.fake_mode):
                 new_fake = self.from_meta_and_device(fake_mode, t, t.fake_device)
             self.set_tensor_memo(t, new_fake)
@@ -373,7 +382,12 @@ class FakeTensorConverter:
 
         if is_traceable_wrapper_subclass(t):
             inner_fake_mode = maybe_get_fake_mode(t)
-            if inner_fake_mode is not None and inner_fake_mode is not fake_mode:
+            # Only handle cross-mode transfer for subclasses without symbolic shapes
+            if (
+                inner_fake_mode is not None
+                and inner_fake_mode is not fake_mode
+                and not t._has_symbolic_sizes_strides
+            ):
                 inner_tensor_names, ctx = t.__tensor_flatten__()
                 new_inner_tensors = {
                     name: self.from_real_tensor(
