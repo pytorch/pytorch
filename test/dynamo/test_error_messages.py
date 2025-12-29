@@ -2126,7 +2126,9 @@ Dynamo recompile limit exceeded
   Hint: To monitor recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider increasing torch._dynamo.config.recompile_limit to an appropriate value.
   Hint: See https://pytorch.org/docs/main/compile/programming_model.recompilation.html for tips on dealing with recompilations.
 
-  Developer debug context: Limit type: recompile_limit""",
+  Developer debug context: Limit type: recompile_limit
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0039.html""",
             )
 
 
