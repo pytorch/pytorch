@@ -17,7 +17,7 @@ TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
 struct TORCH_CUDA_CPP_API CUDAGraphImpl : public at::GraphImplInterface {
   CUDAGraphImpl(const GraphImplArgs& args = {});
-  ~CUDAGraphImpl();
+  ~CUDAGraphImpl() override;
 
   // See Note [Explicit Registration of Generators to the CUDA Graph]
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
