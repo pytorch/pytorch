@@ -313,28 +313,23 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                             placeholder.node.meta[key] = value
 
             # Always ensure we have proper "val" metadata from fake tensor
-            from torch._subclasses.fake_tensor import is_fake
-
             if self.fake_mode is not None and isinstance(
                 self.flat_inputs[i], torch.Tensor
             ):
-                if is_fake(self.flat_inputs[i]):
-                    placeholder.node.meta["val"] = self.flat_inputs[i]
-                else:
-                    placeholder.node.meta["val"] = self.fake_mode.from_tensor(
-                        self.flat_inputs[i],
-                        symbolic_context=StatelessSymbolicContext(
-                            dynamic_sizes=[
-                                (
-                                    DimDynamic.DYNAMIC
-                                    if d in self.flat_args_dynamic_dims[i]
-                                    else DimDynamic.STATIC
-                                )
-                                for d in range(len(self.flat_inputs[i].shape))
-                            ],
-                            constraint_sizes=[None] * len(self.flat_inputs[i].shape),
-                        ),
-                    )
+                placeholder.node.meta["val"] = self.fake_mode.from_tensor(
+                    self.flat_inputs[i],
+                    symbolic_context=StatelessSymbolicContext(
+                        dynamic_sizes=[
+                            (
+                                DimDynamic.DYNAMIC
+                                if d in self.flat_args_dynamic_dims[i]
+                                else DimDynamic.STATIC
+                            )
+                            for d in range(len(self.flat_inputs[i].shape))
+                        ],
+                        constraint_sizes=[None] * len(self.flat_inputs[i].shape),
+                    ),
+                )
             elif hasattr(self.flat_inputs[i], "val"):  # _IntWrapper case
                 placeholder.node.meta["val"] = self.flat_inputs[i].val
             else:
@@ -758,11 +753,7 @@ def _dynamo_graph_capture_for_export(
     _dynamic_shapes = dynamic_shapes
     _constraints = constraints
 
-    def inner(
-        args: tuple[Any, ...], kwargs: Optional[dict[str, Any]] = None
-    ) -> torch.fx.GraphModule:
-        if kwargs is None:
-            kwargs = {}
+    def inner(*args: Any, **kwargs: Any) -> torch.fx.GraphModule:
         # This sets the is_exporting flag when building guards.
         with _compiling_state_context():
             flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))

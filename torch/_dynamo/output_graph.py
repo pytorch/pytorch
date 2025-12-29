@@ -608,7 +608,9 @@ class OutputGraph(OutputGraphCommon):
 
         with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
             outer_fake_mode = active_fake_mode()
-            if outer_fake_mode is not None:
+            # Only reuse the outer fake mode when AOT compile is enabled,
+            # to avoid issues with test infrastructure fake modes
+            if outer_fake_mode is not None and config.enable_aot_compile:
                 if outer_fake_mode.shape_env is None:
                     outer_fake_mode.shape_env = shape_env
                 if outer_fake_mode.shape_env is not None:
@@ -2244,7 +2246,8 @@ class OutputGraph(OutputGraphCommon):
                     # Dynamo made decisions about what is dynamic or not / guards from the user code
                     # that is not in graph.
                     outer_fake_mode = active_fake_mode()
-                    if outer_fake_mode is not None:
+                    # Only reuse the outer fake mode when AOT compile is enabled
+                    if outer_fake_mode is not None and config.enable_aot_compile:
                         if outer_fake_mode.shape_env is None:
                             outer_fake_mode.shape_env = old_fake_mode.shape_env
                         if outer_fake_mode.shape_env is not None:
@@ -2514,10 +2517,8 @@ class OutputGraph(OutputGraphCommon):
         return next_name
 
     def example_inputs(self) -> list[torch.Tensor]:
-        return [
-            arg.fake_tensor if arg.fake_tensor is not None else arg.example
-            for arg in self.graphargs
-        ]
+        result = [arg.example for arg in self.graphargs]
+        return result
 
     def _transfer_example_inputs_to_mode(
         self,
