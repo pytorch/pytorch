@@ -109,6 +109,11 @@ class C10_XPU_API XPUStream {
     }
   }
 
+  bool is_capturing() const {
+    return queue().ext_oneapi_get_state() ==
+        sycl::ext::oneapi::experimental::queue_state::recording;
+  }
+
   /// Return the priority that this stream is associated with. Lower numbers
   /// represent higher priority.
   int priority() const;

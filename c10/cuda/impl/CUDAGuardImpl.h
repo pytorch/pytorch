@@ -211,10 +211,7 @@ struct CUDAGuardImpl final : public c10::impl::DeviceGuardImplInterface {
 
   bool isStreamCapturing(const Stream& stream) const override {
     CUDAStream cuda_stream{stream};
-    cudaStreamCaptureStatus status;
-    TORCH_INTERNAL_ASSERT(hasPrimaryContext(stream.device_index()));
-    C10_CUDA_CHECK(cudaStreamIsCapturing(cuda_stream, &status));
-    return status == cudaStreamCaptureStatusActive;
+    return cuda_stream.is_capturing();
   }
 
   void synchronizeEvent(void* event) const override {
