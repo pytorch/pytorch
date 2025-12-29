@@ -1517,7 +1517,7 @@ class triton:
 
     # use triton.autotune for pointwise ops with complex layouts
     # this should only be disabled for debugging/testing
-    autotune_pointwise = False
+    autotune_pointwise = True
 
     # max autotune gemm with cublasLt
     autotune_cublasLt = True

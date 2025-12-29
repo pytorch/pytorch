@@ -15020,6 +15020,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         {
             "triton.enable_pdl": True,
             "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
             "coordinate_descent_tuning": True,
         }
     )

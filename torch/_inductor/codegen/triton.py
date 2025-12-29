@@ -3365,7 +3365,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             prev_node is None
             or any(matching_dep(d) for d in dependencies)
         )
-        need_wait = True
         if not need_wait:
             return
         # hoist before the loop
@@ -5548,14 +5547,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if config.benchmark_kernel:
             code.splice(self.codegen_kernel_benchmark(num_gb))
 
-        value = code.getvalue()
-        pos0 = value.find(self.GDC_WAIT)
-        pos1 = value.find(self.GDC_LAUNCH)
-        if pos0 >= pos1 and pos1 != -1:
-            print(value)
-            breakpoint()
-
-        return value
+        return code.getvalue()
 
     @staticmethod
     def _get_persistent_RBLOCK(rnumel):
