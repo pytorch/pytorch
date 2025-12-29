@@ -11,6 +11,7 @@ import io
 import itertools
 import json
 import logging
+import mmap
 import os
 import pickle
 import pkgutil
@@ -468,6 +469,74 @@ def write_atomic(
         os.remove(tmp_path)
 
 
+def _should_use_mmap_for_cache(size: int) -> bool:
+    """
+    Determine if mmap should be used for a cache entry of the given size.
+    Returns True if the size exceeds the configured threshold and we're on a supported platform.
+    """
+    threshold = config.fx_graph_cache_mmap_threshold
+    if threshold <= 0 or _IS_WINDOWS:
+        return False
+    return size >= threshold
+
+
+def _read_file_with_mmap(path: str) -> bytes:
+    """
+    Read a file using memory-mapped I/O for improved performance on large files.
+    Falls back to regular read if mmap fails.
+    """
+    if not _should_use_mmap_for_cache(os.path.getsize(path)):
+        with open(path, "rb") as f:
+            return f.read()
+
+    try:
+        with open(path, "rb") as f:
+            with mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ) as mm:
+                return bytes(mm[:])
+    except (OSError, ValueError) as e:
+        log.debug("mmap read failed for %s, falling back to regular read: %s", path, e)
+        with open(path, "rb") as f:
+            return f.read()
+
+
+def _write_file_with_mmap(path: str, content: bytes, make_dirs: bool = False) -> None:
+    """
+    Write a file using memory-mapped I/O for improved performance on large files.
+    Uses atomic write pattern (write to temp file, then rename) for safety.
+    Falls back to regular write_atomic if mmap fails.
+    """
+    if not _should_use_mmap_for_cache(len(content)):
+        write_atomic(path, content, make_dirs=make_dirs)
+        return
+
+    path_obj = Path(path)
+    if make_dirs:
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+    tmp_path = path_obj.parent / f".{os.getpid()}.{threading.get_ident()}.mmap.tmp"
+
+    try:
+        with open(tmp_path, "wb") as f:
+            f.write(b"\x00" * len(content))
+
+        with open(tmp_path, "r+b") as f:
+            with mmap.mmap(f.fileno(), len(content)) as mm:
+                mm[:] = content
+
+        try:
+            tmp_path.rename(target=path_obj)
+        except FileExistsError:
+            if not _IS_WINDOWS:
+                raise
+            shutil.copy2(src=tmp_path, dst=path_obj)
+            os.remove(tmp_path)
+    except (OSError, ValueError) as e:
+        log.debug("mmap write failed for %s, falling back to regular write: %s", path, e)
+        if tmp_path.exists():
+            os.remove(tmp_path)
+        write_atomic(path, content, make_dirs=make_dirs)
+
+
 @dataclasses.dataclass
 class TensorMetadataAndValues:
     """
@@ -477,6 +546,94 @@ class TensorMetadataAndValues:
 
     tensor_metadata: TensorMetadata
     values: list[Any]
+
+
+@dataclasses.dataclass
+class TensorContentHash:
+    """
+    A pre-computed hash of tensor content, used to avoid re-hashing large tensors.
+    The hash is computed once and cached, allowing the pickler to include just the
+    hash value instead of re-serializing the tensor content each time.
+    """
+
+    tensor_metadata: TensorMetadata
+    content_hash: str
+
+
+# Cache for tensor content hashes, keyed by (storage data_ptr, storage_offset, numel).
+# This avoids expensive re-hashing of large tensor constants during cache key computation.
+# Uses weak references to tensor storage to allow garbage collection.
+_tensor_content_hash_cache: dict[int, tuple[Any, TensorContentHash]] = {}
+
+
+_stable_component_hash_cache: dict[tuple[str, int], str] = {}
+
+
+_STABLE_HASH_COMPONENTS = frozenset({
+    "torch_version",
+    "system_info",
+    "inductor_config",
+    "deterministic_algorithms_settings",
+    "cuda_matmul_settings",
+})
+
+
+def _get_stable_component_hash(name: str, value: Any) -> str | None:
+    return _stable_component_hash_cache.get((name, id(value)))
+
+
+def _cache_stable_component_hash(name: str, value: Any, hash_value: str) -> None:
+    _stable_component_hash_cache[(name, id(value))] = hash_value
+
+
+def _clear_stable_component_hash_cache() -> None:
+    _stable_component_hash_cache.clear()
+
+
+def _compute_tensor_content_hash(t: Tensor) -> str:
+    """Compute a hash of tensor content by hashing its raw bytes."""
+    t_contiguous = t.detach().contiguous()
+    if t_contiguous.device.type != "cpu":
+        t_contiguous = t_contiguous.cpu()
+    return sha256_hash(t_contiguous.numpy().tobytes())
+
+
+def _get_cached_tensor_content_hash(
+    t: Tensor, metadata: TensorMetadata
+) -> TensorContentHash | None:
+    """
+    Get cached tensor content hash if available and still valid.
+    Returns None if the tensor is not in cache or the cache entry is stale.
+    """
+    storage = t.untyped_storage()
+    cache_key = (storage.data_ptr(), t.storage_offset(), t.numel())
+
+    if cache_key not in _tensor_content_hash_cache:
+        return None
+
+    weak_storage, cached_hash = _tensor_content_hash_cache[cache_key]
+    if weak_storage() is None:
+        del _tensor_content_hash_cache[cache_key]
+        return None
+    if cached_hash.tensor_metadata != metadata:
+        return None
+
+    return cached_hash
+
+
+def _cache_tensor_content_hash(
+    t: Tensor, metadata: TensorMetadata, content_hash: str
+) -> TensorContentHash:
+    """
+    Cache the computed hash for a tensor's content.
+    """
+    import weakref
+
+    storage = t.untyped_storage()
+    cache_key = (storage.data_ptr(), t.storage_offset(), t.numel())
+    cached_hash = TensorContentHash(metadata, content_hash)
+    _tensor_content_hash_cache[cache_key] = (weakref.ref(storage), cached_hash)
+    return cached_hash
 
 
 def _ident(x: T) -> T:
@@ -550,7 +707,9 @@ class FxGraphCachePickler(pickle.Pickler):
 
     def _reduce_tensor(
         self, t: Tensor
-    ) -> tuple[Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues]]:
+    ) -> tuple[
+        Callable[[T], T], tuple[TensorMetadata | TensorMetadataAndValues | TensorContentHash]
+    ]:
         """
         Custom reducer to pickle Tensors.  If we see tensors, we know they're constants
         stored as attributes on the GraphModule.
@@ -569,18 +728,22 @@ class FxGraphCachePickler(pickle.Pickler):
         if is_frozen_param(t) and not GraphLowering.can_inline_constant(t):
             return (_ident, (metadata,))
 
+        cached_hash = _get_cached_tensor_content_hash(t, metadata)
+        if cached_hash is not None:
+            return (_ident, (cached_hash,))
+
         # Very large tensors will be expensive to copy to cpu and hash. Let's at least
         # report any slowness.
         start = time()
-        values = t.tolist()
+        content_hash = _compute_tensor_content_hash(t)
         elapsed = time() - start
         if elapsed > 1.0:
             warnings.warn(
-                f"FX graph cache copying of a large constant took {elapsed:.1}s. "
+                f"FX graph cache hashing of a large constant took {elapsed:.1}s. "
                 "Please file an issue."
             )
 
-        return (_ident, (TensorMetadataAndValues(metadata, values),))
+        return (_ident, (_cache_tensor_content_hash(t, metadata, content_hash),))
 
     def _reduce_symint(self, s: SymInt) -> tuple[Callable[[T], T], tuple[str]]:
         """
@@ -639,6 +802,46 @@ class FxGraphCachePickler(pickle.Pickler):
         """
         serialized_data = self.dumps(obj)
         return sha256_hash(serialized_data)
+
+    def get_hash_for_component(self, name: str, obj: Any) -> str:
+        if name in _STABLE_HASH_COMPONENTS:
+            cached = _get_stable_component_hash(name, obj)
+            if cached is not None:
+                return cached
+            h = self.get_hash(obj)
+            _cache_stable_component_hash(name, obj, h)
+            return h
+        return self.get_hash(obj)
+
+    def get_incremental_hash(self, details: FxGraphHashDetails) -> str:
+        hasher = hashlib.sha256()
+        for attr in sorted(vars(details).keys()):
+            obj = getattr(details, attr)
+            hasher.update(attr.encode("utf-8"))
+            if isinstance(obj, list):
+                for item in obj:
+                    hasher.update(self.get_hash(item).encode("utf-8"))
+            elif isinstance(obj, dict):
+                for k in sorted(obj.keys()):
+                    hasher.update(str(k).encode("utf-8"))
+                    hasher.update(self.get_hash(obj[k]).encode("utf-8"))
+            else:
+                hasher.update(self.get_hash_for_component(attr, obj).encode("utf-8"))
+        return base64.b32encode(hasher.digest())[:51].decode("utf-8").lower()
+
+    @staticmethod
+    def _hash_tensor(t: Tensor) -> str:
+        """
+        Compute a hash for a tensor, using caching to avoid re-hashing.
+        This is a convenience method for testing and external use.
+        """
+        metadata = extract_tensor_metadata_for_cache_key(t)
+        cached = _get_cached_tensor_content_hash(t, metadata)
+        if cached is not None:
+            return cached.content_hash
+        content_hash = _compute_tensor_content_hash(t)
+        _cache_tensor_content_hash(t, metadata, content_hash)
+        return content_hash
 
     def debug_lines(self, inp: FxGraphHashDetails) -> list[str]:
         """
@@ -977,7 +1180,7 @@ def compiled_fx_graph_hash(
 
     # The prefix distinguishes among the other kinds of objects we
     # cache in this module.
-    key = "f" + pickler.get_hash(details)
+    key = "f" + pickler.get_incremental_hash(details)
     debug_lines = pickler.debug_lines(details)
     debug_str = "\n".join(debug_lines)
     log.debug(f"FX graph cache hash details for key {key}:\n{debug_str}")  # noqa: G004
@@ -1033,9 +1236,8 @@ class GuardedCache(Generic[T]):
             if os.path.exists(subdir):
                 for path in sorted(os.listdir(subdir)):
                     try:
-                        with open(os.path.join(subdir, path), "rb") as f:
-                            content = f.read()
-                            yield pickle.loads(content), content
+                        content = _read_file_with_mmap(os.path.join(subdir, path))
+                        yield pickle.loads(content), content
                     except Exception:
                         log.warning(
                             "fx graph cache unable to load compiled graph",
@@ -1364,7 +1566,7 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         # name. The specific name doesn't matter since a lookup involves
         # iterating over all entries in the parent subdir.
         path = os.path.join(subdir, sha256_hash(content))
-        write_atomic(path, content, make_dirs=True)
+        _write_file_with_mmap(path, content, make_dirs=True)
 
     @staticmethod
     def _save_graph(

@@ -23,12 +23,20 @@ from torch._functorch import config as functorch_config
 from torch._functorch._aot_autograd.autograd_cache import AOTAutogradCache
 from torch._inductor import config, metrics
 from torch._inductor.codecache import (
+    _clear_stable_component_hash_cache,
+    _read_file_with_mmap,
+    _should_use_mmap_for_cache,
+    _stable_component_hash_cache,
+    _tensor_content_hash_cache,
+    _write_file_with_mmap,
     BypassFxGraphCache,
+    CacheBase,
     cuda_compile_command,
     CUDACodeCache,
     FxGraphCachePickler,
     FxGraphHashDetails,
     PyCodeCache,
+    TensorContentHash,
     TensorMetadata,
     TensorMetadataAndValues,
 )
@@ -2415,9 +2423,9 @@ class TestFxGraphCacheHashing(TestCase):
         pickler = FxGraphCachePickler(gm)
 
         data = pickler.dumps(small)
-        self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
+        self.assertIsInstance(pickle.loads(data), TensorContentHash)
         data = pickler.dumps(large)
-        self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
+        self.assertIsInstance(pickle.loads(data), TensorContentHash)
 
         # For frozen parameters, we only hash the values of small tensors.
         gm._has_frozen_params = True
@@ -2428,7 +2436,7 @@ class TestFxGraphCacheHashing(TestCase):
         pickler = FxGraphCachePickler(gm)
 
         data = pickler.dumps(small)
-        self.assertIsInstance(pickle.loads(data), TensorMetadataAndValues)
+        self.assertIsInstance(pickle.loads(data), TensorContentHash)
         data = pickler.dumps(large)
         self.assertIsInstance(pickle.loads(data), TensorMetadata)
 
@@ -2887,6 +2895,75 @@ class TestFxGraphCacheHashing(TestCase):
                 temp.close()
                 os.unlink(temp.name)
 
+    def test_tensor_hash_caching(self):
+        """
+        Test that tensor content hashing is cached to avoid re-hashing large tensors.
+        """
+        import time
+
+        _tensor_content_hash_cache.clear()
+
+        t = torch.randn(1000, 1000)
+
+        start = time.perf_counter()
+        h1 = FxGraphCachePickler._hash_tensor(t)
+        first_time = time.perf_counter() - start
+
+        start = time.perf_counter()
+        h2 = FxGraphCachePickler._hash_tensor(t)
+        second_time = time.perf_counter() - start
+
+        self.assertEqual(h1, h2)
+        self.assertGreater(len(_tensor_content_hash_cache), 0)
+        self.assertLess(
+            second_time,
+            first_time * 0.5,
+            f"Cached hash ({second_time:.4f}s) should be much faster than "
+            f"initial computation ({first_time:.4f}s)",
+        )
+
+        t2 = torch.randn(1000, 1000)
+        h3 = FxGraphCachePickler._hash_tensor(t2)
+        self.assertNotEqual(h1, h3)
+
+        t3 = t.clone()
+        h4 = FxGraphCachePickler._hash_tensor(t3)
+        self.assertEqual(h1, h4)
+
+    def test_tensor_hash_cache_invalidation(self):
+        """
+        Test that tensor hash cache properly handles storage changes.
+        """
+        _tensor_content_hash_cache.clear()
+
+        t = torch.randn(100, 100)
+        h1 = FxGraphCachePickler._hash_tensor(t)
+
+        t.fill_(1.0)
+        _tensor_content_hash_cache.clear()
+        h2 = FxGraphCachePickler._hash_tensor(t)
+
+        self.assertNotEqual(h1, h2)
+
+    def test_tensor_hash_with_views(self):
+        """
+        Test that tensor views are handled correctly in hash caching.
+        """
+        _tensor_content_hash_cache.clear()
+
+        base = torch.randn(100, 100)
+
+        view1 = base[10:20, 10:20]
+        view2 = base[10:20, 10:20]
+        view3 = base[20:30, 20:30]
+
+        h1 = FxGraphCachePickler._hash_tensor(view1)
+        h2 = FxGraphCachePickler._hash_tensor(view2)
+        h3 = FxGraphCachePickler._hash_tensor(view3)
+
+        self.assertEqual(h1, h2)
+        self.assertNotEqual(h1, h3)
+
 
 class TestCudaCompileCommand(TestCase):
     @requires_cuda_and_triton
@@ -3149,6 +3226,81 @@ class TestAutotuneCache(TestCase):
 
                 self.assertEqual(res1, res2)
 
+    def test_autotune_cache_eager_loading(self):
+        """Test that autotune cache is preloaded into memory on first access."""
+        from torch._inductor.runtime.autotune_cache import (
+            _autotune_cache_memory,
+            _clear_autotune_cache_memory,
+            _preload_autotune_cache,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.environ["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
+
+            subdir = os.path.join(tmpdir, "ab")
+            os.makedirs(subdir)
+
+            config_data = b'{"num_warps": 4, "num_stages": 2}'
+            config_path1 = os.path.join(subdir, "test1.best_config")
+            config_path2 = os.path.join(subdir, "test2.best_config")
+            with open(config_path1, "wb") as f:
+                f.write(config_data)
+            with open(config_path2, "wb") as f:
+                f.write(config_data)
+
+            _clear_autotune_cache_memory()
+            self.assertEqual(len(_autotune_cache_memory), 0)
+
+            _preload_autotune_cache()
+
+            self.assertEqual(len(_autotune_cache_memory), 2)
+            self.assertIn(config_path1, _autotune_cache_memory)
+            self.assertIn(config_path2, _autotune_cache_memory)
+            self.assertEqual(_autotune_cache_memory[config_path1], config_data)
+            self.assertEqual(_autotune_cache_memory[config_path2], config_data)
+
+            original_cache = dict(_autotune_cache_memory)
+            _preload_autotune_cache()
+            self.assertEqual(_autotune_cache_memory, original_cache)
+
+            _clear_autotune_cache_memory()
+            del os.environ["TORCHINDUCTOR_CACHE_DIR"]
+
+    def test_autotune_cache_preload_on_torch_compile(self):
+        """Test that autotune cache is preloaded on torch.compile(), not on kernel compile."""
+        from torch._inductor.runtime.autotune_cache import (
+            _autotune_cache_memory,
+            _clear_autotune_cache_memory,
+        )
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            os.environ["TORCHINDUCTOR_CACHE_DIR"] = tmpdir
+
+            subdir = os.path.join(tmpdir, "ab")
+            os.makedirs(subdir)
+
+            config_data = b'{"num_warps": 4, "num_stages": 2}'
+            config_path = os.path.join(subdir, "test.best_config")
+            with open(config_path, "wb") as f:
+                f.write(config_data)
+
+            _clear_autotune_cache_memory()
+            torch._dynamo.reset()
+
+            self.assertEqual(len(_autotune_cache_memory), 0)
+
+            def f(x):
+                return x + 1
+
+            torch.compile(f, backend="inductor")
+
+            self.assertEqual(len(_autotune_cache_memory), 1)
+            self.assertIn(config_path, _autotune_cache_memory)
+            self.assertEqual(_autotune_cache_memory[config_path], config_data)
+
+            _clear_autotune_cache_memory()
+            del os.environ["TORCHINDUCTOR_CACHE_DIR"]
+
 
 class TestRemoteAOTAutogradCache(TestCase):
     @requires_gpu()
@@ -3240,6 +3392,100 @@ class TestRemoteAOTAutogradCache(TestCase):
             self.assertEqual(b.grad, b2.grad)
 
 
+class TestMmapCache(TestCase):
+    def test_should_use_mmap_for_cache_threshold(self):
+        default_threshold = config.fx_graph_cache_mmap_threshold
+
+        self.assertFalse(_should_use_mmap_for_cache(default_threshold - 1))
+
+        import sys
+
+        if sys.platform != "win32":
+            self.assertTrue(_should_use_mmap_for_cache(default_threshold))
+            self.assertTrue(_should_use_mmap_for_cache(default_threshold + 1))
+
+        with config.patch({"fx_graph_cache_mmap_threshold": 0}):
+            self.assertFalse(_should_use_mmap_for_cache(100 * 1024 * 1024))
+
+    def test_mmap_write_and_read_small_file(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "small_file")
+            content = b"small content"
+
+            _write_file_with_mmap(path, content)
+
+            result = _read_file_with_mmap(path)
+            self.assertEqual(result, content)
+
+    def test_mmap_write_and_read_large_file(self):
+        import sys
+
+        if sys.platform == "win32":
+            self.skipTest("mmap not supported on Windows for this use case")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            threshold = config.fx_graph_cache_mmap_threshold
+            large_content = b"x" * (threshold + 1024)
+            path = os.path.join(tmpdir, "large_file")
+
+            _write_file_with_mmap(path, large_content)
+
+            self.assertTrue(os.path.exists(path))
+            self.assertEqual(os.path.getsize(path), len(large_content))
+
+            result = _read_file_with_mmap(path)
+            self.assertEqual(result, large_content)
+
+    def test_mmap_with_pickle_data(self):
+        import sys
+
+        if sys.platform == "win32":
+            self.skipTest("mmap not supported on Windows for this use case")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            large_list = list(range(1000000))
+            content = pickle.dumps(large_list)
+
+            with config.patch({"fx_graph_cache_mmap_threshold": 1024}):
+                path = os.path.join(tmpdir, "pickle_cache")
+
+                _write_file_with_mmap(path, content)
+
+                result = pickle.loads(_read_file_with_mmap(path))
+
+                self.assertEqual(result, large_list)
+
+    def test_mmap_atomic_write(self):
+        import sys
+
+        if sys.platform == "win32":
+            self.skipTest("mmap not supported on Windows for this use case")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            path = os.path.join(tmpdir, "atomic_test")
+            content = b"test content" * 10000
+
+            with config.patch({"fx_graph_cache_mmap_threshold": 100}):
+                _write_file_with_mmap(path, content)
+
+                files = os.listdir(tmpdir)
+                self.assertEqual(files, ["atomic_test"])
+
+                result = _read_file_with_mmap(path)
+                self.assertEqual(result, content)
+
+    def test_mmap_make_dirs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            nested_path = os.path.join(tmpdir, "a", "b", "c", "file")
+            content = b"nested content"
+
+            _write_file_with_mmap(nested_path, content, make_dirs=True)
+
+            self.assertTrue(os.path.exists(nested_path))
+            result = _read_file_with_mmap(nested_path)
+            self.assertEqual(result, content)
+
+
 class TestUtils(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     def test_fresh_cache(self):
@@ -3280,6 +3526,61 @@ class TestUtils(TestCase):
             return layer(inp @ weight)
 
         torch.compile(fn)()
+
+    def test_get_system_is_cached(self):
+        CacheBase.get_system.cache_clear()
+
+        result1 = CacheBase.get_system()
+        for _ in range(99):
+            result2 = CacheBase.get_system()
+
+        self.assertIs(result1, result2)
+        self.assertEqual(CacheBase.get_system.cache_info().misses, 1)
+        self.assertEqual(CacheBase.get_system.cache_info().hits, 99)
+
+    def test_stable_component_hash_cache(self):
+        _clear_stable_component_hash_cache()
+        self.assertEqual(len(_stable_component_hash_cache), 0)
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        details1 = FxGraphHashDetails(None, [], {}, [])
+        details2 = FxGraphHashDetails(None, [], {}, [])
+
+        hash1 = pickler.get_incremental_hash(details1)
+        initial_cache_size = len(_stable_component_hash_cache)
+        self.assertGreater(initial_cache_size, 0)
+
+        hash2 = pickler.get_incremental_hash(details2)
+        self.assertEqual(hash1, hash2)
+        self.assertEqual(len(_stable_component_hash_cache), initial_cache_size)
+
+        hash3 = pickler.get_incremental_hash(details1)
+        self.assertEqual(hash1, hash3)
+        self.assertEqual(len(_stable_component_hash_cache), initial_cache_size)
+
+        _clear_stable_component_hash_cache()
+
+    def test_stable_component_hash_cache_invalidation(self):
+        _clear_stable_component_hash_cache()
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+        pickler = FxGraphCachePickler(gm)
+
+        with config.patch({"max_autotune": False}):
+            details1 = FxGraphHashDetails(None, [], {}, [])
+            hash1 = pickler.get_incremental_hash(details1)
+            cache_size1 = len(_stable_component_hash_cache)
+
+        with config.patch({"max_autotune": True}):
+            details2 = FxGraphHashDetails(None, [], {}, [])
+            hash2 = pickler.get_incremental_hash(details2)
+
+        self.assertNotEqual(hash1, hash2)
+        self.assertGreaterEqual(len(_stable_component_hash_cache), cache_size1)
+
+        _clear_stable_component_hash_cache()
 
 
 if __name__ == "__main__":

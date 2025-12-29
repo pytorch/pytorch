@@ -3,7 +3,11 @@ from unittest.mock import patch
 
 import torch
 from torch._inductor import config
-from torch._inductor.async_compile import AsyncCompile, shutdown_compile_workers
+from torch._inductor.async_compile import (
+    AsyncCompile,
+    shutdown_compile_workers,
+    warm_async_compile_pool,
+)
 from torch._inductor.compile_worker.subproc_pool import SubprocException
 from torch._inductor.runtime.triton_compat import Config
 from torch._inductor.runtime.triton_heuristics import (
@@ -64,6 +68,38 @@ class TestAsyncCompile(TestCase):
             AsyncCompile.wait_pool_ready()
             self.assertTrue(AsyncCompile._ready_future.done())
             self.assertTrue(AsyncCompile.use_process_pool())
+
+    @requires_gpu()
+    @requires_triton()
+    @parametrize("method", ("subprocess", "fork", "spawn"))
+    def test_warm_async_compile_pool(self, method):
+        shutdown_compile_workers()
+
+        with config.patch(worker_start_method=method, compile_threads=8):
+            self.assertIsNone(AsyncCompile._ready_future)
+
+            warm_async_compile_pool()
+
+            self.assertIsNotNone(AsyncCompile._ready_future)
+
+            AsyncCompile.wait_pool_ready()
+            self.assertTrue(AsyncCompile._ready_future.done())
+            self.assertTrue(AsyncCompile.use_process_pool())
+
+    @requires_gpu()
+    @requires_triton()
+    @parametrize("method", ("subprocess", "fork", "spawn"))
+    def test_early_warmup_on_torch_compile(self, method):
+        shutdown_compile_workers()
+
+        with config.patch(worker_start_method=method, compile_threads=8):
+            self.assertIsNone(AsyncCompile._ready_future)
+
+            @torch.compile(backend="inductor")
+            def fn(x):
+                return x + 1
+
+            self.assertIsNotNone(AsyncCompile._ready_future)
 
     @requires_gpu()
     @requires_triton()

@@ -38,8 +38,7 @@ def _add_file(filename: str) -> None:
     # NOTE: undefined behavior if file is not valid Python source,
     # since tokenize will have undefined behavior.
     result: dict[int, str] = {}
-    # current full funcname, e.g. xxx.yyy.zzz
-    cur_name = ""
+    name_parts: list[str] = []
     cur_indent = 0
     significant_indents: list[int] = []
 
@@ -51,8 +50,8 @@ def _add_file(filename: str) -> None:
             # possible end of function or class
             if significant_indents and cur_indent == significant_indents[-1]:
                 significant_indents.pop()
-                # pop the last name
-                cur_name = cur_name.rpartition(".")[0]
+                if name_parts:
+                    name_parts.pop()
         elif (
             token.type == tokenize.NAME
             and i + 1 < len(tokens)
@@ -61,10 +60,8 @@ def _add_file(filename: str) -> None:
         ):
             # name of class/function always follows class/def token
             significant_indents.append(cur_indent)
-            if cur_name:
-                cur_name += "."
-            cur_name += tokens[i + 1].string
-        result[token.start[0]] = cur_name
+            name_parts.append(tokens[i + 1].string)
+        result[token.start[0]] = ".".join(name_parts)
 
     cache[filename] = result
 

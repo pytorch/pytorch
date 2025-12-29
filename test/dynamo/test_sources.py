@@ -5,6 +5,8 @@ import torch._dynamo
 import torch._dynamo.test_case
 import torch.nn as nn
 from torch._dynamo.source import (
+    _esc_str,
+    _esc_str_cached,
     AttrSource,
     GlobalSource,
     is_from_local_source,
@@ -17,6 +19,21 @@ class CausalLMOutputWithPast:
 
 
 class SourceTests(torch._dynamo.test_case.TestCase):
+    def test_esc_str_caching(self):
+        _esc_str_cached.cache_clear()
+
+        s = "test{value}"
+        self.assertEqual(_esc_str(s), "test{{value}}")
+        self.assertEqual(_esc_str(s), "test{{value}}")
+        self.assertIs(_esc_str_cached(s), _esc_str_cached(s))
+        self.assertGreater(_esc_str_cached.cache_info().hits, 0)
+
+        self.assertEqual(_esc_str(s, apply_repr=True), "'test{{value}}'")
+
+        self.assertEqual(_esc_str("{}"), "{{}}")
+        self.assertEqual(_esc_str("{a}{b}"), "{{a}}{{b}}")
+        self.assertEqual(_esc_str("no braces"), "no braces")
+
     def test_is_local(self):
         x_src = LocalSource("x")
         y_src = GlobalSource("y")

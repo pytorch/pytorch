@@ -128,6 +128,11 @@ def _get_source_debug_name(source: Optional[Source]) -> str:
             return "<unknown source>"
 
 
+@functools.lru_cache(maxsize=256)
+def _esc_str_cached(s: str) -> str:
+    return s.replace("{", "{{").replace("}", "}}")
+
+
 def _esc_str(s: Any, apply_repr: bool = False) -> str:
     """
     Escapes curly brackets for format strings.
@@ -140,7 +145,7 @@ def _esc_str(s: Any, apply_repr: bool = False) -> str:
         s = repr(s)
     else:
         s = str(s)
-    return s.replace("{", "{{").replace("}", "}}")
+    return _esc_str_cached(s)
 
 
 @dataclass_with_cached_hash(frozen=True)

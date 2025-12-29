@@ -31,6 +31,7 @@ import math
 import pickle
 import sys
 import textwrap
+import threading
 import traceback
 import types
 import warnings
@@ -736,10 +737,10 @@ def uninteresting_files() -> set[str]:
 
     mods = [torch._dynamo.external_utils, torch._dynamo.polyfills]
 
-    from torch._dynamo.polyfills.loader import POLYFILLED_MODULES
+    from torch._dynamo.polyfills.loader import get_polyfilled_modules
 
     # pyrefly: ignore [bad-argument-type]
-    mods.extend(POLYFILLED_MODULES)
+    mods.extend(get_polyfilled_modules())
 
     return {inspect.getfile(m) for m in mods}
 
@@ -1067,7 +1068,96 @@ class GuardBuilder(GuardBuilderBase):
         self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
             "pytorch/compiler:guard_nn_modules"
         )
-        self.already_added_code_parts: OrderedSet[str] = OrderedSet()
+        self.already_added_code_parts: set[str] = set()
+
+    def reset(self) -> None:
+        self.argnames.clear()
+        self.code.clear()
+        self.shape_env_code.clear()
+        self.no_tensor_aliasing_names.clear()
+        self.no_tensor_aliasing_guard_managers.clear()
+        self.guard_tree_values.clear()
+        self.key_order_guarded_dict_ids.clear()
+        self.id_matched_objs.clear()
+        self._cached_guard_managers.clear()
+        self._cached_duplicate_input_guards.clear()
+        self.object_aliasing_guard_codes.clear()
+        self.already_added_code_parts = OrderedSet()
+        self.src_get_value_cache = weakref.WeakKeyDictionary()
+        self.scope = None  # type: ignore[assignment]
+        self.f_code = None  # type: ignore[assignment]
+        self.id_ref = None  # type: ignore[assignment]
+        self.source_ref = None  # type: ignore[assignment]
+        self.lookup_weakrefs = None  # type: ignore[assignment]
+        self.guard_manager = None  # type: ignore[assignment]
+        self.check_fn_manager = None  # type: ignore[assignment]
+        self.runtime_global_scope = None  # type: ignore[assignment]
+        self.source_get_cache = {}
+        self.save_guards = False
+        self.guard_filter_fn = None
+
+    def init_for_compilation(
+        self,
+        f_code: types.CodeType,
+        id_ref: Callable[[object, str], int],
+        source_ref: Callable[[Source], str],
+        lookup_weakrefs: Callable[[object], Optional[weakref.ref[object]]],
+        local_scope: dict[str, object],
+        global_scope: dict[str, object],
+        guard_manager: GuardManagerWrapper,
+        check_fn_manager: CheckFunctionManager,
+        save_guards: bool = False,
+        runtime_global_scope: Optional[dict[str, object]] = None,
+        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+        | None = None,
+        source_get_cache: Optional[dict[str, Any]] = None,
+    ) -> None:
+        self.f_code = f_code
+        self.id_ref = id_ref
+        self.source_ref = source_ref
+        self.lookup_weakrefs = lookup_weakrefs
+        self.scope = {"L": local_scope, "G": global_scope}
+        self.src_get_value_cache = weakref.WeakKeyDictionary()
+        self.runtime_global_scope = runtime_global_scope or global_scope
+        self.source_get_cache = source_get_cache or {}
+        self.scope["__builtins__"] = builtins.__dict__.copy()
+        for (
+            name,
+            package_module,
+        ) in torch.package.package_importer._package_imported_modules.items():
+            name = name.replace(">", "_").replace("<", "_").replace(".", "_dot_")
+            self.scope["__builtins__"][name] = package_module
+            self.scope[name] = package_module
+        self.guard_manager = guard_manager
+
+        self.argnames.clear()
+        self.code.clear()
+        self.shape_env_code.clear()
+        self.no_tensor_aliasing_names.clear()
+        self.no_tensor_aliasing_guard_managers.clear()
+
+        self.check_fn_manager = check_fn_manager
+
+        self.guard_tree_values.clear()
+        self.save_guards = save_guards
+        self.guard_filter_fn = guard_filter_fn
+
+        self.key_order_guarded_dict_ids.clear()
+        assert self.check_fn_manager.output_graph is not None
+        for source in self.check_fn_manager.output_graph.guard_on_key_order:
+            dict_obj = self.get(source)
+            if self.save_guards:
+                self.source_get_cache[source.name] = dict_obj
+            self.key_order_guarded_dict_ids.add(id(dict_obj))
+
+        self.id_matched_objs.clear()
+        self._cached_guard_managers.clear()
+        self._cached_duplicate_input_guards.clear()
+        self.object_aliasing_guard_codes.clear()
+        self.guard_nn_modules = config.guard_nn_modules and justknobs_check(
+            "pytorch/compiler:guard_nn_modules"
+        )
+        self.already_added_code_parts = OrderedSet()
 
     def guard_on_dict_keys_and_ignore_order(
         self, example_value: dict[Any, Any], guard: Guard
@@ -1883,7 +1973,6 @@ class GuardBuilder(GuardBuilderBase):
 
         ref = self.arg_ref(base)
         val = hasattr(self.get(base_source), attr)
-        code = None
         if val:
             code = f"hasattr({ref}, {attr!r})"
         else:
@@ -2016,10 +2105,9 @@ class GuardBuilder(GuardBuilderBase):
 
     def SET_CONTAINS(self, guard: Guard, key: Any, invert: bool) -> None:
         set_ref = self.arg_ref(guard)
-        item = key
-        contains = not invert  # install_dict_contains_guard inverts "contains"
+        contains = not invert
 
-        code = f"set.__contains__({set_ref}, {item!r})"
+        code = f"set.__contains__({set_ref}, {key!r})"
         if code in self.already_added_code_parts:
             return
 
@@ -2027,7 +2115,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self.get_guard_manager(guard).add_set_contains_guard(
             contains,
-            item,
+            key,
             get_verbose_code_parts(code, guard),
             guard.user_stack,
         )
@@ -3130,6 +3218,40 @@ class GuardBuilder(GuardBuilderBase):
         )
 
 
+class GuardBuilderPool:
+    MAX_POOL_SIZE = 4
+    _local = threading.local()
+
+    @classmethod
+    def _get_pool(cls) -> list[GuardBuilder]:
+        if not hasattr(cls._local, "pool"):
+            cls._local.pool = []
+        return cls._local.pool
+
+    @classmethod
+    def acquire(cls) -> Optional[GuardBuilder]:
+        pool = cls._get_pool()
+        if pool:
+            return pool.pop()
+        return None
+
+    @classmethod
+    def release(cls, builder: GuardBuilder) -> None:
+        pool = cls._get_pool()
+        if len(pool) < cls.MAX_POOL_SIZE:
+            builder.reset()
+            pool.append(builder)
+
+    @classmethod
+    def clear(cls) -> None:
+        if hasattr(cls._local, "pool"):
+            cls._local.pool.clear()
+
+    @classmethod
+    def pool_size(cls) -> int:
+        return len(cls._get_pool())
+
+
 # Common Sub-Expression Elimination for Python expressions.
 #
 # There are 2 steps to this pass:
@@ -3681,9 +3803,9 @@ class CheckFunctionManager:
         self.torch_function_mode_stack = (
             output_graph.torch_function_mode_stack if output_graph else None
         )
-        self.used_builtin_vars: OrderedSet[str] = OrderedSet()
-        self.additional_used_local_vars: OrderedSet[str] = OrderedSet()
-        self.additional_used_global_vars: OrderedSet[str] = OrderedSet()
+        self.used_builtin_vars: set[str] = set()
+        self.additional_used_local_vars: set[str] = set()
+        self.additional_used_global_vars: set[str] = set()
         self.runtime_global_scope = runtime_global_scope
         self.global_state: Optional[torch._C._dynamo.guards.GlobalStateGuard] = None
         self.torch_function_mode_stack_check_fn: Optional[Callable[[], bool]] = None
@@ -4043,26 +4165,43 @@ class CheckFunctionManager:
             assert r_builder is not None
             return r_builder.arg_ref(source.name)
 
-        builder = GuardBuilder(
-            f_code,
-            self.id_ref,
-            source_ref,
-            self.lookup_weakrefs,
-            output_graph.local_scope,
-            output_graph.global_scope,
-            guard_manager,
-            self,
-            save_guards,
-            runtime_global_scope=self.runtime_global_scope,
-            guard_filter_fn=guard_filter_fn,
-            source_get_cache=source_get_cache,
-        )
+        builder = GuardBuilderPool.acquire()
+        if builder is not None:
+            builder.init_for_compilation(
+                f_code,
+                self.id_ref,
+                source_ref,
+                self.lookup_weakrefs,
+                output_graph.local_scope,
+                output_graph.global_scope,
+                guard_manager,
+                self,
+                save_guards,
+                runtime_global_scope=self.runtime_global_scope,
+                guard_filter_fn=guard_filter_fn,
+                source_get_cache=source_get_cache,
+            )
+        else:
+            builder = GuardBuilder(
+                f_code,
+                self.id_ref,
+                source_ref,
+                self.lookup_weakrefs,
+                output_graph.local_scope,
+                output_graph.global_scope,
+                guard_manager,
+                self,
+                save_guards,
+                runtime_global_scope=self.runtime_global_scope,
+                guard_filter_fn=guard_filter_fn,
+                source_get_cache=source_get_cache,
+            )
 
         # Break retain cycle. See test_release_scope_memory
         def cleanup_builder(weak_b: weakref.ref[GuardBuilder]) -> None:
             b = weak_b()
             if b:
-                b.scope = None  # type: ignore[assignment]
+                GuardBuilderPool.release(b)
 
         # Break retain cycle. See test_release_input_memory
         w_builder = weakref.ref(builder, cleanup_builder)

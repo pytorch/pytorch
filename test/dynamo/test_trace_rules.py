@@ -493,6 +493,48 @@ class TraceRuleTests(torch._dynamo.test_case.TestCase):
                 ),
             )
 
+    def test_lazy_dictionary_initialization(self):
+        import torch._dynamo.trace_rules as trace_rules
+
+        self.assertIsInstance(trace_rules._get_manual_torch_name_rule_map(), dict)
+        self.assertIsInstance(trace_rules._get_torch_c_binding_in_graph_functions(), dict)
+        self.assertIsInstance(trace_rules._get_torch_non_c_binding_in_graph_functions(), dict)
+        self.assertIsInstance(trace_rules._get_torch_name_rule_map(), list)
+        self.assertEqual(len(trace_rules._get_torch_name_rule_map()), 3)
+
+        self.assertEqual(trace_rules.manual_torch_name_rule_map, trace_rules._get_manual_torch_name_rule_map())
+        self.assertEqual(trace_rules.torch_c_binding_in_graph_functions, trace_rules._get_torch_c_binding_in_graph_functions())
+        self.assertEqual(trace_rules.torch_non_c_binding_in_graph_functions, trace_rules._get_torch_non_c_binding_in_graph_functions())
+        self.assertEqual(trace_rules.torch_name_rule_map, trace_rules._get_torch_name_rule_map())
+
+        self.assertIn("torch.jit.is_scripting", trace_rules.manual_torch_name_rule_map)
+        self.assertIn("math.sin", trace_rules.torch_c_binding_in_graph_functions)
+        self.assertIn("torch._assert", trace_rules.torch_non_c_binding_in_graph_functions)
+
+        trace_rules.clear_lru_cache()
+        self.assertIn("torch.jit.is_scripting", trace_rules._get_manual_torch_name_rule_map())
+
+    def test_extended_lazy_module_getattr(self):
+        import torch._dynamo.trace_rules as trace_rules
+
+        self.assertIsInstance(trace_rules.torch_obj_rule_map, dict)
+        self.assertEqual(trace_rules.torch_obj_rule_map, trace_rules.get_torch_obj_rule_map())
+
+        self.assertIsInstance(trace_rules.tensor_method, frozenset)
+        self.assertEqual(trace_rules.tensor_method, trace_rules.get_tensor_method())
+
+        self.assertIsInstance(trace_rules.legacy_mod_inlinelist, set)
+        self.assertEqual(trace_rules.legacy_mod_inlinelist, trace_rules.get_legacy_mod_inlinelist())
+
+        self.assertIsInstance(trace_rules.mod_inlinelist, set)
+        self.assertEqual(trace_rules.mod_inlinelist, trace_rules.get_mod_inlinelist())
+
+        self.assertIsInstance(trace_rules.mod_skiplist, set)
+        self.assertEqual(trace_rules.mod_skiplist, trace_rules.get_mod_skiplist())
+
+        with self.assertRaises(AttributeError):
+            _ = trace_rules.nonexistent_attribute
+
     def test_almost_impossible_missing_name(self):
         class weird:  # noqa: UP004
             def __getattribute__(self, name):

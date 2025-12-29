@@ -54,7 +54,6 @@ from torch._inductor.utils import clear_on_fresh_cache
 from torch._inductor.virtualized import V
 from torch._utils_internal import log_triton_builds
 from torch.hub import _Faketqdm, tqdm
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_package
 
 
@@ -142,7 +141,7 @@ _IS_WINDOWS = sys.platform == "win32"
 log = logging.getLogger(__name__)
 
 # Used to keep track of all process pools invoked so far.
-_pool_set = OrderedSet[AnyPool]()
+_pool_set: set[AnyPool] = set()
 
 
 def shutdown_compile_workers() -> None:
@@ -720,6 +719,15 @@ class AsyncCompile:
                     "to cause compilation to occur in the main process."
                 ) from e
             pbar.update(1)
+
+
+def warm_async_compile_pool() -> None:
+    """Explicitly warm up the async compile pool."""
+    if not has_triton_package():
+        return
+
+    AsyncCompile.warm_pool()
+    AsyncCompile.wakeup()
 
 
 def maybe_warm_pool() -> None:

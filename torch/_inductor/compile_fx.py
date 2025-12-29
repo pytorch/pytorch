@@ -23,10 +23,8 @@ from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import Never, override, ParamSpec, Protocol, TypedDict, Unpack
 from unittest import mock
 
-import torch._inductor.async_compile
 import torch.fx
 import torch.utils._pytree as pytree
-from functorch.compile import min_cut_rematerialization_partition
 from torch import fx
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo import (
@@ -36,7 +34,6 @@ from torch._dynamo import (
     utils as dynamo_utils,
 )
 from torch._dynamo.device_interface import get_interface_for_device
-from torch._dynamo.repro.after_aot import wrap_compiler_debug
 from torch._dynamo.utils import (
     chromium_event_timed,
     CompileEventLogger,
@@ -49,11 +46,7 @@ from torch._dynamo.utils import (
     set_feature_use,
 )
 from torch._functorch import config as functorch_config
-from torch._functorch._aot_autograd.subclass_parametrization import (
-    unwrap_tensor_subclass_parameters,
-)
 from torch._functorch.aot_autograd import (
-    aot_export_module,
     GraphOutputName,
     make_boxed_func,
     SerializableAOTDispatchCompiler,
@@ -93,11 +86,8 @@ from torch._inductor.utils import (
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
-from torch._utils_internal import compile_time_strobelight_meta
 from torch.fx import GraphModule
 from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols, SymExprPrinter
-from torch.fx.passes.fake_tensor_prop import FakeTensorProp
-from torch.monitor import _WaitCounter
 from torch.utils._ordered_set import OrderedSet
 
 from .._dynamo.backends.common import aot_autograd
@@ -105,18 +95,11 @@ from .._dynamo.exc import ShortenTraceback, SkipFrame
 from ..fx._lazy_graph_module import _use_lazy_graph_module
 from ..fx.graph import _PyTreeCodeGen
 from ..utils._triton import has_triton
-from . import config, distributed_autotune, metrics
-from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
+from . import config, metrics
 from .debug import DebugContext
-from .decomposition import select_decomp_table
 from .exc import InductorError
-from .fx_passes.joint_graph import joint_graph_passes
-from .fx_passes.post_grad import post_grad_passes, view_to_reshape
-from .fx_passes.pre_grad import pre_grad_passes
-from .graph import GraphLowering
 from .ir import get_device_type, IRNode
 from .output_code import complex_memory_overlap  # noqa: F401
-from .triton_bundler import TritonBundler
 from .utils import (
     align_inputs_from_check_idxs,
     clone_preserve_strides,
@@ -138,6 +121,7 @@ if TYPE_CHECKING:
     from torch._ops import OpOverload
     from torch.export.pt2_archive._package_weights import Weights
 
+    from .graph import GraphLowering
     from .ir import ExternKernelNode
 
 
@@ -242,6 +226,109 @@ static_inputs_log = torch._logging.getArtifactLogger(
     __name__, "cudagraph_static_inputs"
 )
 inductor_metrics_log = torch._logging.getArtifactLogger(__name__, "inductor_metrics")
+
+
+# Lazy import helpers for heavy inductor submodules.
+@functools.cache
+def _lazy_import_codegen_common() -> tuple[Any, Any]:
+    from .codegen.common import get_wrapper_codegen_for_device, init_backend_registration
+
+    return get_wrapper_codegen_for_device, init_backend_registration
+
+
+@functools.cache
+def _lazy_import_fx_passes() -> tuple[Any, Any, Any, Any]:
+    from .fx_passes.joint_graph import joint_graph_passes
+    from .fx_passes.post_grad import post_grad_passes, view_to_reshape
+    from .fx_passes.pre_grad import pre_grad_passes
+
+    return pre_grad_passes, joint_graph_passes, post_grad_passes, view_to_reshape
+
+
+@functools.cache
+def _lazy_import_graph_lowering() -> type:
+    from .graph import GraphLowering
+
+    return GraphLowering
+
+
+@functools.cache
+def _lazy_import_triton_bundler() -> type:
+    from .triton_bundler import TritonBundler
+
+    return TritonBundler
+
+
+@functools.cache
+def _lazy_import_decomposition() -> Any:
+    from .decomposition import select_decomp_table
+
+    return select_decomp_table
+
+
+@functools.cache
+def _lazy_import_fake_tensor_prop() -> type:
+    from torch.fx.passes.fake_tensor_prop import FakeTensorProp
+
+    return FakeTensorProp
+
+
+@functools.cache
+def _lazy_import_min_cut_rematerialization_partition() -> Any:
+    from functorch.compile import min_cut_rematerialization_partition
+
+    return min_cut_rematerialization_partition
+
+
+@functools.cache
+def _lazy_import_async_compile() -> Any:
+    from torch._inductor import async_compile
+
+    return async_compile
+
+
+@functools.cache
+def _lazy_import_compile_time_strobelight_meta() -> Any:
+    from torch._utils_internal import compile_time_strobelight_meta
+
+    return compile_time_strobelight_meta
+
+
+@functools.cache
+def _lazy_import_wait_counter() -> type:
+    from torch.monitor import _WaitCounter
+
+    return _WaitCounter
+
+
+@functools.cache
+def _lazy_import_unwrap_tensor_subclass_parameters() -> Any:
+    from torch._functorch._aot_autograd.subclass_parametrization import (
+        unwrap_tensor_subclass_parameters,
+    )
+
+    return unwrap_tensor_subclass_parameters
+
+
+@functools.cache
+def _lazy_import_aot_export_module() -> Any:
+    from torch._functorch.aot_autograd import aot_export_module
+
+    return aot_export_module
+
+
+@functools.cache
+def _lazy_import_wrap_compiler_debug() -> Any:
+    from torch._dynamo.repro.after_aot import wrap_compiler_debug
+
+    return wrap_compiler_debug
+
+
+@functools.cache
+def _lazy_import_distributed_autotune() -> Any:
+    from . import distributed_autotune
+
+    return distributed_autotune
 
 
 def get_static_input_idxs(num_fixed: int) -> list[int]:
@@ -522,6 +609,7 @@ def _recursive_pre_grad_passes(
             # as we don't have recursive example inputs, passing empty set here
             new_subgraph = _recursive_pre_grad_passes(subgraph, ())
             setattr(gm, subgraph_name, new_subgraph)
+        pre_grad_passes, _, _, _ = _lazy_import_fx_passes()
         return pre_grad_passes(gm, example_inputs, add_passes, remove_passes)
 
 
@@ -545,6 +633,7 @@ def _recursive_joint_graph_passes(
         for subgraph_name in _get_subgraph_names(gm, skip_invoke_subgraph):
             subgraph = getattr(gm, subgraph_name)
             _recursive_joint_graph_passes(subgraph, skip_invoke_subgraph)
+        _, joint_graph_passes, _, _ = _lazy_import_fx_passes()
         joint_graph_passes(gm)
 
 
@@ -560,6 +649,7 @@ def _recursive_post_grad_passes(gm: GraphModule, is_inference: bool = False) -> 
         for subgraph_name in _get_subgraph_names(gm):
             subgraph = getattr(gm, subgraph_name)
             _recursive_post_grad_passes(subgraph, is_inference)
+        _, _, post_grad_passes, _ = _lazy_import_fx_passes()
         post_grad_passes(gm, is_inference)
 
 
@@ -704,6 +794,7 @@ def fake_tensor_prop(
     # Ensure that decomps that support symbolic shapes are used
     with enable_python_dispatcher():
         fake_mode = detect_fake_mode(example_inputs)
+        FakeTensorProp = _lazy_import_fake_tensor_prop()
         if not fake_mode:
             fake_mode = torch._subclasses.FakeTensorMode(allow_non_fake_inputs=True)
             FakeTensorProp(gm, mode=fake_mode).propagate(*example_inputs)
@@ -803,7 +894,7 @@ def compile_fx_inner(
             "inductor_compile",
             is_backward=kwargs["is_backward"],
         )
-        return wrap_compiler_debug(_compile_fx_inner, compiler_name="inductor")(
+        return _lazy_import_wrap_compiler_debug()(_compile_fx_inner, compiler_name="inductor")(
             gm,
             example_inputs,
             **kwargs,
@@ -833,7 +924,7 @@ def _compile_fx_inner(
 
     # Clean up Compiled Triton Kernels per inductor compile, as the future objects
     # may not be valid for use after they are run/autotuned
-    torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
+    _lazy_import_async_compile().CompiledTritonKernels.cache_clear()
 
     if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
         # trigger the real recompilation for _LazyGraphModule before returning
@@ -873,6 +964,9 @@ def _compile_fx_inner(
     fx_graph_remote_cache = should_use_remote_fx_graph_cache()
 
     # Check if the registered backend(s) support caching.
+    get_wrapper_codegen_for_device, init_backend_registration = (
+        _lazy_import_codegen_common()
+    )
     init_backend_registration()
     backends_support_caching = all(
         backend.supports_caching
@@ -958,6 +1052,7 @@ def _compile_fx_inner(
             # to use the TritonBundler, but we don't want to save
             # the results here. The results will get saved directly
             # to AOTAutogradCache.
+            TritonBundler = _lazy_import_triton_bundler()
             TritonBundler.begin_compile()
             try:
                 mb_compiled_graph = fx_codegen_and_compile(
@@ -1005,6 +1100,7 @@ def _compile_fx_inner(
             assert mb_compiled_graph is None
             assert key_info is not None
             log.debug("FX cache miss, compiling and saving to cache")
+            TritonBundler = _lazy_import_triton_bundler()
             TritonBundler.begin_compile()
             try:
                 mb_compiled_graph = fx_codegen_and_compile(
@@ -1141,7 +1237,7 @@ def _compile_fx_inner(
 
     # Not strictly necessary, but good to clean up straggling futures
     # that are unused to reclaim memory.
-    torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
+    _lazy_import_async_compile().CompiledTritonKernels.cache_clear()
 
     _step_logger()(
         logging.INFO,
@@ -1217,7 +1313,7 @@ class _InProcessFxCompile(FxCompile):
         )
 
         with (
-            _WaitCounter("pytorch.wait_counter.actual_codegen_and_compile").guard(),
+            _lazy_import_wait_counter()("pytorch.wait_counter.actual_codegen_and_compile").guard(),
             dynamo_utils.preserve_rng_state(),
         ):
             if (sleep_sec := config.sleep_sec_TESTING_ONLY) is not None:
@@ -1284,6 +1380,7 @@ class _InProcessFxCompile(FxCompile):
             #
             # Also this has to be done before FakeTensorProp below to avoid the failed
             # .view() call.
+            _, _, _, view_to_reshape = _lazy_import_fx_passes()
             view_to_reshape(gm)
 
             with dynamo_timed(
@@ -1399,6 +1496,7 @@ class _InProcessFxCompile(FxCompile):
                         ),
                     )
 
+                    GraphLowering = _lazy_import_graph_lowering()
                     const_graph = GraphLowering(
                         const_gm,
                         example_inputs=[],
@@ -1422,6 +1520,7 @@ class _InProcessFxCompile(FxCompile):
                             const_graph.codegen_with_cpp_wrapper()
                         )
 
+                GraphLowering = _lazy_import_graph_lowering()
                 graph = GraphLowering(
                     gm,
                     # example_inputs will be used by AOTInductor to dry-run the generated code for Triton kernel tuning.
@@ -1454,7 +1553,7 @@ class _InProcessFxCompile(FxCompile):
                 with (
                     V.set_graph_handler(graph),
                     V.set_extern_kernel_nodes([]),
-                    distributed_autotune.graph_context(),
+                    _lazy_import_distributed_autotune().graph_context(),
                 ):
                     graph.run(*example_inputs)
                     output_strides: list[Optional[tuple[_StrideExprStr, ...]]] = []
@@ -1977,7 +2076,7 @@ def compile_fx_aot(
     assert isinstance(model_, GraphModule), model_
 
     # [See NOTE] Unwrapping subclasses AOT
-    unwrap_tensor_subclass_parameters(model_)
+    _lazy_import_unwrap_tensor_subclass_parameters()(model_)
 
     # pyrefly: ignore [annotation-mismatch, redefinition]
     config_patches: dict[str, Any] = copy.deepcopy(config_patches or {})
@@ -2053,6 +2152,7 @@ def fw_compiler_freezing(
     # partition_fn won't be called
     _recursive_joint_graph_passes(aot_autograd_model)
 
+    GraphLowering = _lazy_import_graph_lowering()
     layout_opt = GraphLowering.decide_layout_opt(aot_autograd_model, is_inference=True)
     if layout_opt:
         # make sure meta['val'] is properly setup
@@ -2197,6 +2297,9 @@ def partition_fn(
         with dynamo_utils.dynamo_timed(
             "min_cut_rematerialization_partition", log_pt2_compile_event=True
         ):
+            min_cut_rematerialization_partition = (
+                _lazy_import_min_cut_rematerialization_partition()
+            )
             return min_cut_rematerialization_partition(
                 gm,
                 joint_inputs,
@@ -2505,7 +2608,7 @@ def compile_fx(
         isinstance(e, torch.Tensor) and e.device.type in ("cuda", "xpu")
         for e in example_inputs_
     ):
-        torch._inductor.async_compile.AsyncCompile.wakeup()
+        _lazy_import_async_compile().AsyncCompile.wakeup()
 
     if config.cpp_wrapper or config.fx_wrapper:
         from torch._export.non_strict_utils import _fakify_script_objects
@@ -2670,7 +2773,7 @@ def _compile_fx_main(
         compiler_config_extra = create_compiler_config_extra(config)
 
         decompositions = (
-            decompositions if decompositions is not None else select_decomp_table()
+            decompositions if decompositions is not None else _lazy_import_decomposition()()
         )
 
         def fw_compiler_base(
@@ -2714,7 +2817,7 @@ def _compile_fx_main(
                 OutputCode, inference_compiler
             )
 
-        @compile_time_strobelight_meta(phase_name="backward")
+        @_lazy_import_compile_time_strobelight_meta()(phase_name="backward")
         def bw_compiler(
             gm: GraphModule, example_inputs: Sequence[InputType]
         ) -> OutputCode:
@@ -2747,7 +2850,7 @@ def _compile_fx_main(
                 unlift_effect_tokens=True,
                 selective_decompose=config.selective_decompose,
             ):
-                gm, graph_signature = aot_export_module(
+                gm, graph_signature = _lazy_import_aot_export_module()(
                     model_,
                     example_inputs_,
                     trace_joint=False,

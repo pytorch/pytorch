@@ -2377,7 +2377,12 @@ class _TorchCompileInductorWrapper:
     compiler_name = "inductor"
 
     def __init__(self, mode, options, dynamic):
+        from torch._inductor.async_compile import maybe_warm_pool
         from torch._inductor.compiler_bisector import CompilerBisector
+        from torch._inductor.runtime.autotune_cache import _preload_autotune_cache
+
+        maybe_warm_pool()
+        _preload_autotune_cache()
 
         self.config: dict[str, _Any] = {}
         self.dynamic = dynamic

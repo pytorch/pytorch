@@ -165,10 +165,111 @@ unpatched_nn_module_getattr = torch.nn.Module.__getattr__
 unpatched_nn_module_call = torch.nn.Module.__call__
 unpatched_nn_module_call_impl = torch.nn.Module._call_impl
 
-counters: collections.defaultdict[str, Counter[str]] = collections.defaultdict(
+
+# Lazy initialization wrapper for global dictionaries to avoid creating them at import time
+class _LazyDict(dict):
+    """A dict wrapper that delays initialization until first access."""
+
+    def __init__(self, factory: Callable[[], dict]) -> None:
+        object.__setattr__(self, "_factory", factory)
+        object.__setattr__(self, "_initialized", False)
+
+    def _ensure_initialized(self) -> None:
+        if not object.__getattribute__(self, "_initialized"):
+            object.__setattr__(self, "_initialized", True)
+            factory = object.__getattribute__(self, "_factory")
+            super().__init__(factory())
+
+    def __getitem__(self, key: Any) -> Any:
+        self._ensure_initialized()
+        return super().__getitem__(key)
+
+    def __setitem__(self, key: Any, value: Any) -> None:
+        self._ensure_initialized()
+        super().__setitem__(key, value)
+
+    def __delitem__(self, key: Any) -> None:
+        self._ensure_initialized()
+        super().__delitem__(key)
+
+    def __contains__(self, key: object) -> bool:
+        self._ensure_initialized()
+        return super().__contains__(key)
+
+    def __iter__(self) -> Any:
+        self._ensure_initialized()
+        return super().__iter__()
+
+    def __len__(self) -> int:
+        self._ensure_initialized()
+        return super().__len__()
+
+    def __repr__(self) -> str:
+        self._ensure_initialized()
+        return super().__repr__()
+
+    def __bool__(self) -> bool:
+        self._ensure_initialized()
+        return super().__bool__()
+
+    def get(self, key: Any, default: Any = None) -> Any:
+        self._ensure_initialized()
+        return super().get(key, default)
+
+    def keys(self) -> Any:
+        self._ensure_initialized()
+        return super().keys()
+
+    def values(self) -> Any:
+        self._ensure_initialized()
+        return super().values()
+
+    def items(self) -> Any:
+        self._ensure_initialized()
+        return super().items()
+
+    def clear(self) -> None:
+        self._ensure_initialized()
+        super().clear()
+
+    def pop(self, *args: Any) -> Any:
+        self._ensure_initialized()
+        return super().pop(*args)
+
+    def update(self, *args: Any, **kwargs: Any) -> None:
+        self._ensure_initialized()
+        super().update(*args, **kwargs)
+
+    def setdefault(self, key: Any, default: Any = None) -> Any:
+        self._ensure_initialized()
+        return super().setdefault(key, default)
+
+    def copy(self) -> dict:
+        self._ensure_initialized()
+        return super().copy()
+
+
+class _LazyDefaultDict(_LazyDict):
+    """A defaultdict wrapper that delays initialization until first access."""
+
+    def __init__(self, default_factory_outer: Callable[[], Any]) -> None:
+        object.__setattr__(self, "_default_factory_outer", default_factory_outer)
+        super().__init__(lambda: {})
+
+    def _ensure_initialized(self) -> None:
+        if not object.__getattribute__(self, "_initialized"):
+            object.__setattr__(self, "_initialized", True)
+
+    def __missing__(self, key: Any) -> Any:
+        self._ensure_initialized()
+        self[key] = object.__getattribute__(self, "_default_factory_outer")()
+        return self[key]
+
+
+counters: collections.defaultdict[str, Counter[str]] = _LazyDefaultDict(
     collections.Counter
-)
-optimus_scuba_log: dict[str, Any] = {}
+)  # type: ignore[assignment]
+optimus_scuba_log: dict[str, Any] = _LazyDict(dict)  # type: ignore[assignment]
 troubleshooting_url = (
     "https://pytorch.org/docs/main/compile/programming_model.recompilation.html"
 )
@@ -177,7 +278,7 @@ nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitat
 log = logging.getLogger(__name__)
 
 # profiling compilation time by function
-compilation_time_metrics: dict[str, list[float]] = {}
+compilation_time_metrics: dict[str, list[float]] = _LazyDict(dict)  # type: ignore[assignment]
 
 # This supports calculate_time_spent(), which reports cumulative times
 # across the process for any "phase" populated by dynamo_timed. Reset if
@@ -887,6 +988,120 @@ def compile_times(  # type: ignore[misc]
 @atexit.register
 def dump_compile_times() -> None:
     log.info(compile_times(repr="str", aggregate=True))
+
+
+def print_compile_profile(compile_id: Optional[str] = None) -> None:
+    if not compilation_time_metrics:
+        return
+
+    phase_categories: dict[str, list[tuple[str, float]]] = {
+        "dynamo": [],
+        "aot_autograd": [],
+        "inductor": [],
+        "guards": [],
+        "other": [],
+    }
+
+    total_time = 0.0
+    for key, times in compilation_time_metrics.items():
+        if not times:
+            continue
+        total_time += times[-1]
+
+        if key.startswith("aot_"):
+            phase_categories["aot_autograd"].append((key, times[-1]))
+        elif key.startswith("inductor") or key.startswith("code_gen"):
+            phase_categories["inductor"].append((key, times[-1]))
+        elif "guard" in key.lower() or "check" in key.lower():
+            phase_categories["guards"].append((key, times[-1]))
+        elif key.startswith("dynamo") or key.startswith("_compile") or key.startswith("entire_frame"):
+            phase_categories["dynamo"].append((key, times[-1]))
+        else:
+            phase_categories["other"].append((key, times[-1]))
+
+    lines = []
+    header = "=== TORCH_COMPILE_PROFILE: Compile Time Breakdown ==="
+    if compile_id:
+        header = f"=== TORCH_COMPILE_PROFILE [{compile_id}]: Compile Time Breakdown ==="
+    lines.append(header)
+    lines.append(f"Total compile time: {total_time:.4f}s")
+    lines.append("")
+
+    for category, phases in phase_categories.items():
+        if not phases:
+            continue
+        phases.sort(key=lambda x: x[1], reverse=True)
+        category_total = sum(t for _, t in phases)
+
+        lines.append(f"[{category.upper()}] ({category_total:.4f}s, {category_total / total_time * 100 if total_time > 0 else 0:.1f}%)")
+        for phase, t in phases:
+            lines.append(f"  {phase}: {t:.4f}s ({t / total_time * 100 if total_time > 0 else 0:.1f}%)")
+        lines.append("")
+
+    lines.append("=" * len(header))
+
+    # Add cache statistics section
+    cache_stats = get_cache_stats()
+    if cache_stats:
+        lines.append("")
+        lines.append("=== Cache Statistics ===")
+        for cache_name, stats in cache_stats.items():
+            hits = stats["hits"]
+            misses = stats["misses"]
+            total = hits + misses
+            if total > 0:
+                hit_rate = hits / total * 100
+                lines.append(f"  {cache_name}: {hits}/{total} hits ({hit_rate:.1f}% hit rate)")
+        lines.append("")
+
+    print("\n".join(lines), file=sys.stderr)
+
+
+def get_cache_stats() -> dict[str, dict[str, int]]:
+    cache_stats: dict[str, dict[str, int]] = {}
+
+    if counters["inductor"]["fxgraph_cache_hit"] or counters["inductor"]["fxgraph_cache_miss"]:
+        cache_stats["fx_graph_cache"] = {
+            "hits": counters["inductor"]["fxgraph_cache_hit"],
+            "misses": counters["inductor"]["fxgraph_cache_miss"],
+        }
+
+    if counters["inductor"]["async_compile_cache_hit"] or counters["inductor"]["async_compile_cache_miss"]:
+        cache_stats["async_compile_cache"] = {
+            "hits": counters["inductor"]["async_compile_cache_hit"],
+            "misses": counters["inductor"]["async_compile_cache_miss"],
+        }
+
+    if counters["inductor"]["generated_module_cache_hit"] or counters["inductor"]["generated_module_cache_miss"]:
+        cache_stats["generated_module_cache"] = {
+            "hits": counters["inductor"]["generated_module_cache_hit"],
+            "misses": counters["inductor"]["generated_module_cache_miss"],
+        }
+
+    return cache_stats
+
+
+def log_cache_stats() -> None:
+    cache_stats = get_cache_stats()
+    if not cache_stats:
+        log.debug("No cache statistics available")
+        return
+
+    lines = ["Cache hit/miss statistics:"]
+    total_hits = 0
+    total_misses = 0
+
+    for cache_name, stats in cache_stats.items():
+        total = stats["hits"] + stats["misses"]
+        total_hits += stats["hits"]
+        total_misses += stats["misses"]
+        if total > 0:
+            lines.append(f"  {cache_name}: {stats['hits']} hits, {stats['misses']} misses ({stats['hits'] / total * 100:.1f}% hit rate)")
+
+    if total_hits + total_misses > 0:
+        lines.append(f"  Overall: {total_hits} hits, {total_misses} misses ({total_hits / (total_hits + total_misses) * 100:.1f}% hit rate)")
+
+    log.info("\n".join(lines))
 
 
 tensortype_to_dtype = {

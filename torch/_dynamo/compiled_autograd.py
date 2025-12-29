@@ -63,7 +63,6 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.experimental.symbolic_shapes import DimDynamic, ShapeEnv
 from torch.fx.traceback import preserve_node_meta, set_stack_trace
 from torch.types import FloatLikeType, IntLikeType
-from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import CapturedTraceback
 
 
@@ -258,14 +257,12 @@ ops = OpNamespace()
 
 
 _graph_placeholders = ["inputs", "sizes", "scalars", "hooks", "packed_data"]
-_impure_targets = OrderedSet(
-    [
-        call_hook,
-        call_backward,
-        FakeCompiledAutogradEngine._exec_final_callbacks_stub,
-        call_accumulate_grad,
-    ]
-)
+_impure_targets = {
+    call_hook,
+    call_backward,
+    FakeCompiledAutogradEngine._exec_final_callbacks_stub,
+    call_accumulate_grad,
+}
 
 COMPILE_COUNTER = itertools.count()
 
@@ -968,7 +965,7 @@ class AutogradCompilerInstance:
         # Remove some of these nodes earlier to improve compilation speed
 
         # Dynamo guards will error instead of creating aliasing guards unless we unpack them in the graph
-        unpack_nodes: OrderedSet[torch.fx.Node] = OrderedSet()
+        unpack_nodes: set[torch.fx.Node] = set()
         i: int | None = None
         for i, node in enumerate(self.fx_tracer.graph.find_nodes(op="placeholder")):  # noqa: B007
             unpack_nodes.update(node.users.keys())

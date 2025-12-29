@@ -1148,6 +1148,34 @@ class TestInductorConfigParsingForLogging(TestCase):
         inductor_config_json = utils._scrubbed_inductor_config_for_logging()
         self.assertEqual(inductor_config_json, expected)
 
+    def test_lazy_dict_initialization(self):
+        utils.counters.clear()
+        utils.counters["test"]["count"] += 1
+        self.assertEqual(utils.counters["test"]["count"], 1)
+
+        utils.counters["new_key"]["new_count"] += 5
+        self.assertEqual(utils.counters["new_key"]["new_count"], 5)
+
+        utils.counters.clear()
+        utils.counters["a"]["x"] += 1
+        utils.counters["b"]["y"] += 2
+        self.assertEqual(len(utils.counters), 2)
+        self.assertIn("a", utils.counters)
+        self.assertIn("b", utils.counters)
+
+        utils.optimus_scuba_log.clear()
+        utils.optimus_scuba_log["key"] = "value"
+        self.assertEqual(utils.optimus_scuba_log["key"], "value")
+        self.assertIn("key", utils.optimus_scuba_log)
+
+        utils.compilation_time_metrics.clear()
+        utils.compilation_time_metrics["metric"] = [1.0, 2.0, 3.0]
+        self.assertEqual(utils.compilation_time_metrics["metric"], [1.0, 2.0, 3.0])
+
+        utils.counters.clear()
+        utils.optimus_scuba_log.clear()
+        utils.compilation_time_metrics.clear()
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

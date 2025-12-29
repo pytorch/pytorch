@@ -239,5 +239,59 @@ class TestGroupTensorsByDeviceAndDtype(torch._dynamo.test_case.TestCase):
         self.assertGreater(cnts.op_count, 0, "Expected tensor operations to be traced")
 
 
+class TestPolyfillLoader(torch._dynamo.test_case.TestCase):
+    """Tests for the polyfill loader module."""
+
+    def test_get_polyfilled_modules_is_cached(self):
+        """Test that get_polyfilled_modules uses functools.cache."""
+        from torch._dynamo.polyfills.loader import get_polyfilled_modules
+
+        self.assertTrue(hasattr(get_polyfilled_modules, "cache_info"))
+        self.assertTrue(hasattr(get_polyfilled_modules, "cache_clear"))
+
+        result1 = get_polyfilled_modules()
+        result2 = get_polyfilled_modules()
+        self.assertIs(result1, result2)
+
+        cache_info = get_polyfilled_modules.cache_info()
+        self.assertGreaterEqual(cache_info.hits, 1)
+
+    def test_get_polyfilled_modules_returns_modules(self):
+        """Test that get_polyfilled_modules returns the loaded modules."""
+        from torch._dynamo.polyfills.loader import (
+            get_polyfilled_modules,
+            POLYFILLED_MODULE_NAMES,
+        )
+
+        modules = get_polyfilled_modules()
+        self.assertIsInstance(modules, tuple)
+        self.assertEqual(len(modules), len(POLYFILLED_MODULE_NAMES))
+
+        for module, expected_name in zip(modules, POLYFILLED_MODULE_NAMES):
+            self.assertIn(expected_name, module.__name__)
+
+    def test_get_polyfilled_modules_removes_from_builtin_function_ids(self):
+        """Test that polyfilled functions are removed from _builtin_function_ids."""
+        import builtins
+        import operator
+
+        from torch._dynamo.polyfills.loader import get_polyfilled_modules
+        from torch._dynamo.trace_rules import _builtin_function_ids
+
+        get_polyfilled_modules()
+
+        polyfilled_builtins = ["all", "any", "sum"]
+        for name in polyfilled_builtins:
+            self.assertNotIn(id(getattr(builtins, name)), _builtin_function_ids)
+
+        polyfilled_operators = ["attrgetter", "itemgetter", "methodcaller", "countOf"]
+        for name in polyfilled_operators:
+            self.assertNotIn(id(getattr(operator, name)), _builtin_function_ids)
+
+        non_polyfilled_builtins = ["len", "abs", "max", "min"]
+        for name in non_polyfilled_builtins:
+            self.assertIn(id(getattr(builtins, name)), _builtin_function_ids)
+
+
 if __name__ == "__main__":
     run_tests()
