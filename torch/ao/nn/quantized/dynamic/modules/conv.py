@@ -244,7 +244,8 @@ class Conv3d(nnq.Conv3d):
             f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
             stacklevel=2,
         )
-        assert padding_mode != "reflect", "Conv3d does not support reflection padding"
+        if padding_mode == "reflect":
+            raise AssertionError("Conv3d does not support reflection padding")
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)
