@@ -147,7 +147,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
 
   cudaGraphExec_t raw_cuda_graph_exec(){
     return impl_->raw_cuda_graph_exec();
-  };
+  }
 
 private:
   std::unique_ptr<CUDAGraphImpl> impl_;
