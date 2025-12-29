@@ -384,6 +384,18 @@ def flex_attention(
             )
 
         cur_kernel_options.setdefault("USE_TMA", False)
+
+        # USE TMA = false by default, except for document_mask when B=1 or when M/N >= 8192
+        batch_size_hint = V.graph.sizevars.size_hint(Bq)
+        M_hint = V.graph.sizevars.size_hint(seq_len_q)
+        N_hint = V.graph.sizevars.size_hint(seq_len_kv)
+        if batch_size_hint == 1:
+            cur_kernel_options.setdefault("USE_TMA", True)
+        elif M_hint >= 8192 or N_hint >= 8192:
+            cur_kernel_options.setdefault("USE_TMA", True)
+        else:
+            cur_kernel_options.setdefault("USE_TMA", False)
+
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
 
