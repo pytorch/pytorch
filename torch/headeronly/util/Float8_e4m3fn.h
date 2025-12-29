@@ -177,11 +177,11 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fn_from_fp32_value(float f) {
 
   /*
    * Representation of 448.0f in fp32 format, which is the last
-   * non-NaN fp8e4m3fn value
+   * non-NaN fp8e4m3fn value:
    * 0 1111 110 - fp8e4m3fn
    * 0 10000111 11000000000000000000000 - fp32
    */
-  constexpr uint32_t fp8_max = UINT32_C(543) << 21;
+  constexpr uint32_t fp8_max = UINT32_C(0x21F) << 21;
 
   /*
    * A mask for converting fp32 numbers lower than fp8e4m3fn normal range

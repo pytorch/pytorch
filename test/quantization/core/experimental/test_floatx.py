@@ -182,7 +182,7 @@ def simulate_fp8_precision(input, variant):
     max_v = torch.finfo(variant).max
     min_v = torch.finfo(variant).min
     vals[vals > max_v] = torch.inf if has_inf else max_v
-    vals[vals < min_v] = torch.neg_inf if has_inf else min_v
+    vals[vals < min_v] = -torch.inf if has_inf else min_v
     return vals
 
 
