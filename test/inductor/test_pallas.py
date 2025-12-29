@@ -273,8 +273,6 @@ class PallasTestsMixin:
 
     def test_compile_options(self):
         """Test that Pallas backend is properly configured."""
-        if self.DEVICE == "cuda":
-            self.skipTest("sin/cos not supported in Pallas GPU (Mosaic) backend")
 
         @torch.compile(
             backend="inductor",
@@ -287,8 +285,8 @@ class PallasTestsMixin:
 
         _, (code,) = run_and_get_code(
             pallas_fn,
-            torch.randn(64, device=self.DEVICE),
-            torch.randn(64, device=self.DEVICE),
+            torch.randn(128, device=self.DEVICE),
+            torch.randn(128, device=self.DEVICE),
         )
         # Verify Pallas-specific code generation
         self.assertIn("import jax", code)
@@ -708,7 +706,9 @@ class PallasTestsMixin:
     def test_non_power_of_2_multiple_ops(self):
         """Test non-power-of-2 sizes with multiple operations."""
         if self.DEVICE == "cuda":
-            self.skipTest("sin/cos not supported in Pallas GPU (Mosaic) backend")
+            self.skipTest(
+                "non-power-of-2 sizes not supported in Pallas GPU (Mosaic) backend"
+            )
 
         def fn(x, y):
             return x.sin() + y.cos() - (x * y)
