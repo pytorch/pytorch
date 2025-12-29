@@ -43,8 +43,7 @@ struct XPUCachingHostAllocatorImpl
   }
 
   bool stream_is_capturing(XPUStream s) const override {
-    return c10::xpu::CaptureStatus(s.queue().ext_oneapi_get_state()) ==
-        c10::xpu::CaptureStatus::Recording;
+    return s.is_capturing();
   }
 };
 

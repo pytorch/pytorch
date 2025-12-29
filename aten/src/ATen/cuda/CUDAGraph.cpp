@@ -1,5 +1,4 @@
 #include <ATen/core/CachingHostAllocator.h>
-#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/cuda/CUDAGraph.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/MemPool.h>
@@ -39,25 +38,25 @@ MempoolId_t graph_pool_handle() {
  * describes memory management for captures.
  */
 
-CUDAGraph::CUDAGraph(bool keep_graph)
+CUDAGraphImpl::CUDAGraphImpl(const GraphImplArgs& args)
   // CUDAStreams may not be default-constructed.
   : capture_stream_(at::cuda::getCurrentCUDAStream()),
-    keep_graph_(keep_graph) {
+    keep_graph_(args.keep_graph) {
 }
 
-void CUDAGraph::register_generator_state(
+void CUDAGraphImpl::register_generator_state(
     c10::intrusive_ptr<at::CUDAGeneratorState> state) {
   captured_generator_states_[std::move(state)] = 0;
 }
 
-void CUDAGraph::register_generator_state(const at::Generator& generator) {
+void CUDAGraphImpl::register_generator_state(const at::Generator& generator) {
   c10::intrusive_ptr<CUDAGeneratorImpl> cuda_gen =
       dynamic_intrusive_pointer_cast<CUDAGeneratorImpl>(
           generator.getIntrusivePtr());
   cuda_gen->register_graph(this);
 }
 
-void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
+void CUDAGraphImpl::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capture_mode) {
   TORCH_CHECK(!has_graph_exec_,
               "This CUDAGraph instance already owns a captured graph. "
               "To capture a new graph, create a new instance.");
@@ -123,7 +122,26 @@ void CUDAGraph::capture_begin(MempoolId_t pool/*=0*/, cudaStreamCaptureMode capt
 
 }
 
-void CUDAGraph::capture_end() {
+void CUDAGraphImpl::capture_begin(MempoolId_t pool/*=0*/, GraphCaptureMode capture_mode) {
+  cudaStreamCaptureMode cuda_capture_mode = cudaStreamCaptureModeGlobal;
+  switch(capture_mode) {
+    case GraphCaptureMode::Default:
+    case GraphCaptureMode::Global:
+      // use cudaStreamCaptureModeGlobal
+      break;
+    case GraphCaptureMode::ThreadLocal:
+      cuda_capture_mode = cudaStreamCaptureModeThreadLocal;
+      break;
+    case GraphCaptureMode::Relaxed:
+      cuda_capture_mode = cudaStreamCaptureModeRelaxed;
+      break;
+    default:
+      TORCH_CHECK(false, "Invalid GraphCaptureMode value: ", static_cast<int>(capture_mode));
+  }
+  capture_begin(pool, cuda_capture_mode);
+}
+
+void CUDAGraphImpl::capture_end() {
   auto stream = at::cuda::getCurrentCUDAStream();
 
   TORCH_CHECK(stream.stream() == capture_stream_.stream(),
@@ -159,7 +177,7 @@ void CUDAGraph::capture_end() {
   }
 }
 
-void CUDAGraph::instantiate() {
+void CUDAGraphImpl::instantiate() {
   TORCH_CHECK(capture_ended_, "capture_end() must have been called before calling instantiate");
 
   if (has_graph_exec_) {
@@ -189,7 +207,7 @@ void CUDAGraph::instantiate() {
   has_graph_exec_ = true;
 }
 
-void CUDAGraph::replay() {
+void CUDAGraphImpl::replay() {
   TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::replay without a preceding successful capture.");
 
@@ -208,11 +226,11 @@ void CUDAGraph::replay() {
   AT_CUDA_CHECK(cudaGraphLaunch(graph_exec_, at::cuda::getCurrentCUDAStream()));
 }
 
-void CUDAGraph::enable_debug_mode() {
+void CUDAGraphImpl::enable_debug_mode() {
   _cuda_graphs_debug = true;
 }
 
-void CUDAGraph::debug_dump(const std::string& debug_path) {
+void CUDAGraphImpl::debug_dump(const std::string& debug_path) {
   if (_cuda_graphs_debug || keep_graph_) {
     TORCH_WARN("DEBUG: calling debug_dump()");
     if (has_graph_) {
@@ -228,20 +246,20 @@ void CUDAGraph::debug_dump(const std::string& debug_path) {
   }
 }
 
-cudaGraph_t CUDAGraph::raw_cuda_graph() {
+cudaGraph_t CUDAGraphImpl::raw_cuda_graph() {
   TORCH_CHECK(keep_graph_, "You cannot access the raw cudaGraph_t instance unless CUDAGraph was initialized with keep_graph=true");
   TORCH_CHECK(has_graph_, "You cannot access the raw cudaGraph_t instance until capture_end() has been called");
   return graph_;
 }
 
-cudaGraphExec_t CUDAGraph::raw_cuda_graph_exec() {
+cudaGraphExec_t CUDAGraphImpl::raw_cuda_graph_exec() {
   TORCH_CHECK(
       has_graph_exec_,
       "You cannot access the raw cudaGraphExec_t instance until instantiate() has been called");
   return graph_exec_;
 }
 
-void CUDAGraph::reset() {
+void CUDAGraphImpl::reset() {
   // I'd prefer these checks throw exceptions, not print warnings,
   // but the destructor calls reset(), and at least one CI build
   // refuses to compile with a throwing destructor.
@@ -278,13 +296,13 @@ void CUDAGraph::reset() {
 }
 
 // Returns an id another graph's capture_begin can use to share the same memory pool as this graph.
-MempoolId_t CUDAGraph::pool() {
+MempoolId_t CUDAGraphImpl::pool() const {
 TORCH_CHECK(capture_ended_,
               "Called CUDAGraph::pool() without a preceding successful capture.");
   return mempool_id_;
 }
 
-CUDAGraph::~CUDAGraph() {
+CUDAGraphImpl::~CUDAGraphImpl() {
   for (auto& [generator_state, wholegraph_increments] :
        captured_generator_states_) {
     generator_state->unregister_graph(this);
@@ -303,5 +321,7 @@ CUDAGraph::~CUDAGraph() {
   }
 #endif
 }
+
+REGISTER_GRAPH_IMPL(CUDA, CUDAGraphImpl)
 
 } // namespace at::cuda
