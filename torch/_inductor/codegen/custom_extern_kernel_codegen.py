@@ -94,30 +94,3 @@ CUSTOM_EXTERN_KERNEL_CODEGEN: dict[str, CustomCodegen] = {
         # cpp=generate_print_cpp,  # Add C++ implementation when needed
     ),
 }
-
-
-def get_custom_codegen(
-    op_name: str | None,
-    wrapper_type: str = "python",
-) -> CodegenFunc | None:
-    """
-    Get the custom codegen function for an operator.
-
-    Args:
-        op_name: The operator name (e.g., "torch.ops.higher_order.print"), or None
-        wrapper_type: Either "python" or "cpp"
-
-    Returns:
-        The codegen function if found, None otherwise.
-    """
-    if op_name is None or op_name not in CUSTOM_EXTERN_KERNEL_CODEGEN:
-        return None
-
-    codegen: CustomCodegen = CUSTOM_EXTERN_KERNEL_CODEGEN[op_name]
-    result: CodegenFunc | None = getattr(codegen, wrapper_type, None)
-    return result
-
-
-def has_custom_codegen(op_name: str) -> bool:
-    """Check if an operator has a custom codegen implementation."""
-    return op_name in CUSTOM_EXTERN_KERNEL_CODEGEN
