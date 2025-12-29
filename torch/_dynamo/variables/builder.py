@@ -518,6 +518,29 @@ class VariableBuilder:
         install_guard(*tmp, skip=1)
         return {}
 
+    def _install_opaque_guarded_member_guards(self, value):
+        """Install guards on GUARDED members for opaque reference-type objects."""
+        from torch._library.opaque_object import get_opaque_obj_info, MemberType
+
+        from ..source import AttrSource
+
+        opaque_info = get_opaque_obj_info(type(value))
+        if not opaque_info or not opaque_info.members:
+            return
+
+        for member_name, member_type in opaque_info.members.items():
+            if member_type == MemberType.GUARDED:
+                if not hasattr(value, member_name):
+                    raise AttributeError(
+                        f"Opaque object of type {type(value).__name__} was registered with "
+                        f"GUARDED member '{member_name}', but the object does not have this member. "
+                        f"Available attributes: {', '.join(dir(value))}"
+                    )
+
+                attr_source = AttrSource(self.source, member_name)
+                attr_builder = VariableBuilder(self.tx, attr_source)
+                attr_builder.install_guards(GuardBuilder.CONSTANT_MATCH)
+
     @classmethod
     def _type_dispatch(cls):
         return cls._type_dispatch_impl(config.trace_numpy)
@@ -1488,6 +1511,9 @@ class VariableBuilder:
                 else:
                     # Reference-type: guard only on type/identity
                     self.install_guards(GuardBuilder.TYPE_MATCH)
+
+                    # Install guards on GUARDED members
+                    self._install_opaque_guarded_member_guards(value)
 
             elif not hasattr(value, "__obj_flatten__"):
                 # This exists to allow a smoother transition.

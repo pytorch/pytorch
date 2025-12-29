@@ -42,6 +42,7 @@ from torch._export.serde.serialize import GraphModuleSerializer
 from torch._higher_order_ops.auto_functionalize import can_auto_functionalize
 from torch._inductor import metrics
 from torch._inductor.utils import get_free_symbols
+from torch._library.opaque_object import is_opaque_type
 from torch._prims_common import (
     compute_required_storage_length,
     is_boolean_dtype,
@@ -9355,7 +9356,7 @@ class TorchBindObject(NonTensorObj):
         # Returns the sum of all tensors in the flattened object
         real_script_obj = self.get_real_obj()
 
-        if real_script_obj is None:
+        if is_opaque_type(real_script_obj):
             return 0
 
         assert hasattr(real_script_obj, "__obj_flatten__")

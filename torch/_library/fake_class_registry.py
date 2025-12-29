@@ -163,16 +163,30 @@ def maybe_to_fake_obj(
 
     from torch._library.opaque_object import (
         FakeOpaqueObject,
+        get_opaque_obj_info,
         get_opaque_type_name,
+        is_opaque_reference_type,
         is_opaque_type,
         OpaqueTypeStr,
     )
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
 
-    if x is None or is_opaque_type(type(x)):
-        # In order to make OpaqueObjects truly opaque, the fake kernel should
-        # not depend on the contents of the OpaqueObject at all.
-        type_name = OpaqueTypeStr if x is None else get_opaque_type_name(type(x))
-        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, None)
+    x_type = type(x)
+    if is_opaque_type(x_type):
+        type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
+        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
+
+        # Reference types with pure methods should also keep the real object
+        # so that those methods can be called during tracing
+        if is_opaque_reference_type(x_type):
+            opaque_info = get_opaque_obj_info(x_type)
+            assert opaque_info is not None
+            for attr_name in opaque_info.members:
+                # Need to unset fake mode as we don't want @property methods
+                # will get evaluated with the fake mode
+                with unset_fake_temporarily():
+                    object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
+
         return fake_x_wrapped
     else:
         # x.__obj_flatten__() could be calling some tensor operations inside but we don't
