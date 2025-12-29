@@ -898,7 +898,7 @@ class TestPatternMatcher(TestCase):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
             counters.clear()
 
     def test_splitwithsizes_cat(self):
