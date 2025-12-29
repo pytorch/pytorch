@@ -399,8 +399,6 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
 
         self.assertEqual(len(records), 1)
 
-    # no carets available for python 3.10
-    @skipIfNotPy311
     @make_logging_test(side_effects=True)
     def test_side_effects(self, records):
         my_list = [1, 2, 3]
@@ -417,26 +415,14 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
             munge_exc(records[0].getMessage()),
             """\
 Mutating object of type list (source: L['lst'])
-  - test_logging.py:N:
-                lst.append(4)
-                ~~~~~~~~~~^^^""",
+
+      File "test_logging.py", line N, in test_side_effects
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.append(4)
+""",
         )
 
-    @make_logging_test(side_effects=True)
-    def test_side_effects_310(self, records):
-        my_list = [1, 2, 3]
-
-        @torch.compile(backend="eager")
-        def fn(x, lst):
-            lst.append(4)
-            return x + len(lst)
-
-        fn(torch.ones(1), my_list)
-
-        self.assertEqual(len(records), 1)
-        self.assertIn("lst.append(4)", munge_exc(records[0].getMessage()))
-
-    @skipIfNotPy311
     @make_logging_test(side_effects=True)
     def test_side_effects_nested_calls(self, records):
         outer_list = [1]
@@ -458,15 +444,23 @@ Mutating object of type list (source: L['lst'])
             munge_exc(records[0].getMessage()),
             """\
 Mutating object of type list (source: L['my_list'])
-  - test_logging.py:N:
-                lst.append(2)
-                ~~~~~~~~~~^^^
-  - test_logging.py:N:
-                my_list.append(3)
-                ~~~~~~~~~~~~~~^^^""",
+
+      File "test_logging.py", line N, in test_side_effects_nested_calls
+        outer(torch.ones(1), outer_list)
+      File "test_logging.py", line N, in outer
+        result = inner(my_list)
+      File "test_logging.py", line N, in inner
+        lst.append(2)
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_nested_calls
+        outer(torch.ones(1), outer_list)
+      File "test_logging.py", line N, in outer
+        my_list.append(3)
+""",
         )
 
-    @skipIfNotPy311
     @make_logging_test(side_effects=True)
     def test_side_effects_multiple_mutations_same_object(self, records):
         my_list = [1, 2, 3]
@@ -486,21 +480,35 @@ Mutating object of type list (source: L['my_list'])
             munge_exc(records[0].getMessage()),
             """\
 Mutating object of type list (source: L['lst'])
-  - test_logging.py:N:
-                lst.append(4)
-                ~~~~~~~~~~^^^
-  - test_logging.py:N:
-                lst.append(5)
-                ~~~~~~~~~~^^^
-  - test_logging.py:N:
-                lst.extend([6, 7])
-                ~~~~~~~~~~^^^^^^^^
-  - test_logging.py:N:
-                lst.pop()
-                ~~~~~~~^^""",
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.append(4)
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.append(5)
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.extend([6, 7])
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.pop()
+""",
         )
 
-    @skipIfNotPy311
     @make_logging_test(side_effects=True)
     def test_side_effects_dict_mutations(self, records):
         my_dict = {"a": 1}
@@ -518,15 +526,21 @@ Mutating object of type list (source: L['lst'])
             munge_exc(records[0].getMessage()),
             """\
 Mutating object of type dict (source: L['d'])
-  - test_logging.py:N:
-                d["b"] = 2
-                ~^^^^^
-  - test_logging.py:N:
-                d["c"] = 3
-                ~^^^^^""",
+
+      File "test_logging.py", line N, in test_side_effects_dict_mutations
+        fn(torch.ones(1), my_dict)
+      File "test_logging.py", line N, in fn
+        d["b"] = 2
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_dict_mutations
+        fn(torch.ones(1), my_dict)
+      File "test_logging.py", line N, in fn
+        d["c"] = 3
+""",
         )
 
-    @skipIfNotPy311
     @make_logging_test(side_effects=True)
     def test_side_effects_attribute_mutations(self, records):
         class MyClass:
@@ -550,32 +564,53 @@ Mutating object of type dict (source: L['d'])
             munge_exc(records[0].getMessage()),
             """\
 Mutating object of type MyClass (source: L['o'])
-  - test_logging.py:N:
-                o.value = 20
-                ^^^^^^^
-  - test_logging.py:N:
-                o.count = 1
-                ^^^^^^^
-  - test_logging.py:N:
-                o.count = 2
-                ^^^^^^^""",
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.value = 20
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.count = 1
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.count = 2
+""",
         )
         self.assertExpectedInline(
             munge_exc(records[1].getMessage()),
             """\
 Mutating object of type MyClass (source: L['o'])
-  - test_logging.py:N:
-                o.value = 20
-                ^^^^^^^
-  - test_logging.py:N:
-                o.count = 1
-                ^^^^^^^
-  - test_logging.py:N:
-                o.count = 2
-                ^^^^^^^""",
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.value = 20
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.count = 1
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.count = 2
+""",
         )
 
-    @skipIfNotPy311
     @make_logging_test(side_effects=True)
     def test_side_effects_local_list_no_log(self, records):
         """Test that lists created inside compiled region don't log side effects."""
@@ -591,7 +626,6 @@ Mutating object of type MyClass (source: L['o'])
         # Should NOT have logged the list mutation since it's a local variable
         self.assertEqual(len(records), 0)
 
-    @skipIfNotPy311
     @make_logging_test(side_effects=True)
     def test_side_effects_local_object_with_log(self, records):
         """Test that returned objects created inside compiled region still log attribute mutations."""
@@ -613,15 +647,23 @@ Mutating object of type MyClass (source: L['o'])
             munge_exc(records[0].getMessage()),
             """\
 Mutating object of type MyClass (source: created in torch.compile region)
-  - test_logging.py:N:
-                    self.value = 10
-                    ^^^^^^^^^^
-  - test_logging.py:N:
-                obj.value = 20
-                ^^^^^^^^^""",
+
+      File "test_logging.py", line N, in test_side_effects_local_object_with_log
+        fn(torch.ones(1))
+      File "test_logging.py", line N, in fn
+        obj = MyClass()  # Created inside compiled region
+      File "test_logging.py", line N, in __init__
+        self.value = 10
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_local_object_with_log
+        fn(torch.ones(1))
+      File "test_logging.py", line N, in fn
+        obj.value = 20
+""",
         )
 
-    @skipIfNotPy311
     @make_logging_test(side_effects=True)
     def test_side_effects_nn_module_buffer(self, records):
         class Mod(torch.nn.Module):
@@ -644,9 +686,14 @@ Mutating object of type MyClass (source: created in torch.compile region)
             munge_exc(records[0].getMessage()),
             """\
 Mutating object of type dict (source: L['mod']._buffers)
-  - nn/modules/module.py:N:
-                self._buffers[name] = tensor
-                ~~~~~~~~~~~~~^^^^^^""",
+
+      File "test_logging.py", line N, in test_side_effects_nn_module_buffer
+        fn(Mod(), torch.ones(1))
+      File "test_logging.py", line N, in fn
+        return mod(x)
+      File "test_logging.py", line N, in forward
+        self.buf += 1
+""",
         )
 
     @make_settings_test("torch._dynamo.utils")

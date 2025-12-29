@@ -24,9 +24,8 @@ while enabling optimizations where safe.
 import collections
 import contextlib
 import inspect
-import linecache
-import sys
 import textwrap
+import traceback
 import warnings
 import weakref
 from collections.abc import Generator, MutableMapping
@@ -46,14 +45,14 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented
-from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
-from .utils import (
-    get_instruction_source_311,
-    is_frozen_dataclass,
-    nn_module_new,
-    object_new,
+from .exc import (
+    collapse_resume_frames,
+    get_stack_above_dynamo,
+    SideEffectsError,
+    unimplemented,
 )
+from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
+from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
     AttributeMutationExisting,
@@ -117,7 +116,7 @@ class SideEffects:
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     keepalive: list[Any]
     # Maps variable tracker to list of source locations (filename, lineno, source_line)
-    mutation_source_locations: dict[VariableTracker, OrderedSet[tuple[str, int, str]]]
+    mutation_user_stack: dict[VariableTracker, OrderedSet[str]]
 
     def __init__(
         self,
@@ -149,7 +148,7 @@ class SideEffects:
         self.keepalive = keepalive or []
         self.save_for_backward = save_for_backward or []
         self.tensor_hooks = tensor_hooks or {}
-        self.mutation_source_locations = {}
+        self.mutation_user_stack = {}
         # Used by MappingProxyVariable to graph break in case of any mutated
         # dict
         self._has_existing_dict_mutation = False
@@ -176,32 +175,16 @@ class SideEffects:
         if var in self.ignore_mutation_on_these_variables:
             self.ignore_mutation_on_these_variables.remove(var)
 
-    def _capture_source_location(self, key: VariableTracker) -> None:
-        """Capture the current source location from the instruction translator."""
-        output_graph = self.output_graph_weakref()
-        assert output_graph is not None, "expected output_graph to exist"
-        tx = output_graph.current_tx
-        assert tx is not None, "expected output_graph.current_tx to exist"
-        instruction = tx.current_instruction
-
-        # Use get_instruction_source_311 to get source from bytecode instruction
-        # This handles multi-line expressions and uses instruction positions
-        if sys.version_info >= (3, 11):
-            source_line = textwrap.indent(
-                get_instruction_source_311(tx.f_code, instruction), "    "
-            ).rstrip()
-        else:
-            source_line = (
-                "    " + linecache.getline(tx.f_code.co_filename, tx.lineno).rstrip()
-            )
-        location = (
-            tx.f_code.co_filename,
-            tx.lineno,
-            source_line,
+    def _capture_user_stack(self, key: VariableTracker) -> None:
+        """Capture the current user stack from the instruction translator."""
+        user_stack = (
+            get_stack_above_dynamo() + torch._guards.TracingContext.extract_stack()
         )
-        if key not in self.mutation_source_locations:
-            self.mutation_source_locations[key] = OrderedSet()
-        self.mutation_source_locations[key].add(location)
+        user_stack_collapsed = collapse_resume_frames(user_stack)
+        user_stack_formatted = "".join(traceback.format_list(user_stack_collapsed))
+        if key not in self.mutation_user_stack:
+            self.mutation_user_stack[key] = OrderedSet()
+        self.mutation_user_stack[key].add(user_stack_formatted)
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -320,8 +303,8 @@ class SideEffects:
         if item not in self.store_attr_mutations:
             self.store_attr_mutations[item] = {}
         self.store_attr_mutations[item][name] = value
-        # Capture source location for this mutation
-        self._capture_source_location(item)
+        # Capture user stack for this mutation
+        self._capture_user_stack(item)
 
     def load_attr(
         self,
@@ -711,8 +694,8 @@ class SideEffects:
             return
 
         self.check_allowed_side_effect(var)
-        # Capture source location for this mutation
-        self._capture_source_location(var)
+        # Capture user stack for this mutation
+        self._capture_user_stack(var)
 
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
@@ -916,8 +899,8 @@ class SideEffects:
         return self.ca_final_callbacks_var
 
     def _log_side_effects(self, var: VariableTracker) -> None:
-        """Make a side effect log message with source locations."""
-        locations = self.mutation_source_locations[var]
+        """Make a side effect log message with user stack."""
+        locations = self.mutation_user_stack[var]
         description = f"Mutating object of type {var.python_type_name()}"
         source_info = " (no source)"
         if var.source is not None:
@@ -927,15 +910,11 @@ class SideEffects:
                 source_info = f" (source: {var.source.name})"
 
         if locations:
-            lines: list[str] = []
-            for filename, lineno, source_line in locations:
-                lines.append(f"  - {filename}:{lineno}:\n{source_line}")
-
-            formatted_lines = "\n".join(lines)
-            log_str = f"{description}{source_info}\n{formatted_lines}"
+            formatted_lines = "\n********\n\n".join(locations)
+            log_str = f"{description}{source_info}\n\n{textwrap.indent(formatted_lines, '    ')}"
         else:
             log_str = (
-                f"{description}{source_info} (unable to find sources for mutations)"
+                f"{description}{source_info} (unable to find user stacks for mutations)"
             )
 
         side_effects_log.debug(log_str)
