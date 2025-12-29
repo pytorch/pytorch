@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ctypes
 import logging
 from collections import defaultdict
 from dataclasses import dataclass
@@ -53,7 +52,11 @@ def _make_config_key_from_heuristic(cfg: HeuristicConfig) -> ConfigKey:
 
 
 def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
-    """Build config key from cutlass_api kernel metadata.design."""
+    """Build config key from cutlass_api kernel metadata.design.
+
+    Note: design can be None (default in KernelMetadata). We use hasattr checks
+    defensively since only BLASDesignMetadata has tile_shape/cluster_shape.
+    """
     if (
         hasattr(design, "tile_shape")
         and len(design.tile_shape) >= 3
@@ -180,20 +183,18 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             len(result),
         )
         for i, (kernel, runtime) in enumerate(selected):
-            meta = kernel.metadata
-            if hasattr(meta, "design"):
-                design = meta.design
-                autotuning_log.info(
-                    "  Selected kernel %d: tile=(%d, %d, %d), cluster=(%d, %d), "
-                    "estimated_runtime=%.2f us",
-                    i,
-                    design.tile_shape[0],
-                    design.tile_shape[1],
-                    design.tile_shape[2],
-                    design.cluster_shape[0],
-                    design.cluster_shape[1],
-                    runtime * 1e6,
-                )
+            design = kernel.metadata.design
+            autotuning_log.info(
+                "  Selected kernel %d: tile=(%d, %d, %d), cluster=(%d, %d), "
+                "estimated_runtime=%.2f us",
+                i,
+                design.tile_shape[0],
+                design.tile_shape[1],
+                design.tile_shape[2],
+                design.cluster_shape[0],
+                design.cluster_shape[1],
+                runtime * 1e6,
+            )
 
         return result
 
@@ -202,11 +203,9 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         config_to_kernels: dict[ConfigKey, list] = defaultdict(list)
 
         for kernel in kernels:
-            meta = kernel.metadata
-            if hasattr(meta, "design"):
-                key = _make_config_key_from_kernel_design(meta.design)
-                if key is not None:
-                    config_to_kernels[key].append(kernel)
+            key = _make_config_key_from_kernel_design(kernel.metadata.design)
+            if key is not None:
+                config_to_kernels[key].append(kernel)
 
         return config_to_kernels
 
@@ -264,6 +263,12 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         acc_char = dtype_to_cublas.get(accumulator_type, "S")
         precision = f"{a_char}{acc_char}{a_char}"
 
+        # NvMatmulHeuristicsInterfaceEx configuration:
+        # - backend=CUTLASS3: Use CUTLASS 3.x kernel database for Hopper+ GPUs
+        #   TODO(nikhilap): Update when nvMatmulHeuristics supports CUTLASS 4
+        # - flags=PERF_MODEL_BASED_AUTO_TUNING: Rank kernels using analytical
+        #   performance model (faster than empirical profiling)
+        # - load_discovery_implicitly=True: Auto-load kernel discovery sets on demand
         lh = nvMatmulHeuristics.NvMatmulHeuristicsInterfaceEx(
             backend=nvMatmulHeuristics.NvMatmulHeuristicsTarget.CUTLASS3,
             flags=nvMatmulHeuristics.NvMatmulHeuristicsFlags.PERF_MODEL_BASED_AUTO_TUNING,
@@ -272,7 +277,6 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         backend = lh.createBackend(nvMatmulHeuristics.NvMatmulHeuristicsTarget.CUTLASS3)
 
-        # Set validity callback to filter to available kernel configs
         validity_callback = self._make_validity_callback(valid_configs)
         try:
             lh.setBackendCallbackProperty(
@@ -280,24 +284,12 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
                 nvMatmulHeuristics.NvMatmulHeuristicsBackendPropertyCallbackKind.KERNEL_ADDITIONAL_VALIDITY_CHECK,
                 validity_callback,
             )
-        except Exception:
+        except RuntimeError:
             log.debug("Could not set validity callback", exc_info=True)
-
-        # Set CTA_TILE_N_DIV_REQUIREMENT
-        cta_n_div = ctypes.c_int(32)
-        lh.setBackendValueProperty(
-            backend,
-            nvMatmulHeuristics.NvMatmulHeuristicsBackendProperty.CTA_TILE_N_DIV_REQUIREMENT,
-            ctypes.byref(cta_n_div),  # pyre-ignore[6]: ctypes typing
-            ctypes.sizeof(cta_n_div),  # pyre-ignore[6]: ctypes typing
-        )
 
         layout = self._get_layout_enum(layout_a, layout_b)
 
-        try:
-            lh.loadInternalDiscoverySet(layout, precision=precision)
-        except Exception:
-            log.debug("Could not load internal discovery set", exc_info=True)
+        lh.loadInternalDiscoverySet(layout, precision=precision)
 
         # TODO(nikhilap) support different batch sizes
         problem = lh.makeNvMatmulHeuristicsProblem(m, n, k, layout, batch_size=1)
