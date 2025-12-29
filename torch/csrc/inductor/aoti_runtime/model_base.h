@@ -999,19 +999,20 @@ class AOTInductorModelBase {
     auto magic_number =
         reinterpret_cast<const uint64_t*>(_binary_constants_bin_start)[1];
     auto weights_offset = fsize - weights_size;
-    AOTI_RUNTIME_CHECK(
-        (weights_offset & 0x3fff) == 0,
-        "weights_offset must be aligned to 16K boundary");
+    auto page_size = sysconf(_SC_PAGESIZE);
+    AOTI_RUNTIME_CHECK(page_size > 0, "Failed to get system page size");
+    auto aligned_offset = weights_offset & ~(page_size - 1);
+    auto adjustment = weights_offset - aligned_offset;
     auto ptr = mmap(
         NULL,
-        weights_size,
+        weights_size + adjustment,
         PROT_READ | PROT_WRITE,
         MAP_PRIVATE,
         fd,
-        weights_offset);
+        aligned_offset);
     close(fd);
     AOTI_RUNTIME_CHECK(ptr != MAP_FAILED, "mmap() failed");
-    self_mmap = static_cast<uint8_t*>(ptr);
+    self_mmap = static_cast<uint8_t*>(ptr) + adjustment;
     AOTI_RUNTIME_CHECK(
         reinterpret_cast<uint64_t*>(
             self_mmap + weights_size - sizeof(uint64_t))[0] == magic_number,
