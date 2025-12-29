@@ -282,6 +282,10 @@ void CacheEntry::update(const std::vector<RecordFunctionCallback>& callbacks) {
 }
 
 void CacheEntry::getActiveCallbacksImpl() {
+  // skip if no callbacks registered for this scope.
+  if (C10_LIKELY(callbacks_.empty())) {
+    return;
+  }
   // We rebuild the active set when `sampling_countdown_` reaches zero, so if it
   // reaches zero at the start of this function something has gone wrong.
   TORCH_INTERNAL_ASSERT(sampling_countdown_ > 0, sampling_countdown_);
