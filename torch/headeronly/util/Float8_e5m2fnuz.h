@@ -74,7 +74,7 @@ inline C10_HOST_DEVICE uint8_t fp8e5m2fnuz_from_fp32_value(float f) {
    * 0 11111111 00000000000000000000000 - fp32
    */
   constexpr uint32_t fp32_inf = UINT32_C(0xFF) << 23;
-  
+
   /*
    * Binary representation of 57344.0f, which is the last
    * non-NaN fp8e5m2fnuz value:
