@@ -1079,8 +1079,8 @@ void add_out_sparse_csr(
         auto beta_dev = at::empty_strided({1}, {1}, scalar_opts);
         alpha_dev.fill_(alpha_);
         beta_dev.fill_(beta_);
-        const scalar_t* alpha_ptr = alpha_dev.data_ptr<scalar_t>();
-        const scalar_t* beta_ptr = beta_dev.data_ptr<scalar_t>();
+        const scalar_t* alpha_ptr = alpha_dev.const_data_ptr<scalar_t>();
+        const scalar_t* beta_ptr = beta_dev.const_data_ptr<scalar_t>();
 #else
         TORCH_CUDASPARSE_CHECK(
             cusparseSetPointerMode(handle, CUSPARSE_POINTER_MODE_HOST));
