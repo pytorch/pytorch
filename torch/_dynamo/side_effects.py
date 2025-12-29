@@ -36,6 +36,7 @@ from typing import Any, Optional, TYPE_CHECKING
 import torch
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, graph_break_hints, utils, variables
 from .bytecode_transformation import (
@@ -116,7 +117,7 @@ class SideEffects:
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     keepalive: list[Any]
     # Maps variable tracker to list of source locations (filename, lineno, source_line)
-    mutation_source_locations: dict[VariableTracker, list[tuple[str, int, str]]]
+    mutation_source_locations: dict[VariableTracker, OrderedSet[tuple[str, int, str]]]
 
     def __init__(
         self,
@@ -199,8 +200,8 @@ class SideEffects:
             source_line,
         )
         if key not in self.mutation_source_locations:
-            self.mutation_source_locations[key] = []
-        self.mutation_source_locations[key].append(location)
+            self.mutation_source_locations[key] = OrderedSet()
+        self.mutation_source_locations[key].add(location)
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)

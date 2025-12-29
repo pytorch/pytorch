@@ -496,9 +496,6 @@ Mutating object of type list (source: L['lst'])
                 lst.extend([6, 7])
                 ~~~~~~~~~~^^^^^^^^
   - test_logging.py:N:
-                lst.extend([6, 7])
-                ~~~~~~~~~~^^^^^^^^
-  - test_logging.py:N:
                 lst.pop()
                 ~~~~~~~^^""",
         )
@@ -622,6 +619,34 @@ Mutating object of type MyClass (source: created in torch.compile region)
   - test_logging.py:N:
                 obj.value = 20
                 ^^^^^^^^^""",
+        )
+
+    @skipIfNotPy311
+    @make_logging_test(side_effects=True)
+    def test_side_effects_nn_module_buffer(self, records):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.rand(2, 2))
+
+            def forward(self, x):
+                self.buf += 1
+                return x + self.buf
+
+        @torch.compile(backend="eager")
+        def fn(mod, x):
+            return mod(x)
+
+        fn(Mod(), torch.ones(1))
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type dict (source: L['mod']._buffers)
+  - nn/modules/module.py:N:
+                self._buffers[name] = tensor
+                ~~~~~~~~~~~~~^^^^^^""",
         )
 
     @make_settings_test("torch._dynamo.utils")
