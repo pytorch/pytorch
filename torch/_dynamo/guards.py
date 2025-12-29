@@ -4437,24 +4437,23 @@ def strip_local_scope(s: str) -> str:
     return re.sub(pattern, r"\1", s)
 
 
-def format_user_stack_trace(user_stack: traceback.StackSummary | None) -> str:
+def format_user_stack_trace(
+    user_stack: traceback.StackSummary | None,
+) -> str:
     """
     Format the user stack trace for display in guard failure messages.
 
-    Returns a formatted string with the full stack trace in JSON format per line,
+    Returns a formatted string representation of the stack trace,
     or an empty string if no user stack is available.
     """
     if user_stack is None or len(user_stack) == 0:
         return ""
 
-    formatted = "\n  Full recompile user stack trace:\n"
+    lines: list[str] = []
     for idx, frame in enumerate(user_stack):
-        frame_data = {
-            "name": frame.name,
-            "line": frame.line.strip() if frame.line else "",
-        }
-        formatted += f"    {idx}: {json.dumps(frame_data)}\n"
-    return formatted
+        source_line = frame.line.strip() if frame.line else ""
+        lines.append(f"    frame {idx}: {frame.name} - {source_line}")
+    return "\n".join(lines)
 
 
 def get_guard_fail_reason_helper(
@@ -4468,6 +4467,7 @@ def get_guard_fail_reason_helper(
     Updates `guard_failures` with the generated reason.
     Only the first failed check of guard_manager is reported.
     """
+
     assert guard_manager.global_scope is not None
     assert guard_manager.closure_vars is not None
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
@@ -4551,7 +4551,14 @@ def get_guard_fail_reason_helper(
                 if not is_recompiles_verbose_enabled():
                     break
 
-    reason_str = f"{compile_id}: " + "; ".join(reasons) + user_stack_str
+    # Build reason string - simple format for normal logging
+    # Use singular "reason" when there's only one, plural "reasons" for multiple
+    if len(reasons) == 1:
+        reason_str = f"compile_id: {compile_id}, reason: {reasons[0]}"
+    else:
+        reason_str = f"compile_id: {compile_id}, reasons: {reasons}"
+    if user_stack_str:
+        reason_str += f"\n  user_stack:\n{user_stack_str}"
     return strip_local_scope(reason_str)
 
 
@@ -4619,9 +4626,11 @@ def get_and_maybe_log_recompilation_reasons(
 
     if do_recompiles_log or config.error_on_recompile:
         if is_recompiles_verbose_enabled():
+            # For verbose mode, use JSON format
+            json_reasons = [json.dumps({"reason": r}) for r in reasons]
             failures = "\n\n".join(
                 f"guard {i} failures:\n" + textwrap.indent(reason, "- ")
-                for i, reason in enumerate(reasons)
+                for i, reason in enumerate(json_reasons)
             )
         else:
             failures = textwrap.indent("\n".join(reasons), "- ")
@@ -4646,7 +4655,7 @@ def get_and_maybe_log_recompilation_reasons(
             "name": "recompile_reasons",
             "encoding": "json",
         },
-        payload_fn=lambda: reasons,
+        payload_fn=lambda: reasons[0] if len(reasons) == 1 else reasons,
     )
 
     return reasons

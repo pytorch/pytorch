@@ -3488,13 +3488,20 @@
 
 - func: ldexp.Tensor(Tensor self, Tensor other) -> Tensor
   variants: function, method
+  tags: pointwise
+  dispatch:
+    CompositeExplicitAutograd: ldexp
 
 - func: ldexp_(Tensor(a!) self, Tensor other) -> Tensor(a!)
   variants: function, method
   tags: pointwise
+  dispatch:
+    CompositeExplicitAutograd: ldexp_
 
 - func: ldexp.out(Tensor self, Tensor other, *, Tensor(a!) out) -> Tensor(a!)
   tags: pointwise
+  dispatch:
+    CompositeExplicitAutograd: ldexp_out
 
 - func: linspace(Scalar start, Scalar end, int steps, *, ScalarType? dtype=None, Layout? layout=None, Device? device=None, bool? pin_memory=None) -> Tensor
   dispatch:

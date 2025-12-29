@@ -221,26 +221,18 @@ class LoggingTests(LoggingTestCase):
 
         record_str = "\n".join(r.getMessage() for r in records)
 
-        self.assertIn(
-            "Full recompile user stack trace:",
-            record_str,
-        )
-
-        self.assertIn(
-            """ 0: {"name": "outmost_fn", "line": "return outer_fn(x, ys, zs)"}""",
-            record_str,
-        )
-        self.assertIn(
-            """2: {"name": "fn", "line": "return inner(x, ys, zs)""",
-            record_str,
-        )
-        self.assertIn(
-            """1: {"name": "outer_fn", "line": "return fn(x, ys, zs)"}""",
-            record_str,
-        )
-        self.assertIn(
-            """3: {"name": "inner", "line": "for y, z in zip(ys, zs):"}""",
-            record_str,
+        self.assertExpectedInline(
+            munge_exc(record_str).strip(),
+            """\
+Recompiling function outmost_fn in test_logging.py:N
+    triggered by the following guard failure(s):
+    - compile_id: 0/0, reason: len(ys) == 3                                             \
+# for y, z in zip(ys, zs):  # test/dynamo/test_logging.py:N in inner
+    -   user_stack:
+    -     frame 0: outmost_fn - return outer_fn(x, ys, zs)
+    -     frame 1: outer_fn - return fn(x, ys, zs)
+    -     frame 2: fn - return inner(x, ys, zs)
+    -     frame 3: inner - for y, z in zip(ys, zs):""",
         )
 
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
@@ -386,6 +378,23 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
         logger = logging.getLogger("torch.utils")
         logger.info("hi")
         self.assertEqual(len(records), 1)
+
+    @make_settings_test("torch._logging")
+    def test_directory_based_logging(self, records):
+        # Test that the package itself can log
+        logger = logging.getLogger("torch._logging")
+        logger.info("package log")
+
+        # Test that submodules can also log
+        sublogger = logging.getLogger("torch._logging._internal")
+        sublogger.info("submodule log")
+
+        # We should have at least 2 records (one from package, one from submodule)
+        self.assertGreaterEqual(len(records), 2)
+
+        # Verify both loggers are registered and have handlers
+        self.assertTrue(len(logger.handlers) > 0 or logger.propagate)
+        self.assertTrue(len(sublogger.handlers) > 0 or sublogger.propagate)
 
     @make_logging_test(all=logging.DEBUG, dynamo=logging.INFO)
     def test_all(self, _):
@@ -1097,12 +1106,14 @@ exclusions = {
     "benchmarking",
     "loop_ordering",
     "loop_tiling",
+    "auto_chunker",
     "autotuning",
     "graph_region_expansion",
     "hierarchical_compile",
     "compute_dependencies",
     "annotation",
     "node_runtime_estimation",
+    "caching",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

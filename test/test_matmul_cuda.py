@@ -19,11 +19,9 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
-    SM53OrLater,
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
-    _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
@@ -282,8 +280,7 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1.1e-5)})
-    @dtypes(*([torch.float32, torch.float16] +
-              [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),
@@ -976,10 +973,6 @@ class TestMatmulCuda(InductorTestCase):
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
-        version = _get_torch_cuda_version()
-        if version < (11, 8):
-            self.skipTest("_mixed_dtypes_linear only compiled for CUDA 11.8+")
-
         def run_test(
             batch_shape,
             m,
