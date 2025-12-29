@@ -1535,9 +1535,7 @@ class PallasKernel(SIMDKernel):
                 # (i.e., just a strided view, not a slice). For slices (size mismatch),
                 # we need strided indexing regardless of buffer contiguity.
                 skip_for_non_contiguous = (
-                    is_known_non_contiguous
-                    and not is_tpu
-                    and buf_numel == output_numel
+                    is_known_non_contiguous and not is_tpu and buf_numel == output_numel
                 )
 
                 if (
