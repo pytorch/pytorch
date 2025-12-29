@@ -940,7 +940,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
                 outputs = [torch.empty(s) for s in out_sizes]
                 inputs = []
-                for in_size, out_size in zip(in_sizes, out_sizes):
+                for in_size, out_size in zip(in_sizes, out_sizes, strict=True):
                     inp = torch.empty(in_size)
                     for i in range(self.world_size):
                         inp[i * out_size : (i + 1) * out_size] = float(
