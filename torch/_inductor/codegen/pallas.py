@@ -1395,6 +1395,9 @@ class PallasKernel(SIMDKernel):
                 # - If index coefficients match buffer strides (like 1 + 10*x for 10xN buffer),
                 #   it's standard strided access and [...] is correct after .contiguous()
                 has_non_unit_strides = False
+                is_originally_contiguous = True
+                actual_buf_strides: list = []
+                coefficients: OrderedSet = OrderedSet()
                 try:
                     buf_stride = buf_obj.get_layout().stride
                     # Check if original buffer is contiguous (stride matches size)
@@ -1502,11 +1505,7 @@ class PallasKernel(SIMDKernel):
                 # using a subset of iteration vars is normal.
                 # Also check that the buffer has more dimensions than used vars,
                 # which indicates a gather pattern rather than simple broadcast.
-                buf_effective_dims = sum(
-                    1
-                    for s in buf_size
-                    if _safe_int(s) != 1
-                )
+                buf_effective_dims = sum(1 for s in buf_size if _safe_int(s) != 1)
                 # For im2col patterns: the index uses MORE vars than buffer has dims
                 # This means multiple iteration vars map to fewer buffer dimensions
                 # which is a gather pattern. For normal access (including broadcast),
@@ -1522,15 +1521,14 @@ class PallasKernel(SIMDKernel):
                 is_tpu = torch._inductor.config._debug_cpu_to_tpu_pallas
 
                 # Check if buffer is KNOWN to be non-contiguous (static mismatch)
-                is_known_non_contiguous = (
-                    not is_originally_contiguous
-                    and all(s is not None for s in actual_buf_strides)
+                is_known_non_contiguous = not is_originally_contiguous and all(
+                    s is not None for s in actual_buf_strides
                 )
 
                 # Check if index has symbolic coefficients (can't use _generate_strided_index)
                 # This happens when the same kernel is called with different input shapes
                 has_symbolic_coef = any(
-                    not isinstance(c, (int, float)) for c in coefficients
+                    not isinstance(c, int | float) for c in coefficients
                 )
 
                 if (
@@ -2768,7 +2766,9 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                     if matching_param:
                         # Calculate flattened size for this tensor
                         kernel_body.writeline(f"# Mask for {buf_name}")
-                        kernel_body.writeline(f"{mask_var}_size = {matching_param}.size")
+                        kernel_body.writeline(
+                            f"{mask_var}_size = {matching_param}.size"
+                        )
                         kernel_body.writeline(
                             f"{mask_var} = jnp.arange(block_size) < {mask_var}_size"
                         )
