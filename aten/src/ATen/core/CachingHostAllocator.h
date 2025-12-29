@@ -15,6 +15,7 @@
 #include <shared_mutex>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Winterference-size")
 namespace at {
 
 using c10::CachingAllocator::Stat;
@@ -1088,4 +1089,5 @@ struct HostAllocatorRegistry {
   }
 
 } // namespace at
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
