@@ -239,6 +239,18 @@ print(normalize_gm(graph.print_readable(print_output=False)))
             Unsupported,
             lambda: fn(x),
             """\
+Failed to trace builtin operator
+  Explanation: Dynamo does not know how to trace builtin operator `add` with argument types ['str', '<unknown type>'] (has_kwargs False)
+  Hint: Avoid calling builtin `add` with argument types ['str', '<unknown type>']. Consider using an equivalent alternative function/method to `add`.
+  Hint: If you are attempting to call a logging function (e.g. `print`), you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.
+  Hint: Please report an issue to PyTorch.
+
+  Developer debug context: builtin add [<class 'torch._dynamo.variables.constant.ConstantVariable'>, <class 'torch._dynamo.variables.misc.StringFormatVariable'>] False
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0059.html
+
+*** While handling this graph break, another graph break occurred: ***
+
 Failed to trace einops function
   Explanation: Failed to trace builtin operator
       Explanation: Dynamo does not know how to trace builtin operator `add` with argument types ['str', '<unknown type>'] (has_kwargs False)
