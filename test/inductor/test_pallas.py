@@ -148,8 +148,6 @@ class PallasTestsMixin:
 
     def test_sin(self):
         """Test sin operation."""
-        if self.DEVICE == "cuda":
-            self.skipTest("sin not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             return torch.sin(x)
@@ -163,8 +161,6 @@ class PallasTestsMixin:
 
     def test_fused_ops(self):
         """Test fused operations (sin + add)."""
-        if self.DEVICE == "cuda":
-            self.skipTest("sin not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x, y):
             return x.sin() + y
@@ -179,8 +175,6 @@ class PallasTestsMixin:
 
     def test_exp_log(self):
         """Test exp and log operations."""
-        if self.DEVICE == "cuda":
-            self.skipTest("exp/log not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             return torch.log(torch.exp(x))
@@ -209,8 +203,6 @@ class PallasTestsMixin:
 
     def test_tanh(self):
         """Test tanh operation."""
-        if self.DEVICE == "cuda":
-            self.skipTest("tanh not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             return torch.tanh(x)
@@ -239,10 +231,6 @@ class PallasTestsMixin:
 
     def test_maximum_minimum(self):
         """Test maximum and minimum operations."""
-        if self.DEVICE == "cuda":
-            self.skipTest(
-                "maximum/minimum not supported in Pallas GPU (Mosaic) backend"
-            )
 
         def fn(a, b):
             return torch.maximum(a, b) + torch.minimum(a, b)
@@ -884,31 +872,27 @@ class PallasTestsMixin:
 
     def test_where(self):
         """Test torch.where operation."""
-        if self.DEVICE == "cuda":
-            self.skipTest("where not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x, y):
             return torch.where(x > 0, x, y)
 
         compiled = self._compile(fn)
 
-        x = torch.randn(16, device=self.DEVICE)
-        y = torch.randn(16, device=self.DEVICE)
+        x = torch.randn(1024, device=self.DEVICE)
+        y = torch.randn(1024, device=self.DEVICE)
         result = compiled(x, y)
         expected = fn(x, y)
         self.assertEqual(result, expected)
 
     def test_clamp(self):
         """Test torch.clamp operation."""
-        if self.DEVICE == "cuda":
-            self.skipTest("clamp not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             return torch.clamp(x, -1.0, 1.0)
 
         compiled = self._compile(fn)
 
-        x = torch.randn(16, device=self.DEVICE) * 2
+        x = torch.randn(1024, device=self.DEVICE) * 2
         result = compiled(x)
         expected = fn(x)
         self.assertEqual(result, expected)
@@ -1026,30 +1010,26 @@ class PallasTestsMixin:
 
     def test_sum_reduction(self):
         """Test sum reduction."""
-        if self.DEVICE == "cuda":
-            self.skipTest("sum reduction not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             return x.sum()
 
         compiled = self._compile(fn)
 
-        x = torch.randn(16, device=self.DEVICE)
+        x = torch.randn(1024, device=self.DEVICE)
         result = compiled(x)
         expected = fn(x)
         self.assertEqual(result, expected)
 
     def test_max_reduction(self):
         """Test max reduction."""
-        if self.DEVICE == "cuda":
-            self.skipTest("max reduction not supported in Pallas GPU (Mosaic) backend")
 
         def fn(x):
             return x.max()
 
         compiled = self._compile(fn)
 
-        x = torch.randn(16, device=self.DEVICE)
+        x = torch.randn(1024, device=self.DEVICE)
         result = compiled(x)
         expected = fn(x)
         self.assertEqual(result, expected)
