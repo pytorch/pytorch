@@ -5201,6 +5201,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 fglobals_value = _import_module(module_name)
             # Dont use lazy vt because we will do a setattr afterwards
+            # TODO: fix InstructionTranslator -> InstructionTranslatorBase
+            # pyrefly: ignore[bad-argument-type]
             fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
             global_source = AttrSource(module_source, name)
         else:
@@ -5210,6 +5212,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             # Dont use lazy vt because we will do a setattr afterwards
+            # pyrefly: ignore[bad-argument-type]
             fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
             global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
 
