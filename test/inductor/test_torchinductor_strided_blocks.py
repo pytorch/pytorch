@@ -1397,9 +1397,10 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
     not (
         HAS_CUDA_AND_TRITON
         and torch.cuda.get_device_capability()[0] >= 9
-        and torch.version.hip is None
-    ),
-    "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
+    )
+    or torch.version.hip,
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+    # ROCm triton doesn't support/generate "tl.make_tensor_descriptor" which is exactly what this unit test is about
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
 @instantiate_parametrized_tests
