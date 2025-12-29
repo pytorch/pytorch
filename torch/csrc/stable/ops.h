@@ -295,6 +295,82 @@ inline torch::stable::Tensor flatten(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+// We expect this to be the stable version of the unsqueeze op with identical
+// semantics to the existing unsqueeze op.
+inline torch::stable::Tensor unsqueeze(
+    const torch::stable::Tensor& self,
+    int64_t dim) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(dim)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::unsqueeze", "", stack.data(), TORCH_ABI_VERSION));
+#else
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::unsqueeze", "", stack.data()));
+#endif
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the squeeze.dim op with identical
+// semantics to the existing squeeze.dim op.
+inline torch::stable::Tensor squeeze(
+    const torch::stable::Tensor& self,
+    int64_t dim) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(dim)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::squeeze", "dim", stack.data(), TORCH_ABI_VERSION));
+#else
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::squeeze", "dim", stack.data()));
+#endif
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the select.int op with identical
+// semantics to the existing select.int op.
+// Note: index is typed as int64_t because SymInt is not yet header-only.
+inline torch::stable::Tensor select(
+    const torch::stable::Tensor& self,
+    int64_t dim,
+    int64_t index) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(index)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::select", "int", stack.data(), TORCH_ABI_VERSION));
+#else
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::select", "int", stack.data()));
+#endif
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the matmul op with identical
+// semantics to the existing matmul op.
+inline torch::stable::Tensor matmul(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::matmul", "", stack.data(), TORCH_ABI_VERSION));
+#else
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::matmul", "", stack.data()));
+#endif
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // New ops should be added here if they use a brand new shim API
@@ -576,6 +652,21 @@ inline torch::stable::Tensor& sum_out(
   // Clean up the handle in stack[0], discard the temporary
   (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
   return out;
+}
+
+// We expect this to be the stable version of the subtract.Tensor op.
+// Note: alpha is typed as double because the underlying C shim API
+// uses double for the Scalar parameter. We don't use torch_call_dispatcher
+// as the stableivalue conversion for Scalar is not yet available as of
+// 2.10
+inline torch::stable::Tensor subtract(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other,
+    double alpha = 1.0) {
+  AtenTensorHandle ret0;
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_subtract_Tensor(self.get(), other.get(), alpha, &ret0));
+  return torch::stable::Tensor(ret0);
 }
 
 // We expect this to be the stable version of the full.default op.

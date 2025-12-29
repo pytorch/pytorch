@@ -22,6 +22,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
+from ...utils import can_use_tma
 from .common import (
     build_subgraph_buffer,
     create_indices_fake,
@@ -42,6 +43,7 @@ from .flex_flash_attention import (
     _use_flex_flash_attention_backward,
     create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
+    is_trivial_mask_graph,
 )
 
 
@@ -381,8 +383,9 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", False)
+        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+            cur_kernel_options["USE_TMA"] = False
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
@@ -663,6 +666,13 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    # Add check for mixed dtypes
+    if query.dtype != key.dtype or query.dtype != value.dtype:
+        raise ValueError(
+            f"Backward pass with mixed query, key, and value dtype is not supported, "
+            f"got query.dtype={query.dtype}, key.dtype={key.dtype}, "
+            f"and value.dtype={value.dtype}"
+        )
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
@@ -729,9 +739,27 @@ def flex_attention_backward(*args, **kwargs):
         fw_graph,
         mask_graph,
         backend=backend,
+        joint_outputs=joint_outputs,
+        score_mod_other_buffers=score_mod_other_buffers,
     ):
+        needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
-            query, key, value, out, logsumexp, grad_out, scale, kernel_options
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            scale,
+            kernel_options,
+            fw_subgraph_buffer=fw_subgraph_buffer,
+            joint_subgraph_buffer=joint_outputs.grad_input,
+            score_mod_other_buffers=list(score_mod_other_buffers),
+            mask_graph_buffer=mask_graph_buffer if needs_block_mask else None,
+            q_num_blocks=q_num_blocks if needs_block_mask else None,
+            q_indices=q_indices if needs_block_mask else None,
+            full_q_num_blocks=full_q_num_blocks if needs_block_mask else None,
+            full_q_indices=full_q_indices if needs_block_mask else None,
         )
 
     # Construct layout with stride order matching K
