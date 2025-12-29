@@ -688,7 +688,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
 
         @register(torch.library.wrap_triton)
-        def handle_wrap_triton(self, tx: "InstructionTranslator", *args, **kwargs):
+        def handle_wrap_triton(self, tx: "InstructionTranslator", *args: VariableTracker, **kwargs: VariableTracker) -> VariableTracker:
             if len(args) == 1:
                 # torch.library.wrap_triton is a no-op in dynamo
                 return args[0]
