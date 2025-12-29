@@ -19,6 +19,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
     TestCase,
     xfailIfTorchDynamo,
@@ -1417,6 +1418,7 @@ except RuntimeError as e:
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
         @parametrize("show_cpp_stacktraces", [False, True])
+        @skipIfRocm(msg="HIP kernel launch with invalid config doesn't report error via hipGetLastError")
         @unittest.skipIf(
             _get_torch_cuda_version() >= (13, 0), "To be resolved after branch cut"
         )
