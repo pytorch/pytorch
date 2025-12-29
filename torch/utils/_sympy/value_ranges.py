@@ -465,6 +465,7 @@ class SymPyValueRangeAnalysis:
                 if not isinstance(value, BooleanAtom):
                     raise AssertionError("expected BooleanAtom for bool dtype")
             elif dtype.is_floating_point:
+                # pyrefly: ignore [missing-attribute]
                 if value.is_finite and not value.is_real:
                     raise AssertionError(
                         "expected float-like sympy value for float dtype"
