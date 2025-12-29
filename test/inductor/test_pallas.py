@@ -81,11 +81,23 @@ def make_pallas(cls):
 class PallasTestsMixin:
     """Basic tests for Pallas backend functionality (parameterized by DEVICE). Mixin only, not collected.
 
-    NOTE: CUDA tests using the Mosaic GPU backend may fail when run together due to
-    JAX Mosaic internal state issues. Each test passes when run individually. This is
-    a known limitation of the Mosaic GPU backend. To run tests reliably, use:
-        pytest test/inductor/test_pallas.py::PallasTestsCUDA::test_simple_add -v
+    NOTE: CUDA tests disable per-test fresh_cache to avoid JAX Mosaic GPU backend state issues.
+    The Mosaic backend fails with "Failed to construct pass pipeline" when dynamically loading
+    jit-compiled kernels across mock.patch.dict context boundaries (which fresh_cache uses).
     """
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # Disable per-test fresh_cache for CUDA to avoid JAX Mosaic state corruption
+        if getattr(cls, "DEVICE", None) == "cuda":
+            os.environ["INDUCTOR_TEST_DISABLE_FRESH_CACHE"] = "1"
+
+    @classmethod
+    def tearDownClass(cls):
+        if getattr(cls, "DEVICE", None) == "cuda":
+            os.environ.pop("INDUCTOR_TEST_DISABLE_FRESH_CACHE", None)
+        super().tearDownClass()
 
     def setUp(self):
         super().setUp()
