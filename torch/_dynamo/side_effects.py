@@ -900,8 +900,8 @@ class SideEffects:
 
         return self.ca_final_callbacks_var
 
-    def _log_side_effects(self, var: VariableTracker) -> None:
-        """Make a side effect log message with user stack."""
+    def _format_side_effect_message(self, var: VariableTracker) -> str:
+        """Format a side effect log message with user stack."""
         # NOTE: a KeyError in self.mutation_user_stacks or a NotImplementedError from var.source.name is a bug
         # and must be fixed!
         locations = self.mutation_user_stacks[var]
@@ -927,15 +927,20 @@ class SideEffects:
                 f"{description}{source_info} (unable to find user stacks for mutations)"
             )
 
-        side_effects_log.debug(log_str)
+        return log_str
 
     def codegen_update_mutated(
         self, cg: PyCodegen, log_side_effects: bool = False
     ) -> None:
         # NOTE: should only be called once per VT - only if a side effect actually gets codegen'd!
+        side_effect_messages: list[str] = []
+
         def _maybe_log_side_effect(var: VariableTracker) -> None:
             if log_side_effects:
-                self._log_side_effects(var)
+                msg = self._format_side_effect_message(var)
+                side_effect_messages.append(msg)
+                # Log individual side effects for granular debugging
+                side_effects_log.debug(msg)
 
         suffixes = []
         for var in self._get_modified_vars():
@@ -1274,6 +1279,20 @@ class SideEffects:
         # do all the actual mutations at the very end to handle dependencies
         for suffix in reversed(suffixes):
             cg.extend_output(suffix)
+
+        # Send batched structured trace for all side effects in this compilation
+        if log_side_effects and side_effect_messages:
+            combined_msg = "\n\n========================================\n\n".join(
+                side_effect_messages
+            )
+            torch._logging.trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "dynamo_side_effects",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: combined_msg,
+            )
 
     def is_empty(self) -> bool:
         return not (
