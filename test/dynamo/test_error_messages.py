@@ -2118,7 +2118,7 @@ torch._dynamo hit config.recompile_limit (1)
    function: 'fn' (test_error_messages.py:N)
    last reason: 0/0: n == 0                                                   # return x + n  # test_error_messages.py:N in fn
 To log all recompilation reasons, use TORCH_LOGS="recompiles".
-To diagnose recompilation issues, see https://pytorch.org/docs/main/compile/programming_model.recompilation.html""",
+To diagnose recompilation issues, see https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.recompilation.html""",
         )
 
         torch.compiler.reset()
@@ -2131,7 +2131,7 @@ To diagnose recompilation issues, see https://pytorch.org/docs/main/compile/prog
 Dynamo recompile limit exceeded
   Explanation: Dynamo attempted to recompile the code object too many times, exceeding the recompile_limit cache size limit (currently set to 1). Excessive recompilations can degrade performance due to the compilation overhead of each recompilation.
   Hint: To monitor recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider increasing torch._dynamo.config.recompile_limit to an appropriate value.
-  Hint: See https://pytorch.org/docs/main/compile/programming_model.recompilation.html for tips on dealing with recompilations.
+  Hint: See https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.recompilation.html for tips on dealing with recompilations.
 
   Developer debug context: Limit type: recompile_limit
 
