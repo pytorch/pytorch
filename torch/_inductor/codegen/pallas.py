@@ -1147,6 +1147,7 @@ class PallasKernel(SIMDKernel):
             return False
 
         # Skip for reduction variables
+        # pyrefly: ignore [missing-argument]
         if any(entry.is_reduction for _, entry in var_items):
             return False
 
@@ -1370,6 +1371,7 @@ class PallasKernel(SIMDKernel):
         """Compute total reduction numel."""
         result = 1
         for tree in self.range_trees:
+            # pyrefly: ignore [missing-argument]
             if tree.is_reduction:
                 numel = self._safe_int(tree.numel)
                 if numel is None:
@@ -2077,6 +2079,7 @@ class PallasKernel(SIMDKernel):
             var = used_iter_vars[0]
             var_name = str(var)
             is_reduction_var = (
+                # pyrefly: ignore [missing-argument]
                 var in self.range_tree_nodes and self.range_tree_nodes[var].is_reduction
             )
 
@@ -2435,7 +2438,9 @@ class PallasKernel(SIMDKernel):
 
         # Count the number of pointwise and reduction dimensions
         n_reduction_dims = sum(
-            1 for var, entry in self.range_tree_nodes.items() if entry.is_reduction
+            1
+            for var, entry in self.range_tree_nodes.items()
+            if entry.is_reduction  # pyrefly: ignore [missing-argument]
         )
 
         if reduction_type == "xor_sum":
@@ -2468,7 +2473,7 @@ class PallasKernel(SIMDKernel):
                     reduction_vars = [
                         var
                         for var, entry in self.range_tree_nodes.items()
-                        if entry.is_reduction
+                        if entry.is_reduction  # pyrefly: ignore [missing-argument]
                     ]
                     if reduction_vars:
                         r_var = reduction_vars[0]
@@ -2481,7 +2486,7 @@ class PallasKernel(SIMDKernel):
                         pw_vars = [
                             var
                             for var, entry in self.range_tree_nodes.items()
-                            if not entry.is_reduction
+                            if not entry.is_reduction  # pyrefly: ignore [missing-argument]
                         ]
                         if pw_vars:
                             pw_var = pw_vars[0]
