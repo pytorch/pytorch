@@ -7,6 +7,10 @@ from torch._dynamo.utils import same
 from torch._inductor import config, metrics
 from torch._inductor.test_case import TestCase
 from torch.testing._internal.common_device_type import largeTensorTest
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+)
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CUDA_AND_TRITON
 
 
@@ -15,9 +19,19 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 DO_PROFILING = os.environ.get("DO_PROFILING") == "1"
 
 
-@config.patch(
-    "auto_chunker.enable", os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER", "1") == "1"
-)
+class LinearAndCEL(nn.Module):
+    def __init__(self, C, V):
+        super().__init__()
+        self.linear = nn.Linear(C, V)
+        self.ce = nn.CrossEntropyLoss()
+        self.V = V
+
+    def forward(self, x, y):
+        return self.ce(self.linear(x).view(-1, self.V), y.view(-1))
+
+
+@config.patch("auto_chunker.enable", True)
+@instantiate_parametrized_tests
 class AutoChunkerTest(TestCase):
     def setUp(self):
         super().setUp()
@@ -117,16 +131,7 @@ class AutoChunkerTest(TestCase):
 
         dtype = torch.bfloat16
 
-        class LinearAndCEL(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = nn.Linear(C, V)
-                self.ce = nn.CrossEntropyLoss()
-
-            def forward(self, x, y):
-                return self.ce(self.linear(x).view(B * T, -1), y.view(-1))
-
-        mod = LinearAndCEL().cuda().to(dtype)
+        mod = LinearAndCEL(C, V).cuda().to(dtype)
 
         def f(x, y):
             x.grad = None
@@ -168,13 +173,79 @@ class AutoChunkerTest(TestCase):
             print(f"Write the chrome trace to {path}")
             p.export_chrome_trace(path)
 
-        if config.auto_chunker.enable:
-            self.assertEqual(metrics.num_auto_chunking, 1)
-            expected_bound = B * T * V * x.dtype.itemsize
-            self.assertTrue(
-                peak_memory < expected_bound,
-                f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
-            )
+        self.assertEqual(metrics.num_auto_chunking, 1)
+        expected_bound = B * T * V * x.dtype.itemsize
+        self.assertTrue(
+            peak_memory < expected_bound,
+            f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
+        )
+
+    @config.patch("auto_chunker.num_chunk", config.auto_chunker.num_chunk or 16)
+    @largeTensorTest("12GB", device=GPU_TYPE, inductor=True)
+    @parametrize("gradient_accumulation_steps", [1, 2])
+    def test_gradient_accumulation(self, gradient_accumulation_steps):
+        B = 32
+        T = 1024
+        C = 768
+        V = 50257
+
+        dtype = torch.bfloat16
+
+        mod = LinearAndCEL(C, V).cuda().to(dtype)
+
+        def f(x, y):
+            x.grad = None
+
+            x = x * 2
+            loss = mod(x, y) / gradient_accumulation_steps
+            loss.backward()
+            return loss
+
+        def step(func, xs, ys):
+            mod.linear.weight.grad = None
+            mod.linear.bias.grad = None
+
+            tot = 0
+            for x, y in zip(xs, ys):
+                loss = func(x, y)
+                tot += loss.detach().item()
+            return tot
+
+        opt_f = torch.compile(f)
+
+        xs = [
+            torch.randn(B, T, C, dtype=dtype, requires_grad=True, device="cuda")
+            for _ in range(gradient_accumulation_steps)
+        ]
+        ys = [
+            torch.randint(0, V, (B, T)).cuda()
+            for _ in range(gradient_accumulation_steps)
+        ]
+
+        expect = (
+            step(f, xs, ys),
+            *[x.grad for x in xs],
+            mod.linear.weight.grad,
+            mod.linear.bias.grad,
+        )
+        torch.cuda.reset_peak_memory_stats()
+        actual = (
+            step(opt_f, xs, ys),
+            *[x.grad for x in xs],
+            mod.linear.weight.grad,
+            mod.linear.bias.grad,
+        )
+        peak_memory = torch.cuda.max_memory_allocated()
+        print(f"Peak memory {peak_memory / 10**9:.6f} GB")
+
+        self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
+
+        self.assertEqual(metrics.num_auto_chunking, 1)
+        expected_bound = B * T * V * xs[0].dtype.itemsize
+        self.assertTrue(
+            peak_memory < expected_bound,
+            f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
+        )
 
 
 if __name__ == "__main__":
