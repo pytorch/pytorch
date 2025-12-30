@@ -1184,7 +1184,7 @@ def is_from_global_source(source: Source) -> bool:
     return get_global_source_name(source) is not None
 
 
-def get_global_source_name(source: Source) -> Optional[str]:
+def get_global_source_name(source: Source | None) -> str | None:
     if isinstance(source, ChainedSource):
         return get_global_source_name(source.base)
     if not isinstance(source, GlobalSource):

@@ -2016,6 +2016,8 @@ def getRocmArchName(device_index: int = 0):
     return torch.cuda.get_device_properties(device_index).gcnArchName
 
 def isRocmArchAnyOf(arch: tuple[str, ...]):
+    if not torch.version.hip:
+        return False
     rocmArch = getRocmArchName()
     return any(x in rocmArch for x in arch)
 

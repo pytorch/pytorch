@@ -335,6 +335,7 @@ jobs:
           TESTS_TO_INCLUDE: ${{ inputs.tests-to-include }}
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
+          HF_CACHE: /mnt/hf_cache
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
@@ -368,6 +369,13 @@ jobs:
             JENKINS_USER="--user jenkins"
             DOCKER_SHELL_CMD=
             USED_IMAGE="${DOCKER_IMAGE}"
+          fi
+
+          # Just create an empty HF_CACHE dir if it doesn't exist. This dir is not
+          # used for anything besides vLLM jobs
+          if [[ ! -d "${HF_CACHE}" ]]; then
+            export HF_CACHE="${RUNNER_TEMP}/hf_cache"
+            mkdir -p "${HF_CACHE}"
           fi
 
           # detached container should get cleaned up by teardown_ec2_linux
@@ -415,6 +423,7 @@ jobs:
             -e SKIP_SCCACHE_INITIALIZATION=1 \
             -e HUGGING_FACE_HUB_TOKEN \
             -e VLLM_TEST_HUGGING_FACE_TOKEN \
+            -e HF_CACHE \
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e DASHBOARD_TAG \
             -e ARTIFACTS_FILE_SUFFIX \
@@ -431,6 +440,7 @@ jobs:
             --name="${container_name}" \
             ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -v "${HF_CACHE}:${HF_CACHE}" \
             -w /var/lib/jenkins/workspace \
             "${USED_IMAGE}" \
             ${DOCKER_SHELL_CMD}
