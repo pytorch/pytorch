@@ -968,12 +968,6 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                     (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
                 ),
             ),
-            # If we use the graph search solution, the redistribution path will
-            # be S(0)[0, 1] -> S(0)[0]S(1)[1] -> S(1)[1] -> S(0)[2]S(1)[1],
-            # which takes only 1 comm count. However, this placement follows the
-            # default device order and the greedy solution will be triggered,
-            # which results in path: S(0)[0, 1] -> S(0)[0]S(1)[1] -> S(1)[1] ->
-            # S(0)[2]S(1)[1] with 2 comm count
             (
                 (
                     [Shard(0), Shard(0), Replicate()],
@@ -1002,22 +996,22 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]S(1)->S(0)S(1)[1]S(1)[0]->RS(1)[1]S(1)[0]->RS(0)S(1)->RS(0)[0]S(0)[1]""",
+                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]R->S(0)RR->RRR->RS(0)R->RS(0)[0]S(0)[1]""",
                 )
             elif idx == 1:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]S(1)->RS(0)S(1)->RS(0)[0]S(0)[1]""",
+                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]R->RS(0)R->RS(0)[0]S(0)[1]""",
                 )
             elif idx == 2:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]R->S(1)S(0)R->S(1)S(2)R->S(0)S(2)R->S(0)[0]S(0)[1]R""",
+                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]R->RS(0)R->RRR->S(0)RR->S(0)[0]S(0)[1]R""",
                 )
             elif idx == 3:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]R->S(0)S(1)R->RS(1)R->RS(1)S(0)""",
+                    """S(0)[0]S(0)[1]R->S(0)RR->S(0)S(1)R->RS(1)R->RS(1)S(0)""",
                 )
             expected_dt = _distribute_tensor(
                 input_data.clone(), mesh, dst_placement, shard_order=dst_order
@@ -1072,7 +1066,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]S(2)->S(0)S(2)[1]S(2)[0]->S(1)S(2)[1]S(2)[0]->S(1)[0]S(1)[1]S(2)->S(1)[0]S(1)[1]S(1)[2]""",
+                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]R->S(0)RR->RRR->S(1)RR->S(1)[0]S(1)[1]R->S(1)[0]S(1)[1]S(1)[2]""",
                 )
             # Validate greedy algorithm trace (idx=1, disable_graph=True)
             # Greedy uses simple heuristic approach (processes mesh dims sequentially)
@@ -1219,9 +1213,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             rng = random.Random(42)
             rng.shuffle(shard_orders)
             with use_min_cost_redistribution_plan(enabled=True):
-                for i in range(
-                    0, len(shard_orders), 2
-                ):
+                for i in range(0, len(shard_orders), 2):
                     src_order, dst_order = shard_orders[i : i + 2]
                     # prepare SRC DTensorSpec
                     src_dtensor = _distribute_tensor(
