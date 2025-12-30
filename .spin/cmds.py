@@ -174,6 +174,7 @@ VERY_FAST_LINTERS = {
 
 #: These linters are expected to take a few seconds, but less than 10s cpu time total
 FAST_LINTERS = {
+    "CLANGTIDY_EXECUTORCH_COMPATIBILITY",
     "CMAKE",
     "DOCSTRING_LINTER",
     "GHA",
