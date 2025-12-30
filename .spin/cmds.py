@@ -337,7 +337,7 @@ def _run_lintrunner(
         + (list(lintrunner_args) if lintrunner_args else [])
     )
     p = spin.util.run(full_cmd, sys_exit=False)
-    lint_found = not bool(p.returncode)
+    lint_found = bool(p.returncode)
     if tee_file:
         tee_path = Path(tee_file)
         json_output = tee_path.read_text()
@@ -358,6 +358,7 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     all_files_linters = VERY_FAST_LINTERS | FAST_LINTERS
     changed_files_linters = SLOW_LINTERS
     write_json_output = bool(tee_file)
+    breakpoint()
     lint_found_all, json_output_all = _run_lintrunner(
         all_files_linters,
         take=take,
