@@ -26,6 +26,7 @@ import functools
 import inspect
 import itertools
 import logging
+import os
 import sys
 import traceback
 import types
@@ -2131,12 +2132,18 @@ class WrapperUserFunctionVariable(VariableTracker):
             module_name = getattr(target_fn, "__module__", "") or ""
 
             if module_name.split(".", maxsplit=1)[0] != "torch":
+                frame_summary = tx.frame_summary()
+                filename = os.path.basename(frame_summary.filename)
+                lineno = frame_summary.lineno
                 msg = (
                     "Dynamo detected a call to a `functools.lru_cache`-wrapped "
-                    "function. Dynamo ignores the cache wrapper and directly "
-                    "traces the wrapped function. Silent incorrectness is only "
-                    "a *potential* risk, not something we have observed. "
-                    'Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.'
+                    f"function at '{filename}:{lineno}'. Dynamo ignores the "
+                    "cache wrapper and directly traces the wrapped function. "
+                    "Silent incorrectness is only a *potential* risk, not "
+                    "something we have observed. "
+                    "Enable TORCH_LOGS=+dynamo for a DEBUG stack trace.\n\n"
+                    "This call originates from:\n"
+                    f"{''.join(traceback.format_list([frame_summary]))}"
                 )
 
                 torch._dynamo.utils.warn_once(msg)
