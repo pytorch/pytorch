@@ -6,7 +6,6 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 import torch
-import torch.distributed._functional_collectives as funcol
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import (
@@ -834,8 +833,6 @@ class CollectivePaddingContext:
 
         # Run collective
         result = collective_fn(local_tensor)
-        if isinstance(result, funcol.AsyncCollectiveTensor):
-            result = result.wait()
 
         # Apply all unpadding operations in reverse order
         for op in reversed(self._ops):
