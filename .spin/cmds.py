@@ -179,6 +179,7 @@ FAST_LINTERS = {
     "DOCSTRING_LINTER",
     "GHA",
     "NATIVEFUNCTIONS",
+    "PYREFLY",
     "RUFF",
     "SET_LINTER",
     "SHELLCHECK",
@@ -196,7 +197,6 @@ SLOW_LINTERS = {
     "FLAKE8",
     "GB_REGISTRY",
     "PYFMT",
-    "PYREFLY",
     "TEST_DEVICE_BIAS",
     "TEST_HAS_MAIN",
 }
