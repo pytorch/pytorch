@@ -776,7 +776,6 @@ class GraphModule(torch.nn.Module):
         gen, y = fn(t)
         self.assertEqual(y, t.sin())
         self.assertEqual(len(list(gen)), 4)
-        # Check for the new formatted message from unimplemented()
         found = any(
             "Generator reconstruction with mutations" in msg
             and "Cannot reconstruct a generator with variable mutations" in msg
