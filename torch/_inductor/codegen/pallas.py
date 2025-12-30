@@ -2885,10 +2885,14 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                     except (TypeError, ValueError):
                         length_val = None
 
-                    # For symbolic lengths, still need to reshape for broadcasting
-                    # if there are multiple broadcast dimensions
+                    # For symbolic lengths, only reshape if we have a valid target shape
+                    # Without a target, we can't determine correct dimensions
                     if length_val is None:
-                        if num_broadcast_dims > 1 and idx != total_var_idx:
+                        if (
+                            reshape_target_shape
+                            and num_broadcast_dims > 1
+                            and idx != total_var_idx
+                        ):
                             # Symbolic var in multi-broadcast case needs reshape
                             broadcast_idx = next(
                                 (
