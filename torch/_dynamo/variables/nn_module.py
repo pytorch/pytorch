@@ -533,11 +533,6 @@ class NNModuleVariable(VariableTracker):
                 tx.output.is_root_tracer()
                 and mod.__module__.startswith(("torch.nn.", "torch.ao."))
                 and mod.__module__ != "torch.nn.utils.parametrize"
-                # this basically means we are using the new strict export tracer which wraps the
-                # user callable, so we shouldn't directly proxy in the fx graph
-                and not isinstance(
-                    mod, torch.ao.quantization.pt2e.export_utils._WrapperModule
-                )
             ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True

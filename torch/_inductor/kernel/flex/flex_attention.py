@@ -22,6 +22,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
+from ...utils import can_use_tma
 from .common import (
     build_subgraph_buffer,
     create_indices_fake,
@@ -156,6 +157,24 @@ def flex_attention(
         mask_graph,
     ) = block_mask
 
+    kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+
+    # Early check for FLASH backend: detect unsupported captured scalars before
+    # building subgraph buffers (which can trigger unbacked_bindings errors)
+    if backend == "FLASH":
+        from .flex_flash_attention import _has_unsupported_captured_scalars
+
+        if _has_unsupported_captured_scalars(
+            score_mod_other_buffers, mask_mod_other_buffers
+        ):
+            raise RuntimeError(
+                "BACKEND='FLASH' but flash attention cannot be used: "
+                "NYI: score_mod or mask_mod captures a dynamic scalar (SymInt/SymFloat). "
+                "The FLASH backend cannot inline symbolic values into the CuteDSL template. "
+                "Workarounds: use BACKEND='TRITON', compile with dynamic=False, or pass the "
+                "value as a tensor on device instead of capturing a Python scalar."
+            )
+
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -184,8 +203,6 @@ def flex_attention(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
     freeze_irnodes(mask_graph_buffer)
-
-    kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
@@ -382,8 +399,9 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", False)
+        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+            cur_kernel_options["USE_TMA"] = False
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)

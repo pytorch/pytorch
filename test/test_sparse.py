@@ -19,7 +19,7 @@ from numbers import Number
 from typing import Any
 from packaging import version
 from torch.testing._internal.common_cuda import \
-    (SM53OrLater, SM80OrLater, TEST_MULTIGPU)
+    (SM80OrLater, TEST_MULTIGPU)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, ops, dtypes, dtypesIfCUDA, dtypesIfMPS, onlyCPU, onlyCUDA, precisionOverride,
      deviceCountAtLeast, OpDTypes, onlyNativeDeviceTypes, skipCUDAIf, expectedFailureMPS,
@@ -3796,7 +3796,7 @@ class TestSparse(TestSparseBase):
     @coalescedonoff
     @dtypes(*floating_and_complex_types())
     @dtypesIfMPS(*all_mps_types())
-    @dtypesIfCUDA(*floating_types_and(*[torch.half] if SM53OrLater and not TEST_WITH_ROCM else [],
+    @dtypesIfCUDA(*floating_types_and(*[torch.half] if not TEST_WITH_ROCM else [],
                                       *[torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [],
                                       torch.complex64,
                                       *[torch.complex128]
