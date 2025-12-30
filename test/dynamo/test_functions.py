@@ -4216,7 +4216,7 @@ class GraphModule(torch.nn.Module):
 
         compiled = torch.compile(fn, fullgraph=True, backend="eager")
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=device_type)
         result = compiled(x)
 
         self.assertEqual(result, torch.sin(x))
