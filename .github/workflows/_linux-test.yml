@@ -371,6 +371,13 @@ jobs:
             USED_IMAGE="${DOCKER_IMAGE}"
           fi
 
+          # Just create an empty HF_CACHE dir if it doesn't exist. This dir is not
+          # used for anything besides vLLM jobs
+          if [[ ! -d "${HF_CACHE}" ]]; then
+            export HF_CACHE="${RUNNER_TEMP}/hf_cache"
+            mkdir -p "${HF_CACHE}"
+          fi
+
           # detached container should get cleaned up by teardown_ec2_linux
           # TODO: Stop building test binaries as part of the build phase
           # Used for GPU_FLAG, SHM_OPTS, JENKINS_USER and DOCKER_SHELL_CMD since that doesn't play nice

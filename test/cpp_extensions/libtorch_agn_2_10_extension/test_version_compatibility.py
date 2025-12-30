@@ -287,23 +287,13 @@ if not IS_WINDOWS:
     # Collect both .cpp and .cu files, excluding those used for negative test
     # already defined above
     _source_files = sorted(
-        [
-            f
-            for f in _csrc_dir.rglob("*.cpp")
-            if f.name not in ("mv_tensor_accessor_cpu.cpp",)
-        ]
-        + [
-            f
-            for f in _csrc_dir.rglob("*.cu")
-            if f.name not in ("mv_tensor_accessor_cuda.cu",)
-        ]
+        [f for f in _csrc_dir.rglob("*.cpp") if f.name != "mv_tensor_accessor_cpu.cpp"]
+        + [f for f in _csrc_dir.rglob("*.cu") if f.name != "mv_tensor_accessor_cuda.cu"]
     )
 
     for _source_file in _source_files:
         _test_method = _create_test_method_for_file(_source_file)
-        setattr(
-            FunctionVersionCompatibilityTest, _test_method.__name__, _test_method
-        )
+        setattr(FunctionVersionCompatibilityTest, _test_method.__name__, _test_method)
 
     del (
         _create_test_method_for_file,
