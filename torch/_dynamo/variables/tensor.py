@@ -1073,7 +1073,7 @@ class TensorVariable(VariableTracker):
         return VariableTracker.build(tx, out)
 
     def method_backward(
-        self, *args: VariableTracker, **kwargs: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker, **kwargs: VariableTracker
     ) -> NoReturn:
         unimplemented(
             gb_type="Unsupported Tensor.backward() call",
@@ -1083,7 +1083,7 @@ class TensorVariable(VariableTracker):
         )
 
     def method_data_ptr(
-        self, *args: VariableTracker, **kwargs: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker, **kwargs: VariableTracker
     ) -> "DataPtrVariable":
         return DataPtrVariable(self)
 
@@ -1234,7 +1234,7 @@ class TensorVariable(VariableTracker):
         return ConstantVariable.create(None)
 
     def method_resize_(
-        self, *args: VariableTracker, **kwargs: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker, **kwargs: VariableTracker
     ) -> NoReturn:
         unimplemented(
             gb_type="Unsupported Tensor.resize_() call",
@@ -1244,7 +1244,7 @@ class TensorVariable(VariableTracker):
         )
 
     def method_resize_as_(
-        self, *args: VariableTracker, **kwargs: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker, **kwargs: VariableTracker
     ) -> NoReturn:
         unimplemented(
             gb_type="Unsupported Tensor.resize_as_() call",
@@ -1254,7 +1254,7 @@ class TensorVariable(VariableTracker):
         )
 
     def method_sparse_resize_(
-        self, *args: VariableTracker, **kwargs: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker, **kwargs: VariableTracker
     ) -> NoReturn:
         unimplemented(
             gb_type="Unsupported Tensor.sparse_resize_() call",
@@ -1264,7 +1264,7 @@ class TensorVariable(VariableTracker):
         )
 
     def method_sparse_resize_and_clear_(
-        self, *args: VariableTracker, **kwargs: VariableTracker
+        self, tx: "InstructionTranslator", *args: VariableTracker, **kwargs: VariableTracker
     ) -> NoReturn:
         unimplemented(
             gb_type="Unsupported Tensor.sparse_resize_and_clear_() call",
@@ -1500,7 +1500,7 @@ class TensorVariable(VariableTracker):
         return handle_variable
 
     def method_requires_grad_(
-        self, requires_grad: bool | VariableTracker = True
+        self, tx: "InstructionTranslator", requires_grad: bool | VariableTracker = True
     ) -> VariableTracker:
         if requires_grad is not True:
             requires_grad = requires_grad.as_python_constant()  # type: ignore[attr-defined]
