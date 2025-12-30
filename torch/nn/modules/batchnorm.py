@@ -262,8 +262,12 @@ class _LazyNormBase(LazyModuleMixin, _NormBase):
         if self.has_uninitialized_params():
             self.num_features = input.shape[1]
             if self.affine:
-                assert isinstance(self.weight, UninitializedParameter)
-                assert isinstance(self.bias, UninitializedParameter)
+                if not isinstance(self.weight, UninitializedParameter):
+                    raise AssertionError(
+                        "self.weight must be an UninitializedParameter"
+                    )
+                if not isinstance(self.bias, UninitializedParameter):
+                    raise AssertionError("self.bias must be an UninitializedParameter")
                 self.weight.materialize((self.num_features,))
                 self.bias.materialize((self.num_features,))
             if self.track_running_stats:
@@ -757,7 +761,8 @@ class SyncBatchNorm(_BatchNorm):
             exponential_average_factor = self.momentum
 
         if self.training and self.track_running_stats:
-            assert self.num_batches_tracked is not None
+            if self.num_batches_tracked is None:
+                raise AssertionError("num_batches_tracked must not be None")
             self.num_batches_tracked.add_(1)
             if self.momentum is None:  # use cumulative moving average
                 exponential_average_factor = 1.0 / self.num_batches_tracked.item()
@@ -825,7 +830,8 @@ class SyncBatchNorm(_BatchNorm):
                 self.eps,
             )
         else:
-            assert bn_training
+            if not bn_training:
+                raise AssertionError("bn_training must be True")
             return sync_batch_norm.apply(
                 input,
                 self.weight,

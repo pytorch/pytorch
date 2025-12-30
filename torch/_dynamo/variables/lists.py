@@ -698,6 +698,7 @@ class CommonListMethodsVariable(BaseListVariable):
             else:
                 const_idx = idx.as_python_constant()
             tx.output.side_effects.mutation(self)
+            # type: ignore[arg-type]
             self.items.insert(const_idx, value)
             return ConstantVariable.create(None)
         elif name == "pop" and self.is_mutable():
@@ -752,6 +753,7 @@ class CommonListMethodsVariable(BaseListVariable):
             key, value = args
             tx.output.side_effects.mutation(self)
             if isinstance(key, SymNodeVariable):
+                # pyrefly: ignore[unsupported-operation]
                 self.items[key.evaluate_expr()] = value
             elif isinstance(key, SliceVariable):
                 if key.is_python_constant():
@@ -790,7 +792,8 @@ class CommonListMethodsVariable(BaseListVariable):
                     idx = args[0].as_python_constant()
 
                 try:
-                    self.items.__delitem__(idx)
+                    self.items.__delitem__(idx)  # type: ignore[arg-type]
+
                 except (IndexError, ValueError) as exc:
                     raise_observed_exception(
                         type(exc),
@@ -905,6 +908,7 @@ class ListVariable(CommonListMethodsVariable):
                     key = key.as_python_constant()
 
                 try:
+                    # pyrefly: ignore[unsupported-operation]
                     self.items[key] = value
                 except (IndexError, TypeError) as e:
                     raise_observed_exception(
@@ -1343,10 +1347,22 @@ class SizeVariable(TupleVariable):
     def get_item_dyn(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        from .tensor import SymNodeVariable
+        from .tensor import SymNodeVariable, TensorVariable
 
         if isinstance(arg, SymNodeVariable):
             index = arg.sym_num
+        elif isinstance(arg, TensorVariable):
+            value = get_fake_value(arg.as_proxy().node, tx)
+            if value.constant is None or value.constant.numel() != 1:
+                unimplemented(
+                    gb_type="Indexing torch.Size with non-scalar tensor",
+                    context=f"get_item_dyn {self} {arg}",
+                    explanation=(
+                        "Attempted to index torch.Size with a tensor that is not a scalar constant."
+                    ),
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+            index = value.constant.item()
         else:
             index = arg.as_python_constant()
 

@@ -9,7 +9,7 @@ from collections import defaultdict
 from collections.abc import Sequence
 from enum import auto, Enum
 from functools import cache
-from typing import cast, NamedTuple, Optional
+from typing import cast, NamedTuple
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -39,20 +39,11 @@ logger = logging.getLogger(__name__)
 # When True, forces the graph-based algorithm using Dijkstra's shortest path.
 # When False, prefers the greedy algorithm for faster planning. Uses the graph-based algorithm
 # only when necessary to support strided-shard redistribution
-_FORCE_MIN_COST_REDISTRIBUTION_PLAN: Optional[bool] = None
-
-# Global configuration flag to control the cost function used by the graph-based planner.
-# When True, uses fixed cost weights that prioritize reducing memory overhead
-# (e.g., prefers all-to-all over all-gather to avoid memory spikes).
-# When False, uses communication time estimation based on actual tensor sizes and
-# mesh topology for more accurate cost modeling.
-_USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN: bool = True
+_FORCE_MIN_COST_REDISTRIBUTION_PLAN: bool | None = None
 
 
 @contextlib.contextmanager
-def use_min_cost_redistribution_plan(
-    enabled: bool = True, reduce_memory_overhead: bool = True
-):
+def use_min_cost_redistribution_plan(enabled: bool = True):
     """
     Context manager to control the redistribution planning strategy for DTensor operations.
 
@@ -101,28 +92,15 @@ def use_min_cost_redistribution_plan(
         enabled (bool): If True, forces the use of the graph-based algorithm.
                        If False, forces the use of the greedy algorithm.
                        Default: True
-        reduce_memory_overhead (bool): Controls the cost function used by the graph-based
-                       planner. If True, uses fixed cost weights that prioritize reducing
-                       memory overhead (e.g., prefers all-to-all over all-gather).
-                       If False, uses communication time estimation based on actual tensor
-                       sizes and mesh topology. Default: True
     """
     global _FORCE_MIN_COST_REDISTRIBUTION_PLAN
-    global _USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN
 
-    old_value = (
-        _FORCE_MIN_COST_REDISTRIBUTION_PLAN,
-        _USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN,
-    )
+    old_value = _FORCE_MIN_COST_REDISTRIBUTION_PLAN
     _FORCE_MIN_COST_REDISTRIBUTION_PLAN = enabled
-    _USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN = reduce_memory_overhead
     try:
         yield
     finally:
-        (
-            _FORCE_MIN_COST_REDISTRIBUTION_PLAN,
-            _USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN,
-        ) = old_value
+        _FORCE_MIN_COST_REDISTRIBUTION_PLAN = old_value
 
 
 class _TransformInfo(NamedTuple):
@@ -134,7 +112,7 @@ class _TransformInfo(NamedTuple):
 
 # Global cache for DTensorRedistributePlanner instances
 _planner_cache: dict[
-    tuple[weakref.ReferenceType[DeviceMesh], TensorMeta, Optional[bool]],
+    tuple[weakref.ReferenceType[DeviceMesh], TensorMeta],
     "DTensorRedistributePlanner",
 ] = {}
 
@@ -142,7 +120,6 @@ _planner_cache: dict[
 def get_redistribute_planner(
     device_mesh: DeviceMesh,
     dtensor_meta: TensorMeta,
-    reduce_memory_overhead: Optional[bool] = True,
 ) -> "DTensorRedistributePlanner":
     """
     Factory function to get or create a DTensorRedistributePlanner instance.
@@ -152,23 +129,16 @@ def get_redistribute_planner(
     Args:
         device_mesh: The device mesh for the planner
         dtensor_meta: TensorMeta of the DTensor to redistribute
-        reduce_memory_overhead: The objective redistribute cost function
-            focuses on reducing the memory overhead. Otherwise reducing the
-            communication time.
     Returns:
         A DTensorRedistributePlanner instance (potentially cached)
     """
     if _are_we_tracing():
-        return DTensorRedistributePlanner(
-            device_mesh, dtensor_meta, reduce_memory_overhead
-        )
+        return DTensorRedistributePlanner(device_mesh, dtensor_meta)
     # Use the underlying shape (torch.Size) from TensorMeta for the cache key
-    cache_key = (weakref.ref(device_mesh), dtensor_meta, reduce_memory_overhead)
+    cache_key = (weakref.ref(device_mesh), dtensor_meta)
 
     if cache_key not in _planner_cache:
-        planner = DTensorRedistributePlanner(
-            device_mesh, dtensor_meta, reduce_memory_overhead
-        )
+        planner = DTensorRedistributePlanner(device_mesh, dtensor_meta)
         _planner_cache[cache_key] = planner
 
     return _planner_cache[cache_key]
@@ -330,7 +300,6 @@ class DTensorRedistributePlanner:
         self,
         device_mesh: DeviceMesh,
         dtensor_meta: TensorMeta,
-        reduce_memory_overhead: Optional[bool] = True,
     ) -> None:
         """
         Initialize DTensorRedistributePlanner.
@@ -338,9 +307,6 @@ class DTensorRedistributePlanner:
         Args:
             device_mesh: The device mesh for this planner
             dtensor_meta: TensorMeta of the DTensor to redistribute
-            reduce_memory_overhead: The objective redistribute cost function
-            focuses on reducing the memory overhead. Otherwise reducing the
-            communication time.
         """
         self.device_mesh = device_mesh
         self.coordinate = device_mesh.get_coordinate()
@@ -348,65 +314,35 @@ class DTensorRedistributePlanner:
         assert dtensor_meta is not None
         self.dtensor_meta = dtensor_meta
         self.tensor_dimension = len(dtensor_meta.shape)
-        self.reduce_memory_overhead = reduce_memory_overhead
         self.setup_cost_callbacks()
 
     def setup_cost_callbacks(
         self,
     ) -> None:
         """
-        Set up the cost weights for different collective operations.
+        Set up the cost function for different collective operations.
+        Uses communication time estimation based on actual tensor sizes and
+        mesh topology for accurate cost modeling.
         """
-        if self.reduce_memory_overhead:
-            all_reduce_cost: float = 4.0
-            all_to_all_cost: float = 1.0
-            all_gather_cost: float = 2.0
-            reduce_scatter_cost: float = 2.0
-            chunk_cost: float = 0.0
 
-            def cost_function(
-                src_state,
-                dst_state,
-                transition_type: DTensorRedistributePlanner.TransitionType,
-            ):
-                match transition_type:
-                    case DTensorRedistributePlanner.TransitionType.REPLICATE_TO_SHARD:
-                        return chunk_cost
-                    case DTensorRedistributePlanner.TransitionType.SHARD_TO_SHARD:
-                        return all_to_all_cost
-                    case DTensorRedistributePlanner.TransitionType.SHARD_TO_REPLICATE:
-                        return all_gather_cost
-                    case DTensorRedistributePlanner.TransitionType.PARTIAL_TO_REPLICATE:
-                        return all_reduce_cost
-                    case DTensorRedistributePlanner.TransitionType.REPLICATE_TO_PARTIAL:
-                        # replicate to partial is a no-op (just marks tensor as partial)
-                        return chunk_cost
-                    case DTensorRedistributePlanner.TransitionType.PARTIAL_TO_SHARD:
-                        return reduce_scatter_cost
-                    case _:
-                        raise ValueError(
-                            f"unsupported cost for TransitionType {transition_type}"
-                        )
-        else:
+        def state_to_spec(
+            state: DTensorRedistributePlanner.DistState,
+        ) -> DTensorSpec:
+            return DTensorSpec(
+                mesh=self.device_mesh,
+                placements=state.placements,
+                tensor_meta=self.dtensor_meta,
+                shard_order=state.tensor_dim_to_mesh_dim,
+            )
 
-            def state_to_spec(
-                state: DTensorRedistributePlanner.DistState,
-            ) -> DTensorSpec:
-                return DTensorSpec(
-                    mesh=self.device_mesh,
-                    placements=state.placements,
-                    tensor_meta=self.dtensor_meta,
-                    shard_order=state.tensor_dim_to_mesh_dim,
-                )
-
-            def cost_function(
-                src_state,
-                dst_state,
-                transition_type: DTensorRedistributePlanner.TransitionType,
-            ):
-                return one_step_redistribute_cost(
-                    state_to_spec(src_state), state_to_spec(dst_state)
-                )
+        def cost_function(
+            src_state,
+            dst_state,
+            transition_type: DTensorRedistributePlanner.TransitionType,
+        ):
+            return one_step_redistribute_cost(
+                state_to_spec(src_state), state_to_spec(dst_state)
+            )
 
         self.cost_function = cost_function
 
@@ -891,7 +827,6 @@ def _gen_transform_infos_non_cached(
     drp = get_redistribute_planner(
         device_mesh,
         src_spec.tensor_meta,
-        _USE_REDUCE_MEMORY_OVERHEAD_REDISTRIBUTION_PLAN,
     )
     if use_graph_based_transform:
         transform_infos = drp.generate_graph_based_transform_infos(
@@ -919,7 +854,6 @@ def redistribute_local_tensor(
     target_spec: DTensorSpec,
     *,
     async_op: bool = False,
-    is_backward: bool = False,
     use_graph_based_transform: bool | None = None,
 ) -> torch.Tensor:
     """
@@ -1031,27 +965,12 @@ def redistribute_local_tensor(
             elif target.is_partial():
                 if current.is_replicate():
                     partial_spec = cast(Partial, target)
-                    # skip the replicate to partial transformation when we are in backward pass
-                    # In this case we keep the grad as replicate, this is because we don't
-                    # want to convert the replicated gradients back to partial, although
-                    # that's logically conform with the same layout, converting the gradients
-                    # back to partial is actually useless as you would have to do reduce later
-                    # which would be more expensive than keeping it replicate! For this reason,
-                    # we keep the replicate grad here.
-                    new_local_tensor = (
-                        partial_spec._partition_value(local_tensor, device_mesh, i)
-                        if not is_backward
-                        else local_tensor
+                    new_local_tensor = partial_spec._partition_value(
+                        local_tensor, device_mesh, i
                     )
                 elif current.is_shard():
-                    if not is_backward:
-                        raise RuntimeError(
-                            f"redistribute from {current} to {target} not supported yet"
-                        )
-                    # for backward shard -> partial, we just need to convert the shard to replicate
-                    current_placement = cast(Shard, current)
-                    new_local_tensor = current_placement._to_replicate_tensor(
-                        local_tensor, device_mesh, i, transform_info.logical_shape
+                    raise RuntimeError(
+                        f"redistribute from {current} to {target} not supported yet"
                     )
                 else:
                     # partial -> partial no op, should never hit
@@ -1145,26 +1064,37 @@ class Redistribute(torch.autograd.Function):
         else:
             local_tensor = grad_output._local_tensor
             current_spec = grad_output._spec
+        # skip the replicate to partial transformation when we are in backward pass
+        # In this case we keep the grad as replicate, this is because we don't
+        # want to convert the replicated gradients back to partial, although
+        # that's logically conform with the same layout, converting the gradients
+        # back to partial is actually useless as you would have to do reduce later
+        # which would be more expensive than keeping it replicate!
+
+        # for backward shard -> partial, we just do shard -> replicate
+        # for backward replicate -> partial, we skip the transformation
+        normalized_placements: list[Placement] = []
+        for current, target in zip(current_spec.placements, previous_spec.placements):
+            if (current.is_shard() or current.is_replicate()) and target.is_partial():
+                normalized_placements.append(Replicate())
+            else:
+                normalized_placements.append(target)
+
+        previous_spec = DTensorSpec(
+            previous_spec.device_mesh,
+            placements=tuple(normalized_placements),
+            tensor_meta=previous_spec.tensor_meta,
+        )
 
         output = redistribute_local_tensor(
             local_tensor,
             current_spec,
             previous_spec,
             async_op=async_op,
-            is_backward=True,
         )
 
         if output.dtype != ctx.original_dtype:
             output = output.to(ctx.original_dtype)
-
-        # normalize the target placement to replicate if it is partial
-        normalized_placements: list[Placement] = []
-        for previous_placement in previous_spec.placements:
-            if previous_placement.is_partial():
-                # keep target placement to replicate instead of partial in this case
-                normalized_placements.append(Replicate())
-            else:
-                normalized_placements.append(previous_placement)
 
         spec = DTensorSpec(
             previous_spec.device_mesh,
