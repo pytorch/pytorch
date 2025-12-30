@@ -424,7 +424,12 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return a @ b
 
-        mm(torch.rand([25, 25], device=GPU_TYPE), torch.rand([25, 25], device=GPU_TYPE))
+        M = N = K = 25
+        # Adjust sizes for XPU to trigger padding.
+        if GPU_TYPE == "xpu":
+            M = N = K = 125
+
+        mm(torch.rand([M, K], device=GPU_TYPE), torch.rand([K, N], device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
         self.assertTrue(len(local_cache) == 2)
         FileCheck().check_count("exclude_pad:False", 2, exactly=True).run(
@@ -435,7 +440,7 @@ class PadMMTest(TestCase):
         def mm(a, b):
             return (a + 1) @ b
 
-        mm(torch.rand([25, 25], device=GPU_TYPE), torch.rand([25, 25], device=GPU_TYPE))
+        mm(torch.rand([M, K], device=GPU_TYPE), torch.rand([K, N], device=GPU_TYPE))
         local_cache = get_pad_cache().get_local_cache()
         # reuse original base timing
         self.assertTrue(len(local_cache) == 3)
@@ -512,7 +517,7 @@ class PadMMTest(TestCase):
         {
             "triton.unique_kernel_names": "original_aten",
             "max_autotune_gemm_backends": "TRITON",
-            "shape_padding": True,
+            "force_shape_pad": True,
         }
     )
     def test_original_aten_preserved_pad_mm(self):

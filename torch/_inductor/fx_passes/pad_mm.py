@@ -303,12 +303,6 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
     except Exception:
         return True
 
-    # Before get_device_tflops and get_gpu_dram_gbps support XPU, this function always return True for XPU.
-    # So we keep the same behavior here.
-    # TODO: Remove this and use real values after we verified the performance of E2E test has no regression.
-    if torch.xpu.is_available():
-        return True
-
     # dram_gbps might be underestimating bandwidth because of cache.
     # if we estimate machine balance too low we might miss some speedups,
     # if we estimate too high there will be unnecessary compilation time increase.
