@@ -3343,8 +3343,10 @@ def module_error_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_g
 def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, **kwargs):
     # use float64 for dtype mismatch test if current dtype is float32, otherwise use float32
     # MPS doesn't support float64, so use float16 instead
+    # Extract device type from device string (e.g., 'mps:0' -> 'mps')
+    device_type = device.split(':')[0] if isinstance(device, str) else device.type
     if dtype == torch.float32:
-        mismatched_dtype = torch.float16 if device == 'mps' else torch.float64
+        mismatched_dtype = torch.float16 if device_type == 'mps' else torch.float64
     else:
         mismatched_dtype = torch.float32
     make_input = partial(make_tensor, device=device, dtype=mismatched_dtype, requires_grad=requires_grad)
