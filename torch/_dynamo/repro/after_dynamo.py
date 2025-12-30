@@ -471,6 +471,7 @@ def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
         compiler_fn,
         compiler_name=options.backend,  # type: ignore[call-arg]
     )
+    # pyrefly: ignore [bad-argument-type]
     opt_mod = torch._dynamo.optimize(dynamo_minifier_backend)(mod)
 
     with torch.amp.autocast("cuda", enabled=options.autocast):
@@ -478,6 +479,7 @@ def repro_minify(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
 
 
 def repro_run(options: Any, mod: torch.nn.Module, load_args: Any) -> None:
+    # pyrefly: ignore [bad-argument-type]
     opt_mod = torch._dynamo.optimize(options.backend)(mod)
 
     if options.accuracy != "":

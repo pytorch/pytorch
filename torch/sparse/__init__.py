@@ -533,7 +533,8 @@ class check_sparse_tensor_invariants:
         torch._C._set_check_sparse_tensor_invariants(self.state)
 
     def __exit__(self, type, value, traceback):
-        assert self.saved_state is not None
+        if self.saved_state is None:
+            raise AssertionError("saved_state should not be None on exit")
         torch._C._set_check_sparse_tensor_invariants(self.saved_state)
         self.saved_state = None
 

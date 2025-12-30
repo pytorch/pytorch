@@ -71,11 +71,13 @@ class ActivationOffloadingTests(TestCase):
     The first set of tests are for the case of adding offload nodes to the fwd and bwd graphs.
     """
 
-    @torch._functorch.config.patch(enable_activation_offloading=True)
     def test_partitioner_offload(self):
         torch._dynamo.reset()
-        torch._functorch.config.joint_custom_pass = self.joint_custom_pass
-        fw_graph, bw_graph = get_fw_bw_graph(self.fn, [self.x])
+        with torch._functorch.config.patch(
+            enable_activation_offloading=True,
+            joint_custom_pass=self.joint_custom_pass,
+        ):
+            fw_graph, bw_graph = get_fw_bw_graph(self.fn, [self.x])
 
         self.assertExpectedInline(
             fw_graph.code.strip(),
@@ -111,11 +113,13 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         torch._dynamo.reset()
 
         def run_compiled():
-            torch._functorch.config.enable_activation_offloading = True
-            torch._functorch.config.joint_custom_pass = self.joint_custom_pass
             return torch.compile(self.fn)(self.x)
 
-        _, (fw_code, bw_code) = run_fw_bw_and_get_code(run_compiled)
+        with torch._functorch.config.patch(
+            enable_activation_offloading=True,
+            joint_custom_pass=self.joint_custom_pass,
+        ):
+            _, (fw_code, bw_code) = run_fw_bw_and_get_code(run_compiled)
 
         (
             FileCheck()
@@ -132,15 +136,15 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
             .run(bw_code)
         )
 
-    @torch._functorch.config.patch(
-        enable_activation_offloading=True,
-        activation_offload_separate_stream=True,
-    )
     def test_partitioner_offload_sep_stream(self):
         reset_user_object_tracking()
         torch._dynamo.reset()
-        torch._functorch.config.joint_custom_pass = self.joint_custom_pass
-        fw_graph, bw_graph = get_fw_bw_graph(self.fn, [self.x])
+        with torch._functorch.config.patch(
+            enable_activation_offloading=True,
+            activation_offload_separate_stream=True,
+            joint_custom_pass=self.joint_custom_pass,
+        ):
+            fw_graph, bw_graph = get_fw_bw_graph(self.fn, [self.x])
 
         self.assertExpectedInline(
             fw_graph.code.strip(),
@@ -184,10 +188,6 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
     return (mul_2, mul_2, mul_1, mul_1, mul, mul)""".replace("GPU_TYPE", GPU_TYPE),
         )
 
-    @torch._functorch.config.patch(
-        enable_activation_offloading=True,
-        activation_offload_separate_stream=True,
-    )
     def test_partitioner_offload_sep_stream_accuracy(self):
         # Run without compilation to get reference gradients
         x_ref = [x.detach().clone().requires_grad_(True) for x in self.x]
@@ -198,12 +198,16 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         # Run with aot_eager compilation and offloading enabled
         reset_user_object_tracking()
         torch._dynamo.reset()
-        torch._functorch.config.joint_custom_pass = self.joint_custom_pass
-        x_compile = [x.detach().clone().requires_grad_(True) for x in self.x]
-        compiled_fn = torch.compile(self.fn, backend="aot_eager")
-        out_compiled = compiled_fn(x_compile)
-        out_compiled.sum().backward()
-        grads_compiled = [inp.grad for inp in x_compile]
+        with torch._functorch.config.patch(
+            enable_activation_offloading=True,
+            activation_offload_separate_stream=True,
+            joint_custom_pass=self.joint_custom_pass,
+        ):
+            x_compile = [x.detach().clone().requires_grad_(True) for x in self.x]
+            compiled_fn = torch.compile(self.fn, backend="aot_eager")
+            out_compiled = compiled_fn(x_compile)
+            out_compiled.sum().backward()
+            grads_compiled = [inp.grad for inp in x_compile]
 
         # Verify gradients match between reference and compiled versions
         for grad_ref, grad_compiled in zip(grads_ref, grads_compiled):
@@ -214,17 +218,17 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
                 atol=1e-5,
             )
 
-    @torch._functorch.config.patch(
-        enable_activation_offloading=True,
-        activation_offload_separate_stream=True,
-        activation_offload_sink_wait=True,
-        activation_reload_prefetch=True,
-    )
     def test_partitioner_offload_sep_stream_reorder(self):
         reset_user_object_tracking()
         torch._dynamo.reset()
-        torch._functorch.config.joint_custom_pass = self.joint_custom_pass
-        fw_graph, bw_graph = get_fw_bw_graph(self.fn, [self.x])
+        with torch._functorch.config.patch(
+            enable_activation_offloading=True,
+            activation_offload_separate_stream=True,
+            activation_offload_sink_wait=True,
+            activation_reload_prefetch=True,
+            joint_custom_pass=self.joint_custom_pass,
+        ):
+            fw_graph, bw_graph = get_fw_bw_graph(self.fn, [self.x])
 
         self.assertExpectedInline(
             fw_graph.code.strip(),
@@ -268,12 +272,6 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
     return (mul_2, mul_2, mul_1, mul_1, mul, mul)""".replace("GPU_TYPE", GPU_TYPE),
         )
 
-    @torch._functorch.config.patch(
-        enable_activation_offloading=True,
-        activation_offload_separate_stream=True,
-        activation_offload_sink_wait=True,
-        activation_reload_prefetch=True,
-    )
     @serialTest()
     def test_partitioner_offload_sep_stream_reorder_accuracy(self):
         # need larger dimension so that memcpy takes longer, and the code is at the risk of
@@ -291,12 +289,18 @@ def forward(self, cos, cpu_offload_cos_1, cos_2, tangents_1):
         # Run with aot_eager compilation and offloading enabled
         reset_user_object_tracking()
         torch._dynamo.reset()
-        torch._functorch.config.joint_custom_pass = self.joint_custom_pass
-        x_compile = [x.detach().clone().requires_grad_(True) for x in x_larger]
-        compiled_fn = torch.compile(self.fn, backend="aot_eager")
-        out_compiled = compiled_fn(x_compile)
-        out_compiled.sum().backward()
-        grads_compiled = [inp.grad for inp in x_compile]
+        with torch._functorch.config.patch(
+            enable_activation_offloading=True,
+            activation_offload_separate_stream=True,
+            activation_offload_sink_wait=True,
+            activation_reload_prefetch=True,
+            joint_custom_pass=self.joint_custom_pass,
+        ):
+            x_compile = [x.detach().clone().requires_grad_(True) for x in x_larger]
+            compiled_fn = torch.compile(self.fn, backend="aot_eager")
+            out_compiled = compiled_fn(x_compile)
+            out_compiled.sum().backward()
+            grads_compiled = [inp.grad for inp in x_compile]
 
         # Verify gradients match between reference and compiled versions
         for grad_ref, grad_compiled in zip(grads_ref, grads_compiled):
