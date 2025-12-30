@@ -59,6 +59,7 @@ def build_triton(
     py_version: Optional[str] = None,
     release: bool = False,
     with_clang_ldd: bool = False,
+    rocm_version: Optional[str] = None,
 ) -> Path:
     env = os.environ.copy()
     if "MAX_JOBS" not in env:
@@ -72,6 +73,15 @@ def build_triton(
         triton_repo = "https://github.com/openai/triton"
         if device == "rocm":
             triton_pkg_name = "triton-rocm"
+            # Set version suffix for Triton's setup.py to use
+            # Triton's setup.py generates: base_version + git_suffix + env_suffix
+            # For nightly: git_suffix = "+git{hash}", so we use ".rocm{ver}" → 3.5.1+gitXXX.rocm7.1
+            # For release: git_suffix = "", so we use "+rocm{ver}" → 3.5.1+rocm7.1
+            if rocm_version:
+                if release:
+                    env["TRITON_WHEEL_VERSION_SUFFIX"] = f"+rocm{rocm_version}"
+                else:
+                    env["TRITON_WHEEL_VERSION_SUFFIX"] = f".rocm{rocm_version}"
         elif device == "xpu":
             triton_pkg_name = "triton-xpu"
             triton_repo = "https://github.com/intel/intel-xpu-backend-for-triton"
@@ -136,20 +146,29 @@ def main() -> None:
     parser = ArgumentParser("Build Triton binaries")
     parser.add_argument("--release", action="store_true")
     parser.add_argument(
-        "--device", type=str, default="cuda", choices=["cuda", "rocm", "xpu", "aarch64"]
+        "--device",
+        type=str,
+        default="cuda",
+        choices=["cuda", "rocm-n", "rocm-n-1", "xpu", "aarch64"],
     )
     parser.add_argument("--py-version", type=str)
     parser.add_argument("--commit-hash", type=str)
     parser.add_argument("--with-clang-ldd", action="store_true")
     parser.add_argument("--triton-version", type=str, default=None)
+    parser.add_argument("--rocm-version", type=str, default=None)
     args = parser.parse_args()
 
     triton_version = read_triton_version(args.device)
     if args.triton_version:
         triton_version = args.triton_version
 
+    # Normalize device name for rocm-n rocm-n-1 builds
+    device = args.device
+    if args.device.startswith("rocm"):
+        device = "rocm"
+
     build_triton(
-        device=args.device,
+        device=device,
         commit_hash=(
             args.commit_hash if args.commit_hash else read_triton_pin(args.device)
         ),
@@ -157,6 +176,7 @@ def main() -> None:
         py_version=args.py_version,
         release=args.release,
         with_clang_ldd=args.with_clang_ldd,
+        rocm_version=args.rocm_version,
     )
 
 
