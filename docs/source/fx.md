@@ -223,7 +223,7 @@ get unwieldy as the transformations get more complex.
 -  [Conv/Batch Norm
    fusion](https://github.com/pytorch/pytorch/blob/40cbf342d3c000712da92cfafeaca651b3e0bd3e/torch/fx/experimental/optimization.py#L50)
 -  [replace_pattern: Basic usage](https://github.com/pytorch/examples/blob/master/fx/subgraph_rewriter_basic_use.py)
--  [Quantization](https://pytorch.org/docs/main/quantization.html#prototype-fx-graph-mode-quantization)
+-  [Quantization](https://docs.pytorch.org/docs/stable/quantization.html#prototype-fx-graph-mode-quantization)
 -  [Invert Transformation](https://github.com/pytorch/examples/blob/master/fx/invert.py)
 
 ### Proxy/Retracing

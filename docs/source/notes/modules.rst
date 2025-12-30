@@ -284,7 +284,7 @@ In the next section, we give a full example of training a neural network.
 
 For more information, check out:
 
-* Library of PyTorch-provided modules: `torch.nn <https://pytorch.org/docs/stable/nn.html>`_
+* Library of PyTorch-provided modules: `torch.nn <https://docs.pytorch.org/docs/stable/nn.html>`_
 * Defining neural net modules: https://pytorch.org/tutorials/beginner/examples_nn/polynomial_module.html
 
 .. _Neural Network Training with Modules:
@@ -534,7 +534,7 @@ The following class demonstrates the various ways of registering parameters and 
 For more information, check out:
 
 * Saving and loading: https://pytorch.org/tutorials/beginner/saving_loading_models.html
-* Serialization semantics: https://pytorch.org/docs/main/notes/serialization.html
+* Serialization semantics: https://docs.pytorch.org/docs/stable/notes/serialization.html
 * What is a state dict? https://pytorch.org/tutorials/recipes/recipes/what_is_state_dict.html
 
 Module Initialization
@@ -715,7 +715,7 @@ Improving Performance with Quantization
 
 Applying quantization techniques to modules can improve performance and memory usage by utilizing lower
 bitwidths than floating-point precision. Check out the various PyTorch-provided mechanisms for quantization
-`here <https://pytorch.org/docs/stable/quantization.html>`_.
+`here <https://docs.pytorch.org/docs/stable/quantization.html>`_.
 
 Improving Memory Usage with Pruning
 ***********************************
@@ -736,7 +736,7 @@ further allows for custom constraints to be defined.
 Transforming Modules with FX
 ****************************
 
-The `FX <https://pytorch.org/docs/stable/fx.html>`_ component of PyTorch provides a flexible way to transform
+The `FX <https://docs.pytorch.org/docs/stable/fx.html>`_ component of PyTorch provides a flexible way to transform
 modules by operating directly on module computation graphs. This can be used to programmatically generate or
 manipulate modules for a broad array of use cases. To explore FX, check out these examples of using FX for
 `convolution + batch norm fusion <https://pytorch.org/tutorials/intermediate/fx_conv_bn_fuser.html>`_ and

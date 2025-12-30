@@ -20,7 +20,7 @@ when working with multi-dimensional sharding.
 
 Please see examples from the PyTorch native parallelism solutions that are built on top of `DTensor`:
 
-- [Tensor Parallel](https://pytorch.org/docs/main/distributed.tensor.parallel.html)
+- [Tensor Parallel](https://docs.pytorch.org/docs/stable/distributed.tensor.parallel.html)
 - [FSDP2](https://github.com/pytorch/torchtitan/blob/main/docs/fsdp.md)
 
 ```{eval-rst}
@@ -216,7 +216,7 @@ DTensor's RNG infra is based on the philox based RNG algorithm, and supports any
 ### Logging
 
 When launching the program, you can turn on additional logging using the `TORCH_LOGS` environment variable from
-[torch._logging](https://pytorch.org/docs/main/logging.html#module-torch._logging) :
+[torch._logging](https://docs.pytorch.org/docs/stable/logging.html#module-torch._logging) :
 
 - `TORCH_LOGS=+dtensor` will display `logging.DEBUG` messages and all levels above it.
 - `TORCH_LOGS=dtensor` will display `logging.INFO` messages and above.

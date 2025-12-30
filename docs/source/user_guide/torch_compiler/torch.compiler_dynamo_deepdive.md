@@ -60,7 +60,7 @@ def forward(l_x_: torch.Tensor, l_y_: torch.Tensor):
 
 We call this a **graph (or trace) of the function for the given
 inputs**. This is represented via an [FX
-graph](https://pytorch.org/docs/main/fx.html). We will simply think
+graph](https://docs.pytorch.org/docs/stable/fx.html). We will simply think
 of an FX graph as a container that stores a list of function calls.
 
 The first thing we should notice is that the graph is a linear sequence
@@ -351,7 +351,7 @@ discuss how Dynamo addresses a rather important correctness issue.
 At this point, we have a way to trace programs completely disregarding control flow.
 And for that, we have reimplemented all of CPython… If this sounds like a bit of an
 overkill, that is because it is.
-[torch.jit.trace](https://pytorch.org/docs/main/generated/torch.jit.trace.html)
+[torch.jit.trace](https://docs.pytorch.org/docs/stable/generated/torch.jit.trace.html)
 already implements this without all this machinery, so what gives?
 
 The issue with `torch.jit.trace`, as it is warned in its docs, is that
@@ -848,7 +848,7 @@ Below are additional details and references for concepts mentioned in this docum
 
 [^5]: Interestingly enough, it does understand NumPy code! Have a look at
     [this blogpost](https://pytorch.org/blog/compiling-numpy-code/)
-    and [the docs](https://pytorch.org/docs/main/torch.compiler_faq.html#does-numpy-work-with-torch-compile).
+    and [the docs](https://docs.pytorch.org/docs/stable/torch.compiler_faq.html#does-numpy-work-with-torch-compile).
     Now, this is just possible because we reimplemented NumPy using
     PyTorch. Good luck implementing Django in PyTorch though…
 

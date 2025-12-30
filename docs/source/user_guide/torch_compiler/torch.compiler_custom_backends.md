@@ -81,7 +81,7 @@ Registration serves two purposes:
 
 - You can pass a string containing your backend function's name to `torch.compile` instead of the function itself,
   for example, `torch.compile(model, backend="my_compiler")`.
-- It is required for use with the [minifier](https://pytorch.org/docs/main/torch.compiler_troubleshooting_old.html#minifier). Any generated
+- It is required for use with the [minifier](https://docs.pytorch.org/docs/stable/torch.compiler_troubleshooting_old.html#minifier). Any generated
   code from the minifier must call your code that registers your backend function, typically through an `import` statement.
 
 ## Custom Backends after AOTAutograd
@@ -90,7 +90,7 @@ It is possible to define custom backends that are called by AOTAutograd rather t
 This is useful for 2 main reasons:
 
 - Users can define backends that support model training, as AOTAutograd can generate the backward graph for compilation.
-- AOTAutograd produces FX graphs consisting of [core Aten ops](https://pytorch.org/docs/main/torch.compiler_ir.html#core-aten-ir). As a result,
+- AOTAutograd produces FX graphs consisting of [core Aten ops](https://docs.pytorch.org/docs/stable/torch.compiler_ir.html#core-aten-ir). As a result,
   custom backends only need to support the core Aten opset, which is a significantly smaller opset than the entire torch/Aten opset.
 
 Wrap your backend with
@@ -238,7 +238,7 @@ on which one is encountered first by the just-in-time compiler.
 
 Integrating a custom backend that offers superior performance is also
 easy and we’ll integrate a real one
-with [optimize_for_inference](https://pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html):
+with [optimize_for_inference](https://docs.pytorch.org/docs/stable/generated/torch.jit.optimize_for_inference.html):
 
 ```python
 def optimize_for_inference_compiler(gm: torch.fx.GraphModule, example_inputs: List[torch.Tensor]):

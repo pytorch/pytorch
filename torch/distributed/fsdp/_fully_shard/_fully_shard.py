@@ -112,9 +112,9 @@ def fully_shard(
     sharded on dim-0, while the unsharded parameters will be like the original
     parameters on ``module`` (e.g. :class:`torch.Tensor` if originally
     :class:`torch.Tensor`). A module
-    `forward pre-hook <https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_forward_pre_hook>`_
+    `forward pre-hook <https://docs.pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_forward_pre_hook>`_
     on ``module`` all-gathers the parameters, and a module
-    `forward hook <https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.register_forward_hook>`_
+    `forward hook <https://docs.pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_forward_hook>`_
     on ``module`` frees them (if needed). Similar backward hooks all-gather
     parameters and later free parameters and reduce-scatter gradients.
 

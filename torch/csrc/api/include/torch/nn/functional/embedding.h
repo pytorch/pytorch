@@ -56,7 +56,7 @@ inline Tensor embedding(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.embedding
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.embedding
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::EmbeddingFuncOptions`
@@ -173,7 +173,7 @@ inline Tensor embedding_bag(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.embedding_bag
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.embedding_bag
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::EmbeddingBagFuncOptions`

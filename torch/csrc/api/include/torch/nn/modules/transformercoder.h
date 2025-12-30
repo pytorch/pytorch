@@ -19,7 +19,7 @@ namespace torch::nn {
 
 /// TransformerEncoder module.
 /// See
-/// https://pytorch.org/docs/main/generated/torch.nn.TransformerEncoder.html
+/// https://docs.pytorch.org/docs/stable/generated/torch.nn.TransformerEncoder.html
 /// to learn abouut the exact behavior of this encoder layer module.
 ///
 /// See the documentation for `torch::nn::TransformerEncoder` class to learn
@@ -78,7 +78,7 @@ TORCH_MODULE(TransformerEncoder);
 
 /// TransformerDecoder is a stack of N decoder layers.
 /// See
-/// https://pytorch.org/docs/main/generated/torch.nn.TransformerDecoder.html
+/// https://docs.pytorch.org/docs/stable/generated/torch.nn.TransformerDecoder.html
 /// to learn abouut the exact behavior of this decoder module
 ///
 /// See the documentation for `torch::nn::TransformerDecoderOptions` class to

@@ -180,7 +180,7 @@ print(f"Device of z: {z.device}")
 
 ## Documentation
 
-Please refer to [this](https://docs.pytorch.org/docs/main/accelerator/index.html) for a series of documents on integrating new accelerators into PyTorch, which will be kept in sync with the `OpenReg` codebase as well.
+Please refer to [this](https://docs.pytorch.org/docs/stable/accelerator/index.html) for a series of documents on integrating new accelerators into PyTorch, which will be kept in sync with the `OpenReg` codebase as well.
 
 ## Future Plans
 

@@ -25,7 +25,7 @@ inline Tensor dropout(Tensor input, double p, bool training, bool inplace) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.dropout
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.dropout
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::DropoutFuncOptions` class
@@ -94,7 +94,7 @@ inline Tensor dropout2d(Tensor input, double p, bool training, bool inplace) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.dropout2d
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.dropout2d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::Dropout2dFuncOptions`
@@ -126,7 +126,7 @@ inline Tensor dropout3d(Tensor input, double p, bool training, bool inplace) {
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.dropout3d
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.dropout3d
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::Dropout3dFuncOptions`
@@ -166,7 +166,7 @@ inline Tensor alpha_dropout(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.alpha_dropout
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.alpha_dropout
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::AlphaDropoutFuncOptions`
@@ -207,7 +207,7 @@ inline Tensor feature_alpha_dropout(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.feature_alpha_dropout
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.feature_alpha_dropout
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for

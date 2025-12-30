@@ -18,7 +18,7 @@ inline Tensor l1_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.l1_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.l1_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::L1LossFuncOptions` class
@@ -74,7 +74,7 @@ inline Tensor kl_div(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.kl_div
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.kl_div
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::KLDivFuncOptions` class to
@@ -123,7 +123,7 @@ inline Tensor mse_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.mse_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.mse_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::MSELossFuncOptions` class
@@ -176,7 +176,7 @@ inline Tensor binary_cross_entropy(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.binary_cross_entropy
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.binary_cross_entropy
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -213,7 +213,7 @@ inline Tensor hinge_embedding_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.hinge_embedding_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.hinge_embedding_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -262,7 +262,7 @@ inline Tensor multi_margin_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.multi_margin_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.multi_margin_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -305,7 +305,7 @@ inline Tensor cosine_embedding_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.cosine_embedding_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.cosine_embedding_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -368,7 +368,7 @@ inline Tensor smooth_l1_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.smooth_l1_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.smooth_l1_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SmoothL1LossFuncOptions`
@@ -388,7 +388,7 @@ inline Tensor smooth_l1_loss(
 }
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.smooth_l1_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.smooth_l1_loss
 /// about the exact behavior of this functional.
 ///
 /// Example:
@@ -440,7 +440,7 @@ inline Tensor huber_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.huber_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.huber_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::HuberLossFuncOptions`
@@ -475,7 +475,7 @@ inline Tensor multilabel_margin_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.multilabel_margin_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.multilabel_margin_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -510,7 +510,7 @@ inline Tensor soft_margin_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.soft_margin_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.soft_margin_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::SoftMarginLossFuncOptions`
@@ -568,7 +568,7 @@ inline Tensor multilabel_soft_margin_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.multilabel_soft_margin_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.multilabel_soft_margin_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -616,7 +616,7 @@ inline Tensor triplet_margin_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.triplet_margin_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.triplet_margin_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -698,7 +698,7 @@ inline Tensor triplet_margin_with_distance_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.triplet_margin_with_distance_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.triplet_margin_with_distance_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -751,7 +751,7 @@ inline Tensor ctc_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.ctc_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.ctc_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::CTCLossFuncOptions` class
@@ -802,7 +802,7 @@ inline Tensor poisson_nll_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.poisson_nll_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.poisson_nll_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::PoissonNLLLossFuncOptions`
@@ -853,7 +853,7 @@ inline Tensor margin_ranking_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.margin_ranking_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.margin_ranking_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for
@@ -910,7 +910,7 @@ inline Tensor nll_loss(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.nll_loss
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.nll_loss
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::NLLLossFuncOptions` class
@@ -957,7 +957,7 @@ inline Tensor cross_entropy(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.cross_entropy
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.cross_entropy
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::CrossEntropyFuncOptions`
@@ -1011,7 +1011,7 @@ inline Tensor binary_cross_entropy_with_logits(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.binary_cross_entropy_with_logits
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.binary_cross_entropy_with_logits
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for

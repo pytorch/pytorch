@@ -315,7 +315,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
       std::vector<int64_t> axes;
       for (int64_t i = 0; i < inputTensorValues[1].sizes()[0]; ++i) {
         // ONNX unsqueeze accepts negative axes
-        // From https://pytorch.org/docs/stable/generated/torch.unsqueeze.html
+        // From https://docs.pytorch.org/docs/stable/generated/torch.unsqueeze.html
         // Negative dim will correspond to unsqueeze() applied at dim = dim +
         // input.dim() + 1.
         axes_a[i] +=
@@ -482,7 +482,7 @@ std::optional<at::Tensor> runTorchBackendForOnnx(
     at::Tensor indices = inputTensorValues[1];
     auto q = indices.dim();
     // at::index_select only supports indices with rank <= 1.
-    // See https://pytorch.org/docs/main/generated/torch.index_select.html
+    // See https://docs.pytorch.org/docs/stable/generated/torch.index_select.html
     if (q > 1) {
       return std::nullopt;
     }

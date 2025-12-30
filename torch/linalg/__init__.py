@@ -1193,7 +1193,7 @@ Examples::
     tensor([2])
 
 .. _condition number:
-    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
+    https://docs.pytorch.org/docs/stable/linalg.html#torch.linalg.cond
 .. _full description of these drivers:
     https://www.netlib.org/lapack/lug/node27.html
 """,
@@ -1884,7 +1884,7 @@ Examples::
     tensor(3.0957e-06)
 
 .. _condition number:
-    https://pytorch.org/docs/main/linalg.html#torch.linalg.cond
+    https://docs.pytorch.org/docs/stable/linalg.html#torch.linalg.cond
 .. _the resulting vectors will span the same subspace:
     https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD
 """,

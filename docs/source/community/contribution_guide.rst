@@ -94,7 +94,7 @@ here is the basic process.
       everything, but if you happen to know who the maintainer for a
       given subsystem affected by your patch is, feel free to include
       them directly on the pull request. You can learn more about
-      `Persons of Interest <https://pytorch.org/docs/main/community/persons_of_interest.html>`_
+      `Persons of Interest <https://docs.pytorch.org/docs/stable/community/persons_of_interest.html>`_
       that could review your code.
 
 -  **Iterate on the pull request until it's accepted!**
@@ -325,13 +325,13 @@ Python Docs
 PyTorch documentation is generated from python source using
 `Sphinx <https://www.sphinx-doc.org/en/master/>`__. Generated HTML is
 copied to the docs folder in the main branch of
-`pytorch.org/docs <https://pytorch.org/docs/main>`__,
+`pytorch.org/docs <https://pytorch.org/docs/stable>`__,
 and is served via GitHub pages.
 
 -  Site: https://pytorch.org/docs
 -  GitHub: https://github.com/pytorch/pytorch/tree/main/docs
 -  Served from:
-   `https://pytorch.org/docs/main <https://pytorch.org/docs/main>`__
+   `https://pytorch.org/docs/stable <https://pytorch.org/docs/stable>`__
 
 C++ Docs
 ~~~~~~~~

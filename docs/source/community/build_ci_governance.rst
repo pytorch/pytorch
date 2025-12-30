@@ -12,7 +12,7 @@ For the person to be a maintainer, a person needs to:
 * At least one of these commits must be submitted in the last six months
 
 To add a qualified person to the maintainers' list, please create
-a PR that adds a person to the `persons of interests <https://pytorch.org/docs/main/community/persons_of_interest.html>`__ page and
+a PR that adds a person to the `persons of interests <https://docs.pytorch.org/docs/stable/community/persons_of_interest.html>`__ page and
 `merge_rules <https://github.com/pytorch/pytorch/blob/main/.github/merge_rules.yaml>`__ files. Current maintainers will cast their votes of
 support. Decision criteria for approving the PR:
 

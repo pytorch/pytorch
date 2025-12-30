@@ -10,7 +10,7 @@ orphan: true
 
 :::{note}
 This document is outdated and is now mainly a primary resource on how to run the `torch.compile` minifier.
-Please see the [updated troubleshooting document](https://pytorch.org/docs/main/torch.compiler_troubleshooting.html).
+Please see the [updated troubleshooting document](https://docs.pytorch.org/docs/stable/torch.compiler_troubleshooting.html).
 There is also a more [comprehensive manual for torch.compile](https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit#heading=h.ivdr7fmrbeab)
 available.
 :::
@@ -75,7 +75,7 @@ tools and their typical usage. For additional help see
 ```
 
 In addition to info and debug logging,
-you can use [torch.\_logging](https://pytorch.org/docs/main/logging.html)
+you can use [torch.\_logging](https://docs.pytorch.org/docs/stable/logging.html)
 for more fine-grained logging.
 
 (diagnosing-runtime-errors)=

@@ -517,7 +517,7 @@ class Function(_SingleLevelFunction):
         raise RuntimeError(
             "Legacy autograd function with non-static forward method is deprecated. "
             "Please use new-style autograd function with static forward method. "
-            "(Example: https://pytorch.org/docs/stable/autograd.html#torch.autograd.Function)"
+            "(Example: https://docs.pytorch.org/docs/stable/autograd.html#torch.autograd.Function)"
         )
 
     """
@@ -587,7 +587,7 @@ class Function(_SingleLevelFunction):
                 "In order to use an autograd.Function with functorch transforms "
                 "(vmap, grad, jvp, jacrev, ...), it must override the setup_context "
                 "staticmethod. For more details, please see "
-                "https://pytorch.org/docs/main/notes/extending.func.html"
+                "https://docs.pytorch.org/docs/stable/notes/extending.func.html"
             )
 
         return custom_function_call(cls, *args, **kwargs)

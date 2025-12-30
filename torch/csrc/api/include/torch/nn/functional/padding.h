@@ -35,7 +35,7 @@ inline Tensor pad(
 #endif /* DOXYGEN_SHOULD_SKIP_THIS */
 
 /// See
-/// https://pytorch.org/docs/main/nn.functional.html#torch.nn.functional.pad
+/// https://docs.pytorch.org/docs/stable/nn.functional.html#torch.nn.functional.pad
 /// about the exact behavior of this functional.
 ///
 /// See the documentation for `torch::nn::functional::PadFuncOptions` class to

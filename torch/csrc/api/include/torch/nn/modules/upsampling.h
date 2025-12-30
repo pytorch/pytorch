@@ -17,7 +17,7 @@ namespace torch::nn {
 
 /// Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D
 /// (volumetric) data.
-/// See https://pytorch.org/docs/main/nn.html#torch.nn.Upsample to learn
+/// See https://docs.pytorch.org/docs/stable/nn.html#torch.nn.Upsample to learn
 /// about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::UpsampleOptions` class to learn what

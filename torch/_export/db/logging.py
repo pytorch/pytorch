@@ -9,7 +9,7 @@ def exportdb_error_message(case_name: str) -> str:
     if case_name in ALL_EXAMPLES:
         url_case_name = case_name.replace("_", "-")
         return f"See {case_name} in exportdb for unsupported case. \
-                https://pytorch.org/docs/main/generated/exportdb/index.html#{url_case_name}"
+                https://docs.pytorch.org/docs/stable/generated/exportdb/index.html#{url_case_name}"
     else:
         log_export_usage(
             event="export.error.casenotregistered",

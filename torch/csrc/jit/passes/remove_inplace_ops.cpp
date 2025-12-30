@@ -117,7 +117,7 @@ void ImplicitCastForBinaryInplaceOps(Block* b) {
       if ((shape_node->kind() == prim::NumToTensor) &&
           (shape_node->inputs().at(0)->node()->kind() == aten::size)) {
         std::cerr
-            << "In-place op on output of tensor.shape. See https://pytorch.org/docs/main/onnx.html#"
+            << "In-place op on output of tensor.shape. See https://docs.pytorch.org/docs/stable/onnx.html#"
             << "avoid-inplace-operations-when-using-tensor-shape-in-tracing-mode"
             << '\n';
       }

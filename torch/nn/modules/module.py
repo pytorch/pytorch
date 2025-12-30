@@ -2242,7 +2242,7 @@ class Module:
             # DeprecationWarning is ignored by default
             warnings.warn(
                 "Positional args are being deprecated, use kwargs instead. Refer to "
-                "https://pytorch.org/docs/main/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
+                "https://docs.pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.state_dict"
                 " for details.",
                 FutureWarning,
                 stacklevel=2,

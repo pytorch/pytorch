@@ -31,7 +31,7 @@ struct TORCH_API ASMoutput {
 /// `Efficient softmax approximation for GPUs`_ by Edouard Grave, Armand Joulin,
 /// Moustapha Cissé, David Grangier, and Hervé Jégou.
 /// See
-/// https://pytorch.org/docs/main/nn.html#torch.nn.AdaptiveLogSoftmaxWithLoss
+/// https://docs.pytorch.org/docs/stable/nn.html#torch.nn.AdaptiveLogSoftmaxWithLoss
 /// to learn about the exact behavior of this module.
 ///
 /// See the documentation for `torch::nn::AdaptiveLogSoftmaxWithLossOptions`

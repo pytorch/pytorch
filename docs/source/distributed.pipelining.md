@@ -394,7 +394,7 @@ are subclasses of `PipelineScheduleMulti`.
 
 ## Logging
 
-You can turn on additional logging using the `TORCH_LOGS` environment variable from [torch.\_logging](https://pytorch.org/docs/main/logging.html#module-torch._logging):
+You can turn on additional logging using the `TORCH_LOGS` environment variable from [torch.\_logging](https://docs.pytorch.org/docs/stable/logging.html#module-torch._logging):
 
 - `TORCH_LOGS=+pp` will display `logging.DEBUG` messages and all levels above it.
 - `TORCH_LOGS=pp` will display `logging.INFO` messages and above.

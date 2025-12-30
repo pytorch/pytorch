@@ -780,7 +780,7 @@ class Tensor(torch._C.TensorBase):
             trim(
                 r"""reinforce() was removed.
             Use torch.distributions instead.
-            See https://pytorch.org/docs/main/distributions.html
+            See https://docs.pytorch.org/docs/stable/distributions.html
 
             Instead of:
 

@@ -206,7 +206,7 @@ An ``RRef`` (Remote REFerence) is a reference to a value of some type ``T``
 (e.g. ``Tensor``) on a remote worker. This handle keeps the referenced remote
 value alive on the owner, but there is no implication that the value will be
 transferred to the local worker in the future. RRefs can be used in
-multi-machine training by holding references to [nn.Modules](https://pytorch.org/docs/stable/nn.html#torch.nn.Module) that exist on
+multi-machine training by holding references to [nn.Modules](https://docs.pytorch.org/docs/stable/nn.html#torch.nn.Module) that exist on
 other workers, and calling the appropriate functions to retrieve or modify their
 parameters during training. See {ref}`remote-reference-protocol` for more
 details.
@@ -269,7 +269,7 @@ rpc/distributed_autograd
 
 ## Distributed Optimizer
 
-See the [torch.distributed.optim](https://pytorch.org/docs/main/distributed.optim.html) page for documentation on distributed optimizers.
+See the [torch.distributed.optim](https://docs.pytorch.org/docs/stable/distributed.optim.html) page for documentation on distributed optimizers.
 
 ## Design Notes
 
@@ -285,7 +285,7 @@ The RRef design note covers the design of the {ref}`rref` (Remote REFerence) pro
 
 The RPC tutorials introduce users to the RPC framework, provide several example applications
 using {ref}`torch.distributed.rpc<distributed-rpc-framework>` APIs, and demonstrate how
-to use [the profiler](https://pytorch.org/docs/stable/autograd.html#profiler) to profile RPC-based workloads.
+to use [the profiler](https://docs.pytorch.org/docs/stable/autograd.html#profiler) to profile RPC-based workloads.
 
 -  [Getting started with Distributed RPC Framework](https://pytorch.org/tutorials/intermediate/rpc_tutorial.html)
 -  [Implementing a Parameter Server using Distributed RPC Framework](https://pytorch.org/tutorials/intermediate/rpc_param_server_tutorial.html)

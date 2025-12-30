@@ -247,7 +247,7 @@ class TestExplainWithBackend(torch._dynamo.test_case.TestCase):
 
 
 class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
-    """Test APIs documented by https://pytorch.org/docs/main/torch.compiler_custom_backends.html"""
+    """Test APIs documented by https://docs.pytorch.org/docs/stable/torch.compiler_custom_backends.html"""
 
     def test_register_backend_api(self):
         from torch._dynamo import register_backend

@@ -281,8 +281,8 @@ torch._logging.set_logs(graph_breaks=True)
 ```
 
 More `TORCH_LOGS` options are {ref}`troubleshooting-torch-logs-options`.
-For the full list of options, see [torch.\_logging](https://pytorch.org/docs/stable/logging.html)
-and [torch.\_logging.set_logs](https://pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs).
+For the full list of options, see [torch.\_logging](https://docs.pytorch.org/docs/stable/logging.html)
+and [torch.\_logging.set_logs](https://docs.pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs).
 
 ### tlparse vs. TORCH_LOGS
 
@@ -495,7 +495,7 @@ def fn(y):
         return y - x
 ```
 
-- Use higher-order ops like `torch.cond` (<https://pytorch.org/docs/main/cond.html>) in place of data-dependent control flow
+- Use higher-order ops like `torch.cond` (<https://docs.pytorch.org/docs/stable/cond.html>) in place of data-dependent control flow
 
 ```py
 # old
@@ -802,7 +802,7 @@ This is likely because bugs that can be automatically reproduced in this manner 
 and have already been addressed, leaving more complex issues that do not reproduce easily.
 However, it is straightforward to attempt using the minifier, so it is worth trying even if it may not succeed.
 
-Instructions for operating the minifier can be found [here](https://pytorch.org/docs/stable/torch.compiler_troubleshooting_old.html).
+Instructions for operating the minifier can be found [here](https://docs.pytorch.org/docs/stable/torch.compiler_troubleshooting_old.html).
 If the compiler is crashing, you can set `TORCHDYNAMO_REPRO_AFTER="dynamo"` or `TORCHDYNAMO_REPRO_AFTER="aot"`
 The `aot` option is more likely to succeed, although it may not identify the `AOTAutograd` issues. This will generate the `repro.py` file which may help to diagnose the problem.
 For accuracy-related issues, consider setting `TORCHDYNAMO_REPRO_LEVEL=4`. Please note that this may not always successfully identify the problematic subgraph.
@@ -1071,17 +1071,17 @@ A summary of helpful `TORCH_LOGS` options is:
       - Output Inductor fusion logs
 ```
 
-For the full list of options, see [torch.\_logging](https://pytorch.org/docs/stable/logging.html)
-and [torch.\_logging.set_logs](https://pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs).
+For the full list of options, see [torch.\_logging](https://docs.pytorch.org/docs/stable/logging.html)
+and [torch.\_logging.set_logs](https://docs.pytorch.org/docs/stable/generated/torch._logging.set_logs.html#torch._logging.set_logs).
 
 ## Related Articles
 
 - [torch.compile tutorial](https://pytorch.org/tutorials/intermediate/torch_compile_tutorial.html)
-- [torch.compile fine-grained APIs](https://pytorch.org/docs/stable/torch.compiler_fine_grain_apis.html)
-- [torch.compile FAQ](https://pytorch.org/docs/stable/torch.compiler_faq.html)
-- [torch.compiler namespace overview](https://pytorch.org/docs/stable/torch.compiler.html#torch-compiler-overview)
-- [torch.compiler API reference](https://pytorch.org/docs/stable/torch.compiler_api.html)
-- [Profiling torch.compile](https://pytorch.org/docs/stable/torch.compiler_profiling_torch_compile.html)
+- [torch.compile fine-grained APIs](https://docs.pytorch.org/docs/stable/torch.compiler_fine_grain_apis.html)
+- [torch.compile FAQ](https://docs.pytorch.org/docs/stable/torch.compiler_faq.html)
+- [torch.compiler namespace overview](https://docs.pytorch.org/docs/stable/torch.compiler.html#torch-compiler-overview)
+- [torch.compiler API reference](https://docs.pytorch.org/docs/stable/torch.compiler_api.html)
+- [Profiling torch.compile](https://docs.pytorch.org/docs/stable/torch.compiler_profiling_torch_compile.html)
 - [torch.compile missing manual](https://docs.google.com/document/d/1y5CRfMLdwEoF1nTk9q8qEu1mgMUuUtvhklPKJ2emLU8/edit?usp=sharing)
 - [The dynamic shapes manual](https://docs.google.com/document/d/1GgvOe7C8_NVOMLOCwDaYV1mXXyHMXY7ExoewHqooxrs/edit#heading=h.fh8zzonyw8ng)
 - [TorchInductor caching tutorial](https://pytorch.org/tutorials/recipes/torch_compile_caching_tutorial.html)

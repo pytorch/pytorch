@@ -265,7 +265,7 @@ class NLLLoss(_WeightedLoss):
 @deprecated(
     "`NLLLoss2d` has been deprecated. "
     "Please use `NLLLoss` instead as a drop-in replacement and see "
-    "https://pytorch.org/docs/main/nn.html#torch.nn.NLLLoss for more details.",
+    "https://docs.pytorch.org/docs/stable/nn.html#torch.nn.NLLLoss for more details.",
     category=FutureWarning,
 )
 class NLLLoss2d(NLLLoss):

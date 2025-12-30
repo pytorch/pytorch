@@ -194,7 +194,7 @@ def wrap_outputs_maintaining_identity(
                 f"out_dims has structure {pytree.tree_flatten(out_dims)[1]} "
                 f"but output has structure {spec}. "
                 f"For more details, please see "
-                f"https://pytorch.org/docs/main/notes/extending.func.html"
+                f"https://docs.pytorch.org/docs/stable/notes/extending.func.html"
             )
 
     for i, output in enumerate(flat_outputs):
@@ -296,7 +296,7 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwarg
                 f"staticmethod. Please set generate_vmap_rule=False or delete "
                 f"the overridden vmap staticmethod to avoid ambiguity. "
                 f"For more details, please see "
-                f"https://pytorch.org/docs/main/notes/extending.func.html"
+                f"https://docs.pytorch.org/docs/stable/notes/extending.func.html"
             )
         return custom_function_call_vmap_generate_rule(
             interpreter, autograd_function, *operands
@@ -310,7 +310,7 @@ def custom_function_call_vmap(interpreter, autograd_function, *operands, **kwarg
             f"it does not have vmap support. Please override and implement the "
             f"vmap staticmethod or set generate_vmap_rule=True. "
             f"For more details, please see "
-            f"https://pytorch.org/docs/main/notes/extending.func.html"
+            f"https://docs.pytorch.org/docs/stable/notes/extending.func.html"
         )
 
     return custom_function_call_vmap_helper(

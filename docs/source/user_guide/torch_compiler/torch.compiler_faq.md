@@ -37,7 +37,7 @@ dispatcher hooks.
 The basic strategy for optimizing DDP with Dynamo is outlined in
 [distributed.py](https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/backends/distributed.py)
 where the main idea will be to graph break on [DDP bucket
-boundaries](https://pytorch.org/docs/stable/notes/ddp.html#internal-design).
+boundaries](https://docs.pytorch.org/docs/stable/notes/ddp.html#internal-design).
 
 When each node in DDP needs to synchronize its weights with the other
 nodes it organizes its gradients and parameters into buckets which
@@ -566,7 +566,7 @@ with a {ref}`minimal reproducer <torch.compiler_troubleshooting>`.
 ### I `torch.compile` some NumPy code and I did not see any speed-up.
 
 The best place to start is the
-[tutorial with general advice for how to debug these sort of torch.compile issues](https://pytorch.org/docs/main/torch.compiler_faq.html#why-am-i-not-seeing-speedups).
+[tutorial with general advice for how to debug these sort of torch.compile issues](https://docs.pytorch.org/docs/stable/torch.compiler_faq.html#why-am-i-not-seeing-speedups).
 
 Some graph breaks may happen because of the use of unsupported features. See
 {ref}`nonsupported-numpy-feats`. More generally, it is useful to keep in mind

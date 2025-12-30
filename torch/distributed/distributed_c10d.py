@@ -3019,7 +3019,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op: bool = False):
 @deprecated(
     "`torch.distributed.all_reduce_coalesced` will be deprecated. If you must "
     "use it, please revisit our documentation later at "
-    "https://pytorch.org/docs/main/distributed.html#collective-functions",
+    "https://docs.pytorch.org/docs/stable/distributed.html#collective-functions",
     category=FutureWarning,
 )
 def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op: bool = False):
@@ -4167,7 +4167,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op: bool = F
 @deprecated(
     "`torch.distributed.all_gather_coalesced` will be deprecated. If you must use it, "
     "please revisit our documentation later at "
-    "https://pytorch.org/docs/main/distributed.html#collective-functions",
+    "https://docs.pytorch.org/docs/stable/distributed.html#collective-functions",
     category=FutureWarning,
 )
 def all_gather_coalesced(
