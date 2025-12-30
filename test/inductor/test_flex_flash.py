@@ -21,6 +21,7 @@ from torch.nn.attention.flex_attention import (
     flex_attention,
 )
 from torch.profiler import profile, ProfilerActivity
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_device_type import (
     dtypes,
     e4m3_type,
@@ -853,14 +854,15 @@ class TestFlexFlash(InductorTestCase):
                 kernel_options={"BACKEND": "FLASH"},
             )
 
-    @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes(self, device, dtype):
+        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
+        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
         """Ensure flash attention rejects mixed dtypes (e.g., fp32 Q with fp16 K/V)"""
         B, H, S, D = 2, 8, 512, 64
 
-        query = torch.randn(B, H, S, D, dtype=torch.bfloat16, device=device)
-        key = torch.randn(B, H, S, D, dtype=dtype, device=device).to(e4m3_type)
-        value = torch.randn(B, H, S, D, dtype=dtype, device=device).to(e4m3_type)
+        query = torch.randn(B, H, S, D, dtype=dtype_high, device=device)
+        key = torch.randn(B, H, S, D, dtype=dtype_high, device=device).to(dtype_low)
+        value = torch.randn(B, H, S, D, dtype=dtype_high, device=device).to(dtype_low)
 
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
 

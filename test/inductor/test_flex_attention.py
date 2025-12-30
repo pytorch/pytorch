@@ -48,7 +48,11 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_FP8,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
@@ -2760,12 +2764,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_mixed_dtypes_eager(self, device):
-        query = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
-            e4m3_type
+        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
+        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        query = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
+            dtype_low
         )
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
-            e4m3_type
+        value = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
+            dtype_low
         )
         out = flex_attention(query, key, value, _identity)
         self.assertEqual(out.shape, query.shape)
@@ -2773,12 +2779,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @supported_platform
     def test_mixed_dtypes_compiled(self, device):
-        query = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
-            e4m3_type
+        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
+        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        query = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
+            dtype_low
         )
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.bfloat16, device=device).to(
-            e4m3_type
+        value = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
+            dtype_low
         )
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
         if device == "cpu":
@@ -2794,6 +2802,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @skip_on_cpu
     @supported_platform
+    @skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
     def test_mixed_dtypes_sqnr_per_tensor(self, device):
         query_ref = torch.testing.make_tensor(
             (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
@@ -2823,6 +2832,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
 
     @skip_on_cpu
     @supported_platform
+    @skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
     def test_mixed_dtypes_sqnr_per_head(self, device):
         query_ref = torch.testing.make_tensor(
             (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
@@ -2857,24 +2867,26 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     def test_mixed_dtype_backwards_eager(self, device):
+        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
+        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
         q = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.bfloat16,
+            dtype=dtype_high,
             device=device,
             requires_grad=True,
         )
         k = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.bfloat16,
+            dtype=dtype_high,
             device=device,
             requires_grad=True,
-        ).to(e4m3_type)
+        ).to(dtype_low)
         v = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.bfloat16,
+            dtype=dtype_high,
             device=device,
             requires_grad=True,
-        ).to(e4m3_type)
+        ).to(dtype_low)
         out = flex_attention(q, k, v, _identity).mean()
         with self.assertRaisesRegex(
             ValueError,
@@ -2885,24 +2897,26 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @supported_platform
     @skip_on_cpu
     def test_mixed_dtype_backwards_compiled(self, device):
+        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
+        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
         q = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.bfloat16,
+            dtype=dtype_high,
             device=device,
             requires_grad=True,
         )
         k = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.bfloat16,
+            dtype=dtype_high,
             device=device,
             requires_grad=True,
-        ).to(e4m3_type)
+        ).to(dtype_low)
         v = torch.testing.make_tensor(
             (1, 1, 1024, 64),
-            dtype=torch.bfloat16,
+            dtype=dtype_high,
             device=device,
             requires_grad=True,
-        ).to(e4m3_type)
+        ).to(dtype_low)
 
         compiled_fn = torch.compile(flex_attention, fullgraph=True)
 
