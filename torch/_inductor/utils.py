@@ -57,7 +57,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch._inductor.analysis.device_info import datasheet_tops
+from torch._inductor.analysis.device_info import datasheet_dram_bw_gbs, datasheet_tops
 from torch._inductor.runtime.hints import DeviceProperties
 from torch.fx.passes.regional_inductor import _needs_inductor_compile
 from torch.utils._dtype_abbrs import dtype_abbrs
@@ -2793,10 +2793,14 @@ def get_device_tflops(dtype: torch.dtype) -> float:
 
 
 @functools.cache
-def get_gpu_dram_gbps() -> int:
-    from triton.testing import get_dram_gbps
+def get_gpu_dram_gbps() -> float:
+    dram_bw_gbs = datasheet_dram_bw_gbs()
+    if dram_bw_gbs is not None:
+        return dram_bw_gbs
+    else:
+        from triton.testing import get_dram_gbps
 
-    return get_dram_gbps()
+        return get_dram_gbps()
 
 
 def get_gpu_shared_memory() -> int:

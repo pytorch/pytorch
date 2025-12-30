@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Optional, Union
 
 import torch
+from torch._dynamo.device_interface import get_interface_for_device
 
 
 log = logging.getLogger(__name__)
@@ -172,6 +173,34 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_bw_gbs=1600.0,
         dram_gb=64.0,
     ),
+    # Source:
+    # @lint-ignore https://www.intel.com/content/www/us/en/products/sku/232876/\
+    # intel-data-center-gpu-max-1100/specifications.html
+    "Intel(R) Data Center GPU Max 1100": DeviceInfo(
+        # XeCore count: 56,
+        # vector/matrix engines per XeCore: 8
+        # freq: 1.55GHz
+        tops={
+            # Vector engine
+            torch.float64: 11.1,
+            torch.float32: 22.2,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 22.2,
+            # Matrix engine
+            torch.float16: 355.5,
+            torch.bfloat16: 355.5,
+            # not supported, fall back to float32 numbers
+            torch.float8_e8m0fnu: 22.2,
+            torch.float8_e8m0fnu: 22.2,
+            torch.float8_e4m3fnuz: 22.2,
+            torch.float8_e5m2: 22.2,
+            torch.float8_e5m2fnuz: 22.2,
+            torch.float8_e8m0fnu: 22.2,
+            torch.int8: 711.1,
+        },
+        dram_bw_gbs=1228.8,
+        dram_gb=48,
+    ),
 }
 _device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
@@ -194,11 +223,9 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> Optional[float]
     Get the theoretical TFLOPS of the device for a given dtype. This can throw an exception if the device
     is not in the datasheet list above.
     """
-    name: Optional[str] = (
-        torch.xpu.get_device_name()
-        if torch.xpu.is_available()
-        else torch.cuda.get_device_name()
-    )
+    gpu_type = torch._inductor.utils.get_gpu_type()
+    device_interface = get_interface_for_device(gpu_type)
+    name: Optional[str] = device_interface.get_device_name()
     if name is None:
         log.info("No device found, returning None")
         return None
@@ -218,3 +245,23 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> Optional[float]
     return device_info.tops[
         "torch.tf32" if dtype == torch.float32 and is_tf32 else dtype
     ]
+
+
+def datasheet_dram_bw_gbs() -> Optional[float]:
+    """
+    Get the theoretical DRAM bandwidth of the device in GB/s. This can throw an exception if the device
+    is not in the datasheet list above.
+    """
+    gpu_type = torch._inductor.utils.get_gpu_type()
+    device_interface = get_interface_for_device(gpu_type)
+    name: Optional[str] = device_interface.get_device_name()
+    if name is None:
+        log.info("No device found, returning None")
+        return None
+    device_info = lookup_device_info(name)
+    if device_info is None:
+        log_str = f"Device {name} not in datasheet, returning None"
+        log.info(log_str)
+        return None
+
+    return device_info.dram_bw_gbs
