@@ -700,7 +700,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
 #if defined(CUDNN_VERSION)
   static auto cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
 #else
-  static audo cudnn_version = 0;
+  static auto cudnn_version = 0;
 #endif
 #if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || !defined(CUDNN_VERSION)
   if (debug) {
