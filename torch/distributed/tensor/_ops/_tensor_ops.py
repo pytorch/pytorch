@@ -121,6 +121,14 @@ def equal_strategy(op_schema: OpSchema) -> StrategyType:
     if not isinstance(other_strategy, OpStrategy):
         raise AssertionError(f"Expected OpStrategy, got {type(other_strategy)}")
 
+    # If either tensor is 0-dimensional (scalar), we must use Replicate for both
+    if self_strategy.ndim == 0 or other_strategy.ndim == 0:
+        replicate_spec = DTensorSpec(
+            mesh=mesh,
+            placements=tuple(Replicate() for _ in range(mesh.ndim)),
+        )
+        return OpStrategy([OpSpec(output_specs=replicate_spec)])
+
     select_strategy = (
         self_strategy
         if self_strategy.max_num_shards() >= other_strategy.max_num_shards()
@@ -1215,7 +1223,7 @@ def split_strategy(op_schema: OpSchema) -> OpStrategy:
 
     output_size_list = (
         size_split(input_strategy.shape[dim], split_size_or_sections)
-        if isinstance(split_size_or_sections, int)
+        if isinstance(split_size_or_sections, IntLike)
         else split_size_or_sections
     )
     if not isinstance(output_size_list, Sized):

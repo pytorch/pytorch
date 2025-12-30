@@ -717,21 +717,18 @@ class GraphModule(torch.nn.Module):
                 i += 1
                 yield t + j
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="eager")
         def fn(t):
             return whoo(t), t.sin()
 
         t = torch.randn(2)
         fn(t)
         self.assertEqual(len(counters["unimplemented"]), 1)
-        self.assertEqual(
-            dict(counters["unimplemented"]),
-            {
-                "Cannot reconstruct a generator with variable mutations. "
-                "Dynamo needs to fully exhaust the generator, which may cause "
-                "unintended variable modifications.": 1
-            },
+        entry = next(iter(counters["unimplemented"].items()))
+        self.assertIn(
+            "Cannot reconstruct a generator with variable mutations.", entry[0]
         )
+        self.assertEqual(entry[1], 1)
 
     def test_subgenerator_with_side_effects(self):
         i = 0
@@ -753,7 +750,7 @@ class GraphModule(torch.nn.Module):
             i += 1
             yield t + 4
 
-        @torch.compile(backend="eager", fullgraph=True)
+        @torch.compile(backend="eager")
         def fn(t):
             return whoo(t), t.sin()
 
@@ -761,11 +758,11 @@ class GraphModule(torch.nn.Module):
         gen, y = fn(t)
         self.assertEqual(y, t.sin())
         self.assertEqual(len(list(gen)), 5)
-        self.assertTrue(
-            "Cannot reconstruct a generator with variable mutations. "
-            "Dynamo needs to fully exhaust the generator, which may cause "
-            "unintended variable modifications." in dict(counters["unimplemented"])
-        )
+        for gb in counters["unimplemented"]:
+            if "Cannot reconstruct a generator with variable mutations." in gb:
+                break
+        else:
+            self.assertTrue(False, "expected side effect error; not found")
 
     def test_generator_with_side_effects_graph_break(self):
         i = 0

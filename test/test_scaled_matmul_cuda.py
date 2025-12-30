@@ -4,6 +4,7 @@ import contextlib
 import json
 import math
 import re
+import itertools
 import tempfile
 import unittest
 from typing import Optional
@@ -695,11 +696,17 @@ class TestFP8Matmul(TestCase):
                               x_dtype: torch.dtype = e4m3_type,
                               y_dtype: torch.dtype = e4m3_type,
                               out_dtype: Optional[torch.dtype] = None,
+                              x_cm: bool = True,
+                              y_cm: bool = False,
                               size: int = 16) -> None:
         if not _device_supports_scaled_mm_fp8(device):
             raise unittest.SkipTest(f8_msg)
         x_fp8 = torch.rand(size, size, device=device).to(x_dtype)
-        y_fp8 = torch.eye(size, device=device, dtype=y_dtype).t()
+        y_fp8 = torch.eye(size, device=device, dtype=y_dtype)
+        if not x_cm:
+            x_fp8 = x_fp8.t()
+        if not y_cm:
+            y_fp8 = y_fp8.t()
         out_fp32 = torch.mm(x_fp8.to(torch.float), y_fp8.to(torch.float))
         scale_a = torch.tensor(1.0, device=device)
         scale_b = torch.tensor(1.0, device=device)
@@ -724,6 +731,13 @@ class TestFP8Matmul(TestCase):
         self._test_tautological_mm(device, size=64, out_dtype=torch.float16)
         self._test_tautological_mm(device, size=96, out_dtype=torch.float32)
         self._test_tautological_mm(device, size=80, out_dtype=torch.bfloat16)
+
+        if torch.cuda.is_available():
+            for (x_cm, y_cm) in itertools.product([True, False], repeat=2):
+                # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
+                layouts_supported = (x_cm, y_cm) == (True, False) or torch.cuda.get_device_properties(0).major == 10
+                with contextlib.nullcontext() if layouts_supported else self.assertRaises(RuntimeError):
+                    self._test_tautological_mm(device, size=64, out_dtype=torch.bfloat16, x_cm=x_cm, y_cm=y_cm)
 
         with self.assertRaises(
             AssertionError if (torch.version.hip or "xpu" in device or "cpu" in device)
