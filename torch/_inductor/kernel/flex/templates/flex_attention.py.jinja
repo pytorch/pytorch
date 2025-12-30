@@ -1,4 +1,4 @@
-{{def_kernel("Q", "K", "V", "LSE", "MAX", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX")}}
+{{def_kernel("Q", "K", "V", "LSE", "MAX", "KV_NUM_BLKS", "KV_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "Q_OFFSETS", "KV_OFFSETS")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
@@ -115,6 +115,19 @@
     sparse_kv_num_blks_offset = sparse_hz_offset * stride_kv_num_blks_h + q_start // SPARSE_Q_MULTIPLE
     sparse_kv_idx_offset = sparse_hz_offset * stride_kv_idx_h + (q_start // SPARSE_Q_MULTIPLE) * stride_kv_idx_m  # noqa: B950
 
+    # Load offset for variable-length sequences (used to compute local indices for mask_mod/score_mod)
+    # When HAS_OFFSETS is True, we compute local indices by subtracting offsets from global indices
+    # This enables batch-invariant document masking
+    {%- if HAS_OFFSETS %}
+    stride_q_offsets_z = {{stride("Q_OFFSETS", 0)}}
+    stride_q_offsets_h = {{stride("Q_OFFSETS", 1)}}
+    q_sparse_block_idx = q_start // SPARSE_Q_MULTIPLE
+    q_offset_ptr = Q_OFFSETS + off_zq * stride_q_offsets_z + sparse_idx_hq * stride_q_offsets_h + q_sparse_block_idx
+    q_offset = tl.load(q_offset_ptr).to(INDEX_DTYPE)
+    {%- else %}
+    q_offset = 0
+    {%- endif %}
+
     {%- if USE_TMA %}
     q = tl.load_tensor_descriptor(
         desc_q,
@@ -130,14 +143,33 @@
     # We don't know anything "special" about these blocks, so we need to apply
     # both score_mod and mask_mod to it
     kv_indices = KV_IDX + sparse_kv_idx_offset
-    kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
     kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
     block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
 
+    # Load first kv block index and compute kv_offset for variable-length sequences
+    # All kv blocks for a given q block belong to the same document (due to document masking)
+    # so we can load the offset from the first kv block
+    # Note: even if kv_num_blocks = 0, the load is safe (allocated memory), and the value is ignored
+    first_kv_block_idx = tl.load(kv_indices)  # sparse block index
+    kv_start = first_kv_block_idx * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+    {%- if HAS_OFFSETS %}
+    stride_kv_offsets_z = {{stride("KV_OFFSETS", 0)}}
+    stride_kv_offsets_h = {{stride("KV_OFFSETS", 1)}}
+    kv_offset_ptr = KV_OFFSETS + off_zq * stride_kv_offsets_z + sparse_idx_hq * stride_kv_offsets_h + first_kv_block_idx
+    kv_offset = tl.load(kv_offset_ptr).to(INDEX_DTYPE)
+    {%- else %}
+    kv_offset = 0
+    {%- endif %}
+
+    # Compute local indices for mask_mod/score_mod
+    # For batch-invariant document masking, we pass local (document-relative) indices
+    offs_m_local = offs_m - q_offset
 
     # K and V pointers will be passed directly to forward_inner
 
     offs_n = kv_start + tl.arange(0, BLOCK_N)
+    # offs_n_local = offs_n - kv_offset (local kv indices)
+    offs_n_local = offs_n - kv_offset
 
 
     acc, l_i, m_i = forward_inner(
@@ -145,7 +177,7 @@
         q, K, V,
         desc_k, desc_v, Q_LEN, KV_LEN,
         acc, l_i, m_i,
-        off_zq, off_hq, offs_m[:, None], offs_n[None, :],
+        off_zq, off_hq, offs_m_local[:, None], offs_n_local[None, :],
         kv_start,
         kv_indices, kv_num_blocks,
         0, block_n_end,
@@ -160,18 +192,29 @@
     if HAS_FULL_BLOCKS:
         # FULL_KV_IDX and FULL_KV_NUM_BLKS are always contiguous.
         kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
-        kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+        first_full_kv_block_idx = tl.load(kv_indices)  # sparse block index
+        kv_start = first_full_kv_block_idx * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
         block_n_end = tl.minimum(kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N), 1))
+
+        # Load kv_offset for full blocks (should be same document as partial blocks)
+        {%- if HAS_OFFSETS %}
+        kv_offset_ptr_full = KV_OFFSETS + off_zq * stride_kv_offsets_z + sparse_idx_hq * stride_kv_offsets_h + first_full_kv_block_idx
+        kv_offset_full = tl.load(kv_offset_ptr_full).to(INDEX_DTYPE)
+        {%- else %}
+        kv_offset_full = 0
+        {%- endif %}
+
         # K and V pointers will be passed directly to forward_inner
         offs_n = kv_start + tl.arange(0, BLOCK_N)
+        offs_n_local_full = offs_n - kv_offset_full
 
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
             q, K, V,
             desc_k, desc_v, Q_LEN, KV_LEN,
             acc, l_i, m_i,
-            off_zq, off_hq, offs_m[:, None], offs_n[None, :],
+            off_zq, off_hq, offs_m_local[:, None], offs_n_local_full[None, :],
             kv_start,
             kv_indices, kv_num_blocks,
             0, block_n_end,

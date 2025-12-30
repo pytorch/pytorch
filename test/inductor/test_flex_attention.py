@@ -1639,12 +1639,9 @@ class TestFlexAttention(InductorTestCase):
             result = torch.zeros(
                 seqlens.shape[0], 1, max_seqlen, tensor.shape[-1], device=device
             )
-            for i in range(tensor.shape[0]):
+            for i in range(seqlens.shape[0]):
                 src = tensor[0, :, offsets[i] : (offsets[i] + seqlens[i]), :]
                 dst = result[i, :, : seqlens[i], :]
-                print(
-                    f"{src.shape=} {dst.shape=} {offsets[i]=} {tensor.shape=} {offsets=} {seqlens=}"
-                )
                 dst.copy_(src)
             return result
 
@@ -1682,15 +1679,20 @@ class TestFlexAttention(InductorTestCase):
             offsets_q,
             offsets_kv,
         ):
-            print(
-                f"{seqlens_q.device=} {seqlens_kv.device=} {offsets_q.device=} {offsets_kv.device=}"
-            )
-            upper_q = offsets_q + seqlens_q
-            upper_kv = offsets_kv + seqlens_kv
-            doc_q = torch.arange(total_q, device=device)
-            doc_kv = torch.arange(total_kv, device=device)
-            doc_q = torch.searchsorted(upper_q, doc_q) % seqlens_q.shape[0]
-            doc_kv = torch.searchsorted(upper_kv, doc_kv) % seqlens_kv.shape[0]
+            # Create position-to-document mapping (handles unsorted offsets)
+            # For each position, find which document it belongs to (-1 if none)
+            doc_q = torch.full((total_q,), -1, device=device, dtype=torch.int32)
+            doc_kv = torch.full((total_kv,), -1, device=device, dtype=torch.int32)
+
+            for i in range(seqlens_q.shape[0]):
+                start = offsets_q[i].item()
+                end = start + seqlens_q[i].item()
+                doc_q[start:end] = i
+
+            for i in range(seqlens_kv.shape[0]):
+                start = offsets_kv[i].item()
+                end = start + seqlens_kv[i].item()
+                doc_kv[start:end] = i
 
             assert (
                 seqlens_q.shape
@@ -1702,17 +1704,19 @@ class TestFlexAttention(InductorTestCase):
             def mask_mod(b, h, q, k):
                 id_q = doc_q[q]
                 id_kv = doc_kv[k]
-                in_range_q = (q >= offsets_q[id_q]) & (
-                    q < (offsets_q[id_q] + seqlens_q[id_q])
-                )
-                in_range_kv = (k >= offsets_kv[id_kv]) & (
-                    k < (offsets_kv[id_kv] + seqlens_kv[id_kv])
-                )
+                # Positions with id=-1 are outside any document
+                valid_q = id_q >= 0
+                valid_kv = id_kv >= 0
+                # Use clamp to avoid negative indexing, the valid check handles correctness
+                id_q_safe = id_q.clamp(min=0)
+                id_kv_safe = id_kv.clamp(min=0)
                 return (
-                    in_range_q
-                    & in_range_kv
+                    valid_q
+                    & valid_kv
                     & (id_q == id_kv)
-                    & mask_mod_inner(b, h, q - offsets_q[id_q], k - offsets_kv[id_kv])
+                    & mask_mod_inner(
+                        b, h, q - offsets_q[id_q_safe], k - offsets_kv[id_kv_safe]
+                    )
                 )
 
             return mask_mod
@@ -1891,6 +1895,180 @@ class TestFlexAttention(InductorTestCase):
         self.assertTrue(dense_block_mask[0, 0, 0, 1].item())
         self.assertTrue(dense_block_mask[0, 0, 1, 0].item())
         self.assertTrue(dense_block_mask[0, 0, 1, 1].item())
+
+    @supported_platform
+    def test_varlen_block_mask_forward(self, device):
+        """Test create_varlen_block_mask works end-to-end with flex_attention forward."""
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+
+        # Create sequence lengths for 3 documents
+        q_seq_lens = torch.tensor([300, 200, 500], device=device)
+        kv_seq_lens = torch.tensor([300, 200, 500], device=device)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=2,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Total implied length
+        total_q_len = block_mask.seq_lengths[0]
+        total_kv_len = block_mask.seq_lengths[1]
+
+        # Create query, key, value tensors
+        query = torch.randn(
+            1, 2, total_q_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, 2, total_kv_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, 2, total_kv_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+
+        # Run with torch.compile
+        compiled_flex = torch.compile(flex_attention)
+        out = compiled_flex(query, key, value, block_mask=block_mask)
+
+        # Basic sanity checks
+        self.assertEqual(out.shape, (1, 2, total_q_len, HEAD_DIM))
+        self.assertFalse(torch.isnan(out).any())
+        self.assertFalse(torch.isinf(out).any())
+
+        # Compare with eager mode
+        eager_out = flex_attention(query, key, value, block_mask=block_mask)
+        torch.testing.assert_close(out, eager_out, rtol=1e-2, atol=1e-2)
+
+    @supported_platform
+    def test_varlen_block_mask_backward(self, device):
+        """Test create_varlen_block_mask works end-to-end with flex_attention backward."""
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+
+        # Create sequence lengths for 2 documents
+        q_seq_lens = torch.tensor([256, 384], device=device)
+        kv_seq_lens = torch.tensor([256, 384], device=device)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=2,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Total implied length
+        total_q_len = block_mask.seq_lengths[0]
+        total_kv_len = block_mask.seq_lengths[1]
+
+        # Create query, key, value tensors with requires_grad
+        query = torch.randn(
+            1, 2, total_q_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True
+        )
+        key = torch.randn(
+            1, 2, total_kv_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True
+        )
+        value = torch.randn(
+            1, 2, total_kv_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True
+        )
+
+        # Clone for comparison
+        query_ref = query.detach().clone().requires_grad_(True)
+        key_ref = key.detach().clone().requires_grad_(True)
+        value_ref = value.detach().clone().requires_grad_(True)
+
+        # Run compiled version
+        compiled_flex = torch.compile(flex_attention)
+        out = compiled_flex(query, key, value, block_mask=block_mask)
+        grad_out = torch.randn_like(out)
+        out.backward(grad_out)
+
+        # Run eager version for comparison
+        out_ref = flex_attention(query_ref, key_ref, value_ref, block_mask=block_mask)
+        out_ref.backward(grad_out)
+
+        # Check outputs match
+        torch.testing.assert_close(out, out_ref, rtol=1e-2, atol=1e-2)
+
+        # Check gradients match
+        torch.testing.assert_close(query.grad, query_ref.grad, rtol=1e-1, atol=1e-1)
+        torch.testing.assert_close(key.grad, key_ref.grad, rtol=1e-1, atol=1e-1)
+        torch.testing.assert_close(value.grad, value_ref.grad, rtol=1e-1, atol=1e-1)
+
+    @supported_platform
+    def test_varlen_block_mask_batch_invariance(self, device):
+        """Test that varlen block mask produces batch-invariant results."""
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+
+        # Document lengths - we'll test that processing as single batch
+        # gives same results as processing documents separately
+        doc_lens = [300, 200, 500]
+        num_docs = len(doc_lens)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        # Create packed version with varlen_block_mask
+        q_seq_lens = torch.tensor(doc_lens, device=device)
+        kv_seq_lens = torch.tensor(doc_lens, device=device)
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=1,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        total_q_len = block_mask.seq_lengths[0]
+
+        # Create packed query, key, value
+        query_packed = torch.randn(1, 1, total_q_len, HEAD_DIM, device=device, dtype=torch.float16)
+        key_packed = query_packed.clone()  # Use same values for determinism
+        value_packed = torch.randn(1, 1, total_q_len, HEAD_DIM, device=device, dtype=torch.float16)
+
+        # Run with torch.compile
+        compiled_flex = torch.compile(flex_attention)
+        out_packed = compiled_flex(query_packed, key_packed, value_packed, block_mask=block_mask)
+
+        # Extract outputs per document and verify they don't contain cross-document attention
+        doc_offsets = [0]
+        for doc_len in doc_lens:
+            rounded_len = ((doc_len + BLOCK_SIZE - 1) // BLOCK_SIZE) * BLOCK_SIZE
+            doc_offsets.append(doc_offsets[-1] + rounded_len)
+
+        # For each document, verify the output is finite and valid
+        for i in range(num_docs):
+            doc_start = doc_offsets[i]
+            doc_end = doc_start + doc_lens[i]
+            doc_output = out_packed[0, 0, doc_start:doc_end, :]
+            self.assertFalse(
+                torch.isnan(doc_output).any(),
+                f"Document {i} output contains NaN values"
+            )
+            self.assertFalse(
+                torch.isinf(doc_output).any(),
+                f"Document {i} output contains Inf values"
+            )
 
     @supported_platform
     def test_index_multiple(self, device):

@@ -152,7 +152,10 @@ def flex_attention(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-        _, _, _, _,
+        kv_offsets,
+        kv_limits,
+        q_offsets,
+        q_limits,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -214,9 +217,12 @@ def flex_attention(
         sympy.Ne(query.get_size()[1], key.get_size()[1]),
     )
 
+    # Check if varlen offsets are present - flex decoding doesn't support this yet
+    has_varlen_offsets = kv_offsets is not None and q_offsets is not None
+
     can_use_decode = _use_flex_decoding(
         query, kv_indices, value, kernel_options, enable_gqa
-    )
+    ) and not has_varlen_offsets
     use_decode = (backend == "TRITON_DECODE") or (backend == "AUTO" and can_use_decode)
 
     if backend == "TRITON_DECODE" and not can_use_decode:
@@ -251,6 +257,10 @@ def flex_attention(
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        kv_offsets,
+        kv_limits,
+        q_offsets,
+        q_limits,
     ) = maybe_realize(
         [
             query,
@@ -264,6 +274,10 @@ def flex_attention(
             q_indices,
             full_q_num_blocks,
             full_q_indices,
+            kv_offsets,
+            kv_limits,
+            q_offsets,
+            q_limits,
         ]
     )
 
@@ -273,7 +287,7 @@ def flex_attention(
         kernel_options,
         num_score_mod_placeholders=len(placeholder_inps),
         backend=backend,
-    ):
+    ) and not has_varlen_offsets:
         return create_flex_flash_attention_kernel(
             query,
             key,
@@ -360,6 +374,14 @@ def flex_attention(
             empty(0, device=query.get_device()) for _ in range(2)
         )
 
+    # Check if we have variable-length offsets for computing local indices
+    has_offsets = q_offsets is not None and kv_offsets is not None
+    kernel_options.setdefault("HAS_OFFSETS", has_offsets)
+    if not has_offsets:
+        q_offsets, kv_offsets = (
+            empty(0, device=query.get_device(), dtype=torch.int32) for _ in range(2)
+        )
+
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
     choices: list[Any] = []
@@ -441,6 +463,8 @@ def flex_attention(
                 kv_indices,
                 full_kv_num_blocks,
                 full_kv_indices,
+                q_offsets,
+                kv_offsets,
             ],
             layout=layout,
             subgraphs=[
@@ -467,6 +491,8 @@ def flex_attention(
             kv_indices,
             full_kv_num_blocks,
             full_kv_indices,
+            q_offsets,
+            kv_offsets,
         ]
         + list(score_mod_other_buffers)
         + list(mask_mod_other_buffers)
@@ -476,6 +502,7 @@ def flex_attention(
         6: create_indices_fake,
         7: create_num_blocks_fake_generator(full_kv_indices),
         8: create_indices_fake,
+        # q_offsets and kv_offsets at indices 9 and 10 don't need special generators
     }
 
     out = autotune_select_algorithm(
@@ -636,7 +663,10 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
-        _, _, _, _,
+        kv_offsets,
+        kv_limits,
+        q_offsets,
+        q_limits,
         SPARSE_Q_BLOCK_SIZE,
         SPARSE_KV_BLOCK_SIZE,
         mask_graph,
@@ -656,6 +686,10 @@ def flex_attention_backward(*args, **kwargs):
         q_indices,
         full_q_num_blocks,
         full_q_indices,
+        kv_offsets,
+        kv_limits,
+        q_offsets,
+        q_limits,
     ) = maybe_realize(
         [
             query,
@@ -671,6 +705,10 @@ def flex_attention_backward(*args, **kwargs):
             q_indices,
             full_q_num_blocks,
             full_q_indices,
+            kv_offsets,
+            kv_limits,
+            q_offsets,
+            q_limits,
         ]
     )
 
@@ -836,6 +874,14 @@ def flex_attention_backward(*args, **kwargs):
             empty(0, device=query.get_device()) for _ in range(4)
         )
 
+    # Check if we have variable-length offsets for computing local indices
+    has_offsets = q_offsets is not None and kv_offsets is not None
+    kernel_options.setdefault("HAS_OFFSETS", has_offsets)
+    if not has_offsets:
+        q_offsets, kv_offsets = (
+            empty(0, device=query.get_device(), dtype=torch.int32) for _ in range(2)
+        )
+
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
     SPARSE_Q_BLOCK_SIZE = V.graph.sizevars.guard_int(SPARSE_Q_BLOCK_SIZE)
@@ -915,6 +961,8 @@ def flex_attention_backward(*args, **kwargs):
                 full_kv_indices,
                 full_q_num_blocks,
                 full_q_indices,
+                q_offsets,
+                kv_offsets,
             ],
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
             subgraphs=[
@@ -949,6 +997,8 @@ def flex_attention_backward(*args, **kwargs):
             full_kv_indices,
             full_q_num_blocks,
             full_q_indices,
+            q_offsets,
+            kv_offsets,
         ]
         + list(score_mod_other_buffers)
         + list(mask_mod_other_buffers)
@@ -963,6 +1013,7 @@ def flex_attention_backward(*args, **kwargs):
         13: create_indices_fake,
         14: create_num_blocks_fake_generator(full_q_indices),  # full_q_num_blocks
         15: create_indices_fake,
+        # q_offsets and kv_offsets at indices 16 and 17 don't need special generators
     }
 
     broadcasted_grad_key = autotune_select_algorithm(

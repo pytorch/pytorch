@@ -1,4 +1,4 @@
-{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ", "DV", "KV_NUM_BLKS", "KV_IDX", "Q_NUM_BLKS", "Q_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX")}}
+{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ", "DV", "KV_NUM_BLKS", "KV_IDX", "Q_NUM_BLKS", "Q_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "Q_OFFSETS", "KV_OFFSETS")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
@@ -117,6 +117,17 @@
         start_m2 = start_m2_block * BLOCK_M2
         offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
 
+        # Load offset for variable-length sequences (used to compute local indices for mask_mod/score_mod)
+        {%- if HAS_OFFSETS %}
+        stride_q_offsets_z = {{stride("Q_OFFSETS", 0)}}
+        stride_q_offsets_h = {{stride("Q_OFFSETS", 1)}}
+        q_sparse_block_idx = off_pid_mask
+        q_offset_ptr = Q_OFFSETS + off_zq * stride_q_offsets_z + sparse_idx_hq2 * stride_q_offsets_h + q_sparse_block_idx
+        q_offset = tl.load(q_offset_ptr).to(INDEX_DTYPE)
+        {%- else %}
+        q_offset = 0
+        {%- endif %}
+
         # load Q and do: they stay in SRAM throughout the inner loop.
         q = load_checked_2d(Q2, offs_m2, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
         do = load_checked_2d(DO2, offs_m2, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
@@ -136,15 +147,29 @@
         # ~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # KV_IDX and KV_NUM_BLKS are always contiguous.
         kv_indices = KV_IDX + sparse_kv_idx_offset
-        kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+        first_kv_block_idx = tl.load(kv_indices)  # sparse block index
+        kv_start = first_kv_block_idx * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
         sparse_kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_kv_num_blks_offset)
 
+        # Load kv_offset for variable-length sequences
+        {%- if HAS_OFFSETS %}
+        stride_kv_offsets_z = {{stride("KV_OFFSETS", 0)}}
+        stride_kv_offsets_h = {{stride("KV_OFFSETS", 1)}}
+        kv_offset_ptr = KV_OFFSETS + off_zq * stride_kv_offsets_z + sparse_idx_hq2 * stride_kv_offsets_h + first_kv_block_idx
+        kv_offset = tl.load(kv_offset_ptr).to(INDEX_DTYPE)
+        {%- else %}
+        kv_offset = 0
+        {%- endif %}
+
         offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
+        # Pass global indices (offs_m2, offs_n2) for memory access
+        # Pass offsets (q_offset, kv_offset) for computing local indices inside inner functions
         dq = bwd_dq_inner(
             {{gen_argdefs()}},
             K, V,
             dq, q, do, Di, lse,
             off_zq, off_hq2, offs_m2, offs_n2,
+            q_offset, kv_offset,
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
             MATMUL_PRECISION,
@@ -155,8 +180,17 @@
             # ~~~~~~~~~~~ partial unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # FULL_KV_IDX and FULL_KV_NUM_BLKS are always contiguous.
             kv_indices = FULL_KV_IDX + sparse_kv_idx_offset
-            kv_start = tl.load(kv_indices) * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
+            first_full_kv_block_idx = tl.load(kv_indices)  # sparse block index
+            kv_start = first_full_kv_block_idx * SPARSE_KV_BLOCK_SIZE # first kv block we're loading
             sparse_kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_kv_num_blks_offset)
+
+            # Load kv_offset for full blocks
+            {%- if HAS_OFFSETS %}
+            kv_offset_ptr_full = KV_OFFSETS + off_zq * stride_kv_offsets_z + sparse_idx_hq2 * stride_kv_offsets_h + first_full_kv_block_idx
+            kv_offset_full = tl.load(kv_offset_ptr_full).to(INDEX_DTYPE)
+            {%- else %}
+            kv_offset_full = 0
+            {%- endif %}
 
             offs_n2 = kv_start + tl.arange(0, BLOCK_N2)
             dq = bwd_dq_inner(
@@ -164,6 +198,7 @@
                 K, V,
                 dq, q, do, Di, lse,
                 off_zq, off_hq2, offs_m2, offs_n2,
+                q_offset, kv_offset_full,
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION,
@@ -195,7 +230,20 @@
         start_n1 = pid * BLOCK_N1
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
+        # Load kv_offset for variable-length sequences
+        {%- if HAS_OFFSETS %}
+        stride_kv_offsets_z = {{stride("KV_OFFSETS", 0)}}
+        stride_kv_offsets_h = {{stride("KV_OFFSETS", 1)}}
+        kv_sparse_block_idx = pid_mask
+        # Note: for DK/DV, we use off_hkv for kv offset lookup as we're iterating over kv heads
+        kv_offset_ptr = KV_OFFSETS + off_zq * stride_kv_offsets_z + (off_hkv % {{size("KV_OFFSETS", 1)}}) * stride_kv_offsets_h + kv_sparse_block_idx
+        kv_offset = tl.load(kv_offset_ptr).to(INDEX_DTYPE)
+        {%- else %}
+        kv_offset = 0
+        {%- endif %}
+
         # load K and V: they stay in SRAM throughout the inner loop.
+        # Use global indices (offs_n1) for memory access
         k = load_checked_2d(K, offs_n1, offs_k, stride_kn, stride_kd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, QK_HEAD_DIM)
         v = load_checked_2d(V, offs_n1, offs_v, stride_vn, stride_vd, IS_DIVISIBLE, SAFE_HEAD_DIM, KV_LEN, V_HEAD_DIM)
 
@@ -227,15 +275,28 @@
             # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
             # Q_IDX and Q_NUM_BLKS are always contiguous.
             q_indices = Q_IDX + sparse_q_idx_offset
-            q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
+            first_q_block_idx = tl.load(q_indices)  # sparse block index
+            q_start = first_q_block_idx * SPARSE_Q_BLOCK_SIZE # first q block we're loading
             sparse_q_num_blocks = tl.load(Q_NUM_BLKS + sparse_q_num_blks_offset)
 
+            # Load q_offset for variable-length sequences
+            {%- if HAS_OFFSETS %}
+            stride_q_offsets_z = {{stride("Q_OFFSETS", 0)}}
+            stride_q_offsets_h = {{stride("Q_OFFSETS", 1)}}
+            q_offset_ptr = Q_OFFSETS + off_zq * stride_q_offsets_z + sparse_idx_hq1 * stride_q_offsets_h + first_q_block_idx
+            q_offset = tl.load(q_offset_ptr).to(INDEX_DTYPE)
+            {%- else %}
+            q_offset = 0
+            {%- endif %}
+
             offs_m1 = q_start + tl.arange(0, BLOCK_M1)
+            # Pass global indices (offs_n1, offs_m1) and offsets (kv_offset, q_offset) to inner function
             dk, dv = bwd_dkdv_inner(
                 {{gen_argdefs()}},
                 Q1, DO1, DELTA1, LSE1,
                 dk, dv, k, v,
                 off_zq, off_hq1, offs_n1, offs_m1,
+                kv_offset, q_offset,
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
                 MATMUL_PRECISION,
@@ -247,15 +308,26 @@
                 # ~~~~~~~~~~~~~~~ fully unmasked blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
                 # FULL_Q_IDX and FULL_Q_NUM_BLKS are always contiguous.
                 q_indices = FULL_Q_IDX + sparse_q_idx_offset
-                q_start = tl.load(q_indices) * SPARSE_Q_BLOCK_SIZE # first q block we're loading
+                first_full_q_block_idx = tl.load(q_indices)  # sparse block index
+                q_start = first_full_q_block_idx * SPARSE_Q_BLOCK_SIZE # first q block we're loading
                 sparse_q_num_blocks = tl.load(FULL_Q_NUM_BLKS + sparse_q_num_blks_offset)
 
+                # Load q_offset for full blocks
+                {%- if HAS_OFFSETS %}
+                q_offset_ptr_full = Q_OFFSETS + off_zq * stride_q_offsets_z + sparse_idx_hq1 * stride_q_offsets_h + first_full_q_block_idx
+                q_offset_full = tl.load(q_offset_ptr_full).to(INDEX_DTYPE)
+                {%- else %}
+                q_offset_full = 0
+                {%- endif %}
+
                 offs_m1 = q_start + tl.arange(0, BLOCK_M1)
+                # Pass global indices (offs_n1, offs_m1) and offsets (kv_offset, q_offset_full) to inner function
                 dk, dv = bwd_dkdv_inner(
                     {{gen_argdefs()}},
                     Q1, DO1, DELTA1, LSE1,
                     dk, dv, k, v,
                     off_zq, off_hq1, offs_n1, offs_m1,
+                    kv_offset, q_offset_full,
                     stride_qm, stride_qd, stride_dom, stride_dod,
                     q_indices, sparse_q_num_blocks,
                     MATMUL_PRECISION,
@@ -292,6 +364,7 @@ def bwd_dq_inner(
     K, V,  # pointers
     dq, q, do, Di, lse,
     off_z, off_hq, offs_m2, offs_n2,
+    q_offset, kv_offset,
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION,
@@ -306,6 +379,7 @@ def bwd_dq_inner(
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
+    # Use global indices (offs_n2) for memory access
     kT_ptrs = K + offs_n2[None, :] * stride_kn + offs_k[:, None] * stride_kd
     vT_ptrs = V + offs_n2[None, :] * stride_vn + offs_v[:, None] * stride_vd
     # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
@@ -318,6 +392,7 @@ def bwd_dq_inner(
             {{gen_argdefs()}},
             dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
             off_z, off_hq, offs_m2, offs_n2, offs_k, offs_v,
+            q_offset, kv_offset,
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
             MATMUL_PRECISION, RCP_LN2,
@@ -343,6 +418,7 @@ def bwd_dq_block_mn(
     {{gen_argdefs()}},
     dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
     off_z, off_hq, offs_m2, offs_n2, offs_k, offs_v,
+    q_offset, kv_offset,
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
@@ -351,16 +427,20 @@ def bwd_dq_block_mn(
     {{gen_defines() | indent_except_first(1)}}
 
     # NB reversed order to since K is transposed
+    # Use global indices (offs_n2) for memory access via kT_ptrs
     kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN)
     qk = tl.dot(q, kT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     pre_mod_scores = qk
-    n = get_bounded_indices(offs_n2[None, :], KV_LEN if not IS_DIVISIBLE else None)
+    # Compute local indices for score_mod/mask_mod (subtract offsets from global indices)
+    offs_n2_local = offs_n2 - kv_offset
+    offs_m2_local = offs_m2 - q_offset
+    n = get_bounded_indices(offs_n2_local[None, :], KV_LEN if not IS_DIVISIBLE else None)
     # The boundary check is done for the outer loop, but here it's possible since we're iterating across N dim
     # that the M reads out of bounds for the PIDS spanning the Q_LEN boundary
-    m = get_bounded_indices(offs_m2[:, None], Q_LEN if not IS_DIVISIBLE else None)
+    m = get_bounded_indices(offs_m2_local[:, None], Q_LEN if not IS_DIVISIBLE else None)
 
     {{ modification(
         subgraph_number=0,
@@ -454,6 +534,7 @@ def bwd_dkdv_inner(
     Q, DO, DELTA, LSE, # pointers
     dk, dv, k, v,
     off_z, off_hq, offs_n1, offs_m1,
+    kv_offset, q_offset,
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
     MATMUL_PRECISION,
@@ -468,6 +549,7 @@ def bwd_dkdv_inner(
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
+    # Use global indices (offs_m1) for memory access
     qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
     do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_v[None, :] * stride_dod
     # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
@@ -482,6 +564,7 @@ def bwd_dkdv_inner(
             {{gen_argdefs()}},
             dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
             off_z, off_hq, offs_n1, offs_m1, offs_k, offs_v,
+            kv_offset, q_offset,
             stride_qm, stride_qd, stride_dom, stride_dod,
             q_indices, sparse_q_num_blocks,
             MATMUL_PRECISION, RCP_LN2,
@@ -505,6 +588,7 @@ def bwd_dkdv_block_mn(
     {{gen_argdefs()}},
     dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
     off_z, off_hq, offs_n1, offs_m1, offs_k, offs_v,
+    kv_offset, q_offset,
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
@@ -513,8 +597,10 @@ def bwd_dkdv_block_mn(
     {{gen_defines() | indent_except_first(1) }}
 
     # NB reversed order since Q is transposed
+    # Use global indices (offs_m1) for memory access via qT_ptrs
     qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN)
     # Load LSE before computing qk to reduce pipeline stall.
+    # Use global indices for memory access
     if IS_DIVISIBLE:
         lse = tl.load(LSE + offs_m1)
     else:
@@ -524,10 +610,13 @@ def bwd_dkdv_block_mn(
     if not PRESCALE_QK:
         qkT *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
-    m = get_bounded_indices(offs_m1[None, :], Q_LEN if not IS_DIVISIBLE else None)
+    # Compute local indices for score_mod/mask_mod (subtract offsets from global indices)
+    offs_m1_local = offs_m1 - q_offset
+    offs_n1_local = offs_n1 - kv_offset
+    m = get_bounded_indices(offs_m1_local[None, :], Q_LEN if not IS_DIVISIBLE else None)
     # The boundary check is done for the outer loop, but here it's possible since we're iterating across M dim
     # that the n reads out of bounds for the PIDS spanning the KV_LEN boundary
-    n = get_bounded_indices(offs_n1[:, None], KV_LEN if not IS_DIVISIBLE else None)
+    n = get_bounded_indices(offs_n1_local[:, None], KV_LEN if not IS_DIVISIBLE else None)
 
     pre_mod_scores = qkT
     {{ modification(
