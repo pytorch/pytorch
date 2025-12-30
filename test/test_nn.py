@@ -8139,6 +8139,18 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
+    def _get_mixed_dtypes(self, device):
+        """Get appropriate mixed dtype pair (param_dtype, input_dtype) for the device.
+        Returns lower precision for params and higher precision for input to test
+        mixed dtype handling without triggering unsupported dtype errors.
+        """
+        if device == 'mps':
+            # MPS doesn't support float64, use float16/float32 instead
+            return torch.float16, torch.float32
+        else:
+            # Other devices can handle float32 params with float64 input
+            return torch.float32, torch.float64
+
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
         # default case track_running_stats=False
         b, c = input.size(0), input.size(1)
@@ -8298,10 +8310,14 @@ class TestNNDeviceType(NNTestCase):
         verifies that InstanceNorm2d works correctly when input dtype differs
         from layer parameter dtype for running_mean/running_var buffers.
         """
+        # Get device-appropriate mixed dtypes
+        param_dtype, input_dtype = self._get_mixed_dtypes(device)
+
         layer = torch.nn.InstanceNorm2d(
             num_features=5,
             track_running_stats=True,
             affine=False,
+            dtype=param_dtype,
             device=device
         )
 
@@ -8309,8 +8325,8 @@ class TestNNDeviceType(NNTestCase):
         initial_running_mean = layer.running_mean.clone()
         initial_running_var = layer.running_var.clone()
 
-        # create float64 input (layer params are float32 by default)
-        input_tensor = torch.randn(2, 5, 10, 10, dtype=torch.float64, device=device)
+        # create input with higher precision dtype than params
+        input_tensor = torch.randn(2, 5, 10, 10, dtype=input_dtype, device=device)
 
         # forward pass in training mode
         layer.train()
@@ -8330,10 +8346,10 @@ class TestNNDeviceType(NNTestCase):
         self.assertTrue(running_var_updated, "Running var should be updated")
 
         # verify running stats maintain their original dtype
-        self.assertEqual(layer.running_mean.dtype, torch.float32,
-                         "Running mean should maintain float32 dtype")
-        self.assertEqual(layer.running_var.dtype, torch.float32,
-                         "Running var should maintain float32 dtype")
+        self.assertEqual(layer.running_mean.dtype, param_dtype,
+                         f"Running mean should maintain {param_dtype} dtype")
+        self.assertEqual(layer.running_var.dtype, param_dtype,
+                         f"Running var should maintain {param_dtype} dtype")
 
         # test eval mode uses tracked stats correctly
         layer.eval()
@@ -8344,12 +8360,12 @@ class TestNNDeviceType(NNTestCase):
                         "Eval mode output should not contain NaN or Inf")
 
         # test multiple forward passes to verify stats accumulation
-        layer = torch.nn.InstanceNorm2d(5, track_running_stats=True, device=device)
+        layer = torch.nn.InstanceNorm2d(5, track_running_stats=True, dtype=param_dtype, device=device)
         layer.train()
 
         running_means = []
         for _ in range(3):
-            input_tensor = torch.randn(2, 5, 10, 10, dtype=torch.float64, device=device)
+            input_tensor = torch.randn(2, 5, 10, 10, dtype=input_dtype, device=device)
             output = layer(input_tensor)
             running_means.append(layer.running_mean.clone())
 
@@ -8365,10 +8381,13 @@ class TestNNDeviceType(NNTestCase):
         verifies that gradients are computed correctly when input dtype differs
         from layer parameter dtype.
         """
-        layer = torch.nn.InstanceNorm2d(3, affine=False, device=device)
+        # Get device-appropriate mixed dtypes
+        param_dtype, input_dtype = self._get_mixed_dtypes(device)
 
-        # create float64 input with gradient tracking
-        input_tensor = torch.randn(2, 3, 4, 4, dtype=torch.float64, device=device, requires_grad=True)
+        layer = torch.nn.InstanceNorm2d(3, affine=False, dtype=param_dtype, device=device)
+
+        # create input with higher precision dtype than params
+        input_tensor = torch.randn(2, 3, 4, 4, dtype=input_dtype, device=device, requires_grad=True)
 
         # forward and backward pass
         layer.train()
@@ -8378,14 +8397,14 @@ class TestNNDeviceType(NNTestCase):
 
         # verify input gradients
         self.assertIsNotNone(input_tensor.grad, "Input gradient should be computed")
-        self.assertEqual(input_tensor.grad.dtype, torch.float64,
+        self.assertEqual(input_tensor.grad.dtype, input_dtype,
                          "Input gradient should match input dtype")
         self.assertTrue(torch.isfinite(input_tensor.grad).all(),
                         "Input gradient should not contain NaN or Inf")
 
         # test that affine=True with mixed dtype errors out (from batch_norm checks)
-        layer = torch.nn.InstanceNorm2d(3, affine=True, device=device)
-        input_tensor = torch.randn(2, 3, 4, 4, dtype=torch.float64, device=device)
+        layer = torch.nn.InstanceNorm2d(3, affine=True, dtype=param_dtype, device=device)
+        input_tensor = torch.randn(2, 3, 4, 4, dtype=input_dtype, device=device)
 
         with self.assertRaisesRegex(RuntimeError, "(mixed dtype|does not match|Expected weight to have type)"):
             output = layer(input_tensor)
