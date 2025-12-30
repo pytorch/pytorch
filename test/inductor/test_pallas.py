@@ -899,8 +899,6 @@ class PallasTestsMixin:
 
     def test_comparison_ops(self):
         """Test comparison operations."""
-        if self.DEVICE == "cuda":
-            self.skipTest("comparison ops not supported in Pallas GPU (Mosaic) backend")
 
         def fn(a, b):
             gt = a > b
@@ -910,24 +908,22 @@ class PallasTestsMixin:
 
         compiled = self._compile(fn)
 
-        a = torch.randn(16, device=self.DEVICE)
-        b = torch.randn(16, device=self.DEVICE)
+        a = torch.randn(1024, device=self.DEVICE)
+        b = torch.randn(1024, device=self.DEVICE)
         result = compiled(a, b)
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
     def test_logical_ops(self):
         """Test logical operations."""
-        if self.DEVICE == "cuda":
-            self.skipTest("logical ops not supported in Pallas GPU (Mosaic) backend")
 
         def fn(a, b):
             return torch.logical_and(a > 0, b > 0).float()
 
         compiled = self._compile(fn)
 
-        a = torch.randn(16, device=self.DEVICE)
-        b = torch.randn(16, device=self.DEVICE)
+        a = torch.randn(1024, device=self.DEVICE)
+        b = torch.randn(1024, device=self.DEVICE)
         result = compiled(a, b)
         expected = fn(a, b)
         self.assertEqual(result, expected)
