@@ -1588,6 +1588,26 @@ call to a lru_cache wrapped function at: test_error_messages.py:N
 """,
         )
 
+    def test_lru_cache_warning(self):
+        # test only the warning message itself
+        @lru_cache
+        def bax(x):
+            return x + 1
+
+        def bar(x):
+            return bax(x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def foo(x):
+            return bar(x)
+
+        x = torch.randn(2)
+        with self.assertWarnsOnceRegex(
+            UserWarning,
+            r"(?s).*This call originates from:\n.*File .*, line (\d+), in bar",
+        ):
+            foo(x)
+
     def test_disable_message(self):
         @torch.compile(backend="eager", fullgraph=True)
         def outer(fn, x):
