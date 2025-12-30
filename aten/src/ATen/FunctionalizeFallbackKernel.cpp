@@ -202,7 +202,9 @@ static const at::Tensor & resize__functionalization(c10::DispatchKeySet dispatch
 
 
 static at::Tensor lift_functionalize(const at::Tensor & self) {
-  TORCH_INTERNAL_ASSERT(!at::functionalization::impl::isFunctionalTensor(self));
+  if (at::functionalization::impl::isFunctionalTensor(self)) {
+    return self;
+  }
   at::AutoDispatchSkipFunctionalize guard;
   auto out = at::lift(self);
   return at::functionalization::impl::to_functional_tensor(out);
