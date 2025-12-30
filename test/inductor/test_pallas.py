@@ -406,6 +406,169 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    def test_stride_non_contiguous_1d(self):
+        """Test 1D non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_1d = torch.arange(256, dtype=torch.float32, device=self.DEVICE)
+        for x in [base_1d[::2], base_1d[::4], base_1d[::2][::2]]:
+            self.assertFalse(x.is_contiguous())
+            self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_2d_row_stride(self):
+        """Test 2D row-strided input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d[::2, :]  # (16, 32) with stride (64, 1)
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_2d_col_stride(self):
+        """Test 2D col-strided input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d[:, ::2]  # (32, 16) with stride (32, 2)
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_2d_both_stride(self):
+        """Test 2D both-strided input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d[::2, ::2]  # (16, 16) with stride (64, 2)
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_2d_transpose(self):
+        """Test 2D transposed input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d.t()  # (32, 32) with stride (1, 32)
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_3d(self):
+        """Test 3D non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_3d = torch.randn(8, 8, 8, device=self.DEVICE)
+        x = base_3d[::2, ::2, ::2]
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_permuted(self):
+        """Test permuted non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_3d = torch.randn(8, 8, 8, device=self.DEVICE)
+        x = base_3d.permute(2, 0, 1)
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_channels_last(self):
+        """Test channels-last (NHWC) non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        x = torch.randn(2, 3, 4, 5, device=self.DEVICE).to(
+            memory_format=torch.channels_last
+        )
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_diagonal(self):
+        """Test diagonal (large stride) non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d.diagonal()
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_as_strided(self):
+        """Test as_strided (custom layout) non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_flat = torch.randn(256, device=self.DEVICE)
+        x = torch.as_strided(base_flat, size=(4, 8), stride=(16, 2))
+        self.assertFalse(x.is_contiguous())
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_select_stride(self):
+        """Test select then stride on non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d[3, ::2]
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_unsqueeze(self):
+        """Test unsqueeze on strided non-contiguous input patterns."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        base_2d = torch.randn(32, 32, device=self.DEVICE)
+        x = base_2d[::2, ::2].unsqueeze(0)
+        self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    def test_stride_non_contiguous_dtypes(self):
+        """Test non-contiguous patterns with various dtypes."""
+        compiled = self._compile(lambda x: x * 2.0 + 1.0)
+
+        for dtype in [torch.float64, torch.int32, torch.complex64]:
+            if dtype == torch.int32:
+                base = torch.arange(32, dtype=dtype, device=self.DEVICE)
+            else:
+                base = torch.randn(32, dtype=dtype, device=self.DEVICE)
+            x = base[::2]
+            self.assertEqual(compiled(x), x * 2.0 + 1.0)
+
+    @unittest.skip(
+        "Expanded tensors (stride=0) generate index expressions that don't match "
+        "the contiguous layout after .contiguous() is called at runtime, causing "
+        "gather ops on GPU which aren't supported by Pallas GPU lowering"
+    )
+    def test_stride_expanded_tensors(self):
+        """Test expanded tensors with stride=0 (distinct code path)."""
+        compiled = self._compile(lambda x, y: x + y)
+
+        # Single dim expansion
+        x = torch.randn(1, 16, device=self.DEVICE).expand(8, 16)
+        y = torch.randn(8, 16, device=self.DEVICE)
+        self.assertEqual(x.stride()[0], 0)
+        self.assertEqual(compiled(x, y), x + y)
+
+        # Multi-dim expansion
+        x = torch.randn(1, 1, 16, device=self.DEVICE).expand(4, 8, 16)
+        self.assertEqual(compiled(x, x), x + x)
+
+    def test_stride_multiple_inputs(self):
+        """Test multiple strided inputs and broadcasting."""
+        compiled = self._compile(lambda a, b, c: a * b + c)
+
+        # Use separate base tensors to create strided inputs with the SAME stride pattern
+        # This avoids triggering scatter operations which aren't supported in Pallas GPU lowering
+        base_a = torch.randn(32, 32, device=self.DEVICE)
+        base_b = torch.randn(32, 32, device=self.DEVICE)
+
+        # Multiple strided inputs with the same stride pattern
+        a = base_a[::2, ::2]  # (16, 16) with stride (64, 2)
+        b = base_b[::2, ::2]  # (16, 16) with stride (64, 2)
+        c = torch.randn(16, 16, device=self.DEVICE)
+        self.assertEqual(a.stride(), b.stride())
+        self.assertFalse(a.is_contiguous())
+        self.assertFalse(b.is_contiguous())
+        self.assertEqual(compiled(a, b, c), a * b + c)
+
+        # Broadcasting with strided
+        x = base_a[::2, ::2]  # (16, 16)
+        y = torch.randn(16, device=self.DEVICE)  # broadcasts
+        s = torch.tensor(2.0, device=self.DEVICE)  # scalar
+        compiled_bcast = self._compile(lambda x, y, s: x + y * s)
+        self.assertEqual(compiled_bcast(x, y, s), x + y * s)
+
     def test_non_power_of_2_sizes(self):
         """Test that non-power-of-2 tensor sizes work with masked ops on GPU.
 
