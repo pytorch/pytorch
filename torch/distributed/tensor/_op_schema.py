@@ -51,7 +51,6 @@ except ImportError:
     from torch.utils._pytree import (  # type: ignore[no-redef, assignment]
         register_pytree_node,
         tree_leaves,
-        tree_map_only,
         TreeSpec,
     )
 

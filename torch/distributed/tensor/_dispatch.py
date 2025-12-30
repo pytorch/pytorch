@@ -21,6 +21,7 @@ from torch.distributed.tensor._op_schema import (
     OutputSharding,
     OutputSpecType,
 )
+from torch.distributed.tensor._ops._dtensor_ops import _to_local_tensor_handler
 from torch.distributed.tensor._random import is_rng_supported_mesh
 from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
@@ -158,6 +159,7 @@ class OpDispatcher:
             aten.as_strided.default: as_strided_handler,
             aten.argmin.default: argmin_argmax_handler,
             aten.argmax.default: argmin_argmax_handler,
+            torch.ops._dtensor._to_local_tensor.default: _to_local_tensor_handler,
         }
 
     # ********************************************************************************************

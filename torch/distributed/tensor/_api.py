@@ -1,7 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
-import copy
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
@@ -13,11 +12,7 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
-from torch.distributed.device_mesh import (
-    _mesh_resources,
-    _register_device_mesh_as_opaque_type,
-    DeviceMesh,
-)
+from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._redistribute import (
@@ -73,64 +68,6 @@ aten = torch.ops.aten
 #
 # So from_local/to_local must be Autograd functions.
 #
-class _ToTorchTensor(torch.autograd.Function):
-    @staticmethod
-    def forward(  # type: ignore[override]
-        ctx,
-        input: "DTensor",
-        grad_placements: Sequence[Placement] | None,
-    ):
-        ctx.dtensor_spec = input._spec
-        ctx.grad_placements = grad_placements
-        local_tensor = input._local_tensor
-
-        # We need to return a fresh Tensor object there as autograd metadata
-        # will be inplaced into it. So we don't want to pollute the Tensor
-        # object stored in the _local_tensor of this DTensor.
-        return local_tensor.view_as(local_tensor)
-
-    @staticmethod
-    def backward(ctx, grad_output: torch.Tensor):  # type: ignore[override]
-        dtensor_spec = ctx.dtensor_spec
-        mesh = dtensor_spec.mesh
-        grad_placements = ctx.grad_placements
-        dtensor_meta = dtensor_spec.tensor_meta
-
-        _, tensor_stride = compute_global_tensor_info(
-            grad_output, mesh, dtensor_spec.placements
-        )
-        tensor_stride = tuple(tensor_stride)
-        grad_placements = grad_placements or dtensor_spec.placements
-        if (
-            tensor_stride == dtensor_meta.stride
-            and grad_placements == dtensor_spec.placements
-        ):
-            # Avoid actual sharing of specs in case they're modified during (e.g.)
-            # sharding propagation.
-            grad_spec = copy.copy(dtensor_spec)
-        else:
-            grad_spec = DTensorSpec(
-                mesh,
-                grad_placements,
-                tensor_meta=TensorMeta(
-                    shape=dtensor_meta.shape,
-                    stride=tensor_stride,
-                    dtype=dtensor_meta.dtype,
-                ),
-            )
-        return (
-            # pyrefly: ignore [bad-argument-type]
-            DTensor(
-                # pyrefly: ignore [bad-argument-count]
-                grad_output,
-                grad_spec,
-                # pyrefly: ignore [unexpected-keyword]
-                requires_grad=grad_output.requires_grad,
-            ),
-            None,
-        )
-
-
 class _FromTorchTensor(torch.autograd.Function):
     @staticmethod
     def forward(  # type: ignore[override]
@@ -378,6 +315,7 @@ class DTensor(torch.Tensor):
             "DTensor.__torch_dispatch__ should not actually get called"
         )
 
+    # @mark_subclass_constructor_exportable_experimental
     @staticmethod
     def from_local(
         local_tensor: torch.Tensor,
@@ -502,14 +440,9 @@ class DTensor(torch.Tensor):
         .. note:: ``to_local`` is differentiable, the ``requires_grad`` of the local tensor returned
             will depend on if the `DTensor` requires_grad or not.
         """
-        if not torch.is_grad_enabled():
-            return self._local_tensor
-
         if grad_placements is not None and not isinstance(grad_placements, tuple):
             grad_placements = tuple(grad_placements)
-        return _ToTorchTensor.apply(
-            self, grad_placements
-        )  # pyre-ignore[16]: autograd func
+        return torch.ops._dtensor._to_local_tensor(self, grad_placements)
 
     def redistribute(
         self,
@@ -627,7 +560,7 @@ class DTensor(torch.Tensor):
         redist_res = self.redistribute(
             placements=[Replicate()] * self.device_mesh.ndim, async_op=False
         )
-        return _ToTorchTensor.apply(redist_res, grad_placements)
+        return torch.ops._dtensor._to_local_tensor(redist_res, grad_placements)
 
     @property
     def device_mesh(self) -> DeviceMesh:
@@ -1406,11 +1339,8 @@ def zeros(  # type: ignore[no-untyped-def]
         placements=placements,
     )
 
-
 # Module-level alias for DTensor.from_local to support FX code generation.
 # FX uses __name__ instead of __qualname__ when generating code, which loses
 # the class context for static methods. This alias allows generated code like
 # `torch.distributed.tensor._api.from_local(...)` to work correctly.
 from_local = DTensor.from_local
-
-_register_device_mesh_as_opaque_type()

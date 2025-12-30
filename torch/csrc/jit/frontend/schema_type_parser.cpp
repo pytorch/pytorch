@@ -91,6 +91,7 @@ TypePtr SchemaTypeParser::parseBaseType() {
       {"None", c10::TypeFactory::get<NoneType>()},
       {"NoneType", c10::TypeFactory::get<NoneType>()},
       {"Capsule", c10::TypeFactory::get<CapsuleType>()},
+      {"PyObject", c10::PyObjectType::get()},
       {"Any", c10::TypeFactory::get<c10::AnyType>()},
       {"AnyClassType", c10::TypeFactory::get<c10::AnyClassType>()},
       {"AnyEnumType", c10::TypeFactory::get<c10::AnyEnumType>()},
