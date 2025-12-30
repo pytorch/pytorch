@@ -61,6 +61,7 @@ public:
   StreamId id() const        { return stream_.id(); }
   bool query() const         { return stream_.query(); }
   void synchronize() const   { stream_.synchronize(); }
+  bool is_capturing() const  { return stream_.is_capturing(); }
   int priority() const       { return stream_.priority(); }
   hipStream_t stream() const { return stream_.stream(); }
 
