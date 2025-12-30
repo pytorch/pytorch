@@ -6493,6 +6493,13 @@ def _check_scaled_mm_sizes(
             ):
                 # (BlockWise1x128, BlockWise1x128)
                 pass  # do nothing, but do not error
+            elif (
+                scale_a.size(0) == ceil_div(m, 128)
+                and scale_a.size(1) == scale_b.size(0) == ceil_div(_k, 128)
+                and scale_b.size(1) == n
+            ):
+                # (BlockWise128x128, BlockWise1x128)
+                pass  # do nothing, but do not error
             else:
                 # does not match any valid scaling type
                 torch._check(
@@ -6504,6 +6511,8 @@ def _check_scaled_mm_sizes(
                         f"For (BlockWise1x128, BlockWise128x128), scale_a should be ({m}, {ceil_div(_k, 128)}), "
                         + f"scale_b should be ({ceil_div(_k, 128)}, {ceil_div(n, 128)}). "
                         f"For (BlockWise1x128, BlockWise1x128), scale_a should be ({m}, {ceil_div(_k, 128)}), "
+                        + f"scale_b should be ({ceil_div(_k, 128)}, {n}). "
+                        f"For (BlockWise128x128, BlockWise1x128), scale_a should be ({ceil_div(m, 128)}, {ceil_div(_k, 128)}), "
                         + f"scale_b should be ({ceil_div(_k, 128)}, {n}). "
                         f"Got scale_a.size()=({scale_a.size(0)}, {scale_a.size(1)}) "
                         f"and scale_b.size()=({scale_b.size(0)}, {scale_b.size(1)})"
@@ -6553,7 +6562,7 @@ def _check_scaled_mm_sizes_v2(
         )
 
     def is_fp4_type(dtype):
-        return dtype in (torch.float4_e2m1fn_x2,)
+        return dtype == torch.float4_e2m1fn_x2
 
     torch._check(
         self.dim() == 2 and mat2.dim() == 2,

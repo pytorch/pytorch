@@ -286,7 +286,6 @@ class TestTesting(TestCase):
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
     # See: https://github.com/pytorch/pytorch/issues/49019
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
@@ -314,13 +313,17 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 if __name__ == '__main__':
     run_tests()
 """)
-        # should capture CUDA error
-        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            f"Expected device assert error in stderr, got: {stderr}",
+        )
         # should run only 1 test because it throws unrecoverable error.
         self.assertIn('errors=1', stderr)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
@@ -355,8 +358,13 @@ instantiate_device_type_tests(
 if __name__ == '__main__':
     run_tests()
 """)
-        # should capture CUDA error
-        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            f"Expected device assert error in stderr, got: {stderr}",
+        )
         # should run only 1 test because it throws unrecoverable error.
         self.assertIn('errors=1', stderr)
 
@@ -2374,6 +2382,7 @@ class TestImports(TestCase):
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
+                           "torch._inductor.kernel.vendored_templates.cutedsl_grouped_gemm",  # depends on cutlass
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac

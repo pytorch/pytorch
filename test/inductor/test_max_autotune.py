@@ -105,6 +105,11 @@ else:
 if HAS_CUDA_AND_TRITON:
     torch.cuda.memory._set_allocator_settings("expandable_segments:False")
 
+# Conditional patch for decompose_k tests - override to 10 on ROCm, no-op elsewhere
+_DECOMPOSE_K_PATCH_ROCM = (
+    {"triton.num_decompose_k_splits": 10} if torch.version.hip else {}
+)
+
 
 def benchmark_choice(choice, args, out, expected_out, timings):
     result = choice.benchmark(*args, out=out)
@@ -1214,101 +1219,100 @@ class TestMaxAutotune(TestCase):
         shape_padding=False,
     )
     def test_max_autotune_decompose_k(self, sizes, dtype, dynamic):
-        fp16_red_setting = (
-            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
-        )
-        bf16_red_setting = (
-            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
-        )
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
+        with config.patch(_DECOMPOSE_K_PATCH_ROCM):
+            fp16_red_setting = (
+                torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction
+            )
+            bf16_red_setting = (
+                torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction
+            )
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = False
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = False
 
-        M, N, K = sizes
+            M, N, K = sizes
 
-        a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
-        b = torch.randn(K, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            b = torch.randn(K, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
 
-        possible_splits = range(2, min(K // M, K // N) + 1)
+            possible_splits = range(2, min(K // M, K // N) + 1)
 
-        divisors = {split for split in possible_splits if K % split == 0}
+            divisors = {split for split in possible_splits if K % split == 0}
 
-        def check_divisors(code):
-            for kernel in code:
-                if "decompose_k" in kernel:
-                    divisor_found = False
-                    for divisor in divisors:
-                        if f"{divisor}_split" in kernel:
-                            divisor_found = True
-                            break
+            def check_divisors(code):
+                for kernel in code:
+                    if "decompose_k" in kernel:
+                        divisor_found = False
+                        for divisor in divisors:
+                            if f"{divisor}_split" in kernel:
+                                divisor_found = True
+                                break
 
-                    self.assertTrue(
-                        divisor_found,
-                        f"Could not find a split in {divisors} in {kernel}",
-                    )
+                        self.assertTrue(
+                            divisor_found,
+                            f"Could not find a split in {divisors} in {kernel}",
+                        )
 
-        compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
-        # We assume with the large k dim relative to m, n, decompose_k will be most performant
-        out, code = run_and_get_code(compiled_func, a, b)
+            compiled_func = torch.compile(lambda a, b: a @ b, dynamic=dynamic)
+            # We assume with the large k dim relative to m, n, decompose_k will be most performant
+            out, code = run_and_get_code(compiled_func, a, b)
 
-        if dynamic or torch.version.hip:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
-        else:
-            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_0.run"
-            ).check("decompose_k").run(code[0])
-            check_divisors(code)
-            torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
+            if dynamic:
+                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                    "decompose_k"
+                ).run(code[0])
+            else:
+                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                    "triton_.*_fused_0.run"
+                ).check("decompose_k").run(code[0])
+                check_divisors(code)
+                torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
 
-        # Test adding epilogue also equivalent to eager
-        compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
-        out, code = run_and_get_code(compiled_func, a, b)
-        if dynamic or torch.version.hip:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
-        else:
-            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_mm_0.run"
-            ).check("decompose_k").run(code[0])
-            check_divisors(code)
-            torch.testing.assert_close(
-                compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+            # Test adding epilogue also equivalent to eager
+            compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
+            out, code = run_and_get_code(compiled_func, a, b)
+            if dynamic:
+                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                    "decompose_k"
+                ).run(code[0])
+            else:
+                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                    "triton_.*_fused_mm_0.run"
+                ).check("decompose_k").run(code[0])
+                check_divisors(code)
+                torch.testing.assert_close(
+                    compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+                )
+
+            # Test adding reinterpret view before subgraph
+            a = a.transpose(0, 1)
+            compiled_func = torch.compile(
+                lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
+            )
+            out, code = run_and_get_code(compiled_func, a, b)
+
+            if dynamic:
+                FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
+                    "decompose_k"
+                ).run(code[0])
+            else:
+                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                    "triton_.*_fused_.*_0.run"
+                ).check("decompose_k").run(code[0])
+                check_divisors(code)
+                torch.testing.assert_close(
+                    compiled_func(a, b),
+                    (a.transpose(0, 1) @ b).relu(),
+                    atol=1e-2,
+                    rtol=1e-2,
+                )
+
+            torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
+                fp16_red_setting
+            )
+            torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
+                bf16_red_setting
             )
 
-        # Test adding reinterpret view before subgraph
-        a = a.transpose(0, 1)
-        compiled_func = torch.compile(
-            lambda a, b: (a.transpose(0, 1) @ b).relu(), dynamic=dynamic
-        )
-        out, code = run_and_get_code(compiled_func, a, b)
-
-        # DecomposeK is not enabled for AMD yet
-        if dynamic or torch.version.hip:
-            FileCheck().check_not("extern_kernels.bmm_dtype").check_not(
-                "decompose_k"
-            ).run(code[0])
-        else:
-            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_.*_0.run"
-            ).check("decompose_k").run(code[0])
-            check_divisors(code)
-            torch.testing.assert_close(
-                compiled_func(a, b),
-                (a.transpose(0, 1) @ b).relu(),
-                atol=1e-2,
-                rtol=1e-2,
-            )
-
-        torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
-            fp16_red_setting
-        )
-        torch.backends.cuda.matmul.allow_bf16_reduced_precision_reduction = (
-            bf16_red_setting
-        )
-
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1356,7 +1360,6 @@ class TestMaxAutotune(TestCase):
                 rtol=1e-2,
             )
 
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1369,44 +1372,45 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_dynamic_input_bwd(self):
-        def f(a, b):
-            # 256 * s0
-            a_in = torch.cat([a for _ in range(256)], dim=0)
-            return (a_in @ b).relu().sum()
+        with config.patch(_DECOMPOSE_K_PATCH_ROCM):
 
-        a = torch.randn(
-            8, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
-        )
-        b = torch.randn(
-            64, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
-        )
+            def f(a, b):
+                # 256 * s0
+                a_in = torch.cat([a for _ in range(256)], dim=0)
+                return (a_in @ b).relu().sum()
 
-        torch._dynamo.reset()
-        torch._dynamo.maybe_mark_dynamic(a, 0)
-        compiled_func = torch.compile(f)
-        res = compiled_func(a, b)
-        res.backward()
-
-        with mock.patch(
-            "torch._inductor.kernel.mm.use_decompose_k_choice"
-        ) as decomp_mock:
-            decomp_mock.side_effect = (
-                lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
+            a = torch.randn(
+                8, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            )
+            b = torch.randn(
+                64, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
             )
 
-            out, code = run_and_get_code(compiled_func, a, b)
-            out.backward()
+            torch._dynamo.reset()
+            torch._dynamo.maybe_mark_dynamic(a, 0)
+            compiled_func = torch.compile(f)
+            res = compiled_func(a, b)
+            res.backward()
 
-            FileCheck().check("extern_kernels.bmm_dtype").check_regex(
-                "triton_.*_fused_0.run"
-            ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
-                r"256\*s[0-9]+"
-            ).check_regex("s[0-9]+ = 8").run(
-                # code[1] in this case given backwards
-                code[1]
-            )
+            with mock.patch(
+                "torch._inductor.kernel.mm.use_decompose_k_choice"
+            ) as decomp_mock:
+                decomp_mock.side_effect = (
+                    lambda *args, **kwargs: kwargs.get("threshold_multiple", 1) == 1
+                )
 
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+                out, code = run_and_get_code(compiled_func, a, b)
+                out.backward()
+
+                FileCheck().check("extern_kernels.bmm_dtype").check_regex(
+                    "triton_.*_fused_0.run"
+                ).check("decompose_k").check_regex(r"s[0-9]+ = s[0-9]+").check_regex(
+                    r"256\*s[0-9]+"
+                ).check_regex("s[0-9]+ = 8").run(
+                    # code[1] in this case given backwards
+                    code[1]
+                )
+
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )
@@ -1419,38 +1423,42 @@ class TestMaxAutotune(TestCase):
         max_autotune_gemm_backends="TRITON",
     )
     def test_max_autotune_decompose_k_output_stride(self):
-        def f(a, b):
-            a = a.transpose(0, 1)
-            return a @ b
+        with config.patch(_DECOMPOSE_K_PATCH_ROCM):
 
-        a = torch.randn((32768, 256), device=GPU_TYPE, dtype=torch.bfloat16)
-        b = torch.randn((32768, 1152), device=GPU_TYPE, dtype=torch.bfloat16)
+            def f(a, b):
+                a = a.transpose(0, 1)
+                return a @ b
 
-        b = b[:, :1096]
+            a = torch.randn((32768, 256), device=GPU_TYPE, dtype=torch.bfloat16)
+            b = torch.randn((32768, 1152), device=GPU_TYPE, dtype=torch.bfloat16)
 
-        # Force only decomposeK choice
-        with (
-            override_template_heuristics(
-                device_type=GPU_TYPE,
-                template_op_pairs=[(torch._inductor.kernel.mm.mm_template.name, "mm")],
-            ),
-            mock.patch(
-                "torch._inductor.kernel.mm.use_decompose_k_choice"
-            ) as decompose_mock,
-        ):
-            decompose_mock.return_value = True
-            compiled_f = torch.compile(f)
-            out, code = run_and_get_code(compiled_f, a, b)
+            b = b[:, :1096]
 
-            # Output stride equal to original gm output stride
-            # If output stride is not correctly checked, this will be (1152, 1) which can cause nans
-            self.assertEqual(out.stride(), (1096, 1))
+            # Force only decomposeK choice
+            with (
+                override_template_heuristics(
+                    device_type=GPU_TYPE,
+                    template_op_pairs=[
+                        (torch._inductor.kernel.mm.mm_template.name, "mm")
+                    ],
+                ),
+                mock.patch(
+                    "torch._inductor.kernel.mm.use_decompose_k_choice"
+                ) as decompose_mock,
+            ):
+                decompose_mock.return_value = True
+                compiled_f = torch.compile(f)
+                out, code = run_and_get_code(compiled_f, a, b)
 
-            FileCheck().check_not("extern_kernels.bmm_dtype").check(
-                "decompose_k"
-            ).check(
-                f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
-            ).run(code[0])
+                # Output stride equal to original gm output stride
+                # If output stride is not correctly checked, this will be (1152, 1) which can cause nans
+                self.assertEqual(out.stride(), (1096, 1))
+
+                FileCheck().check_not("extern_kernels.bmm_dtype").check(
+                    "decompose_k"
+                ).check(
+                    f" empty_strided_{GPU_TYPE}((256, 1096), (1096, 1), torch.bfloat16)"
+                ).run(code[0])
 
     @unittest.skipIf(not torch.version.hip, "ROCM only")
     @parametrize("dtype", (torch.float16, torch.bfloat16, torch.float32))
@@ -1646,6 +1654,81 @@ class TestMaxAutotune(TestCase):
 
             # Check that contiguous transform was used
             FileCheck().check("contiguous_mm").run(code[0])
+
+    @config.patch(
+        max_autotune=True,
+        max_autotune_gemm_backends="TRITON",
+    )
+    def test_override_template_heuristics_with_custom_class(self):
+        """
+        Test that override_template_heuristics works with a custom heuristic class.
+        Verifies that get_template_heuristic returns an instance of our custom class
+        and that get_template_configs yields the expected configs.
+        """
+        from torch._inductor.kernel.mm import MMKernelInputs
+        from torch._inductor.template_heuristics.registry import (
+            get_registered_heuristic_class,
+            get_template_heuristic,
+        )
+
+        template_uid = torch._inductor.kernel.mm.mm_template.uid
+
+        # Get the base heuristic class that would normally be used for mm_template
+        base_heuristic_class = get_registered_heuristic_class(
+            template_uid, GPU_TYPE, "mm"
+        )
+        self.assertIsNotNone(base_heuristic_class)
+
+        # Create a dummy graph for the GraphLowering context
+        gm = make_fx(lambda: torch.zeros(2, 3))()
+        graph = GraphLowering(gm)
+
+        # The graph handler is needed to create IR nodes and use V.graph.sizevars
+        with V.set_graph_handler(graph), config.patch({"max_autotune": True}):
+            # Create IR Buffer nodes for testing (not actual tensors)
+            mat1 = Buffer(
+                name="mat1",
+                layout=FixedLayout(
+                    torch.device(GPU_TYPE),
+                    dtype=torch.float32,
+                    size=(64, 64),
+                ),
+            )
+            mat2 = Buffer(
+                name="mat2",
+                layout=FixedLayout(
+                    torch.device(GPU_TYPE),
+                    dtype=torch.float32,
+                    size=(64, 64),
+                ),
+            )
+            kernel_inputs = MMKernelInputs([mat1, mat2])
+
+            # Get the first config from the original heuristic to use as our expected config
+            base_heuristic = base_heuristic_class()
+            expected_config = next(
+                iter(base_heuristic.get_template_configs(kernel_inputs, "mm"))
+            )
+
+            # Create a custom heuristic class that only yields the single expected config
+            class CustomMMHeuristic(base_heuristic_class):
+                def get_template_configs(self, kernel_inputs, op_name):
+                    yield expected_config
+
+            with override_template_heuristics(
+                device_type=GPU_TYPE,
+                template_op_pairs=[(template_uid, "mm")],
+                override_heuristic_class=CustomMMHeuristic,
+            ):
+                # Get the heuristic and verify it's our custom class
+                heuristic = get_template_heuristic(template_uid, GPU_TYPE, "mm")
+                self.assertIsInstance(heuristic, CustomMMHeuristic)
+                self.assertIsInstance(heuristic, base_heuristic_class)
+
+                # Verify get_template_configs yields only the expected config
+                configs = list(heuristic.get_template_configs(kernel_inputs, "mm"))
+                self.assertEqual(len(configs), 1)
+                self.assertEqual(configs[0], expected_config)
 
     @unittest.skipIf(config.cpp_wrapper, "out_dtype override not supported for AOTI")
     @unittest.skipIf(TEST_WITH_ROCM, "out_dtype override only available on NVIDIA")
@@ -1981,7 +2064,7 @@ class TestMaxAutotune(TestCase):
             self.assertEqual(misses(), 4)
 
     @fresh_cache()
-    @unittest.skipIf(TEST_WITH_ROCM, "decompose_k not supported on ROCm")
+    @skipIfXpu
     @unittest.skipIf(
         config.cpp_wrapper, "decompose_k not supported for cpp_wrapper yet"
     )

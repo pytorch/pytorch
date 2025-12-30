@@ -19,7 +19,7 @@ on:
       run-doxygen:
         required: false
         type: boolean
-        default: true
+        default: false
         description: If set, will enable C++ API doc generation using doxygen / breathe / exhale.
       sync-tag:
         required: false
