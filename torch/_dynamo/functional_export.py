@@ -126,15 +126,17 @@ def clean_nn_module_stack_and_source_fn(
             cleaned_stack[clean_key] = (clean_name, child_class)
         return cleaned_stack
 
-    def _process_source_fn(source_fn_stack: Iterable[Any]) -> Iterable[Any]:
+    def _process_source_fn(source_fn_stack: Iterable[T]) -> Iterable[T]:
         cleaned_stack = []
         for item in source_fn_stack:
             if isinstance(item, tuple) and len(item) == 2:
                 name, cls = item
                 if isinstance(name, str):
                     clean_name = clean_export_root_string(name)
+                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append((clean_name, cls))
                 else:
+                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append(item)
             else:
                 cleaned_stack.append(item)
