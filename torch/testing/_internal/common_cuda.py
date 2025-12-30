@@ -383,6 +383,11 @@ def xfailIfSM120OrLater(func):
 def xfailIfDistributedNotSupported(func):
     return func if not (IS_MACOS or IS_JETSON) else unittest.expectedFailure(func)
 
+# When using nvcc from the CUDA toolkit its versuib must be at least the one from ptxas bundled with Triton
+TRITON_PTXAS_VERSION = (12, 8)
+requires_triton_ptxas_compat = unittest.skipIf(torch.version.hip is None and _get_torch_cuda_version() < TRITON_PTXAS_VERSION,
+                                               "Requires CUDA {}.{} to match Tritons ptxas version".format(*TRITON_PTXAS_VERSION))
+
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
     assert not torch.cuda.is_initialized()

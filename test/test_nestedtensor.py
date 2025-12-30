@@ -8464,7 +8464,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="SymIntArrayRef expected to contain only concrete integers",
-        op_match_fn=lambda device, op: (op.full_name in {"mean"}),
+        op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name
             and "normal dim reduction" not in sample.name
@@ -8499,7 +8499,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="cannot view shape",
-        op_match_fn=lambda device, op: (op.full_name in {"unflatten"}),
+        op_match_fn=lambda device, op: (op.full_name == "unflatten"),
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="broken_unflatten_backward",
     ),
