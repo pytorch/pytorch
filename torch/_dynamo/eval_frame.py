@@ -642,15 +642,6 @@ def make_set_enable_dynamic(enable: bool) -> Any:
         )
 
 
-@contextlib.contextmanager
-def set_enable_dynamic(enable: bool):
-    cleanup = make_set_enable_dynamic(enable)()
-    try:
-        yield
-    finally:
-        cleanup()
-
-
 # A thread local storage that serves to store information as Dynamo traces
 # through a user provided function.
 class DynamoTLS(threading.local):
@@ -848,7 +839,6 @@ class _TorchDynamoContext:
                 backend=innermost_fn(
                     self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
                 ),
-                dynamic=self._dynamic,
             )
 
         # add context containing GraphModule to any GraphModule forward functions
