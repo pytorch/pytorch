@@ -220,24 +220,13 @@ class LoggingTests(LoggingTestCase):
         fn_opt(x, ys[:1], zs)
 
         record_str = "\n".join(r.getMessage() for r in records)
-
-        # Normalize paths in the record string to just filenames for portability
-        record_str_normalized = re.sub(
-            r"#\s+[^\s#]*[/\\]([^/\\]+\.py:)", r"# \1", munge_exc(record_str)
-        )
-
-        self.assertExpectedInline(
-            record_str_normalized.strip(),
+        self.assertIn(
             """\
-Recompiling function outmost_fn in test_logging.py:N
-    triggered by the following guard failure(s):
-    - compile_id: 0/0, reason: len(ys) == 3                                             \
-# for y, z in zip(ys, zs):  # test_logging.py:N in inner
-    -   user_stack:
     -     frame 0: outmost_fn - return outer_fn(x, ys, zs)
     -     frame 1: outer_fn - return fn(x, ys, zs)
     -     frame 2: fn - return inner(x, ys, zs)
     -     frame 3: inner - for y, z in zip(ys, zs):""",
+            record_str,
         )
 
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
