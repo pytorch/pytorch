@@ -370,7 +370,8 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     """Lint all files."""
     ctx.invoke(lazy_setup_lint)
     lintrunner_args, take, skip, tee_file, has_paths, has_all_files = (
-        _process_lintrunner_args(lintrunner_args))
+        _process_lintrunner_args(lintrunner_args)
+    )
     all_files = has_all_files or not has_paths
     all_files_linters = VERY_FAST_LINTERS | FAST_LINTERS
     changed_files_linters = SLOW_LINTERS
