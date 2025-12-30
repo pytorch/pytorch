@@ -30,9 +30,7 @@ class LinearAndCEL(nn.Module):
         return self.ce(self.linear(x).view(-1, self.V), y.view(-1))
 
 
-@config.patch(
-    "auto_chunker.enable", os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER", "1") == "1"
-)
+@config.patch("auto_chunker.enable", True)
 @instantiate_parametrized_tests
 class AutoChunkerTest(TestCase):
     def setUp(self):
@@ -175,13 +173,12 @@ class AutoChunkerTest(TestCase):
             print(f"Write the chrome trace to {path}")
             p.export_chrome_trace(path)
 
-        if config.auto_chunker.enable:
-            self.assertEqual(metrics.num_auto_chunking, 1)
-            expected_bound = B * T * V * x.dtype.itemsize
-            self.assertTrue(
-                peak_memory < expected_bound,
-                f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
-            )
+        self.assertEqual(metrics.num_auto_chunking, 1)
+        expected_bound = B * T * V * x.dtype.itemsize
+        self.assertTrue(
+            peak_memory < expected_bound,
+            f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
+        )
 
     @config.patch("auto_chunker.num_chunk", config.auto_chunker.num_chunk or 16)
     @largeTensorTest("12GB", device=GPU_TYPE, inductor=True)
@@ -243,13 +240,12 @@ class AutoChunkerTest(TestCase):
 
         self.assertTrue(same(expect, actual, tol=1e-3), f"{expect=}\n{actual=}")
 
-        if config.auto_chunker.enable:
-            self.assertEqual(metrics.num_auto_chunking, 1)
-            expected_bound = B * T * V * xs[0].dtype.itemsize
-            self.assertTrue(
-                peak_memory < expected_bound,
-                f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
-            )
+        self.assertEqual(metrics.num_auto_chunking, 1)
+        expected_bound = B * T * V * xs[0].dtype.itemsize
+        self.assertTrue(
+            peak_memory < expected_bound,
+            f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
+        )
 
     def test_set_num_chunk_with_compile_options(self):
         B = 32
