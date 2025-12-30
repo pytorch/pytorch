@@ -653,6 +653,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     def _get_exceeding_shared_memory_checker(
         self,
+        op_name,
+        persistent: bool = False,
     ) -> Optional[Callable[[BaseConfig, int], bool]]:
         """
         Returns a function that checks whether a given configuration exceeds the available shared memory for the device.
@@ -679,7 +681,19 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 gemm_config.block_m * gemm_config.block_k
                 + gemm_config.block_n * gemm_config.block_k
             )
-            return shared_mem_accum * gemm_config.num_stages > sm_available
+            acc_sm = 0
+            if op_name == "addmm":
+                # 4 for fp32 acc and block size
+                acc_sm = 4 * gemm_config.block_m * gemm_config.block_n
+            elif op_name == "mm" and persistent:
+                # Convert layout from mma -> layout for coalesced global stores
+                # happens in shared memory. In persistent version, this is while
+                # next loads are prefetched. In non persistent version, this happens
+                # while input blocks are still in smem as persistent version
+                # processes every tile, stores happen in loop
+                # NOTE: This shouldn't be needed with TMA store
+                acc_sm = dtype_size * gemm_config.block_m * gemm_config.block_n
+            return shared_mem_accum * gemm_config.num_stages + acc_sm > sm_available
 
         return exceeds
 
@@ -687,11 +701,13 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         self,
         configs: list[BaseConfig],
         dtype_size: int,
+        op_name: str,
+        persistent: bool = False,
     ) -> list[BaseConfig]:
         if dtype_size <= 0:
             return configs
 
-        is_exceeding_shared_memory = self._get_exceeding_shared_memory_checker()
+        is_exceeding_shared_memory = self._get_exceeding_shared_memory_checker(op_name, persistent)
         if is_exceeding_shared_memory is None:
             return configs
 
@@ -744,6 +760,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ] = lambda m, n, k: False,
         dtype_size: int = 0,
         op_name: str = "mm",  # For preprocessing overrides e.g. on CPU
+        persistent: bool = False
     ) -> Generator[TritonConfig, None, None]:
         configs = self._filter_configs(configs)
         scaled_configs = self._scale_mm_configs(
@@ -753,7 +770,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         # Filter out configs that require more shared memory than is available.
         if config.max_autotune_prune_choices_based_on_shared_mem:
             scaled_configs = self._prune_exceeding_max_shared_mem_configs(
-                scaled_configs, dtype_size
+                scaled_configs, dtype_size, op_name, persistent=persistent
             )
 
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
@@ -1639,6 +1656,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        persistent: bool = False,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Convert config lists to template kwargs.
@@ -1663,7 +1681,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         configs = self._get_config_generator()
 
         # Generate and process configs
-        for c in configs(m, n, k, dtype_size=dtype.itemsize, op_name=op_name):
+        for c in configs(m, n, k, dtype_size=dtype.itemsize, op_name=op_name, persistent=persistent):
             template_kwargs = self._convert_config_to_template_kwargs(
                 c,
                 m,
@@ -1814,6 +1832,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
             op_name,
+            persistent=True,
         ):
             yield {**template_kwargs, **tma_opts}
 
