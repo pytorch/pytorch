@@ -7042,6 +7042,8 @@ torch.utils.cpp_backtrace.get_cpp_backtrace(frames_to_skip=)
 torch.utils.cpp_backtrace.get_cpp_backtrace(maximum_number_of_frames=)
 torch.utils.cpp_extension.BuildExtension.__init__(args=)
 torch.utils.cpp_extension.BuildExtension.__init__(kwargs=)
+torch.utils.cpp_extension.BuildExtension.get_export_symbols
+torch.utils.cpp_extension.BuildExtension.get_export_symbols(ext=)
 torch.utils.cpp_extension.BuildExtension.get_ext_filename
 torch.utils.cpp_extension.BuildExtension.get_ext_filename(ext_name=)
 torch.utils.cpp_extension.BuildExtension.with_options
