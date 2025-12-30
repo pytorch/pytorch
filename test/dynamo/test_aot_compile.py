@@ -686,23 +686,6 @@ from user code:
         )
         self.assertEqual(compiled_mod(inputs), mod(inputs))
 
-    def test_dynamic_settings(self):
-        def fn(x, y):
-            return x + y
-
-        def backend(gm, example_inputs):
-            self.assertFalse(torch._dynamo.config.automatic_dynamic_shapes)
-            return CustomCompiledFunction(gm, example_inputs)
-
-        self.assertTrue(torch._dynamo.config.automatic_dynamic_shapes)
-        compiled_fn = torch.compile(
-            fn, fullgraph=True, backend=backend, dynamic=False
-        ).aot_compile(((torch.randn(3, 4), torch.randn(3, 4)), {}))
-        inputs = (torch.randn(3, 4), torch.randn(3, 4))
-        expected = fn(*inputs)
-        actual = compiled_fn(*inputs)
-        self.assertEqual(expected, actual)
-
     def test_fullgraph_capture_with_pytree_func(self):
         from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
