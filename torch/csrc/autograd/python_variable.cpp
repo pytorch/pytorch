@@ -1101,7 +1101,7 @@ class NativeOpSchema {
         comparison_key_ == rhs.comparison_key_;
   }
 
-  std::size_t hash() const {
+  std::size_t hash() const noexcept {
     return hash_;
   }
 
@@ -1131,7 +1131,7 @@ class NativeOpSchema {
 namespace std {
 template <>
 struct hash<NativeOpSchema> {
-  std::size_t operator()(const NativeOpSchema& schema) const {
+  std::size_t operator()(const NativeOpSchema& schema) const noexcept {
     return schema.hash();
   }
 };
@@ -1355,11 +1355,11 @@ static bool get_local_results(
             " in DTensor op is not supported");
         result.push_back(default_tensor(item));
       }
-      stack->push_back(std::move(result));
+      stack->emplace_back(std::move(result));
     };
 
     if (py::isinstance(spec, get_dtensor_spec_class())) {
-      stack->push_back(default_tensor(spec));
+      stack->emplace_back(default_tensor(spec));
     } else if (PyList_Check(spec.ptr())) {
       handle_sequence(py::reinterpret_borrow<py::list>(spec));
     } else if (PyTuple_Check(spec.ptr())) {
