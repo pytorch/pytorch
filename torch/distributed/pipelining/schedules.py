@@ -1666,7 +1666,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     computation_type = action.computation_type
                     mb_index = action.microbatch_index
                     stage_index = action.stage_index
-                    if not (mb_index is not None):
+                    if mb_index is None:
                         raise AssertionError(
                             "All currently supported action types require valid microbatch_index"
                         )
@@ -1743,7 +1743,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         computation_type = prev_rank_action.computation_type
                         mb_index = prev_rank_action.microbatch_index
                         stage_index = prev_rank_action.stage_index
-                        if not (mb_index is not None):
+                        if mb_index is None:
                             raise AssertionError(
                                 "All currently supported action types require valid microbatch_index"
                             )
@@ -1912,7 +1912,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = []
                 for action in actions[rank]:
-                    if not (action is not None):
+                    if action is None:
                         raise AssertionError(
                             f"Expected action to be not None, got {type(action)}"
                         )
@@ -1973,14 +1973,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     def _dump_csv(self, filename: str, format: str = "compute_comms"):
         """Dump a CSV representation of the schedule into a file with the provided filename."""
         if format == "compute_only":
-            if not (self.pipeline_order is not None):
+            if self.pipeline_order is None:
                 raise AssertionError("Compute only schedule must be available")
             with open(filename, "w", newline="") as csvfile:
                 writer = csv.writer(csvfile)
                 for rank in self.pipeline_order:
                     writer.writerow(self.pipeline_order[rank])
         elif format == "compute_comms":
-            if not (self.pipeline_order_with_comms is not None):
+            if self.pipeline_order_with_comms is None:
                 raise AssertionError(
                     "Must initialize compute_comms schedule before dump_csv"
                 )
@@ -2032,7 +2032,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             stage.stage_index: stage for stage in self._stages
         }
 
-        if not (self.pipeline_order_with_comms is not None):
+        if self.pipeline_order_with_comms is None:
             raise AssertionError(
                 "Must call _prepare_schedule_with_comms() before calling _step_microbatches()"
             )
@@ -2105,7 +2105,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         raise AssertionError(
                             f"Resharding {stage_idx=} without unsharding"
                         )
-                    if not (stage_idx not in self.unshard_ops):
+                    if stage_idx in self.unshard_ops:
                         raise AssertionError(
                             f"Resharding {stage_idx=} before finishing unshard"
                         )
@@ -2229,7 +2229,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             action, ctx
                         )
                     elif action.computation_type == OVERLAP_F_B:
-                        if not (action.sub_actions is not None):
+                        if action.sub_actions is None:
                             raise AssertionError("sub_actions must be set")
                         for sub_a in action.sub_actions:
                             _perform_action(sub_a)
@@ -2757,7 +2757,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
 
                 if actions[rank][timestamp] is not None:
                     temp_action = actions[rank][timestamp]
-                    if not (temp_action is not None):
+                    if temp_action is None:
                         raise AssertionError(
                             f"Expected temp_action to be not None, got {type(temp_action)}"
                         )
