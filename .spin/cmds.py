@@ -282,12 +282,13 @@ def lazy_setup_lint(ctx, parent_callback, **kwargs):
     _check_linters()
 
 
-def _extract_take_skip_tee(lintrunner_args):
+def _process_lintrunner_args(lintrunner_args):
     take = None
     skip = None
     args_iter = iter(lintrunner_args)
     remaining_args = []
     tee_file = None
+    has_paths = False
     for arg in args_iter:
         if arg == "--take":
             take = set(next(args_iter).split(","))
@@ -300,8 +301,10 @@ def _extract_take_skip_tee(lintrunner_args):
             elif sep == "=":
                 tee_file = tee_file.strip()
         else:
+            if not arg.strip().startswith("-"):
+                has_paths = True
             remaining_args.append(arg)
-    return remaining_args, take, skip, tee_file
+    return remaining_args, take, skip, tee_file, has_paths
 
 
 def _run_lintrunner(
@@ -354,7 +357,9 @@ def _run_lintrunner(
 def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     """Lint all files."""
     ctx.invoke(lazy_setup_lint)
-    lintrunner_args, take, skip, tee_file = _extract_take_skip_tee(lintrunner_args)
+    lintrunner_args, take, skip, tee_file, has_paths = _process_lintrunner_args(
+        lintrunner_args
+    )
     all_files_linters = VERY_FAST_LINTERS | FAST_LINTERS
     changed_files_linters = SLOW_LINTERS
     write_json_output = bool(tee_file)
@@ -363,7 +368,7 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
         take=take,
         skip=skip,
         apply_patches=apply_patches,
-        all_files=True,
+        all_files=not has_paths,
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
