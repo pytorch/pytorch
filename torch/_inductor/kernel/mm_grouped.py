@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import logging
-import os
 from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
@@ -131,8 +130,9 @@ def gluon_grouped_mm_configs(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=Non
     Generate Gluon grouped MM configs using template heuristics.
     Delegates to torch._inductor.template_heuristics.gluon for config generation.
     """
-    from ..template_heuristics.gluon import get_grouped_mm_configs
     import torch._inductor.config as config
+
+    from ..template_heuristics.gluon import get_grouped_mm_configs
 
     # Use exhaustive search if configured
     exhaustive = config.max_autotune_gemm_search_space == "EXHAUSTIVE"
@@ -177,7 +177,9 @@ def gluon_grouped_mm_configs(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=Non
 def get_gluon_grouped_mm_source():
     from pathlib import Path
 
-    template_path = Path(__file__).parent / "templates" / "gluon_grouped_mm_kernel.py.jinja"
+    template_path = (
+        Path(__file__).parent / "templates" / "gluon_grouped_mm_kernel.py.jinja"
+    )
     return template_path.read_text()
 
 
@@ -329,7 +331,7 @@ def can_use_gluon_kernel(
         return False
 
     try:
-        from triton.experimental import gluon
+        from triton.experimental import gluon  # noqa: F401
     except ImportError:
         return False
 

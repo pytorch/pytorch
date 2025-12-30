@@ -797,15 +797,16 @@ class CachingAutotuner(KernelInterface):
 
         # Detect Gluon kernels using two reliable methods:
         # 1. Check if gluon is imported in the function's module globals
-        if hasattr(self.fn, '__globals__') and 'gluon' in self.fn.__globals__:
+        if hasattr(self.fn, "__globals__") and "gluon" in self.fn.__globals__:
             is_gluon = True
         # 2. Check if it's a GluonJITFunction by class name
-        elif hasattr(self.fn, '__class__') and 'GluonJIT' in self.fn.__class__.__name__:
+        elif hasattr(self.fn, "__class__") and "GluonJIT" in self.fn.__class__.__name__:
             is_gluon = True
 
         if is_gluon:
             try:
                 from triton.experimental.gluon._runtime import GluonASTSource
+
                 ast_source_class = GluonASTSource
             except ImportError:
                 pass

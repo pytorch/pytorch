@@ -1,7 +1,5 @@
-from dataclasses import dataclass
 import itertools
-
-import torch._inductor.config as config
+from dataclasses import dataclass
 
 
 @dataclass(frozen=True)
@@ -108,7 +106,7 @@ def get_grouped_mm_configs(
     M=None,
     N=None,
     K=None,
-    exhaustive: bool = False
+    exhaustive: bool = False,
 ) -> list[GluonGroupedMMConfig]:
     """
     Returns the configuration set for the Gluon Grouped MM kernel.
@@ -129,6 +127,7 @@ def get_grouped_mm_configs(
         # Full ranges for exhaustive search
         BLOCK_M_vals = [64, 128]
         BLOCK_N_vals = [64, 128, 256]
+        block_mn_pairs = []
         BLOCK_K_vals = [64, 128, 256]
         NUM_LOAD_WARP_vals = [1, 2]
         NUM_COMPUTE_WARP_vals = [1, 2]
@@ -139,6 +138,8 @@ def get_grouped_mm_configs(
         # Note: Gluon TMA requires power-of-2 block shapes, so we filter out 160, 192
         # CuTeDSL configs with CLUSTER_M=1, CLUSTER_N=1 (power-of-2 only):
         # (64, 32), (64, 64), (64, 256), (128, 64), (128, 256)
+        BLOCK_M_vals = []
+        BLOCK_N_vals = []
         block_mn_pairs = [
             (64, 32),
             (64, 64),
@@ -183,12 +184,19 @@ def get_grouped_mm_configs(
             MAXNREG_vals,
         ):
             buffer_variants = compute_stage_variants_gluon(
-                BLOCK_M, BLOCK_N, BLOCK_K, dtype=dtype_AB, num_store_warps=num_store_warps, exhaustive=True
+                BLOCK_M,
+                BLOCK_N,
+                BLOCK_K,
+                dtype=dtype_AB,
+                num_store_warps=num_store_warps,
+                exhaustive=True,
             )
 
             for num_load_buffers, num_acc_buffers in buffer_variants:
                 total_regs = (
-                    (num_load_warps + num_compute_warps + num_store_warps) * 32 * maxnreg
+                    (num_load_warps + num_compute_warps + num_store_warps)
+                    * 32
+                    * maxnreg
                 )
                 REGS_PER_SM = 65536
                 MAX_CTAS_PER_SM = 32
@@ -234,12 +242,19 @@ def get_grouped_mm_configs(
             MAXNREG_vals,
         ):
             buffer_variants = compute_stage_variants_gluon(
-                BLOCK_M, BLOCK_N, BLOCK_K, dtype=dtype_AB, num_store_warps=num_store_warps, exhaustive=False
+                BLOCK_M,
+                BLOCK_N,
+                BLOCK_K,
+                dtype=dtype_AB,
+                num_store_warps=num_store_warps,
+                exhaustive=False,
             )
 
             for num_load_buffers, num_acc_buffers in buffer_variants:
                 total_regs = (
-                    (num_load_warps + num_compute_warps + num_store_warps) * 32 * maxnreg
+                    (num_load_warps + num_compute_warps + num_store_warps)
+                    * 32
+                    * maxnreg
                 )
                 REGS_PER_SM = 65536
                 MAX_CTAS_PER_SM = 32

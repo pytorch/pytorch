@@ -1,8 +1,9 @@
 # FIXME: move this to tritonbench project.
 
-import torch
 import triton
 import triton.testing
+
+import torch
 
 
 def is_blackwell():
@@ -48,12 +49,10 @@ def benchmark_grouped_mm(problem_sizes=None):
     results = []
 
     for M, G, N, K in problem_sizes:
-        N_align = (N + align - 1) // align * align
         K_align = (K + align - 1) // align * align
 
         A = torch.randn(M, K_align, device=device, dtype=dtype)[:, :K]
         B = torch.randn(G, N, K_align, device=device, dtype=dtype)[:, :, :K]
-        C = torch.empty(M, N_align, device=device, dtype=dtype)[:, :N]
         offs = torch.arange(M // G, M + 1, M // G, device=device, dtype=torch.int32)
         if offs[-1] != M:
             offs[-1] = M
@@ -66,7 +65,7 @@ def benchmark_grouped_mm(problem_sizes=None):
         # Compute reference result for correctness checks
         C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
 
-        fn_aten = lambda: torch._grouped_mm(A, B.transpose(-2, -1), offs)
+        fn_aten = lambda: torch._grouped_mm(A, B.transpose(-2, -1), offs)  # noqa: E731
         us_aten = triton.testing.do_bench(fn_aten, warmup=2, rep=20) * 1e3
         tflops_aten = flops * 1e-12 / (us_aten * 1e-6)
         print(f"  ATen: {us_aten:.2f} us ({tflops_aten:.2f} TFLOPS)")
@@ -78,7 +77,7 @@ def benchmark_grouped_mm(problem_sizes=None):
                 torch._grouped_mm,
                 options={"max_autotune": True, "max_autotune_gemm_backends": "TRITON"},
             )
-            fn_triton = lambda: compiled_triton(A, B.transpose(-2, -1), offs)
+            fn_triton = lambda: compiled_triton(A, B.transpose(-2, -1), offs)  # noqa: E731
             us_triton = triton.testing.do_bench(fn_triton, warmup=2, rep=20) * 1e3
             tflops_triton = flops * 1e-12 / (us_triton * 1e-6)
             print(f"  Triton: {us_triton:.2f} us ({tflops_triton:.2f} TFLOPS)")
@@ -106,7 +105,7 @@ def benchmark_grouped_mm(problem_sizes=None):
                     },
                     dynamic=False,
                 )
-                fn_cutedsl = lambda: compiled_cutedsl(A, B.transpose(-2, -1), offs)
+                fn_cutedsl = lambda: compiled_cutedsl(A, B.transpose(-2, -1), offs)  # noqa: E731
                 us_cutedsl = triton.testing.do_bench(fn_cutedsl, warmup=2, rep=20) * 1e3
                 tflops_cutedsl = flops * 1e-12 / (us_cutedsl * 1e-6)
                 print(f"  CuTeDSL: {us_cutedsl:.2f} us ({tflops_cutedsl:.2f} TFLOPS)")
@@ -132,7 +131,7 @@ def benchmark_grouped_mm(problem_sizes=None):
                         "max_autotune_gemm_backends": "GLUON",
                     },
                 )
-                fn_gluon = lambda: compiled_gluon(A, B.transpose(-2, -1), offs)
+                fn_gluon = lambda: compiled_gluon(A, B.transpose(-2, -1), offs)  # noqa: E731
                 us_gluon = triton.testing.do_bench(fn_gluon, warmup=2, rep=20) * 1e3
                 tflops_gluon = flops * 1e-12 / (us_gluon * 1e-6)
                 print(f"  Gluon: {us_gluon:.2f} us ({tflops_gluon:.2f} TFLOPS)")
