@@ -773,11 +773,12 @@ class CppWrapperCpuArrayRef(CppWrapperCpu):
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
+        node: Optional[ir.FallbackKernel] = None,
     ) -> None:
         # No stack allocation when there is a fallback op
         self.allow_stack_allocation = False
         super().generate_fallback_kernel_with_runtime_lookup(
-            buf_name, python_kernel_name, get_args, op_overload, raw_args, outputs
+            buf_name, python_kernel_name, get_args, op_overload, raw_args, outputs, node
         )
 
     def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
