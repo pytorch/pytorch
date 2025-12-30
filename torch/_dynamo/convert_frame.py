@@ -39,6 +39,7 @@ import pstats
 import random
 import subprocess
 import sys
+import tempfile
 import threading
 import time
 import traceback
@@ -473,7 +474,10 @@ def cprofile_wrapper(func: Callable[_P, _T]) -> Callable[_P, _T]:
         trace_id = CompileContext.current_trace_id()
         assert trace_id, "Trace id is None"
         profile_path = Path(
-            f"/tmp/{func.__name__}_{str(trace_id).replace('/', '_')}.profile"
+            os.path.join(
+                tempfile.gettempdir(),
+                f"{func.__name__}_{str(trace_id).replace('/', '_')}.profile",
+            )
         )
         prof = cProfile.Profile()
         try:
