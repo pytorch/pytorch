@@ -35,7 +35,6 @@ from typing import Any, Optional, TYPE_CHECKING
 import torch
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
-from torch.utils._ordered_set import OrderedSet
 
 from . import config, graph_break_hints, utils, variables
 from .bytecode_transformation import (
@@ -115,8 +114,8 @@ class SideEffects:
     id_to_variable: dict[int, VariableTracker]
     store_attr_mutations: dict[VariableTracker, dict[str, VariableTracker]]
     keepalive: list[Any]
-    # Maps variable tracker to list of source locations (filename, lineno, source_line)
-    mutation_user_stacks: dict[VariableTracker, OrderedSet[str]]
+    # Maps variable tracker to list of user stacks (StackSummary objects, formatted lazily)
+    mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
 
     def __init__(
         self,
@@ -125,7 +124,8 @@ class SideEffects:
         store_attr_mutations: Optional[
             dict[VariableTracker, dict[str, VariableTracker]]
         ] = None,
-        mutation_user_stacks: dict[VariableTracker, OrderedSet[str]] | None = None,
+        mutation_user_stacks: dict[VariableTracker, list[traceback.StackSummary]]
+        | None = None,
         keepalive: Optional[list[Any]] = None,
         save_for_backward: Optional[
             list[tuple[AutogradFunctionContextVariable, list[VariableTracker]]]
@@ -182,10 +182,9 @@ class SideEffects:
             get_stack_above_dynamo() + torch._guards.TracingContext.extract_stack()
         )
         user_stack_collapsed = collapse_resume_frames(user_stack)
-        user_stack_formatted = "".join(traceback.format_list(user_stack_collapsed))
         if key not in self.mutation_user_stacks:
-            self.mutation_user_stacks[key] = OrderedSet()
-        self.mutation_user_stacks[key].add(user_stack_formatted)
+            self.mutation_user_stacks[key] = []
+        self.mutation_user_stacks[key].append(user_stack_collapsed)
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -920,7 +919,31 @@ class SideEffects:
                 source_info = f" (source name: {var.source.name})"
 
         if locations:
-            formatted_lines = "\n********\n\n".join(locations)
+            # Format and dedupe stacks using tuple representation for efficiency
+            seen = set()
+            unique_formatted_stacks: list[str] = []
+            for stack in locations:
+                # Use tuple of frame info for fast deduplication
+                # Include position info (colno, end_lineno, end_colno) to distinguish
+                # multiple mutations on the same line (when available in Python 3.11+)
+                stack_tuple = tuple(
+                    (
+                        f.filename,
+                        f.lineno,
+                        f.name,
+                        f.line,
+                        getattr(f, "colno", None),
+                        getattr(f, "end_lineno", None),
+                        getattr(f, "end_colno", None),
+                    )
+                    for f in stack
+                )
+                if stack_tuple not in seen:
+                    seen.add(stack_tuple)
+                    unique_formatted_stacks.append(
+                        "".join(traceback.format_list(stack))
+                    )
+            formatted_lines = "\n********\n\n".join(unique_formatted_stacks)
             log_str = f"{description}{source_info}\n\n{textwrap.indent(formatted_lines, '    ')}"
         else:
             log_str = (
@@ -932,9 +955,9 @@ class SideEffects:
     def codegen_update_mutated(
         self, cg: PyCodegen, log_side_effects: bool = False
     ) -> None:
-        # NOTE: should only be called once per VT - only if a side effect actually gets codegen'd!
         side_effect_messages: list[str] = []
 
+        # NOTE: should only be called once per VT - only if a side effect actually gets codegen'd!
         def _maybe_log_side_effect(var: VariableTracker) -> None:
             if log_side_effects:
                 msg = self._format_side_effect_message(var)
