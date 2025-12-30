@@ -323,10 +323,9 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   auto x2_norm = at::linalg_vector_norm(*x2, 2, /*dim=*/dim, /*keepdim=*/true).clone();
 
   // Convert eps to a scalar tensor to ensure consistent CPU/CUDA behavior when eps overflows the dtype.
-  // Use a non-reduced dtype (float32/float64) because CUDA throws an error when creating a scalar_tensor
-  // with reduced floating types (float16/bfloat16) if the value overflows, while CPU converts to inf.
-  // If both norms are non-reduced, use the higher precision one.
-  // If eps is too large for the dtype, it will become inf, and subsequent operations will produce NaN
+  // Use float32 if commonDtype is a reduced floating type (float16/bfloat16), otherwise use commonDtype.
+  // This avoids CUDA errors when creating a scalar_tensor with reduced types if the eps value overflows,
+  // while CPU would convert to inf. The eps_tensor is then used to clamp the norms to prevent division by zero.
   auto common_is_reduced = at::isReducedFloatingType(commonDtype);
   auto eps_dtype = common_is_reduced ? at::kFloat : commonDtype;
   auto eps_tensor = at::scalar_tensor(eps, at::TensorOptions().dtype(eps_dtype).device(x1_norm.device()));
