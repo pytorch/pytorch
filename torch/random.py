@@ -213,5 +213,5 @@ def fork_rng(
         yield
     finally:
         torch.set_rng_state(cpu_rng_state)
-        for device, device_rng_state in zip(devices, device_rng_states, strict=True):
+        for device, device_rng_state in zip(devices, device_rng_states):
             device_mod.set_rng_state(device_rng_state, device)
