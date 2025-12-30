@@ -323,12 +323,19 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   auto x2_norm = at::linalg_vector_norm(*x2, 2, /*dim=*/dim, /*keepdim=*/true).clone();
 
   // Convert eps to a scalar tensor to ensure consistent CPU/CUDA behavior when eps overflows the dtype.
-  // Use the higher precision dtype between x1_norm and x2_norm
+  // Use a non-reduced dtype (float32/float64) because CUDA throws an error when creating a scalar_tensor
+  // with reduced floating types (float16/bfloat16) if the value overflows, while CPU converts to inf.
+  // If both norms are non-reduced, use the higher precision one.
   // If eps is too large for the dtype, it will become inf, and subsequent operations will produce NaN
-  auto eps_options = at::isReducedFloatingType(x1_norm.scalar_type()) &&
-                     !at::isReducedFloatingType(x2_norm.scalar_type())
-                     ? x2_norm.options() : x1_norm.options();
-  auto eps_tensor = at::scalar_tensor(eps, eps_options);
+  auto x1_dtype = x1_norm.scalar_type();
+  auto x2_dtype = x2_norm.scalar_type();
+  auto x1_is_reduced = at::isReducedFloatingType(x1_dtype);
+  auto x2_is_reduced = at::isReducedFloatingType(x2_dtype);
+  auto eps_dtype = (x1_is_reduced && x2_is_reduced) ? at::kFloat
+                   : x1_is_reduced ? x2_dtype
+                   : x2_is_reduced ? x1_dtype
+                   : at::promoteTypes(x1_dtype, x2_dtype);
+  auto eps_tensor = at::scalar_tensor(eps, at::TensorOptions().dtype(eps_dtype).device(x1_norm.device()));
 
   {
     at::NoGradGuard guard;
