@@ -635,9 +635,7 @@ def mirror_inductor_external_kernels() -> None:
     Copy external kernels into Inductor so they are importable.
     """
     cuda_is_disabled = not str2bool(os.getenv("USE_CUDA"))
-    paths = [
-        (),
-    ]
+    paths = []
     for new_path, orig_path, allow_missing_if_cuda_is_disabled in paths:
         # Create the dirs involved in new_path if they don't exist
         if not new_path.exists():
