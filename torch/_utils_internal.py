@@ -119,7 +119,8 @@ def compile_time_strobelight_meta(
 # Killswitch is at
 # https://www.internalfb.com/intern/justknobs/?name=pytorch%2Fsignpost#event
 def signpost_event(category: str, name: str, parameters: dict[str, Any]):
-    log.info("%s %s: %r", category, name, parameters)
+    with torch.autograd.profiler.record_function(f"torch.compile:{name}"):
+        log.info("%s %s: %r", category, name, parameters)
 
 
 def add_mlhub_insight(category: str, insight: str, insight_description: str):
@@ -127,7 +128,12 @@ def add_mlhub_insight(category: str, insight: str, insight_description: str):
 
 
 def log_compilation_event(metrics):
-    log.info("%s", metrics)
+    if isinstance(metrics, dict):
+        label = f"torch.compile:{metrics.get('event', 'unknown')}"
+    else:
+        label = "torch.compile:compilation_event"
+    with torch.autograd.profiler.record_function(label):
+        log.info("%s", metrics)
 
 
 def upload_graph(graph):
