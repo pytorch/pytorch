@@ -126,7 +126,7 @@ def clean_nn_module_stack_and_source_fn(
             cleaned_stack[clean_key] = (clean_name, child_class)
         return cleaned_stack
 
-    def _process_source_fn(source_fn_stack: Iterable[Any]) -> Iterable[Any]:
+    def _process_source_fn(source_fn_stack: Iterable[T]) -> Iterable[T]:
         cleaned_stack = []
         for item in source_fn_stack:
             if isinstance(item, tuple) and len(item) == 2:

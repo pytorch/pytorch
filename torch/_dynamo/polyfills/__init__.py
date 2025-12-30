@@ -18,6 +18,7 @@ import torch
 
 T = TypeVar("T")
 U = TypeVar("U")
+C = TypeVar("C")
 
 
 if TYPE_CHECKING:
@@ -150,8 +151,11 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
 
 
 def set_symmetric_difference(
-    set1: Iterable[T], set2: Iterable[T], cls: type = set
-) -> set[T]:
+    set1: Iterable[T],
+    set2: Iterable[T],
+    # pyrefly: ignore[bad-function-definition]
+    cls: type[C] = set,
+) -> C:
     symmetric_difference_set: set[T] = set()
     for x in set1:
         if x not in set2:
@@ -181,7 +185,12 @@ def set_isdisjoint(set1: set[T], set2: set[T]) -> bool:
     return True
 
 
-def set_intersection(set1: set[T], *others: Iterable[T], cls: type = set) -> set[T]:
+def set_intersection(
+    set1: set[T],
+    *others: Iterable[T],
+    # pyrefly: ignore[bad-function-definition]
+    cls: type[C] = set,
+) -> C | set[T]:
     if len(others) == 0:
         return set1.copy()
 
@@ -209,7 +218,9 @@ def set_intersection_update(set1: set[T], *others: Iterable[T]) -> None:
     set1.update(result)
 
 
-def set_union(set1: set[T], *others: Iterable[T], cls: type | None = None) -> set[T]:
+def set_union(
+    set1: set[T], *others: Iterable[T], cls: type[C] | None = None
+) -> C | set[T]:
     # frozenset also uses this function
     if cls is None:
         # pyrefly: ignore[bad-assignment]
@@ -244,7 +255,12 @@ def set_update(set1: set[T], *others: Iterable[T]) -> set[T]:
                 set1.add(x)
 
 
-def set_difference(set1: set[T], *others: Iterable[T], cls: type = set) -> set[T]:
+def set_difference(
+    set1: set[T],
+    *others: Iterable[T],
+    # pyrefly: ignore[bad-function-definition]
+    cls: type[C] = set,
+) -> C | set[T]:
     if len(others) == 0:
         return set1.copy()
 
