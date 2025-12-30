@@ -1,6 +1,6 @@
 #pragma once
 
-#include <ATen/core/Stream.h>
+#include <c10/core/Stream.h>
 
 namespace at::accelerator {
 
