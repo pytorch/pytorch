@@ -2816,11 +2816,13 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
 
                 # Find reshape target: N-D shape whose numel matches an iteration
                 # var. Try output first (repeat/upsample), then inputs (reductions).
-                iter_lengths = OrderedSet([
-                    int(e.length)
-                    for e in self.range_tree_nodes.values()
-                    if isinstance(e.length, (int, sympy.Integer))
-                ])
+                iter_lengths = OrderedSet(
+                    [
+                        int(e.length)
+                        for e in self.range_tree_nodes.values()
+                        if isinstance(e.length, (int, sympy.Integer))
+                    ]
+                )
 
                 def _get_nd_shape_if_matches(buf_name):
                     buf = V.graph.try_get_buffer(buf_name)
@@ -2919,9 +2921,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                                     f"{var_name} = {arange}.reshape({shape_str})"
                                 )
                                 continue
-                        kernel_body.writeline(
-                            f"{var_name} = jnp.arange({length_str})"
-                        )
+                        kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
                         continue
 
                     if (
@@ -2967,9 +2967,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                             f"{var_name} = {arange}.reshape({shape_str})"
                         )
                     else:
-                        kernel_body.writeline(
-                            f"{var_name} = jnp.arange({length_str})"
-                        )
+                        kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
 
             # Emit compute (CSE) and store lines; they reference *_ptr[index] directly.
             for line in self.compute._lines:
