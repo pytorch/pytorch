@@ -2264,9 +2264,9 @@ class TrackedFake:
     Used by shape guard computation.
     """
 
-    fake: Union[FakeTensor, SymInt]
+    fake: FakeTensor | SymInt | SymFloat
     source: Source
-    symbolic_context: Optional[SymbolicContext]
+    symbolic_context: SymbolicContext | None
 
     def __hash__(self) -> int:
         return hash((self.fake, self.source.name))

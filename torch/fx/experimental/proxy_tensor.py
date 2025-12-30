@@ -274,7 +274,10 @@ def set_proxy_slot(  # type: ignore[no-redef]
         # on a tensor, and it affects the metadata on the proxy.
         assert isinstance(proxy, _ProxyTensor)
         # see NOTE [Do not clobber inplace ops]
-        if not _is_proxy_tensor_update_tensor_tracker_disabled():
+        if (
+            obj not in tracer.tensor_tracker
+            or not _is_proxy_tensor_update_tensor_tracker_disabled()
+        ):
             tracer.tensor_tracker[obj] = proxy
     elif isinstance(obj, (_AnyScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.

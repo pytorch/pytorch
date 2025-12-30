@@ -3,6 +3,7 @@
 import contextlib
 import copy
 import functools
+from collections import defaultdict
 from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
@@ -580,6 +581,26 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         for tangent in filtered_grad_outs:
             metadata = extract_tensor_metadata(tangent)
             metadata._flatten_into(tangent_metadata, fake_mode, state)
+
+        # Add aliasing information to tangent_metadata
+        # Two tangents are aliased if they are the same tensor object (using id())
+        # We create a tuple of tuples where each inner tuple contains indices of aliased tensors
+        # e.g. ((0, 1),) would mean there is one aliasing group, and the first and second tangents are aliased
+        # e.g. () would mean there is no aliasing between tangents
+        tensor_to_indices: dict[int, list[int]] = defaultdict(list)
+        for i, tangent in enumerate(filtered_grad_outs):
+            if isinstance(tangent, torch.Tensor):
+                tensor_to_indices[id(tangent)].append(i)
+
+        aliasing_groups = tuple(
+            sorted(
+                tuple(indices)
+                for indices in tensor_to_indices.values()
+                if len(indices) > 1
+            )
+        )
+        tangent_metadata.append(aliasing_groups)
+
         # pyrefly: ignore [bad-assignment]
         tangent_metadata = tuple(tangent_metadata)
 
