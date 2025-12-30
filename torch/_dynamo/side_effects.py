@@ -405,6 +405,8 @@ class SideEffects:
         item: Any,
         variable: VariableTracker,
     ) -> VariableTracker:
+        # TODO: Modify this API so that we preserve type info of
+        # variable
         return self._track_obj(
             item,
             variable,
