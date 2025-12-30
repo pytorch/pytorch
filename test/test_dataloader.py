@@ -27,8 +27,10 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     IS_MACOS,
     IS_S390X,
+    IS_ARM64,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    IS_LINUX,
     load_tests,
     parametrize,
     run_tests,
@@ -41,6 +43,7 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_TSAN,
     TestCase,
     xfailIfLinux,
+    xfailIf,
 )
 from torch.utils.data import (
     _utils,
@@ -152,6 +155,21 @@ def _sparse_coo_collate(b):
             t._indices(), t._values(), t.size(), t.is_coalesced(), check_pinning=False
         )
     return lst
+
+# decide if AArch64 platform supports SVE instructions
+# if desirable, this can be moved to torch/testing/_internal/common_utils.py
+# as a globe utils flag
+def _has_sve():
+    # SVE/SVE2 is currently only relevant on Linux + AArch64 for PyTorch
+    if not (IS_LINUX and IS_ARM64):
+        return False
+    try:
+        with open("/proc/cpuinfo") as f:
+            return "sve" in f.read()
+    except OSError:
+        return False
+
+HAS_SVE = _has_sve()
 
 
 @unittest.skipIf(
@@ -1412,6 +1430,9 @@ except RuntimeError as e:
     # please don't forget to remove this skip when remove the xfailIfLinux.
     @unittest.skipIf(IS_S390X, "Unexpectedly succeeds on s390x")
     # https://github.com/pytorch/pytorch/issues/128551
+    @xfailIf(IS_ARM64 and HAS_SVE)
+    # This case pass on AArch64 + SVE on Linux, while remain
+    # failure on AArch64 + ASIMD on Linux
     @xfailIfLinux
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
