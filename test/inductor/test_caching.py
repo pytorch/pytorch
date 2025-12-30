@@ -1276,6 +1276,289 @@ class InterfacesTest(TestMixin, TestCase):
         self.assertEqual(result1, 10)
         self.assertEqual(result2, 10)
 
+    # ============= Cache Loading Tests =============
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_loads_cache_from_dump_file(self) -> None:
+        """Test that Memoizer loads cache entries from dump file on initialization.
+
+        Verifies that when CACHE_DUMP_FILE_PATH is configured and the file exists,
+        a new Memoizer instance pre-populates its in-memory cache with the dump contents.
+        """
+        import json
+        import os
+        import tempfile
+
+        # Setup: Create a dump file with cache entries
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_file:
+            test_filepath = tmp_file.name
+            dump_data = {
+                "cache_size": 2,
+                "cache_entries": {
+                    "key1": {"params": {"x": 1}, "result": 10},
+                    "key2": {"params": {"x": 2}, "result": 20},
+                },
+            }
+            json.dump(dump_data, tmp_file)
+
+        try:
+            # Setup: Configure CACHE_DUMP_FILE_PATH
+            with patch.object(
+                config, "CACHE_DUMP_FILE_PATH", return_value=test_filepath
+            ):
+                # Execute: Create a new Memoizer (should load from dump)
+                memoizer = interfaces.Memoizer()
+
+                # Assert: Cache was populated from dump file
+                hit1 = memoizer._cache.get("key1")
+                self.assertIsNotNone(hit1)
+                cache_entry1 = hit1.value
+                self.assertEqual(cache_entry1.encoded_result, 10)
+
+                hit2 = memoizer._cache.get("key2")
+                self.assertIsNotNone(hit2)
+                cache_entry2 = hit2.value
+                self.assertEqual(cache_entry2.encoded_result, 20)
+        finally:
+            # Cleanup
+            if os.path.exists(test_filepath):
+                os.unlink(test_filepath)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_skips_loading_when_no_dump_file_configured(self) -> None:
+        """Test that Memoizer skips loading when CACHE_DUMP_FILE_PATH is not set.
+
+        Verifies that when no dump file path is configured, the Memoizer
+        initializes with an empty cache without errors.
+        """
+        # Setup: Configure CACHE_DUMP_FILE_PATH to return None
+        with patch.object(config, "CACHE_DUMP_FILE_PATH", return_value=None):
+            # Execute: Create a new Memoizer
+            memoizer = interfaces.Memoizer()
+
+            # Assert: Cache is empty (not loaded from any file)
+            self.assertEqual(len(memoizer._cache._memory), 0)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_handles_missing_dump_file_gracefully(self) -> None:
+        """Test that Memoizer handles missing dump file gracefully.
+
+        Verifies that when CACHE_DUMP_FILE_PATH points to a non-existent file,
+        the Memoizer initializes with an empty cache without crashing.
+        """
+        # Setup: Configure path to non-existent file
+        non_existent_path = "/tmp/this_file_does_not_exist_12345.json"
+
+        with patch.object(
+            config, "CACHE_DUMP_FILE_PATH", return_value=non_existent_path
+        ):
+            # Execute: Create a new Memoizer
+            memoizer = interfaces.Memoizer()
+
+            # Assert: Cache is empty (no crash)
+            self.assertEqual(len(memoizer._cache._memory), 0)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_handles_corrupt_dump_file_gracefully(self) -> None:
+        """Test that Memoizer handles corrupt dump file gracefully.
+
+        Verifies that when the dump file contains invalid JSON, the Memoizer
+        initializes with an empty cache without crashing.
+        """
+        import os
+        import tempfile
+
+        # Setup: Create a corrupt dump file
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_file:
+            test_filepath = tmp_file.name
+            tmp_file.write("{ this is not valid json")
+
+        try:
+            with patch.object(
+                config, "CACHE_DUMP_FILE_PATH", return_value=test_filepath
+            ):
+                # Execute: Create a new Memoizer
+                memoizer = interfaces.Memoizer()
+
+                # Assert: Cache is empty (no crash, handled gracefully)
+                self.assertEqual(len(memoizer._cache._memory), 0)
+        finally:
+            # Cleanup
+            if os.path.exists(test_filepath):
+                os.unlink(test_filepath)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_loads_from_sub_key(self) -> None:
+        """Test that PersistentMemoizer loads cache from sub_dir nested structure.
+
+        Verifies that when sub_dir is set, the PersistentMemoizer loads entries
+        from the nested cache_entries[sub_dir] structure.
+        """
+        import json
+        import os
+        import tempfile
+        from pathlib import Path
+
+        # Setup: Create a dump file with nested structure
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_file:
+            test_filepath = tmp_file.name
+            dump_data = {
+                "cache_size": 2,
+                "cache_entries": {
+                    "test_subdir": {
+                        "nested_key1": {"params": {"x": 1}, "result": 100},
+                        "nested_key2": {"params": {"x": 2}, "result": 200},
+                    },
+                    "other_subdir": {
+                        "other_key": {"params": {"x": 3}, "result": 300},
+                    },
+                },
+            }
+            json.dump(dump_data, tmp_file)
+
+        try:
+            with patch.object(
+                config, "CACHE_DUMP_FILE_PATH", return_value=test_filepath
+            ):
+                # Execute: Create PersistentMemoizer with sub_dir="test_subdir"
+                pm = interfaces.PersistentMemoizer(sub_dir=Path("test_subdir"))
+
+                # Assert: Cache loaded entries from test_subdir only
+                hit1 = pm._memoizer._cache.get("nested_key1")
+                self.assertIsNotNone(hit1)
+                cache_entry1 = hit1.value
+                self.assertEqual(cache_entry1.encoded_result, 100)
+
+                hit2 = pm._memoizer._cache.get("nested_key2")
+                self.assertIsNotNone(hit2)
+                cache_entry2 = hit2.value
+                self.assertEqual(cache_entry2.encoded_result, 200)
+
+                # Assert: Did not load entries from other_subdir
+                hit_other = pm._memoizer._cache.get("other_key")
+                self.assertIsNone(hit_other)
+        finally:
+            # Cleanup
+            if os.path.exists(test_filepath):
+                os.unlink(test_filepath)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_loads_from_root_when_sub_dir_empty(self) -> None:
+        """Test that PersistentMemoizer loads from root when sub_dir is empty.
+
+        Verifies that when sub_dir is empty string, entries are loaded from
+        the root cache_entries level (not from any nested structure).
+        """
+        import json
+        import os
+        import tempfile
+
+        # Setup: Create a dump file with mixed root and nested entries
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_file:
+            test_filepath = tmp_file.name
+            dump_data = {
+                "cache_size": 3,
+                "cache_entries": {
+                    "root_key1": {"params": {"x": 1}, "result": 10},
+                    "root_key2": {"params": {"x": 2}, "result": 20},
+                    "some_subdir": {
+                        "nested_key": {"params": {"x": 3}, "result": 30},
+                    },
+                },
+            }
+            json.dump(dump_data, tmp_file)
+
+        try:
+            with patch.object(
+                config, "CACHE_DUMP_FILE_PATH", return_value=test_filepath
+            ):
+                # Execute: Create PersistentMemoizer with empty sub_dir
+                pm = interfaces.PersistentMemoizer(sub_dir="")
+
+                # Assert: Loaded root-level entries
+                hit1 = pm._memoizer._cache.get("root_key1")
+                self.assertIsNotNone(hit1)
+                cache_entry1 = hit1.value
+                self.assertEqual(cache_entry1.encoded_result, 10)
+
+                hit2 = pm._memoizer._cache.get("root_key2")
+                self.assertIsNotNone(hit2)
+                cache_entry2 = hit2.value
+                self.assertEqual(cache_entry2.encoded_result, 20)
+
+                # Assert: Did not load nested entries
+                hit_nested = pm._memoizer._cache.get("nested_key")
+                self.assertIsNone(hit_nested)
+        finally:
+            # Cleanup
+            if os.path.exists(test_filepath):
+                os.unlink(test_filepath)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_replay_uses_preloaded_cache(self) -> None:
+        """Test that memoizer replay successfully retrieves from preloaded cache.
+
+        Verifies end-to-end workflow: load cache from dump file, then use
+        replay to retrieve cached results without executing the function.
+        """
+        import json
+        import os
+        import tempfile
+
+        # Setup: Create a dump file with a cached result
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".json", delete=False
+        ) as tmp_file:
+            test_filepath = tmp_file.name
+            # Simulate a cache entry for compute(5) -> 10
+            cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+            dump_data = {
+                "cache_size": 1,
+                "cache_entries": {
+                    cache_key: {"params": {"args": (5,), "kwargs": {}}, "result": 10},
+                },
+            }
+            json.dump(dump_data, tmp_file)
+
+        try:
+            with patch.object(
+                config, "CACHE_DUMP_FILE_PATH", return_value=test_filepath
+            ):
+                # Execute: Create a memoizer (loads cache from dump)
+                memoizer = interfaces.Memoizer()
+
+                # Create a replay function
+                @memoizer.replay()
+                def compute(x: int) -> int:
+                    raise AssertionError(
+                        "Function should not be executed during replay"
+                    )
+
+                # Execute: Call replay (should use preloaded cache)
+                result = compute(5)
+
+                # Assert: Got cached result without executing function
+                self.assertEqual(result, 10)
+        finally:
+            # Cleanup
+            if os.path.exists(test_filepath):
+                os.unlink(test_filepath)
+
     # ============= Memoizer._dump_to_disk Tests =============
 
     @patch_on_disk_cache_base_dir
@@ -1518,6 +1801,307 @@ class InterfacesTest(TestMixin, TestCase):
 
         self.assertEqual(next(iter(feature_a_entries.values()))["result"], 10)
         self.assertEqual(next(iter(feature_b_entries.values()))["result"], 30)
+
+
+@instantiate_parametrized_tests
+class ForceDisableCachesTest(TestMixin, TestCase):
+    """Test class for force_disable_caches integration with the caching module."""
+
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-force-disable-caches-{cls.cls_id}"
+
+    def test_force_disable_caches_disables_caching_module(self) -> None:
+        """Test that force_disable_caches=True disables the caching module.
+
+        Verifies that when torch._inductor.config.force_disable_caches is True,
+        IS_CACHING_MODULE_ENABLED() returns False even if the base config
+        would otherwise enable caching.
+        """
+        # Setup: patch the base config to return True (enabled)
+        # and force_disable_caches to return True
+        with (
+            patch.object(config, "_is_caching_module_enabled_base", return_value=True),
+            patch.object(config, "_is_force_disable_caches", return_value=True),
+        ):
+            # Execute & Assert: IS_CACHING_MODULE_ENABLED should return False
+            self.assertFalse(config.IS_CACHING_MODULE_ENABLED())
+
+    def test_caching_module_enabled_when_force_disable_is_false(self) -> None:
+        """Test that caching works when force_disable_caches=False.
+
+        Verifies that when force_disable_caches is False and the base config
+        enables caching, IS_CACHING_MODULE_ENABLED() returns True.
+        """
+        # Setup: patch both configs to enabled states
+        with (
+            patch.object(config, "_is_caching_module_enabled_base", return_value=True),
+            patch.object(config, "_is_force_disable_caches", return_value=False),
+        ):
+            # Execute & Assert: IS_CACHING_MODULE_ENABLED should return True
+            self.assertTrue(config.IS_CACHING_MODULE_ENABLED())
+
+    def test_caching_module_disabled_when_base_config_is_false(self) -> None:
+        """Test that caching is disabled when base config is False.
+
+        Verifies that when the base versioned config returns False,
+        IS_CACHING_MODULE_ENABLED() returns False regardless of force_disable_caches.
+        """
+        # Setup: patch base config to False, force_disable to False
+        with (
+            patch.object(config, "_is_caching_module_enabled_base", return_value=False),
+            patch.object(config, "_is_force_disable_caches", return_value=False),
+        ):
+            # Execute & Assert: IS_CACHING_MODULE_ENABLED should return False
+            self.assertFalse(config.IS_CACHING_MODULE_ENABLED())
+
+    @patch_on_disk_cache_base_dir
+    def test_memoizer_disabled_when_force_disable_caches_true(self) -> None:
+        """Test that Memoizer operations become no-ops when force_disable_caches=True.
+
+        Verifies that when force_disable_caches is enabled, memoized functions
+        always execute (no caching) and replay always raises KeyError.
+        """
+        # Setup: enable force_disable_caches
+        with (
+            patch.object(config, "_is_caching_module_enabled_base", return_value=True),
+            patch.object(config, "_is_force_disable_caches", return_value=True),
+        ):
+            memoizer = Memoizer()
+            call_count = 0
+
+            @memoizer.memoize()
+            def compute(x: int) -> int:
+                nonlocal call_count
+                call_count += 1
+                return x * 2
+
+            # Execute: call twice - should execute both times (no caching)
+            result1 = compute(5)
+            result2 = compute(5)
+
+            # Assert: function was called both times
+            self.assertEqual(call_count, 2)
+            self.assertEqual(result1, 10)
+            self.assertEqual(result2, 10)
+
+
+@instantiate_parametrized_tests
+class FreshCacheIntegrationTest(TestMixin, TestCase):
+    """Test class for fresh_cache integration with the caching module."""
+
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-fresh-cache-{cls.cls_id}"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    @set_caching_module_enabled(True)
+    def test_memoizer_cache_clear_clears_in_memory_cache(self) -> None:
+        """Test that Memoizer.cache_clear() clears the in-memory cache.
+
+        Verifies that calling cache_clear() on a Memoizer instance resets
+        its in-memory cache to empty.
+        """
+        # Setup: create a memoizer and cache some values
+        memoizer = Memoizer()
+        call_count = 0
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        compute(5)
+        compute(10)
+
+        # Verify cache has entries
+        self.assertEqual(len(memoizer._cache._memory), 2)
+        self.assertEqual(call_count, 2)
+
+        # Execute: clear the cache
+        memoizer.cache_clear()
+
+        # Assert: cache is now empty
+        self.assertEqual(len(memoizer._cache._memory), 0)
+
+        # Verify that calling the memoized function again would be a cache miss
+        # by checking that replay raises KeyError
+        @memoizer.replay()
+        def compute_replay(x: int) -> int:
+            raise AssertionError("Should not be called")
+
+        with self.assertRaises(KeyError):
+            compute_replay(5)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_cache_clear_clears_disk_cache(self) -> None:
+        """Test that PersistentMemoizer.cache_clear() clears the on-disk cache.
+
+        Verifies that calling cache_clear() on a PersistentMemoizer removes
+        the on-disk cache directory.
+        """
+        from pathlib import Path
+
+        # Setup: create a persistent memoizer and cache some values
+        persistent = PersistentMemoizer(sub_dir=Path(self.sub_dir()))
+        call_count = 0
+
+        @persistent.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        compute(5)
+        self.assertEqual(call_count, 1)
+
+        # Verify disk cache directory exists and has content
+        disk_cache_dir = persistent._disk_cache._cache_dir
+        self.assertTrue(disk_cache_dir.exists())
+
+        # Execute: clear the persistent memoizer cache
+        persistent.cache_clear()
+
+        # Assert: disk cache directory is removed
+        self.assertFalse(disk_cache_dir.exists())
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_memoizer_registered_with_clear_on_fresh_cache(self) -> None:
+        """Test that Memoizer is registered with clear_on_fresh_cache.
+
+        Verifies that when a Memoizer is created, it is automatically
+        registered to be cleared when fresh_cache() is invoked.
+        """
+        from torch._inductor.utils import _registered_caches
+
+        # Setup: create a memoizer
+        memoizer = Memoizer()
+
+        # Assert: memoizer is in the registered caches list
+        self.assertIn(memoizer, _registered_caches)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_registered_with_clear_on_fresh_cache(self) -> None:
+        """Test that PersistentMemoizer is registered with clear_on_fresh_cache.
+
+        Verifies that when a PersistentMemoizer is created, it is automatically
+        registered to be cleared when fresh_cache() is invoked.
+        """
+        from pathlib import Path
+
+        from torch._inductor.utils import _registered_caches
+
+        # Setup: create a persistent memoizer
+        persistent = PersistentMemoizer(sub_dir=Path(self.sub_dir()))
+
+        # Assert: persistent memoizer is in the registered caches list
+        self.assertIn(persistent, _registered_caches)
+        # Also verify the underlying memoizer is registered
+        self.assertIn(persistent._memoizer, _registered_caches)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_fresh_cache_clears_memoizer(self) -> None:
+        """Test that fresh_cache() context manager clears Memoizer caches.
+
+        Verifies that when entering fresh_cache() context, all registered
+        Memoizer instances have their caches cleared.
+        """
+        from torch._inductor.utils import fresh_cache
+
+        # Setup: create a memoizer and cache some values
+        memoizer = Memoizer()
+        call_count = 0
+
+        @memoizer.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        compute(5)
+        self.assertEqual(len(memoizer._cache._memory), 1)
+
+        # Execute: enter fresh_cache context (this calls clear_caches())
+        with fresh_cache():
+            # Assert: memoizer cache was cleared
+            self.assertEqual(len(memoizer._cache._memory), 0)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_fresh_cache_clears_persistent_memoizer_disk_cache(self) -> None:
+        """Test that fresh_cache() clears PersistentMemoizer disk cache.
+
+        Verifies that when entering fresh_cache() context, PersistentMemoizer
+        instances have their on-disk cache directories removed.
+        """
+        from pathlib import Path
+
+        from torch._inductor.utils import fresh_cache
+
+        # Setup: create a persistent memoizer and cache some values
+        persistent = PersistentMemoizer(sub_dir=Path(self.sub_dir()))
+        call_count = 0
+
+        @persistent.record()
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        compute(5)
+
+        # Verify disk cache exists
+        disk_cache_dir = persistent._disk_cache._cache_dir
+        self.assertTrue(disk_cache_dir.exists())
+
+        # Execute: enter fresh_cache context
+        with fresh_cache():
+            # Assert: disk cache directory was removed
+            self.assertFalse(disk_cache_dir.exists())
+            # And memory cache was cleared (via the underlying Memoizer)
+            self.assertEqual(len(persistent._memoizer._cache._memory), 0)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_cache_clear_is_idempotent(self) -> None:
+        """Test that calling cache_clear() multiple times is safe.
+
+        Verifies that clearing an already-empty cache does not raise errors.
+        """
+        from pathlib import Path
+
+        # Setup: create memoizers
+        memoizer = Memoizer()
+        persistent = PersistentMemoizer(sub_dir=Path(self.sub_dir()))
+
+        # Execute: call cache_clear multiple times on empty caches
+        memoizer.cache_clear()
+        memoizer.cache_clear()
+
+        persistent.cache_clear()
+        persistent.cache_clear()
+
+        # Assert: no errors raised, caches are still empty
+        self.assertEqual(len(memoizer._cache._memory), 0)
+        self.assertFalse(persistent._disk_cache._cache_dir.exists())
 
 
 @instantiate_parametrized_tests
