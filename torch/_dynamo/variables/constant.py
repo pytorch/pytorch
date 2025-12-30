@@ -29,7 +29,7 @@ from .base import ValueMutationNew, VariableTracker
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
 
@@ -135,7 +135,7 @@ its type to `common_constant_types`.
         return self.unpack_var_sequence(tx=None)
 
     def getitem_const(
-        self, tx: "InstructionTranslator", arg: VariableTracker
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         return ConstantVariable.create(
             self.value[arg.as_python_constant()],
@@ -152,14 +152,16 @@ its type to `common_constant_types`.
         return ConstantVariable.is_base_literal(obj)
 
     def unpack_var_sequence(
-        self, tx: Optional["InstructionTranslator"]
+        self, tx: Optional["InstructionTranslatorBase"]
     ) -> list[VariableTracker]:
         try:
             return [ConstantVariable.create(x) for x in self.as_python_constant()]
         except TypeError as e:
             raise NotImplementedError from e
 
-    def const_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def const_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if not hasattr(self.value, name):
             raise_observed_exception(AttributeError, tx, args=[name])
         member = getattr(self.value, name)
@@ -169,7 +171,7 @@ its type to `common_constant_types`.
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -291,7 +293,7 @@ its type to `common_constant_types`.
 
     def call_tree_map(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
         rest: Sequence[VariableTracker],
@@ -343,7 +345,7 @@ its type to `common_constant_types`.
 
     @override
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
@@ -402,7 +404,9 @@ class EnumVariable(VariableTracker):
     def as_python_constant(self) -> Union[enum.Enum, enum.IntEnum]:
         return self.value
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if not hasattr(self.value, name):
             raise NotImplementedError
         if name in cmp_name_to_op_mapping:

@@ -113,7 +113,7 @@ except ImportError:
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.side_effects import SideEffects
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.constant import ConstantVariable
 
 
@@ -245,14 +245,18 @@ class UserDefinedClassVariable(UserDefinedVariable):
     def can_constant_fold_through(self) -> bool:
         return self.value in self._constant_fold_classes()
 
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
+    def has_key_in_generic_dict(
+        self, tx: "InstructionTranslatorBase", key: str
+    ) -> bool:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)
 
         return key in self.value.__dict__
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         from . import ConstantVariable, EnumVariable
 
         source = AttrSource(self.source, name) if self.source is not None else None
@@ -338,7 +342,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def _call_cross_entropy_loss(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -409,7 +413,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -479,7 +483,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -932,7 +936,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
         return new_fn is object.__new__
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
         if self.source:
             source = AttrSource(self.source, name)
@@ -940,7 +944,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.ConstantVariable(hasattr(self.value, name))
         return super().call_obj_hasattr(tx, name)
 
-    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
+    def const_getattr(self, tx: "InstructionTranslatorBase", name: str) -> Any:
         if name == "__name__":
             return self.value.__name__
         return super().const_getattr(tx, name)
@@ -976,7 +980,7 @@ class RemovableHandleClass:
 
 
 def call_random_fn(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     fn: Callable[..., Any],
     args: Sequence[VariableTracker],
     kwargs: dict[str, VariableTracker],
@@ -1096,7 +1100,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             f"calling torch function on object without __torch_function__ {self}"
         )
 
-    def get_torch_fn(self, tx: "InstructionTranslator") -> VariableTracker:
+    def get_torch_fn(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         self.torch_function_check()
         from .torch_function import get_torch_function_fn
 
@@ -1104,7 +1108,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def call_torch_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         fn: VariableTracker,
         types: TupleVariable,
         args: Sequence[Any],
@@ -1144,7 +1148,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[Any],
         kwargs: dict[str, Any],
@@ -1211,7 +1215,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def method_setattr_standard(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: VariableTracker,
         value: VariableTracker,
         directly_update_dict: bool = False,
@@ -1261,7 +1265,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             inspect.getattr_static(self.value, "__setattr__", None)
         ) and not isinstance(self.value, threading.local)
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         if (
             self.source
             and self._maybe_get_baseclass_method("__iter__") is list.__iter__
@@ -1278,7 +1284,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ]
         return super().unpack_var_sequence(tx)
 
-    def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+    def has_force_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
         try:
             variables.BuiltinVariable(iter).call_function(tx, [self], {})
             return True
@@ -1287,7 +1293,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return False
 
     def force_unpack_var_sequence(
-        self, tx: "InstructionTranslator"
+        self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
         result = []
         iter_ = variables.BuiltinVariable(iter).call_function(tx, [self], {})
@@ -1301,7 +1307,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 break
         return result
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def next_variable(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.call_method(tx, "__next__", [], {})
 
     def is_supported_random(self) -> bool:
@@ -1313,7 +1319,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -1439,7 +1445,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             return (descriptor, setter)
         return None
 
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
+    def has_key_in_generic_dict(
+        self, tx: "InstructionTranslatorBase", key: str
+    ) -> bool:
         if tx.output.side_effects.has_pending_mutation_of_attr(self, key):
             mutated_attr = tx.output.side_effects.load_attr(self, key, deleted_ok=True)
             return not isinstance(mutated_attr, variables.DeletedVariable)
@@ -1496,7 +1504,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             ],
         )
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         from . import ConstantVariable
 
         source: Source | None = AttrSource(self.source, name) if self.source else None
@@ -1821,7 +1831,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         )
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
         if self.source:
             install_guard(
@@ -1851,7 +1861,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
     def call_tree_map_branch(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         tree_map_fn: "variables.functions.UserFunctionVariable",
         map_fn: "VariableTracker",
         rest: "collections.abc.Sequence[VariableTracker]",
@@ -1940,7 +1950,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 class FrozenDataClassVariable(UserDefinedObjectVariable):
     @staticmethod
     def create(
-        tx: "InstructionTranslator", value: object, source: Source
+        tx: "InstructionTranslatorBase", value: object, source: Source
     ) -> "FrozenDataClassVariable":
         from dataclasses import fields
 
@@ -2094,7 +2104,7 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
     # use this to accumulate the most up-to-date field values
     def method_setattr_standard(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: VariableTracker,
         value: VariableTracker,
         directly_update_dict: bool = False,
@@ -2132,7 +2142,7 @@ class SourcelessGraphModuleVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -2157,7 +2167,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -2222,7 +2232,9 @@ class KeyedJaggedTensorVariable(UserDefinedObjectVariable):
         assert type(value) is KeyedJaggedTensor
         super().__init__(value, **kwargs)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if (
             torch._dynamo.config.force_unspec_int_unbacked_size_like_on_torchrec_kjt
             and self.source is not None
@@ -2258,7 +2270,7 @@ class RemovableHandleVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         method_name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -2317,7 +2329,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -2340,7 +2352,9 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
                     raise
         return super().call_method(tx, name, args, kwargs)
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         if type(self.value).__iter__ in (  # type: ignore[attr-defined]
             dict.__iter__,
             collections.OrderedDict.__iter__,
@@ -2363,7 +2377,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
         return self._dict_vt.install_dict_keys_match_guard()
 
     def install_dict_contains_guard(
-        self, tx: "InstructionTranslator", args: list[VariableTracker]
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
         return self._dict_vt.install_dict_contains_guard(tx, args)
 
@@ -2412,7 +2426,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -2425,7 +2439,9 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def as_python_constant(self) -> object:
         return self._set_vt.as_python_constant()
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         if inspect.getattr_static(self.value, "__iter__") in (
             set.__iter__,
             frozenset.__iter__,
@@ -2448,7 +2464,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
         return self._set_vt.install_dict_keys_match_guard()
 
     def install_dict_contains_guard(
-        self, tx: "InstructionTranslator", args: list[VariableTracker]
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
         return self._set_vt.install_dict_contains_guard(tx, args)
 
@@ -2488,7 +2504,7 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -2499,7 +2515,9 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
             return self._list_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         assert self._list_vt is not None
         if type(self.value).__iter__ is list.__iter__:  # type: ignore[attr-defined]
             return self._list_vt.unpack_var_sequence(tx)
@@ -2553,7 +2571,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -2564,7 +2582,9 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return self._tuple_vt.call_method(tx, name, args, kwargs)
         return super().call_method(tx, name, args, kwargs)
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         assert self._tuple_vt is not None
         if type(self.value).__iter__ is tuple.__iter__:  # type: ignore[attr-defined]
             return self._tuple_vt.unpack_var_sequence(tx)
@@ -2588,7 +2608,9 @@ class MutableMappingVariable(UserDefinedObjectVariable):
         super().__init__(value, **kwargs)
         self.generic_dict_vt = ConstDictVariable({})
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         # A common pattern in the init code of MutableMapping objects is to
         # update the __dict__ attribute. To prevent graph break, we directly
         # return a ConstDictVariable for the __dict__attr.

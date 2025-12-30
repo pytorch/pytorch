@@ -48,7 +48,7 @@ from .lists import ListIteratorVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .functions import UserFunctionVariable
 
@@ -63,7 +63,7 @@ def was_instancecheck_override(obj: Any) -> bool:
 
 
 def raise_unhashable(
-    arg: VariableTracker, tx: Optional["InstructionTranslator"] = None
+    arg: VariableTracker, tx: Optional["InstructionTranslatorBase"] = None
 ) -> None:
     if tx is None:
         from torch._dynamo.symbolic_convert import InstructionTranslator
@@ -253,7 +253,7 @@ class ConstDictVariable(VariableTracker):
 
     def call_tree_map_branch(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         tree_map_fn: "UserFunctionVariable",
         map_fn: VariableTracker,
         rest: Sequence[VariableTracker],
@@ -349,7 +349,7 @@ class ConstDictVariable(VariableTracker):
             self.reconstruct_kvs_into_new_dict(codegen)
 
     def getitem_const_raise_exception_if_absent(
-        self, tx: "InstructionTranslator", arg: VariableTracker
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
@@ -366,7 +366,7 @@ class ConstDictVariable(VariableTracker):
         return self.items[key]
 
     def getitem_const(
-        self, tx: "InstructionTranslator", arg: VariableTracker
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         key = ConstDictVariable._HashableTracker(arg)
         if key not in self.items:
@@ -402,7 +402,7 @@ class ConstDictVariable(VariableTracker):
             install_guard(self.make_guard(GuardBuilder.DICT_KEYS_MATCH))
 
     def install_dict_contains_guard(
-        self, tx: "InstructionTranslator", args: list[VariableTracker]
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
         # Key guarding - These are the cases to consider
         # 1) The dict has been mutated. In this case, we would have already
@@ -443,7 +443,7 @@ class ConstDictVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -796,12 +796,14 @@ class ConstDictVariable(VariableTracker):
         else:
             return super().call_method(tx, name, args, kwargs)
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         self.install_dict_keys_match_guard()
         return [x.vt for x in self.items]
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
         # dict not allow setting arbitrary attributes.  OrderedDict and
         # defaultdict allow arbitrary setattr, but not deletion of default attrs
@@ -846,7 +848,9 @@ class MappingProxyVariable(VariableTracker):
     def python_type(self) -> type:
         return types.MappingProxyType
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         return self.dv_dict.unpack_var_sequence(tx)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -878,7 +882,7 @@ class MappingProxyVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -906,7 +910,7 @@ class MappingProxyVariable(VariableTracker):
         return self.dv_dict.call_method(tx, name, args, kwargs)
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
         if self.python_type() is types.MappingProxyType:
             return ConstantVariable.create(name in types.MappingProxyType.__dict__)
@@ -919,7 +923,7 @@ class NNModuleHooksDictVariable(ConstDictVariable):
         pass
 
     def install_dict_contains_guard(
-        self, tx: "InstructionTranslator", args: list[VariableTracker]
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
         pass
 
@@ -966,7 +970,7 @@ class DefaultDictVariable(ConstDictVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1053,7 +1057,7 @@ class SetVariable(ConstDictVariable):
 
     def _fast_set_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         fn: Any,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1072,7 +1076,7 @@ class SetVariable(ConstDictVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1298,7 +1302,7 @@ class SetVariable(ConstDictVariable):
         return variables.BuiltinVariable(set)
 
     def getitem_const(
-        self, tx: "InstructionTranslator", arg: VariableTracker
+        self, tx: "InstructionTranslatorBase", arg: VariableTracker
     ) -> VariableTracker:
         raise RuntimeError("Illegal to getitem on a set")
 
@@ -1328,7 +1332,7 @@ class OrderedSetClassVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1354,7 +1358,7 @@ class OrderedSetClassVariable(VariableTracker):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ):
@@ -1433,7 +1437,7 @@ class FrozensetVariable(SetVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1486,7 +1490,7 @@ class DictKeySetVariable(SetVariable):
         pass
 
     def install_dict_contains_guard(
-        self, tx: "InstructionTranslator", args: list[VariableTracker]
+        self, tx: "InstructionTranslatorBase", args: list[VariableTracker]
     ) -> None:
         # Already EQUALS_MATCH guarded
         pass
@@ -1505,7 +1509,7 @@ class DictKeySetVariable(SetVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1541,7 +1545,9 @@ class DictViewVariable(VariableTracker):
         # Implement in the subclasses
         raise NotImplementedError
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         return self.view_items_vt
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -1551,7 +1557,7 @@ class DictViewVariable(VariableTracker):
         codegen.call_method(0)
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> ConstantVariable:
         assert self.kv is not None
         if name in self.python_type().__dict__:
@@ -1560,7 +1566,7 @@ class DictViewVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1591,7 +1597,7 @@ class DictKeysVariable(DictViewVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1646,7 +1652,7 @@ class DictItemsVariable(DictViewVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],

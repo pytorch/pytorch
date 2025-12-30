@@ -70,13 +70,13 @@ from .user_defined import UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from .constant import ConstantVariable
 
 
 def initialize_lazy_module(
-    tx: "InstructionTranslator",
+    tx: "InstructionTranslatorBase",
     mod: torch.nn.Module,
     args: Sequence[VariableTracker],
     kwargs: dict[str, VariableTracker],
@@ -122,7 +122,10 @@ def initialize_lazy_module(
 
 @contextmanager
 def record_nn_module_stack(
-    module_key: str, source: Source, tx: "InstructionTranslator", mod: torch.nn.Module
+    module_key: str,
+    source: Source,
+    tx: "InstructionTranslatorBase",
+    mod: torch.nn.Module,
 ) -> Any:
     fully_qualified_name = source.name
     # Remove redundant namings
@@ -211,7 +214,7 @@ class NNModuleVariable(VariableTracker):
 
     def _wrap_submodule(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         source: Source,
         submod: torch.nn.Module,
         *key_extra: Any,
@@ -219,7 +222,9 @@ class NNModuleVariable(VariableTracker):
     ) -> None:
         return
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         # implement list/iter/tuple/etc calls
         base = tx.output.get_submodule(self.module_key)
         result: list[VariableTracker] = []
@@ -250,7 +255,7 @@ class NNModuleVariable(VariableTracker):
         return result
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
         mod = tx.output.get_submodule(self.module_key)
         result = hasattr(mod, name)
@@ -261,11 +266,11 @@ class NNModuleVariable(VariableTracker):
         )
         return variables.ConstantVariable.create(result)
 
-    def is_training(self, tx: "InstructionTranslator") -> bool:
+    def is_training(self, tx: "InstructionTranslatorBase") -> bool:
         mod = tx.output.get_submodule(self.module_key)
         return getattr(mod, "training", False)
 
-    def convert_to_unspecialized(self, tx: "InstructionTranslator") -> None:
+    def convert_to_unspecialized(self, tx: "InstructionTranslatorBase") -> None:
         """Restart analysis treating this module as an UnspecializedNNModuleVariable"""
         mod = tx.output.get_submodule(self.module_key)
         GenerationTracker.tag(mod)
@@ -275,7 +280,9 @@ class NNModuleVariable(VariableTracker):
             GenerationTracker.mark_class_dynamic(type(mod))
         raise UnspecializeRestartAnalysis
 
-    def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
+    def has_key_in_generic_dict(
+        self, tx: "InstructionTranslatorBase", key: str
+    ) -> bool:
         base = tx.output.get_submodule(self.module_key)
 
         if object_has_getattribute(base):
@@ -301,7 +308,7 @@ class NNModuleVariable(VariableTracker):
     def _custom_getattr_fallback(
         self,
         base: torch.nn.Module,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         obj_source: Source,
     ) -> Optional[VariableTracker]:
@@ -348,7 +355,9 @@ class NNModuleVariable(VariableTracker):
             tx, [variables.ConstantVariable.create(name)], {}
         )
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         source = self.source and AttrSource(self.source, name)
 
         base = tx.output.get_submodule(self.module_key)
@@ -465,7 +474,7 @@ class NNModuleVariable(VariableTracker):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -575,7 +584,7 @@ class NNModuleVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1040,7 +1049,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             if hasattr(x, "__code__") and x not in supported
         }
 
-    def unpack_var_sequence(self, tx: "InstructionTranslator") -> list[VariableTracker]:
+    def unpack_var_sequence(
+        self, tx: "InstructionTranslatorBase"
+    ) -> list[VariableTracker]:
         try:
             fn = inspect.getattr_static(self.value_type, "__iter__")
         except AttributeError as e:
@@ -1066,7 +1077,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -1145,7 +1156,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -1234,14 +1245,16 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         return super().call_method(tx, name, list(args), kwargs)
 
     def getattr_helper(
-        self, tx: "InstructionTranslator", field: str, name_vt: VariableTracker
+        self, tx: "InstructionTranslatorBase", field: str, name_vt: VariableTracker
     ) -> Optional[VariableTracker]:
         dict_vt = self.var_getattr(tx, field)
         if isinstance(dict_vt, variables.ConstDictVariable):
             return dict_vt.maybe_getitem_const(name_vt)
         return None
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         # Allow skipping of empty hook dict guards on inbuilt nn modules
         if name in (
             "_backward_hooks",
@@ -1305,7 +1318,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         return super().var_getattr(tx, name)
 
     def manually_trace_nn_module_getattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> VariableTracker:
         """
         Dynamo tracing of nn.Module __getattr__ can be expensive if the model
