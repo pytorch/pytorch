@@ -327,14 +327,8 @@ Tensor cosine_similarity(const Tensor& x1_, const Tensor& x2_, int64_t dim, doub
   // with reduced floating types (float16/bfloat16) if the value overflows, while CPU converts to inf.
   // If both norms are non-reduced, use the higher precision one.
   // If eps is too large for the dtype, it will become inf, and subsequent operations will produce NaN
-  auto x1_dtype = x1_norm.scalar_type();
-  auto x2_dtype = x2_norm.scalar_type();
-  auto x1_is_reduced = at::isReducedFloatingType(x1_dtype);
-  auto x2_is_reduced = at::isReducedFloatingType(x2_dtype);
-  auto eps_dtype = (x1_is_reduced && x2_is_reduced) ? at::kFloat
-                   : x1_is_reduced ? x2_dtype
-                   : x2_is_reduced ? x1_dtype
-                   : at::promoteTypes(x1_dtype, x2_dtype);
+  auto common_is_reduced = at::isReducedFloatingType(commonDtype);
+  auto eps_dtype = common_is_reduced ? at::kFloat : commonDtype;
   auto eps_tensor = at::scalar_tensor(eps, at::TensorOptions().dtype(eps_dtype).device(x1_norm.device()));
 
   {
