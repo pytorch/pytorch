@@ -5,12 +5,8 @@ import sys
 from typing import Any, Literal
 
 import torch
-from torch._utils import _dummy_type
+from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type, _Snapshot
 from torch.types import Device
-from torch.utils._memory_snapshot_utils import (
-    _augment_memory_snapshot_stack_traces,
-    _Snapshot,
-)
 
 from . import _get_device_index, _is_compiled, _lazy_init, is_initialized
 
