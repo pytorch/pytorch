@@ -186,7 +186,9 @@ if RUN_GPU:
         check_code: bool = True
 
     # XPU Not implemented yet
-    XPU_BASE_TEST_SKIP = []
+    XPU_BASE_TEST_SKIP = [
+        "test_dynamic_shapes_persistent_reduction_mixed_x_dim",
+    ]
 
     # Maintain two separate test lists for cuda and cpp for now
     for item in [
