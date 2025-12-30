@@ -972,6 +972,11 @@ class RegionalOutputCode(OutputCode):
             return self._graph_module(inputs)
         return self._graph_module(*inputs)
 
+    @property
+    def graph(self):
+        _, module = self._unwrap_graph_module()
+        return module.graph
+
     def _unwrap_graph_module(
         self,
     ) -> tuple[list[tuple[Callable, dict[str, Any]]], torch.fx.GraphModule]:

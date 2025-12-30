@@ -3636,14 +3636,43 @@ class GuardsStatePickler(pickle.Pickler):
         return NotImplemented
 
 
+def make_guard_filter_entry(guard: Guard, builder: GuardBuilder) -> GuardFilterEntry:
+    MISSING = object()
+    name = strip_local_scope(guard.name)
+    if name == "":
+        has_value = False
+        value = MISSING
+    else:
+        try:
+            # Guard evaluation is expected to fail when we guard on
+            # things like "not hasattr(x, 'foo')". In cases like this,
+            # we don't have a well defined value because such thing
+            # doesn't exist.
+            value = builder.get(guard)
+            has_value = True
+        except:  # noqa: B001,E722
+            value = MISSING
+            has_value = False
+    is_global = get_global_source_name(guard.originating_source) is not None
+    return GuardFilterEntry(
+        name=name,
+        has_value=has_value,
+        value=value,
+        guard_type=guard.create_fn_name(),
+        derived_guard_types=(tuple(guard.guard_types) if guard.guard_types else ()),
+        is_global=is_global,
+        orig_guard=guard,
+    )
+
+
 def pickle_guards_state(
     state: GuardsState,
-    guard_tree_values: dict[int, Any],
-    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None,
+    builder: GuardBuilder,
 ) -> bytes:
     buf = io.BytesIO()
     empty_values = {}
     missing_values = {}
+    guard_tree_values = builder.guard_tree_values
 
     leaves = pytree.tree_leaves(state.output_graph.local_scope)
     for leaf in leaves:
@@ -3661,11 +3690,17 @@ def pickle_guards_state(
             missing_values[id(leaf)] = leaf
     pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
 
-    if guard_filter_fn is torch.compiler.keep_portable_guards_unsafe:
+    if all(
+        torch.compiler.keep_portable_guards_unsafe(
+            [
+                make_guard_filter_entry(guard, builder)
+                for guard in state.output_graph.guards
+            ]
+        )
+    ):
         # Prune more values in AOT precompile when complex pickling structure is not needed.
-        state.output_graph.global_scope.clear()
-        # state.output_graph.local_scope.clear()
-        state.output_graph.guard_on_key_order.clear()
+        state.output_graph.guard_on_key_order = set()
+        state.output_graph.global_scope = {}
 
     try:
         pickler.dump(state)
@@ -3763,38 +3798,8 @@ class CheckFunctionManager:
                 False,
             )
 
-            def make_guard_filter_entry(guard: Guard) -> GuardFilterEntry:
-                MISSING = object()
-                name = strip_local_scope(guard.name)
-                if name == "":
-                    has_value = False
-                    value = MISSING
-                else:
-                    try:
-                        # Guard evaluation is expected to fail when we guard on
-                        # things like "not hasattr(x, 'foo')". In cases like this,
-                        # we don't have a well defined value because such thing
-                        # doesn't exist.
-                        value = builder.get(guard)
-                        has_value = True
-                    except:  # noqa: B001,E722
-                        value = MISSING
-                        has_value = False
-                is_global = get_global_source_name(guard.originating_source) is not None
-                return GuardFilterEntry(
-                    name=name,
-                    has_value=has_value,
-                    value=value,
-                    guard_type=guard.create_fn_name(),
-                    derived_guard_types=(
-                        tuple(guard.guard_types) if guard.guard_types else ()
-                    ),
-                    is_global=is_global,
-                    orig_guard=guard,
-                )
-
             filter_results = guard_filter_fn(
-                [make_guard_filter_entry(guard) for guard in sorted_guards]
+                [make_guard_filter_entry(guard, builder) for guard in sorted_guards]
             )
             assert len(filter_results) == len(sorted_guards)
             assert all(type(x) is bool for x in filter_results)
@@ -4039,9 +4044,7 @@ class CheckFunctionManager:
             shape_code_parts=self.shape_code_parts,
         )
 
-        return pickle_guards_state(
-            guards_state, builder.guard_tree_values, builder.guard_filter_fn
-        )
+        return pickle_guards_state(guards_state, builder)
 
     def build_guards(
         self,
