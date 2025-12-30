@@ -1418,7 +1418,9 @@ except RuntimeError as e:
         @skipIfTorchVersionLessThan(2, 10)
         @onlyCUDA
         @parametrize("show_cpp_stacktraces", [False, True])
-        @skipIfRocm(msg="HIP kernel launch with invalid config doesn't report error via hipGetLastError")
+        @skipIfRocm(
+            msg="HIP kernel launch with invalid config doesn't report error via hipGetLastError"
+        )
         @unittest.skipIf(
             _get_torch_cuda_version() >= (13, 0), "To be resolved after branch cut"
         )
