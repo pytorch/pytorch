@@ -3393,6 +3393,17 @@
       ]
     }
   ],
+  "GB6735": [
+    {
+      "Gb_type": "torch.library.wrap_triton call with > 1 args",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Attempted to call `torch.library.wrap_triton` with > 1 args. Dynamo does not support this.",
+      "Hints": [
+        "Remove the torch.library.wrap_triton call or its additional args.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0315": [
     {
       "Gb_type": "torch.associative_scan: improper xs",
