@@ -2484,8 +2484,9 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected, result)
 
     def test_disable___exit__(self):
         def h(x):
@@ -2511,8 +2512,9 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected, result)
 
     def test_contextmanager_as_argument(self):
         def h(x):

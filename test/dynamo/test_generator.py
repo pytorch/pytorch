@@ -776,11 +776,13 @@ class GraphModule(torch.nn.Module):
         gen, y = fn(t)
         self.assertEqual(y, t.sin())
         self.assertEqual(len(list(gen)), 4)
-        self.assertTrue(
-            "Cannot reconstruct a generator with variable mutations. "
-            "Dynamo needs to fully exhaust the generator, which may cause "
-            "unintended variable modifications." in dict(counters["unimplemented"])
+        # Check for the new formatted message from unimplemented()
+        found = any(
+            "Generator reconstruction with mutations" in msg
+            and "Cannot reconstruct a generator with variable mutations" in msg
+            for msg in counters["unimplemented"]
         )
+        self.assertTrue(found)
 
     def test_generator_with_side_effects_graph_break_2(self):
         i = 0
