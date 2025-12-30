@@ -150,6 +150,9 @@ std::tuple<Tensor, Tensor> miopen_ctc_loss(
     bool zero_infinity) {
   (void)zero_infinity; // only used for backward
 
+  // Validate non-empty tensor before MIOpen call
+  TORCH_CHECK(log_probs_t.numel() > 0, "log_probs tensor must not be empty");
+
   const CheckedFrom c = "miopen_ctc_loss";
   const TensorArg log_probs{log_probs_t, "log_probs", 1};
   const TensorArg targets{targets_t, "targets", 2};

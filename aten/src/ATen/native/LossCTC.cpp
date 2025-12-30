@@ -508,11 +508,14 @@ Tensor ctc_loss_impl(const Tensor& log_probs_, const Tensor& targets, LengthsTyp
           log_probs, targets, input_lengths, target_lengths, BLANK);
 
   // MIOpen CTC Loss (returns false on non-ROCm builds)
-  Tensor targets_cpu = targets.device().type() == at::kCPU
-      ? targets.to(at::kInt)
-      : targets.to(Device(at::kCPU), at::kInt);
-  bool use_miopen = (log_probs.device().type() == at::kCUDA) &&
-      at::_use_miopen_ctc_loss(log_probs, targets_cpu, input_lengths, target_lengths, BLANK);
+  bool use_miopen = false;
+  Tensor targets_cpu;
+  if (log_probs.device().type() == at::kCUDA) {
+    targets_cpu = targets.device().type() == at::kCPU
+        ? targets.to(at::kInt)
+        : targets.to(Device(at::kCPU), at::kInt);
+    use_miopen = at::_use_miopen_ctc_loss(log_probs, targets_cpu, input_lengths, target_lengths, BLANK);
+  }
 
   if (use_cudnn) {
     // non-deterministic ctc loss on cudnn disabled due to inconsistent results
@@ -559,12 +562,14 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, const Tensor& in
       at::_use_cudnn_ctc_loss(
           log_probs, targets, input_lengths, target_lengths, BLANK);
   // MIOpen CTC Loss (returns false on non-ROCm builds)
-  Tensor targets_check = targets.device().type() == at::kCPU
-      ? targets.to(at::kInt)
-      : targets.to(Device(at::kCPU), at::kInt);
-  bool use_miopen = (log_probs.device().type() == at::kCUDA) &&
-      at::_use_miopen_ctc_loss(
-          log_probs, targets_check, input_lengths, target_lengths, BLANK);
+  bool use_miopen = false;
+  if (log_probs.device().type() == at::kCUDA) {
+    Tensor targets_check = targets.device().type() == at::kCPU
+        ? targets.to(at::kInt)
+        : targets.to(Device(at::kCPU), at::kInt);
+    use_miopen = at::_use_miopen_ctc_loss(
+        log_probs, targets_check, input_lengths, target_lengths, BLANK);
+  }
   bool use_accelerated = use_cudnn || use_miopen;
   if (at::areAnyTensorSubclassLike(
           {log_probs, targets, input_lengths, target_lengths}) || use_accelerated) {
