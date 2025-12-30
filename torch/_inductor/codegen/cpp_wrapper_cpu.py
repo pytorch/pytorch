@@ -2124,6 +2124,7 @@ class CppWrapperCpu(PythonWrapperCodegen):
         raw_args: Sequence[Any],
         output_args: _OUTPUT_ARGS_TYPE,
         raw_outputs: Sequence[ir.Buffer],
+        node: Optional[ir.FallbackKernel] = None,
     ):
         """
         Generates declarations for external kernel arguments if needed, based on the provided
@@ -2325,9 +2326,28 @@ class CppWrapperCpu(PythonWrapperCodegen):
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
+        node: Optional[ir.FallbackKernel] = None,
     ) -> None:
         """Generate a call to a kernel not contained in the C-shim.  This results in
         different code paths for AOT Inductor vs cpp_wrapper Inductor mode."""
+
+        # Check if this op has a custom C++ codegen implementation
+        from .custom_extern_kernel_codegen import CUSTOM_EXTERN_KERNEL_CODEGEN
+
+        # For HigherOrderOperators like Print, the python_kernel_name might not match
+        # exactly, so also check by op type
+        from torch._higher_order_ops.print import Print as PrintHOP
+
+        custom_codegen_key = python_kernel_name
+        if isinstance(op_overload, PrintHOP):
+            custom_codegen_key = "torch.ops.higher_order.print"
+
+        if custom_codegen_key in CUSTOM_EXTERN_KERNEL_CODEGEN:
+            custom_codegen = CUSTOM_EXTERN_KERNEL_CODEGEN[custom_codegen_key].cpp
+            if custom_codegen is not None and node is not None:
+                # Use the node parameter passed from ir.py
+                custom_codegen(node, self.writeline)
+                return
 
         def extract_output_name(
             out: Optional[Union[ir.Buffer, Sequence[ir.Buffer]]],
@@ -2561,6 +2581,7 @@ if (!custom_op_wrapper) {
         op_overload: torch._ops.OpOverload,
         output_args: Sequence[Optional[str]],
         raw_outputs: Sequence[ir.Buffer],
+        node: Optional[ir.FallbackKernel] = None,
     ) -> None:
         """Generate fallback kernel calls with runtime (non-AOT) dispatch.  This can
         only be called in cpp_wrapper mode, and assumes that the input is a non-None
@@ -2679,6 +2700,7 @@ if (!custom_op_wrapper) {
         raw_args: Sequence[Any],
         output_args: Sequence[Optional[str]],
         raw_outputs: Sequence[ir.Buffer],
+        node: Optional[ir.FallbackKernel] = None,
     ) -> None:
         """Generate fallback kernel calls with runtime (non-AOT) dispatch.  This can
         only be called in cpp_wrapper mode, and assumes that the input is a non-None
@@ -2755,6 +2777,7 @@ if (!custom_op_wrapper) {
         raw_args: Sequence[Any],
         output_args: _OUTPUT_ARGS_TYPE,
         raw_outputs: Sequence[ir.Buffer],
+        node: Optional[ir.FallbackKernel] = None,
     ) -> None:
         (
             tensor_call_args,

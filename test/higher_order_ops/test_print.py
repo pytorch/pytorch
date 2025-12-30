@@ -340,6 +340,91 @@ x = add_1, y = add_2);  getitem = None
             "Generated code should not call torch.ops.higher_order.print directly",
         )
 
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_inductor_cpp_wrapper_uses_cout(self):
+        """Test that the C++ wrapper uses std::cout for print HOP fallback.
+
+        This verifies that when compiling with inductor using cpp_wrapper mode:
+        1. The generated code uses std::cout for printing
+        2. The generated code doesn't call torch.ops.higher_order.print directly
+        3. The actual runtime output is correct (captured via subprocess)
+        """
+        import subprocess
+        import sys
+
+        script = '''
+import torch
+import torch._inductor.config as inductor_config
+from torch._inductor.utils import run_and_get_code
+
+def f(x):
+    torch._higher_order_ops.print("cpp_test_marker: {val}", val=42)
+    return x + 1
+
+with inductor_config.patch({"cpp_wrapper": True}):
+    compiled_f = torch.compile(f, backend="inductor")
+    x = torch.randn(2, 3)
+    _, codes = run_and_get_code(compiled_f, x)
+
+# Print the generated code for verification
+merged_code = "\\n".join(codes)
+print("__CODE_START__")
+print(merged_code)
+print("__CODE_END__")
+
+# Run again to verify runtime output
+with inductor_config.patch({"cpp_wrapper": True}):
+    compiled_f = torch.compile(f, backend="inductor")
+    compiled_f(x)
+'''
+        result = subprocess.run(
+            [sys.executable, "-c", script],
+            capture_output=True,
+            text=True,
+        )
+
+        # Check that the process ran successfully
+        self.assertEqual(
+            result.returncode,
+            0,
+            f"Subprocess failed with stderr: {result.stderr}",
+        )
+
+        # Extract generated code from output
+        stdout = result.stdout
+        code_start = stdout.find("__CODE_START__")
+        code_end = stdout.find("__CODE_END__")
+        self.assertNotEqual(code_start, -1, "Could not find code markers in output")
+        merged_code = stdout[code_start + len("__CODE_START__") : code_end].strip()
+
+        # Verify that the generated code uses std::cout
+        self.assertIn(
+            "std::cout",
+            merged_code,
+            "Generated C++ code should use std::cout for print HOP fallback",
+        )
+        # And does not call torch.ops.higher_order.print
+        self.assertNotIn(
+            "torch.ops.higher_order.print",
+            merged_code,
+            "Generated code should not call torch.ops.higher_order.print directly",
+        )
+
+        # Verify that the expected output was printed at runtime
+        # Extract runtime output (after __CODE_END__) to avoid false positives
+        # from string literals appearing in the generated code itself
+        runtime_output = stdout[code_end + len("__CODE_END__") :].strip()
+        self.assertIn(
+            "cpp_test_marker:",
+            runtime_output,
+            f"Expected 'cpp_test_marker:' in runtime output but got: {runtime_output}",
+        )
+        self.assertIn(
+            "42",
+            runtime_output,
+            f"Expected '42' in runtime output but got: {runtime_output}",
+        )
+
 
 if __name__ == "__main__":
     run_tests()

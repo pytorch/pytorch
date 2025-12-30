@@ -92,10 +92,69 @@ def generate_print_python(
     )
 
 
+def generate_print_cpp(
+    node: ir.FallbackKernel,
+    writeline: Callable[[str], None],
+) -> None:
+    """Generate std::cout call with format string interpolation."""
+    import re
+
+    args = node.codegen_args()
+    if not args:
+        raise ValueError("generate_print_cpp requires a format string")
+
+    format_str = args[0].strip('"\'')
+
+    # Get arg names from schema (first arg is format_str, rest are values)
+    # Schema: print(str format_str, int arg0, *, int x, int y) -> ()
+    schema = node.op_overload._schema if hasattr(node.op_overload, "_schema") else None
+    arg_names = []
+    if schema:
+        # Skip first arg (format_str), get names of remaining args
+        arg_names = [arg.name for arg in schema.arguments[1:]]
+
+    # Map arg names to their values (args[1:] are the values)
+    arg_values = args[1:]
+    name_to_value = dict(zip(arg_names, arg_values)) if arg_names else {}
+
+    # Also handle any explicit kwargs from codegen_kwargs
+    for kv in node.codegen_kwargs():
+        if "=" in kv:
+            k, v = kv.split("=", 1)
+            name_to_value[k.strip()] = v.strip()
+
+    parts, last_end, pos_idx = [], 0, 0
+    for m in re.finditer(r"\{(\w*)\}", format_str):
+        if m.start() > last_end:
+            parts.append(f'"{format_str[last_end:m.start()]}"')
+        name = m.group(1)
+        if name == "":
+            # Positional placeholder {} - use argN naming convention
+            pos_name = f"arg{pos_idx}"
+            if pos_name in name_to_value:
+                parts.append(name_to_value[pos_name])
+            elif pos_idx < len(arg_values):
+                parts.append(arg_values[pos_idx])
+            else:
+                parts.append('""')
+            pos_idx += 1
+        elif name in name_to_value:
+            parts.append(name_to_value[name])
+        else:
+            parts.append('""')
+        last_end = m.end()
+
+    if last_end < len(format_str):
+        parts.append(f'"{format_str[last_end:]}"')
+
+    writeline(f"std::cout << {' << '.join(parts or [args[0]])} << std::endl;")
+
+
 # Registry mapping operator names to their custom codegen implementations
 # Usage: CUSTOM_EXTERN_KERNEL_CODEGEN[op_name].python(node, writeline)
 CUSTOM_EXTERN_KERNEL_CODEGEN: dict[str, CustomCodegen] = {
     "torch.ops.higher_order.print": CustomCodegen(
         python=generate_print_python,
+        cpp=generate_print_cpp,
     ),
 }

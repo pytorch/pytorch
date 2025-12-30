@@ -1552,9 +1552,13 @@ class PythonWrapperCodegen(CodeGen):
         # Check if this op has a custom codegen implementation
         op_name = node.python_kernel_name
         if op_name is not None and op_name in CUSTOM_EXTERN_KERNEL_CODEGEN:
-            custom_codegen = CUSTOM_EXTERN_KERNEL_CODEGEN[op_name].python
-            if custom_codegen is not None:
-                custom_codegen(node, self.writeline)
+            custom_codegen_entry = CUSTOM_EXTERN_KERNEL_CODEGEN[op_name]
+            # Use cpp codegen if available and in cpp_wrapper mode, else use python
+            if V.graph.cpp_wrapper and custom_codegen_entry.cpp is not None:
+                custom_codegen_entry.cpp(node, self.writeline)
+                return
+            elif custom_codegen_entry.python is not None:
+                custom_codegen_entry.python(node, self.writeline)
                 return
         self.writeline(ExternKernelAllocLine(self, node))
 
@@ -1716,6 +1720,7 @@ class PythonWrapperCodegen(CodeGen):
         op_overload: Union[torch._ops.OpOverload, torch._ops.HigherOrderOperator],
         raw_args: Sequence[Any],
         outputs: Sequence[ir.Buffer],
+        node: Optional[ir.FallbackKernel] = None,
     ) -> None:
         self.writeline(f"{buf_name} = {python_kernel_name}({', '.join(get_args())})")
 
