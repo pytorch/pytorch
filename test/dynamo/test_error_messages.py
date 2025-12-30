@@ -2104,12 +2104,19 @@ from user code:
 
         outer(torch.ones(3))
 
+        def post_munge(s):
+            return re.sub(
+                r"# \S+/test_error_messages\.py", "# test_error_messages.py", s
+            )
+
         self.assertExpectedInline(
-            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
+            post_munge(
+                munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0)
+            ),
             """\
 torch._dynamo hit config.recompile_limit (1)
    function: 'fn' (test_error_messages.py:N)
-   last reason: 0/0: n == 0                                                   # return x + n  # test/dynamo/test_error_messages.py:N in fn
+   last reason: 0/0: n == 0                                                   # return x + n  # test_error_messages.py:N in fn
 To log all recompilation reasons, use TORCH_LOGS="recompiles".
 To diagnose recompilation issues, see https://pytorch.org/docs/main/compile/programming_model.recompilation.html""",
         )
