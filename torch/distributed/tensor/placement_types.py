@@ -726,6 +726,50 @@ class _StridedShard(torch._C._distributed.StridedShard):
             tensor, mesh, mesh_dim, src_data_rank
         )
 
+    def _reduce_shard_tensor(
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        reduce_op: str,
+        mesh_dim: int,
+    ) -> torch.Tensor:
+        """
+        Reduce and scatter a tensor on a mesh dimension to a _StridedShard placement.
+
+        This performs a reduce_scatter operation where the input tensor (replicated
+        across ranks) is reduced and then scattered along self.dim with strided
+        sharding semantics. The result is a strided-sharded tensor where each rank
+        holds interleaved pieces of the reduced result according to the split_factor.
+
+        Args:
+            tensor: The replicated input tensor to reduce and scatter.
+            mesh: The device mesh over which the operation is performed.
+            reduce_op: The reduction operation (e.g., "sum", "avg").
+            mesh_dim: The mesh dimension along which to reduce_scatter.
+
+        Returns:
+            The local strided shard of the reduced tensor.
+        """
+        my_coordinate = mesh.get_coordinate()
+        if my_coordinate is None:
+            return tensor
+
+        if not tensor.is_contiguous():
+            tensor = tensor.contiguous()
+
+        # `tensor.size(self.dim)` is the logical size since input is the same
+        # size as replicated on that mesh dim.
+        return (
+            CollectivePaddingContext(mesh, mesh_dim)
+            .pad_new_strided(self.dim, tensor.size(self.dim), self.split_factor)
+            .run(
+                tensor,
+                lambda t: funcol.reduce_scatter_tensor(
+                    t, reduce_op, scatter_dim=self.dim, group=(mesh, mesh_dim)
+                ),
+            )
+        )
+
     def _to_replicate_tensor(
         self,
         local_tensor: torch.Tensor,
@@ -928,7 +972,10 @@ class Partial(torch._C._distributed.Partial):
     ) -> torch.Tensor:
         # Partial placement contract #2:
         # _reduce_shard_value: reduce_scatter the value of the tensor over the mesh dimension
-        shard_spec = cast(Shard, shard_spec)
+        if not isinstance(shard_spec, Shard | _StridedShard):
+            raise ValueError(
+                f"Partial can only reduce scatter into Shard or _StridedShard, but got {shard_spec}"
+            )
         return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
 
     def _partition_value(
