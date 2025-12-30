@@ -44,7 +44,7 @@ from torch.utils._pytree import is_namedtuple_class
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
-    format_skip_frame_message,
+    format_frame_info,
     get_dynamo_observed_exception,
     handle_observed_exception,
     InfiniteGeneratorError,
@@ -52,7 +52,6 @@ from ..exc import (
     ObservedGeneratorExit,
     ObservedUserStopIteration,
     raise_observed_exception,
-    SkipFrame,
     StepUnsupported,
     unimplemented,
     Unsupported,
@@ -997,7 +996,10 @@ class LocalGeneratorObjectVariable(VariableTracker):
             raise
         except Unsupported as e:
             torch._dynamo.eval_frame.skip_code(self.get_code())
-            raise SkipFrame from e
+            e.skip_frame = True
+            if not tx.one_graph and not tx.error_on_graph_break:
+                e.msg += "\n\nSkipping frame due to graph break in a generator's next() call."
+            raise
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -1930,11 +1932,15 @@ class SkipFunctionVariable(VariableTracker):
                 skip_frame_msg = skip_frame_msg.as_python_constant()
             else:
                 skip_frame_msg = ""
-            raise SkipFrame(
-                format_skip_frame_message(
-                    tx.f_code,
-                    f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}",
-                )
+            unimplemented(
+                gb_type="Call to `torch._dynamo.skip_frame()`",
+                context=f"Called `torch._dynamo.skip_frame()` with args `{args}`, kwargs `{kwargs}`. "
+                f"Skipping frame {format_frame_info(tx.f_code)}.",
+                explanation=f"User-inserted skip frame. Message: {skip_frame_msg}",
+                hints=[
+                    "Remove the `torch._dynamo.skip_frame()` call.",
+                ],
+                skip_frame=True,
             )
         elif self.value is torch._dynamo.step_unsupported:
             try:
@@ -2719,6 +2725,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
     ) -> VariableTracker:
         from .builder import VariableBuilder
 
+        assert tx is not None
         wrapped_user_obj = VariableBuilder(
             tx, AttrSource(variable.kernel_source, f"{name}")
         )._wrap(user_obj)
@@ -2980,10 +2987,17 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         ptr = kwargs["ptr"] if "ptr" in kwargs else args[0]
 
         if not isinstance(ptr, variables.DataPtrVariable):
-            raise Unsupported(
-                "Please ensure there were no graph breaks between "
-                f"create_{self.rank}d_tma_descriptor and the upstream "
-                ".data_ptr() call."
+            unimplemented(
+                gb_type="invalid ptr argument for create_tma_descriptor",
+                context=f"args = {args}, kwargs = {kwargs}",
+                explanation=f"Expected `ptr` argument of `create_{self.rank}d_tma_descriptor`"
+                "to be from a `.data_ptr()` call, represented internally by `DataPtrVariable`",
+                hints=[
+                    "`torch.compile` may fail to internally represent result of `.data_ptr()` "
+                    "with `DataPtrVariable` due to a graph break between the `.data_ptr()` call and "
+                    f"`create_{self.rank}d_tma_descriptor`. Please ensure there were no graph breaks "
+                    "between these two calls.",
+                ],
             )
 
         if self.rank == 1:
@@ -3013,6 +3027,9 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
                 kwargs["block_dim0"] if "block_dim0" in kwargs else args[4],
             ]
         element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
+
+        # to make pyrefy happy
+        assert isinstance(ptr, variables.DataPtrVariable)
 
         return TMADescriptorExperimentalVariable(
             data_ptr=ptr,
