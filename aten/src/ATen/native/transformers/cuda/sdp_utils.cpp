@@ -20,6 +20,7 @@
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
+#include <cudnn_frontend.h>
 #endif
 
 #include <c10/core/SymInt.h>
@@ -702,23 +703,38 @@ bool check_cudnn_deterministic(const sdp_params& params, bool debug) {
 } // namespace
 
 bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
+#if defined(CUDNN_VERSION)
+  static auto cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
+#else
+  static audo cudnn_version = 0;
+#endif
 #if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || !defined(CUDNN_VERSION)
   if (debug) {
     TORCH_WARN("Torch was not compiled with cuDNN attention.");
   }
   return false;
-#endif
-#if defined(CUDNN_VERSION) && CUDNN_VERSION < 90000
-  if (debug) {
-    TORCH_WARN(CUDNN_VERSION, " cuDNN version too old to use cuDNN Attention (< v9.0.0)");
+#else
+  if (cudnn_version < 90000) {
+    if (debug) {
+      TORCH_WARN(cudnn_version, " cuDNN version too old to use cuDNN Attention (< v9.0.0)");
+    }
+    return false;
   }
-  return false;
-#endif
-#if defined(CUDNN_VERSION)
-  static auto cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
   if (params.dropout > 0.0 && cudnn_version > 91100 && cudnn_version < 91400) {
     if (debug) {
       TORCH_WARN(CUDNN_VERSION, " cuDNN version does not support droppout in SDPA (9.11 - 9.13).");
+    }
+    return false;
+  }
+  if (params.query.size(2) % 128 != 0  && (cudnn_version <= 91500 || CUDNN_FRONTEND_VERSION < 11600)) {
+    if (debug) {
+      TORCH_WARN("You have cuDNN backend version ",
+                 CUDNN_VERSION,
+                 " and frontend version ",
+                 CUDNN_FRONTEND_VERSION,
+                 ". query seq_len % 128 != 0 requires cuDNN backend 9.15.1+ _and cuDNN frontend 1.16.0+.",
+                 "Please consider upgrading to a nightly build or newer PyTorch release if you require this functionality."
+                 );
     }
     return false;
   }
