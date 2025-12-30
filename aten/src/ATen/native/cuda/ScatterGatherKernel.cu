@@ -536,9 +536,6 @@ void scatter_fill_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& ind
 }
 
 void scatter_add_cuda_kernel(const Tensor& self, int64_t dim, const Tensor& index, const Tensor& src) {
-  // See Note [Writing Nondeterministic Operations]
-  // Nondeterministic because of atomicAdd usage
-  globalContext().alertNotDeterministic("scatter_add_cuda_kernel");
   cuda_scatter_gather_base_kernel</*is_scatter_like=*/true, /*cast_to_opaque=*/false>()(
     self, dim, index, src,
     "scatter_add_cuda_", reduce_add);
@@ -567,7 +564,6 @@ void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const
                                     const Tensor& src, const ReductionType& reduce) {
   switch (reduce) {
   case ReductionType::SUM :
-    globalContext().alertNotDeterministic("scatter_reduce_cuda_sum_");
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_sum_", reduce_add);
     break;
@@ -585,7 +581,6 @@ void scatter_reduce_two_cuda_kernel(const Tensor& self, const int64_t dim, const
             "scatter_reduce_cuda_amin_", reduce_minimum);
     break;
   case ReductionType::MEAN :
-    globalContext().alertNotDeterministic("scatter_reduce_cuda_mean_");
     cuda_scatter_gather_base_kernel<true, false>()(self, dim, index, src,
             "scatter_reduce_cuda_mean_", reduce_mean);
     break;
