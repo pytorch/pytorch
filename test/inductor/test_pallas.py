@@ -1395,7 +1395,7 @@ if test_torchinductor.RUN_GPU and has_cuda_pallas():
     class PallasTestsCUDA(PallasTestsMixin, TestCase):
         DEVICE = "cuda"
 
-    # make_pallas(test_torchinductor.SweepInputsGPUTest)
+    make_pallas(test_torchinductor.SweepInputsGPUTest)
     # make_pallas(test_torchinductor.GPUTests)
 
 if test_torchinductor.RUN_TPU and has_tpu_pallas():

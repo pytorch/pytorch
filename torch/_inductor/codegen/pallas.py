@@ -3115,76 +3115,203 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
             if self.is_gpu:
                 # For GPU, pad inputs to align to WARPGROUP_SIZE (128)
                 # Mosaic GPU requires tensor sizes to be multiples of 128
-                code.writeline("# Pad inputs to align to warpgroup size (128)")
-                code.writeline("_orig_out_shapes = out_shapes")
-                code.writeline("_padded_inputs = []")
-                for i, param in enumerate(kernel_input_params):
-                    code.writeline(f"_orig_size_{i} = {param}.size")
-                    code.writeline(
-                        f"_aligned_size_{i} = ((_orig_size_{i} + 127) // 128) * 128"
-                    )
-                    code.writeline(f"if _orig_size_{i} != _aligned_size_{i}:")
-                    code.writeline(f"    _flat_{i} = {param}.flatten()")
-                    code.writeline(
-                        f"    _padded_{i} = jnp.pad(_flat_{i}, (0, _aligned_size_{i} - _orig_size_{i}))"
-                    )
-                    code.writeline(f"    _padded_inputs.append(_padded_{i})")
-                    code.writeline("else:")
-                    code.writeline(f"    _padded_inputs.append({param}.flatten())")
+                # BUT: only apply padding when all tensors have the same size
+                # (no broadcasting). If inputs have different sizes, we need
+                # to preserve shapes for proper broadcasting semantics.
 
-                # Calculate aligned output shapes
-                # NOTE: Skip padding for scalar outputs (reductions) - they don't need alignment
-                code.writeline("# Align output shapes to warpgroup size (128)")
-                code.writeline("# Skip padding for scalar outputs (e.g., reductions)")
-                code.writeline("_aligned_out_specs = []")
-                code.writeline("_is_scalar_output = []")
-                code.writeline("for shape, dtype in zip(out_shapes, out_dtypes):")
+                # First, check if all inputs and outputs have the same numel
+                code.writeline(
+                    "# Check if all tensors have same size (no broadcasting)"
+                )
+                code.writeline("_all_sizes = []")
+                for i, param in enumerate(kernel_input_params):
+                    code.writeline(f"_all_sizes.append({param}.size)")
+                code.writeline("for shape in out_shapes:")
                 code.writeline("    _numel = 1")
                 code.writeline("    for s in shape:")
                 code.writeline("        _numel *= s")
-                code.writeline("    if _numel <= 1:")
-                code.writeline("        # Scalar output (e.g., reduction) - don't pad")
+                code.writeline("    _all_sizes.append(_numel)")
+                code.writeline("_unique_sizes = set(_all_sizes)")
                 code.writeline(
-                    "        _aligned_out_specs.append(jax.ShapeDtypeStruct(shape, dtype))"
+                    "_can_pad = len(_unique_sizes) == 1 and all(s > 1 for s in _unique_sizes)"
                 )
-                code.writeline("        _is_scalar_output.append(True)")
-                code.writeline("    else:")
-                code.writeline("        # Non-scalar output - pad to 128")
-                code.writeline("        _aligned_numel = ((_numel + 127) // 128) * 128")
-                code.writeline(
-                    "        _aligned_out_specs.append(jax.ShapeDtypeStruct((_aligned_numel,), dtype))"
-                )
-                code.writeline("        _is_scalar_output.append(False)")
-                code.writeline("_aligned_out_specs = tuple(_aligned_out_specs)")
 
-                code.writeline("# Execute kernel with padded inputs")
-                code.writeline("_result = plgpu.kernel(")
-                code.writeline("    " + kernel_arg)
-                code.writeline("    out_shape=_aligned_out_specs,")
-                code.writeline(")(*_padded_inputs)")
+                code.writeline("")
+                code.writeline("if _can_pad:")
+                code.writeline("    # All tensors same size - safe to flatten and pad")
+                code.writeline("    _orig_out_shapes = out_shapes")
+                code.writeline("    _padded_inputs = []")
+                for i, param in enumerate(kernel_input_params):
+                    code.writeline(f"    _orig_size_{i} = {param}.size")
+                    code.writeline(
+                        f"    _aligned_size_{i} = ((_orig_size_{i} + 127) // 128) * 128"
+                    )
+                    code.writeline(f"    if _orig_size_{i} != _aligned_size_{i}:")
+                    code.writeline(f"        _flat_{i} = {param}.flatten()")
+                    code.writeline(
+                        f"        _padded_{i} = jnp.pad(_flat_{i}, (0, _aligned_size_{i} - _orig_size_{i}))"
+                    )
+                    code.writeline(f"        _padded_inputs.append(_padded_{i})")
+                    code.writeline("    else:")
+                    code.writeline(f"        _padded_inputs.append({param}.flatten())")
 
-                # Slice results to remove padding (skip for scalar outputs)
+                code.writeline("    # Align output shapes to warpgroup size (128)")
+                code.writeline("    _aligned_out_specs = []")
+                code.writeline("    _is_scalar_output = []")
+                code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes):")
+                code.writeline("        _numel = 1")
+                code.writeline("        for s in shape:")
+                code.writeline("            _numel *= s")
+                code.writeline("        if _numel <= 1:")
                 code.writeline(
-                    "# Remove padding from results (skip for scalar outputs)"
+                    "            _aligned_out_specs.append(jax.ShapeDtypeStruct(shape, dtype))"
                 )
-                code.writeline("if not isinstance(_result, tuple):")
-                code.writeline("    _result = (_result,)")
-                code.writeline("_unpadded_results = []")
+                code.writeline("            _is_scalar_output.append(True)")
+                code.writeline("        else:")
                 code.writeline(
-                    "for _res, _shape, _is_scalar in zip(_result, _orig_out_shapes, _is_scalar_output):"
+                    "            _aligned_numel = ((_numel + 127) // 128) * 128"
                 )
-                code.writeline("    if _is_scalar:")
-                code.writeline("        # Scalar output - no unpadding needed")
-                code.writeline("        _unpadded_results.append(_res)")
+                code.writeline(
+                    "            _aligned_out_specs.append(jax.ShapeDtypeStruct((_aligned_numel,), dtype))"
+                )
+                code.writeline("            _is_scalar_output.append(False)")
+                code.writeline("    _aligned_out_specs = tuple(_aligned_out_specs)")
+
+                code.writeline("    _result = plgpu.kernel(")
+                code.writeline("        " + kernel_arg)
+                code.writeline("        out_shape=_aligned_out_specs,")
+                code.writeline("    )(*_padded_inputs)")
+
+                code.writeline("    # Remove padding from results")
+                code.writeline("    if not isinstance(_result, tuple):")
+                code.writeline("        _result = (_result,)")
+                code.writeline("    _unpadded_results = []")
+                code.writeline(
+                    "    for _res, _shape, _is_scalar in zip(_result, _orig_out_shapes, _is_scalar_output):"
+                )
+                code.writeline("        if _is_scalar:")
+                code.writeline("            _unpadded_results.append(_res)")
+                code.writeline("        else:")
+                code.writeline("            _orig_numel = 1")
+                code.writeline("            for _s in _shape:")
+                code.writeline("                _orig_numel *= _s")
+                code.writeline(
+                    "            _unpadded = _res[:_orig_numel].reshape(_shape)"
+                )
+                code.writeline("            _unpadded_results.append(_unpadded)")
+                code.writeline(
+                    "    return _unpadded_results[0] if len(_unpadded_results) == 1 else tuple(_unpadded_results)"
+                )
+
+                code.writeline("else:")
+                code.writeline(
+                    "    # Different sizes - check if it's a reduction (scalar output)"
+                )
+                code.writeline("    _out_numel = 1")
+                code.writeline("    for s in out_shapes[0]:")
+                code.writeline("        _out_numel *= s")
+                code.writeline("    ")
+                code.writeline("    if _out_numel <= 1:")
+                code.writeline(
+                    "        # Scalar output (reduction) - pad inputs but keep scalar output"
+                )
+                code.writeline("        _orig_out_shapes = out_shapes")
+                code.writeline("        _padded_inputs = []")
+                for i, param in enumerate(kernel_input_params):
+                    code.writeline(f"        _orig_size_{i} = {param}.size")
+                    code.writeline(
+                        f"        _aligned_size_{i} = ((_orig_size_{i} + 127) // 128) * 128"
+                    )
+                    code.writeline(f"        if _orig_size_{i} != _aligned_size_{i}:")
+                    code.writeline(f"            _flat_{i} = {param}.flatten()")
+                    code.writeline(
+                        f"            _padded_{i} = jnp.pad(_flat_{i}, (0, _aligned_size_{i} - _orig_size_{i}))"
+                    )
+                    code.writeline(f"            _padded_inputs.append(_padded_{i})")
+                    code.writeline("        else:")
+                    code.writeline(
+                        f"            _padded_inputs.append({param}.flatten())"
+                    )
+                code.writeline("        ")
+                code.writeline("        # Scalar output - don't pad")
+                code.writeline("        _aligned_out_specs = tuple(")
+                code.writeline("            jax.ShapeDtypeStruct(shape, dtype)")
+                code.writeline(
+                    "            for shape, dtype in zip(out_shapes, out_dtypes)"
+                )
+                code.writeline("        )")
+                code.writeline("        ")
+                code.writeline("        _result = plgpu.kernel(")
+                code.writeline("            " + kernel_arg)
+                code.writeline("            out_shape=_aligned_out_specs,")
+                code.writeline("        )(*_padded_inputs)")
+                code.writeline("        return _result")
                 code.writeline("    else:")
-                code.writeline("        # Non-scalar output - slice to remove padding")
-                code.writeline("        _orig_numel = 1")
-                code.writeline("        for _s in _shape:")
-                code.writeline("            _orig_numel *= _s")
-                code.writeline("        _unpadded = _res[:_orig_numel].reshape(_shape)")
-                code.writeline("        _unpadded_results.append(_unpadded)")
                 code.writeline(
-                    "return _unpadded_results[0] if len(_unpadded_results) == 1 else tuple(_unpadded_results)"
+                    "        # Non-scalar output with broadcasting - broadcast inputs to output shape"
+                )
+                code.writeline("        _target_shape = out_shapes[0]")
+                code.writeline("        _target_numel = _out_numel")
+                code.writeline("        _orig_out_shapes = out_shapes")
+                code.writeline("        ")
+                code.writeline(
+                    "        # Broadcast and flatten all inputs to target shape"
+                )
+                code.writeline("        _padded_inputs = []")
+                for i, param in enumerate(kernel_input_params):
+                    code.writeline(
+                        f"        _broadcasted_{i} = jnp.broadcast_to({param}, _target_shape).flatten()"
+                    )
+                    code.writeline(
+                        f"        _aligned_size_{i} = ((_target_numel + 127) // 128) * 128"
+                    )
+                    code.writeline(f"        if _target_numel != _aligned_size_{i}:")
+                    code.writeline(
+                        f"            _padded_{i} = jnp.pad(_broadcasted_{i}, (0, _aligned_size_{i} - _target_numel))"
+                    )
+                    code.writeline(f"            _padded_inputs.append(_padded_{i})")
+                    code.writeline("        else:")
+                    code.writeline(
+                        f"            _padded_inputs.append(_broadcasted_{i})"
+                    )
+                code.writeline("        ")
+                code.writeline("        # Align output shapes to warpgroup size (128)")
+                code.writeline("        _aligned_out_specs = []")
+                code.writeline(
+                    "        for shape, dtype in zip(out_shapes, out_dtypes):"
+                )
+                code.writeline("            _numel = 1")
+                code.writeline("            for s in shape:")
+                code.writeline("                _numel *= s")
+                code.writeline(
+                    "            _aligned_numel = ((_numel + 127) // 128) * 128"
+                )
+                code.writeline(
+                    "            _aligned_out_specs.append(jax.ShapeDtypeStruct((_aligned_numel,), dtype))"
+                )
+                code.writeline("        _aligned_out_specs = tuple(_aligned_out_specs)")
+                code.writeline("        ")
+                code.writeline("        _result = plgpu.kernel(")
+                code.writeline("            " + kernel_arg)
+                code.writeline("            out_shape=_aligned_out_specs,")
+                code.writeline("        )(*_padded_inputs)")
+                code.writeline("        ")
+                code.writeline("        # Remove padding from results")
+                code.writeline("        if not isinstance(_result, tuple):")
+                code.writeline("            _result = (_result,)")
+                code.writeline("        _unpadded_results = []")
+                code.writeline(
+                    "        for _res, _shape in zip(_result, _orig_out_shapes):"
+                )
+                code.writeline("            _orig_numel = 1")
+                code.writeline("            for _s in _shape:")
+                code.writeline("                _orig_numel *= _s")
+                code.writeline(
+                    "            _unpadded = _res[:_orig_numel].reshape(_shape)"
+                )
+                code.writeline("            _unpadded_results.append(_unpadded)")
+                code.writeline(
+                    "        return _unpadded_results[0] if len(_unpadded_results) == 1 else tuple(_unpadded_results)"
                 )
             else:
                 code.writeline("return pl.pallas_call(")
