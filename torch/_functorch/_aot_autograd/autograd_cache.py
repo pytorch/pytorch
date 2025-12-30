@@ -1020,9 +1020,13 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             if compiled_bw_func is not None:
                 assert backward_state_indices is not None
                 assert num_symints_saved_for_bw is not None
+                assert num_opaque_objects_saved_for_bw is not None
                 compiled_bw_graph = unwrap_output_code(compiled_bw_func)
                 bundled_compiled_backward = BundledCompiledBackward(
-                    compiled_bw_graph, backward_state_indices, num_symints_saved_for_bw
+                    compiled_bw_graph,
+                    backward_state_indices,
+                    num_symints_saved_for_bw,
+                    num_opaque_objects_saved_for_bw,
                 )
 
             return BundledAOTAutogradResult(
@@ -1063,11 +1067,13 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                 assert bw_key is not None
                 assert backward_state_indices is not None
                 assert num_symints_saved_for_bw is not None
+                assert num_opaque_objects_saved_for_bw is not None
                 compiled_backward = CompiledBackward(
                     fx_graph_cache_info=(bw_key, bw_debug_lines),
                     fx_graph_guard_expr=getattr(compiled_bw_func, "guards_expr", None),
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw_=num_symints_saved_for_bw,
+                    num_opaque_objects_saved_for_bw_=num_opaque_objects_saved_for_bw,
                 )
 
             return AOTAutogradResult(

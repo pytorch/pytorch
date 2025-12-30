@@ -2165,6 +2165,7 @@ def _aot_stage2c_make_autograd_function(
         aot_config,
         fw_metadata=fw_metadata,
         try_save_cache_entry=try_save_cache_entry,
+        num_opaque_objects_saved_for_bw_=fw_metadata.num_opaque_objects_saved_for_bw,
     )
 
     if entry is not None:
