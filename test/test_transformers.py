@@ -2740,21 +2740,29 @@ class TestSDPACudaOnly(NNTestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_trivial_output_transpose(self, device):
-        # see also: https://github.com/pytorch/pytorch/issues/134001
-        x = torch.randn(2, 4, 1, 64, device='cuda', dtype=torch.float16, requires_grad=True)
-        x2 = x.transpose(1, 2)
-        with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
-            o = torch.nn.functional.scaled_dot_product_attention(x2, x2, x2).transpose(1, 2).reshape(2, 64, 4)
-        o.backward(o)
-        x_cpu = x.clone().cpu().detach()
-        x_cpu.requires_grad = True
-        x2_cpu = x_cpu.transpose(1, 2)
-        o = torch.nn.functional.scaled_dot_product_attention(x2_cpu, x2_cpu, x2_cpu).transpose(1, 2).reshape(2, 64, 4)
-        o.backward(o)
-        torch.testing.assert_close(x.grad, x_cpu.grad.cuda(), atol=7e-3, rtol=7e-3)
+        def f():
+            # see also: https://github.com/pytorch/pytorch/issues/134001
+            x = torch.randn(2, 4, 1, 64, device='cuda', dtype=torch.float16, requires_grad=True)
+            x2 = x.transpose(1, 2)
+            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
+                o = torch.nn.functional.scaled_dot_product_attention(x2, x2, x2).transpose(1, 2).reshape(2, 64, 4)
+            o.backward(o)
+            x_cpu = x.clone().cpu().detach()
+            x_cpu.requires_grad = True
+            x2_cpu = x_cpu.transpose(1, 2)
+            o = torch.nn.functional.scaled_dot_product_attention(x2_cpu, x2_cpu, x2_cpu).transpose(1, 2).reshape(2, 64, 4)
+            o.backward(o)
+            torch.testing.assert_close(x.grad, x_cpu.grad.cuda(), atol=7e-3, rtol=7e-3)
+        cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
+        # seqlen % 128 != 0 disabled in cuDNN < 9.15.1
+        if cudnn_version <= 91500:
+            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                f()
+        else:
+            f()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
-    def test_cudnn_attention_nonmodulo64seqlen(self, device):
+    def test_cudnn_attention_onmodulo64seqlen(self, device):
         # see also: https://github.com/pytorch/pytorch/issues/137347
         mask = torch.randint(0, 2, (2, 1, 157, 6404)).to(device="cuda", dtype=torch.bool)
         q = torch.randn(2, 32, 157, 128, device='cuda', dtype=torch.float16, requires_grad=True)
@@ -2767,31 +2775,41 @@ class TestSDPACudaOnly(NNTestCase):
         k_cpu.requires_grad = True
         v_cpu.requires_grad = True
         mask_cpu = mask.detach().clone().cpu()
-        with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
-            out = nn.functional.scaled_dot_product_attention(
-                q,
-                k,
-                v,
-                attn_mask=mask,
-                dropout_p=0.0,
-                is_causal=False,
-            )
-        out_cpu = nn.functional.scaled_dot_product_attention(
-            q_cpu,
-            k_cpu,
-            v_cpu,
-            attn_mask=mask_cpu,
-            dropout_p=0.0,
-            is_causal=False,
-        )
 
-        out.sum().backward()
-        out_cpu.sum().backward()
+        def f():
+            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
+                out = nn.functional.scaled_dot_product_attention(
+                    q,
+                    k,
+                    v,
+                    attn_mask=mask,
+                    dropout_p=0.0,
+                    is_causal=False,
+                )
+                out_cpu = nn.functional.scaled_dot_product_attention(
+                    q_cpu,
+                    k_cpu,
+                    v_cpu,
+                    attn_mask=mask_cpu,
+                    dropout_p=0.0,
+                    is_causal=False,
+                )
 
-        torch.testing.assert_close(q.grad, q_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
-        torch.testing.assert_close(k.grad, k_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
-        torch.testing.assert_close(v.grad, v_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
+                out.sum().backward()
+                out_cpu.sum().backward()
 
+                torch.testing.assert_close(q.grad, q_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
+                torch.testing.assert_close(k.grad, k_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
+                torch.testing.assert_close(v.grad, v_cpu.grad.cuda(), atol=3e-3, rtol=2e-3)
+
+        cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
+        # seqlen % 128 != 0 disabled in cuDNN < 9.15.1
+        if cudnn_version <= 91500:
+            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                f()
+        else:
+            f()
+    
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_preserves_query_layout(self, device):
 
@@ -2855,26 +2873,34 @@ class TestSDPACudaOnly(NNTestCase):
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_broken_166211(self):
-        # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
-        shape = (20, 4, 4, 32)
-        scale = 10
-        for _ in range(100):
-            q = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
-            k = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
-            v = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
-            q.requires_grad = True
-            k.requires_grad = True
-            v.requires_grad = True
+        def f():
+            # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
+            shape = (20, 4, 4, 32)
+            scale = 10
+            for _ in range(100):
+                q = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+                k = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+                v = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+                q.requires_grad = True
+                k.requires_grad = True
+                v.requires_grad = True
 
-            grad_attn_output = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
+                grad_attn_output = torch.randn(*shape, device='cuda', dtype=torch.bfloat16) * scale
 
-            with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
-                attn_output = torch.nn.functional.scaled_dot_product_attention(q, k, v)
-                dq, dk, dv = torch.autograd.grad(outputs=attn_output, inputs=(q, k, v), grad_outputs=grad_attn_output)
+                with torch.nn.attention.sdpa_kernel(torch.nn.attention.SDPBackend.CUDNN_ATTENTION):
+                    attn_output = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+                    dq, dk, dv = torch.autograd.grad(outputs=attn_output, inputs=(q, k, v), grad_outputs=grad_attn_output)
 
-            self.assertFalse(dq.isnan().any())
-            self.assertFalse(dk.isnan().any())
-            self.assertFalse(dv.isnan().any())
+                self.assertFalse(dq.isnan().any())
+                self.assertFalse(dk.isnan().any())
+                self.assertFalse(dv.isnan().any())
+        # seqlen % 128 != 0 disabled in cuDNN < 9.15.1
+        cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
+        if cudnn_version <= 91500:
+            with self.assertRaisesRegex(RuntimeError, "No available kernel."):
+                f()
+        else:
+            f()
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Fused SDPA was not built for this system")
     @parametrize("mask_dim", [1, 2, 3, 4])

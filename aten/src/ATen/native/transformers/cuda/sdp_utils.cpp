@@ -726,7 +726,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
     }
     return false;
   }
-  if (params.query.size(2) % 128 != 0  && (cudnn_version <= 91500 || CUDNN_FRONTEND_VERSION < 11600)) {
+  if ((cudnn_version <= 91500 || CUDNN_FRONTEND_VERSION < 11600) && params.query.size(2) % 128 != 0) {
     if (debug) {
       TORCH_WARN("You have cuDNN backend version ",
                  CUDNN_VERSION,
