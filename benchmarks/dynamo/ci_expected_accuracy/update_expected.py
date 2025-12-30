@@ -9,7 +9,7 @@ downloading artifact zips, extracting CSVs and filtering them.
 
 Usage:
 
-python benchmarks/dynamo/ci_expected_accuracy.py <sha of pytorch commit that has completed inductor benchmark jobs>
+python benchmarks/dynamo/ci_expected_accuracy/update_expected.py <sha of pytorch commit that has completed inductor benchmark jobs>
 
 Known limitations:
 - doesn't handle 'retry' jobs in CI, if the same hash has more than one set of artifacts, gets the first one
