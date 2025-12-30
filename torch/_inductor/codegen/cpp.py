@@ -3838,7 +3838,9 @@ class TilingSelect:
         ):
             dtype = _lowp_fp_dtype
 
-        tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=dtype)
+        unroll_factor = 2 if type(fn_list[0].args[0].node.data) == ir.Reduction else 1
+        tiling_factor = cpu_vec_isa.pick_vec_isa().nelements(dtype=torch.float)
+        tiling_factor = tiling_factor * 1
         tiling_indices = self._select_tiling_indices(
             fn_list, var_sizes_list, tiling_factor
         )
@@ -4390,6 +4392,8 @@ class CppKernelProxy(CppKernel):
             tiling_factors, tiling_indices = tiling_select.select_tiling(
                 fn_list, var_sizes_list
             )
+            # tiling_factors=[128]
+            # tiling_indices=[1]
             assert len(tiling_factors) == len(tiling_indices)
             _inner_loop_reduction_outer_not = False
             _outer_loop = None
