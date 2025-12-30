@@ -171,10 +171,12 @@ VERY_FAST_LINTERS = {
 
 #: These linters are expected to take a few seconds, but less than 10s cpu time total
 FAST_LINTERS = {
+    "CLANGTIDY_EXECUTORCH_COMPATIBILITY",
     "CMAKE",
     "DOCSTRING_LINTER",
     "GHA",
     "NATIVEFUNCTIONS",
+    "PYREFLY",
     "RUFF",
     "SET_LINTER",
     "SHELLCHECK",
@@ -192,7 +194,6 @@ SLOW_LINTERS = {
     "FLAKE8",
     "GB_REGISTRY",
     "PYFMT",
-    "PYREFLY",
     "TEST_DEVICE_BIAS",
     "TEST_HAS_MAIN",
 }
@@ -281,12 +282,14 @@ def lazy_setup_lint(ctx, parent_callback, **kwargs):
     _check_linters()
 
 
-def _extract_take_skip_tee(lintrunner_args):
+def _process_lintrunner_args(lintrunner_args):
     take = None
     skip = None
-    args_iter = iter(lintrunner_args)
+    args_iter = iter(arg.strip() for arg in lintrunner_args)
     remaining_args = []
     tee_file = None
+    has_paths = False
+    has_all_files = False
     for arg in args_iter:
         if arg == "--take":
             take = set(next(args_iter).split(","))
@@ -297,10 +300,14 @@ def _extract_take_skip_tee(lintrunner_args):
             if sep == "":
                 tee_file = next(args_iter)
             elif sep == "=":
-                tee_file = tee_file.trim()
+                tee_file = tee_file.strip()
+        elif arg == "--all-files":
+            has_all_files = True
         else:
+            if not arg.startswith("-"):
+                has_paths = True
             remaining_args.append(arg)
-    return remaining_args, take, skip, tee_file
+    return remaining_args, take, skip, tee_file, has_paths, has_all_files
 
 
 def _run_lintrunner(
@@ -324,25 +331,34 @@ def _run_lintrunner(
         linters &= take
     if skip is not None:
         linters -= skip
-    full_cmd = (
-        cmd
-        + tee_cmd
-        + [
-            "--take",
-            ",".join(linters),
-        ]
-        + (["--apply-patches"] if apply_patches else [])
-        + (["--all-files"] if all_files else [])
-        + (list(lintrunner_args) if lintrunner_args else [])
-    )
-    p = spin.util.run(full_cmd, sys_exit=False)
-    lint_found = not bool(p.returncode)
-    if tee_file:
-        tee_path = Path(tee_file)
-        json_output = tee_path.read_text()
-        tee_path.unlink()
+    if not linters:
+        click.echo("No linters to run after applying --take/--skip filters.")
+        click.echo("Skipping lintrunner execution.")
+        lint_found = False
+        if return_json_output:
+            json_output = ""
+        else:
+            json_output = None
     else:
-        json_output = None
+        full_cmd = (
+            cmd
+            + tee_cmd
+            + [
+                "--take",
+                ",".join(linters),
+            ]
+            + (["--apply-patches"] if apply_patches else [])
+            + (["--all-files"] if all_files else [])
+            + (list(lintrunner_args) if lintrunner_args else [])
+        )
+        p = spin.util.run(full_cmd, sys_exit=False)
+        lint_found = bool(p.returncode)
+        if tee_file:
+            tee_path = Path(tee_file)
+            json_output = tee_path.read_text()
+            tee_path.unlink()
+        else:
+            json_output = None
     return lint_found, json_output
 
 
@@ -353,7 +369,10 @@ def _run_lintrunner(
 def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     """Lint all files."""
     ctx.invoke(lazy_setup_lint)
-    lintrunner_args, take, skip, tee_file = _extract_take_skip_tee(lintrunner_args)
+    lintrunner_args, take, skip, tee_file, has_paths, has_all_files = (
+        _process_lintrunner_args(lintrunner_args)
+    )
+    all_files = has_all_files or not has_paths
     all_files_linters = VERY_FAST_LINTERS | FAST_LINTERS
     changed_files_linters = SLOW_LINTERS
     write_json_output = bool(tee_file)
@@ -362,7 +381,7 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
         take=take,
         skip=skip,
         apply_patches=apply_patches,
-        all_files=True,
+        all_files=all_files,
         lintrunner_args=lintrunner_args,
         return_json_output=write_json_output,
     )
