@@ -1072,7 +1072,7 @@ void add_out_sparse_csr(
 #if AT_ROCM_ENABLED()
         // ROCm: HOST pointer mode broken for csrgeam2, use DEVICE mode
         TORCH_CUDASPARSE_CHECK(
-            cusparseSetPointerMode(handle, CUSPARSE_POINTER_MODE_DEVICE));
+            cusparseSetPointerMode(handle, HIPSPARSE_POINTER_MODE_DEVICE));
         auto scalar_opts =
             C_values.options().dtype(C.scalar_type()).layout(kStrided);
         auto alpha_dev = at::empty_strided({1}, {1}, scalar_opts);
