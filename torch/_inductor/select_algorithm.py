@@ -19,7 +19,7 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -89,6 +89,7 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
+    tlx_only_cuda_options,
     triton_type,
     triton_type_to_torch,
     unique,
@@ -661,6 +662,10 @@ class TritonTemplateKernel(TritonKernel):
         if kpack:
             triton_meta["kpack"] = kpack
 
+        for k in tlx_only_cuda_options():
+            if v := self.meta.get(k, None):
+                triton_meta[k] = v
+
         self.triton_meta = triton_meta
 
         inductor_meta = {
@@ -689,6 +694,13 @@ class TritonTemplateKernel(TritonKernel):
             num_consumer_groups={self.num_consumer_groups},
             num_buffers_warp_spec={self.num_buffers_warp_spec},
         """
+
+        for k in tlx_only_cuda_options():
+            if v := self.meta.get(k, None):
+                template_args += f"""
+                    {k}={v},
+                """
+                self.triton_meta[k] = v
 
         return f"""
             @triton_heuristics.template(
@@ -3495,7 +3507,8 @@ class AlgorithmSelectorCache(PersistentCache):
         }
         example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = []
-        for input_node in input_nodes:
+
+        for i, input_node in enumerate(input_nodes):
             if unique_example_inputs[input_node.get_name()].is_mkldnn:
                 example_inputs_extern.append(
                     unique_example_inputs[input_node.get_name()]
@@ -3503,34 +3516,43 @@ class AlgorithmSelectorCache(PersistentCache):
             else:
                 base = unique_example_inputs[input_node.get_name()]
                 base = base if base._base is None else base._base
-                sizes = tuple(
-                    V.graph.sizevars.atomically_apply_size_hint(
-                        size,
+
+                if i in input_gen_fns:
+                    # Use tensor's actual shape from input_gen_fn
+                    generated_tensor = unique_example_inputs[input_node.get_name()]
+                    sizes = tuple(generated_tensor.size())
+                    strides = tuple(generated_tensor.stride())
+                    storage_offset = generated_tensor.storage_offset()
+                else:
+                    # Use IR node's shape resolved via size hints
+                    sizes = tuple(
+                        V.graph.sizevars.atomically_apply_size_hint(
+                            size,
+                            fallback=config.unbacked_symint_fallback,
+                            hint_override=hint_override,
+                        )
+                        for size in input_node.get_size()
+                    )
+                    strides = tuple(
+                        V.graph.sizevars.atomically_apply_size_hint(
+                            stride,
+                            fallback=config.unbacked_symint_fallback,
+                            hint_override=hint_override,
+                        )
+                        for stride in input_node.get_stride()
+                    )
+                    storage_offset = V.graph.sizevars.atomically_apply_size_hint(
+                        input_node.get_layout().offset,
                         fallback=config.unbacked_symint_fallback,
                         hint_override=hint_override,
                     )
-                    for size in input_node.get_size()
-                )
-                strides = tuple(
-                    V.graph.sizevars.atomically_apply_size_hint(
-                        stride,
-                        fallback=config.unbacked_symint_fallback,
-                        hint_override=hint_override,
-                    )
-                    for stride in input_node.get_stride()
-                )
-                storage_offset = V.graph.sizevars.atomically_apply_size_hint(
-                    input_node.get_layout().offset,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
 
                 # Check if the required storage size exceeds the current storage
                 # to avoid illegal memory access
                 needed_size = torch._prims_common.compute_required_storage_length(
-                    sizes, strides, storage_offset
+                    sizes, strides, cast(int, storage_offset)
                 )
-                current_size = base.storage().size()
+                current_size = base.untyped_storage().size()
 
                 if needed_size > current_size:
                     # Create a new base tensor with sufficient storage

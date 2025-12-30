@@ -683,7 +683,7 @@ class DeviceCachingAllocator {
         }
       }
     }
-    if (size < kSmallSize) {
+    if (size <= kSmallSize) {
       return small_blocks;
     } else {
       return large_blocks;

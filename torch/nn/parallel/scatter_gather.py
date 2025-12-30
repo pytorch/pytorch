@@ -60,7 +60,7 @@ def scatter(inputs, target_gpus, dim=0):
             return [
                 # pyrefly: ignore [no-matching-overload]
                 type(obj)(*args)
-                # pyrefly: ignore  # no-matching-overload
+                # pyrefly: ignore [no-matching-overload]
                 for args in zip(*map(scatter_map, obj), strict=False)
             ]
         if isinstance(obj, tuple) and len(obj) > 0:
@@ -74,7 +74,7 @@ def scatter(inputs, target_gpus, dim=0):
             return [
                 # pyrefly: ignore [no-matching-overload]
                 type(obj)(i)
-                # pyrefly: ignore  # no-matching-overload
+                # pyrefly: ignore [no-matching-overload]
                 for i in zip(*map(scatter_map, obj.items()), strict=False)
             ]
         return [obj for _ in target_gpus]

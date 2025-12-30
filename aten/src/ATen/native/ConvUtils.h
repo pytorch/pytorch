@@ -196,6 +196,15 @@ inline void convolution_shape_check(
   check_args(c, padding, input->dim() - 2, "padding");
   check_args(c, stride, padding.size(), "stride");
   check_args(c, dilation, padding.size(), "dilation");
+  for (auto s : stride) {
+      TORCH_CHECK(s > 0, "Stride must be greater than 0 but got ", s);
+  }
+  for (auto d : dilation) {
+      TORCH_CHECK(d > 0, "Dilation must be greater than 0 but got ", d);
+  }
+  for (auto p : padding) {
+      TORCH_CHECK(p >= 0, "Padding must be non-negative but got ", p);
+  }
 
   // Input
   checkDimRange(c, input, 3, 6 /* exclusive */);
@@ -324,11 +333,12 @@ inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input
       weight.scalar_type() == at::kDouble) {
     return at::MemoryFormat::Contiguous;
   }
+  long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
   auto weight_ndim = weight.ndimension();
 
-  bool can_use_cudnn_channels_last_2d = weight_ndim == 4 && (
+  bool can_use_cudnn_channels_last_2d = (cudnn_version >= 7603) && (weight_ndim == 4) && (
     (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
     (weight_memory_format == at::MemoryFormat::ChannelsLast)
   );
@@ -336,7 +346,7 @@ inline at::MemoryFormat cudnn_conv_suggest_memory_format(const at::Tensor& input
     return at::MemoryFormat::ChannelsLast;
   }
 
-  bool can_use_cudnn_channels_last_3d = weight_ndim == 5 && (
+  bool can_use_cudnn_channels_last_3d = (cudnn_version >= 8005) && (weight_ndim == 5) && (
     (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
     (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
   );
@@ -363,10 +373,7 @@ inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& inpu
   // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
   // See https://github.com/pytorch/pytorch/issues/64427.
   // non static variable is used to be able to change environment variable in runtime for testing
-  // enabled by default for ROCm >= 7.0.0 with miopen 3.5
-  int miopen_version = detail::getCUDAHooks().compiledWithMIOpen() ? detail::getCUDAHooks().versionMIOpen() : 0;
-  bool is_miopen_3_5 = miopen_version >= 30500;  // ROCm 7.0
-  bool suggest_nhwc = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(is_miopen_3_5);
+  bool suggest_nhwc = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false);
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
