@@ -493,9 +493,8 @@ struct ConvParams {
   }
 
   bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const  {
-    if (needs_64bit_indexing_no_split(input, weight)) {
-      return false;
-    }
+    // MIOpen supports 64-bit indexing via miopenSetTensorDescriptorV2 API
+    // Reference: https://github.com/ROCm/MIOpen/pull/2838
     return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf) || (input.scalar_type() == at::kBFloat16))
            && cudnn_enabled
            && input.is_cuda()

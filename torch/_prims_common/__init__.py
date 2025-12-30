@@ -272,6 +272,7 @@ def check_contiguous_sizes_strides(sizes, strides, false_if_dde=False):
     expected_stride = 1
     expected_stride_max = 1
 
+    # pyrefly: ignore [bad-assignment]
     for x, y in reversed(tuple(zip(sizes, strides))):
         # Skips checking strides when a dimension has length 1.
         if maybe_guard_or_false(x == 1):
