@@ -725,7 +725,6 @@ class TritonTemplateKernel(TritonKernel):
         if self.output_node is None:
             raise ValueError("No output node available")
         buf_name = self.output_node.get_name()
-        # First ensure the output is registered in args
         if buf_name not in self.args.output_buffers:
             self.args.output(buf_name)
         output = self.args.output_buffers.get(buf_name, None)

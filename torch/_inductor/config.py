@@ -556,7 +556,7 @@ multi_kernel_hints: list[int] = []
 # CUTLASS: Cutlass templates and kernels (NVidia GPUs only).
 # CK: Composable Kernel templates and kernels (AMD Instinct GPUs only).
 # CKTILE: Composable Kernel templates and kernels, new API (AMD Instinct GPUs only).
-# GLUON: Gluon kernels from Triton project (NVidia Blackwell GPUs only).
+# GLUON: Gluon kernels from Triton project (AMD and NVidia GPUs).
 # CPP: CPP templates and kernels for CPU.
 max_autotune_gemm_backends = os.environ.get(
     "TORCHINDUCTOR_MAX_AUTOTUNE_GEMM_BACKENDS", "ATEN,TRITON,GLUON,CPP"

@@ -118,15 +118,11 @@ from triton.experimental.gluon import language as gl
                 c_layout = gl.NVMMASharedLayout.get_default_for(
                     [BLOCK_M, BLOCK_N], gluon_dtype
                 )
-                c_layout_ragged = gl.NVMMASharedLayout.get_default_for(
-                    [1, 1, BLOCK_M, BLOCK_N], gluon_dtype
-                )
 
                 # Extract swizzle widths and add to kwargs
-                kwargs["A_LAYOUT_SWIZZLE"] = a_layout.swizzle_byte_width
-                kwargs["B_LAYOUT_SWIZZLE"] = b_layout.swizzle_byte_width
-                kwargs["C_LAYOUT_SWIZZLE"] = c_layout.swizzle_byte_width
-                kwargs["C_LAYOUT_RAGGED_SWIZZLE"] = c_layout_ragged.swizzle_byte_width
+                kwargs["A_LAYOUT_SWIZZLE_BYTE_WIDTH"] = a_layout.swizzle_byte_width
+                kwargs["B_LAYOUT_SWIZZLE_BYTE_WIDTH"] = b_layout.swizzle_byte_width
+                kwargs["C_LAYOUT_SWIZZLE_BYTE_WIDTH"] = c_layout.swizzle_byte_width
 
                 # Add dtype string for template
                 kwargs["DTYPE"] = dtype_str

@@ -459,10 +459,10 @@ def store_partition(pargs: PartitionArgs):
 
 {{def_kernel("a_ptr", "b_ptr", "offs_ptr")}}
     # Layout objects with computed swizzle widths for the given block dimensions
-    a_layout: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{A_LAYOUT_SWIZZLE}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=2, transposed=False, fp4_padded=False, cga_layout=[])
-    b_layout: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{B_LAYOUT_SWIZZLE}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=3, transposed=False, fp4_padded=False, cga_layout=[])
-    c_layout: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{C_LAYOUT_SWIZZLE}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=2, transposed=False, fp4_padded=False, cga_layout=[])
-    c_layout_ragged: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{C_LAYOUT_RAGGED_SWIZZLE}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=4, transposed=False, fp4_padded=False, cga_layout=[])
+    a_layout: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{A_LAYOUT_SWIZZLE_BYTE_WIDTH}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=2, transposed=False, fp4_padded=False, cga_layout=[])
+    b_layout: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{B_LAYOUT_SWIZZLE_BYTE_WIDTH}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=3, transposed=False, fp4_padded=False, cga_layout=[])
+    c_layout: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{C_LAYOUT_SWIZZLE_BYTE_WIDTH}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=2, transposed=False, fp4_padded=False, cga_layout=[])
+    c_layout_ragged: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{C_LAYOUT_SWIZZLE_BYTE_WIDTH}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=4, transposed=False, fp4_padded=False, cga_layout=[])
     store_layout: gl.constexpr = gl.BlockedLayout(
         size_per_thread=[{{BLOCK_M}} // 1, {{BLOCK_N}} // 32],
         threads_per_warp=[1, 32],

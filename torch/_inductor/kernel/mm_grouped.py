@@ -126,15 +126,10 @@ def early_config_prune(g, m, dtsize, configs, named_args):
 
 
 def gluon_grouped_mm_configs(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
-    """
-    Generate Gluon grouped MM configs using template heuristics.
-    Delegates to torch._inductor.template_heuristics.gluon for config generation.
-    """
     import torch._inductor.config as config
 
     from ..template_heuristics.gluon import get_grouped_mm_configs
 
-    # Use exhaustive search if configured
     exhaustive = config.max_autotune_gemm_search_space == "EXHAUSTIVE"
 
     gluon_configs = get_grouped_mm_configs(
@@ -147,7 +142,6 @@ def gluon_grouped_mm_configs(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=Non
         exhaustive=exhaustive,
     )
 
-    # Convert GluonGroupedMMConfig dataclasses to Config objects
     configs = []
     for gluon_config in gluon_configs:
         configs.append(
@@ -166,7 +160,7 @@ def gluon_grouped_mm_configs(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=Non
                     "MAXNREG": gluon_config.MAXNREG,
                     "NUM_SMS": get_num_sms(),
                 },
-                num_stages=1,
+                num_stages=1,  # Dummy value, the kernel uses NUM_LOAD_BUFFERS/NUM_ACC_BUFFERS for this purpose.
                 num_warps=gluon_config.NUM_STORE_WARPS,
             ),
         )
@@ -319,10 +313,10 @@ def can_use_gluon_kernel(
     if not _use_autotune_backend("GLUON"):
         return False
 
-    # Check for Blackwell GPU (SM 10.0 or 10.3)
     if not torch.cuda.is_available() or torch.version.hip:
         return False
 
+    # Check for Blackwell GPU (SM 10.0 or 10.3)
     major, minor = torch.cuda.get_device_capability()
     if not (major == 10 and minor in [0, 3]):
         return False
@@ -528,6 +522,16 @@ def _tuned_grouped_mm_common(
             )
 
     if can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result):
+        has_ragged_tma = False
+        try:
+            from triton.experimental.gluon.tools.ragged_tma import (  # noqa: F401
+                create_ragged_descriptor_device_2d,
+                store_ragged,
+            )
+
+            has_ragged_tma = True
+        except ImportError:
+            pass
         for config in gluon_grouped_mm_configs(
             dtype_AB=mat_a.get_dtype(),
             dtype_C=layout.dtype,
@@ -542,7 +546,7 @@ def _tuned_grouped_mm_common(
                 layout=layout,
                 num_stages=config.num_stages,
                 num_warps=config.num_warps,
-                USE_RAGGED_TENSOR_DESCRIPTOR=True,
+                USE_RAGGED_TENSOR_DESCRIPTOR=has_ragged_tma,
                 **config.kwargs,
             )
 

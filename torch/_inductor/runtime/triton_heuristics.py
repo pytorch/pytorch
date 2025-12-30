@@ -795,7 +795,7 @@ class CachingAutotuner(KernelInterface):
         ast_source_class = ASTSource
         is_gluon = False
 
-        # Detect Gluon kernels using two reliable methods:
+        # Detect Gluon kernels using two methods:
         # 1. Check if gluon is imported in the function's module globals
         if hasattr(self.fn, "__globals__") and "gluon" in self.fn.__globals__:
             is_gluon = True

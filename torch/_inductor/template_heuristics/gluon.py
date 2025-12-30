@@ -133,11 +133,7 @@ def get_grouped_mm_configs(
         NUM_COMPUTE_WARP_vals = [1, 2]
         NUM_STORE_WARP_vals = [4, 8]
     else:
-        # Default configs based on CuTeDSL pattern:
-        # Extract BLOCK_M and BLOCK_N from CuTeDSL's default configs where CLUSTER=(1,1)
-        # Note: Gluon TMA requires power-of-2 block shapes, so we filter out 160, 192
-        # CuTeDSL configs with CLUSTER_M=1, CLUSTER_N=1 (power-of-2 only):
-        # (64, 32), (64, 64), (64, 256), (128, 64), (128, 256)
+        # Default configs.
         BLOCK_M_vals = []
         BLOCK_N_vals = []
         block_mn_pairs = [
@@ -149,9 +145,7 @@ def get_grouped_mm_configs(
             (128, 128),
             (128, 256),
         ]
-        # For Gluon, BLOCK_K seems less critical - use fixed value
         BLOCK_K_vals = [64]
-        # Use "cluster (1,1)" equivalent: NUM_LOAD_WARPS=1, NUM_COMPUTE_WARPS=1
         NUM_LOAD_WARP_vals = [1]
         NUM_COMPUTE_WARP_vals = [1]
         NUM_STORE_WARP_vals = [4, 8]
@@ -221,7 +215,7 @@ def get_grouped_mm_configs(
                     )
                 )
     else:
-        # Default: use handpicked (BLOCK_M, BLOCK_N) pairs with cluster (1,1)
+        # Default: use handpicked (BLOCK_M, BLOCK_N) pairs
         for (
             (BLOCK_M, BLOCK_N),
             BLOCK_K,

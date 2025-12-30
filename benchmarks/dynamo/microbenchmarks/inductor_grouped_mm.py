@@ -62,7 +62,6 @@ def benchmark_grouped_mm(problem_sizes=None):
         flops = 2 * M * N * K
         result = {"M": M, "G": G, "N": N, "K": K}
 
-        # Compute reference result for correctness checks
         C_ref = torch._grouped_mm(A, B.transpose(-2, -1), offs)
 
         fn_aten = lambda: torch._grouped_mm(A, B.transpose(-2, -1), offs)  # noqa: E731
@@ -84,7 +83,6 @@ def benchmark_grouped_mm(problem_sizes=None):
             result["Triton (us)"] = us_triton
             result["Triton speedup"] = us_aten / us_triton
 
-            # Verify correctness
             try:
                 C_triton = compiled_triton(A, B.transpose(-2, -1), offs)
                 torch.testing.assert_close(C_triton, C_ref, rtol=1e-2, atol=1e-2)
@@ -112,7 +110,6 @@ def benchmark_grouped_mm(problem_sizes=None):
                 result["CuTeDSL (us)"] = us_cutedsl
                 result["CuTeDSL speedup"] = us_aten / us_cutedsl
 
-                # Verify correctness
                 try:
                     C_cutedsl = compiled_cutedsl(A, B.transpose(-2, -1), offs)
                     torch.testing.assert_close(C_cutedsl, C_ref, rtol=1e-2, atol=1e-2)
@@ -138,7 +135,6 @@ def benchmark_grouped_mm(problem_sizes=None):
                 result["Gluon (us)"] = us_gluon
                 result["Gluon speedup"] = us_aten / us_gluon
 
-                # Verify correctness
                 try:
                     C_gluon = compiled_gluon(A, B.transpose(-2, -1), offs)
                     torch.testing.assert_close(C_gluon, C_ref, rtol=1e-2, atol=1e-2)
