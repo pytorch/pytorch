@@ -297,6 +297,24 @@ inductor_expected_failures_single_sample["xpu"] = {
     # could not create a primitive
     "addmv": {f64},
     # [End]
+    "fft.fft": {f16},
+    "fft.fft2": {f16},
+    "fft.fftn": {f16},
+    "fft.hfft": {f16},
+    "fft.hfft2": {f16},
+    "fft.hfftn": {f16},
+    "fft.rfft": {f16},
+    "fft.rfft2": {f16},
+    "fft.rfftn": {f16},
+    "fft.ifft": {f16},
+    "fft.ifft2": {f16},
+    "fft.ifftn": {f16},
+    "fft.ihfft": {f16},
+    "fft.ihfft2": {f16},
+    "fft.ihfftn": {f16},
+    "fft.irfft": {f16},
+    "fft.irfft2": {f16},
+    "fft.irfftn": {f16},
 }
 
 

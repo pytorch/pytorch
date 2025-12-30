@@ -51,6 +51,7 @@ from torch._inductor.template_heuristics.triton import (
     CUDAPersistentTMATemplateConfigHeuristic,
     GemmConfig,
     XPUMMTemplateConfigHeuristic,
+    XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
@@ -3436,8 +3437,12 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         a = torch.randn(512, 1152, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(1152, 7680, device=GPU_TYPE, dtype=torch.bfloat16)
 
-        tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
-        mm_heuristic = CUDAMMTemplateConfigHeuristic()
+        if GPU_TYPE == "xpu":
+            tma_heuristic = XPUPersistentTMATemplateConfigHeuristic()
+            mm_heuristic = XPUMMTemplateConfigHeuristic()
+        else:
+            tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
+            mm_heuristic = CUDAMMTemplateConfigHeuristic()
 
         # Save original configs to restore later
         original_tma_mm_configs = tma_heuristic.mm_configs
