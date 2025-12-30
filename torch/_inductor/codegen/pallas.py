@@ -752,8 +752,12 @@ class PallasKernelOverrides(OpOverrides):
     # Additional operations
     @staticmethod
     def fma(a: str, b: str, c: str) -> str:
-        """Fused multiply-add: a * b + c"""
-        return f"jnp.fma({a}, {b}, {c})"
+        """Fused multiply-add: a * b + c
+
+        JAX doesn't have jnp.fma, so we use the unfused version.
+        The compiler may still fuse this on supported hardware.
+        """
+        return f"(({a}) * ({b}) + ({c}))"
 
     @staticmethod
     def copysign(a: str, b: str) -> str:
@@ -941,6 +945,9 @@ class PallasKernel(SIMDKernel):
         # Get the iteration variables for this kernel
         if not self.range_trees:
             return "..."
+
+        # Rename symbolic sizes to kernel parameter names upfront
+        index = self.rename_indexing(index)
 
         # Check for ModularIndexing - this is NOT contiguous access
         # ModularIndexing is used for roll/wrap-around operations
@@ -1616,7 +1623,10 @@ class PallasKernel(SIMDKernel):
                 load_expr = f"pltriton.load({buf}.at[{index_str}])"
             else:
                 # CPU: use JAX array indexing
-                load_expr = f"{buf}[...].flatten()[{index_str}]"
+                # Cast to int64 if Min/Max ops may have introduced floats
+                has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
+                idx = f"({index_str}).astype(jnp.int64)" if has_minmax else index_str
+                load_expr = f"{buf}[...].flatten()[{idx}]"
         else:
             # Direct indexing for contiguous access
             load_expr = f"{buf}[{index_str}]"
@@ -1702,12 +1712,14 @@ class PallasKernel(SIMDKernel):
             try:
                 return int(coeff)
             except (TypeError, ValueError):
-                return 0
+                # Symbolic coefficient - treat as outer dimension
+                return float("inf")
 
         used_iter_vars = sorted(used_iter_vars_set, key=get_coefficient, reverse=True)
         iter_coeffs = [get_coefficient(var) for var in used_iter_vars]
 
-        index_str = self.kexpr(index)
+        # Rename symbolic sizes to kernel parameter names
+        index_str = self.kexpr(self.rename_indexing(index))
         indirect_var_syms = [s for s in free_symbols if str(s).startswith("tmp")]
         indirect_vars = [str(sym) for sym in indirect_var_syms]
 
@@ -2582,6 +2594,10 @@ class PallasKernel(SIMDKernel):
                 and pointwise_numel > 1
                 and reduction_numel
             )
+            # Also check for symbolic partial reduction (has both pw and reduction vars)
+            is_symbolic_partial = (
+                has_pointwise and n_reduction_dims > 0 and pointwise_numel is None
+            )
             if is_partial_reduction:
                 # For partial reductions, we need to:
                 # 1. Find which axes are reduction axes (contiguous axes whose product = reduction_numel)
@@ -2591,6 +2607,9 @@ class PallasKernel(SIMDKernel):
                 reduction_op = reduction_ops[reduction_type]
                 # Use a helper to find reduction axes by product matching
                 reduction_expr = f"_pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
+            elif is_symbolic_partial:
+                # Symbolic sizes: use axis-based reduction (axis=0 for outer reduction)
+                reduction_expr = f"{reduction_ops[reduction_type]}({value}, axis=0)"
             else:
                 # Full reduction to scalar
                 reduction_expr = f"{reduction_ops[reduction_type]}({value})"
@@ -2798,24 +2817,43 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
             # which are not supported by Pallas Triton backend
             if self.range_tree_nodes and not self.use_masked_ops:
                 kernel_body.writeline("# Define iteration variables as JAX arrays")
-                # Get the first output buffer's shape for reshaping
-                first_output_shape = None
-                first_output_numel = None
+
+                # Find reshape target: N-D shape whose numel matches an iteration
+                # var. Try output first (repeat/upsample), then inputs (reductions).
+                iter_lengths = OrderedSet(
+                    [
+                        int(e.length)
+                        for e in self.range_tree_nodes.values()
+                        if isinstance(e.length, (int, sympy.Integer))
+                    ]
+                )
+
+                def _get_nd_shape_if_matches(buf_name):
+                    buf = V.graph.try_get_buffer(buf_name)
+                    if buf is None or len(buf.get_size()) <= 1:
+                        return None, None
+                    shape = tuple(
+                        int(s) if isinstance(s, (int, sympy.Integer)) else s
+                        for s in buf.get_size()
+                    )
+                    numel = math.prod(shape)
+                    return (shape, numel) if numel in iter_lengths else (None, None)
+
+                # Candidate buffers: output first, then inputs
+                candidate_buf_names = []
                 if output_params:
-                    first_out_param = output_params[0]
-                    first_out_buf_name = output_buffer_lookup.get(first_out_param)
-                    if first_out_buf_name:
-                        try:
-                            buf = V.graph.get_buffer(first_out_buf_name)
-                            size = buf.get_size()
-                            first_output_shape = tuple(
-                                int(s) if hasattr(s, "__int__") else s for s in size
-                            )
-                            first_output_numel = 1
-                            for s in first_output_shape:
-                                first_output_numel *= s
-                        except Exception:
-                            pass
+                    buf_name = output_buffer_lookup.get(output_params[0])
+                    if buf_name:
+                        candidate_buf_names.append(buf_name)
+                candidate_buf_names.extend(self.args.input_buffers)
+
+                # Find first N-D buffer whose numel matches an iteration var
+                reshape_target_shape, reshape_target_numel = None, None
+                for name in candidate_buf_names:
+                    result = _get_nd_shape_if_matches(name)
+                    if result[0]:
+                        reshape_target_shape, reshape_target_numel = result
+                        break
 
                 # Collect all iteration variable info for broadcasting shape computation
                 var_items = list(self.range_tree_nodes.items())
@@ -2833,7 +2871,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                         )
                     except (TypeError, ValueError):
                         length_val = None
-                    if length_val is not None and length_val == first_output_numel:
+                    if length_val is not None and length_val == reshape_target_numel:
                         total_var_idx = idx
                     else:
                         broadcast_vars.append((idx, var_sym, entry, length_val))
@@ -2851,21 +2889,59 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                     except (TypeError, ValueError):
                         length_val = None
 
-                    # For symbolic lengths, generate a simple arange
-                    # The renamed length expression uses kernel parameter names
+                    # For symbolic lengths, only reshape if we have a valid target shape
+                    # Without a target, we can't determine correct dimensions
                     if length_val is None:
+                        if (
+                            reshape_target_shape
+                            and num_broadcast_dims > 1
+                            and idx != total_var_idx
+                        ):
+                            # Symbolic var in multi-broadcast case needs reshape
+                            broadcast_idx = next(
+                                (
+                                    i
+                                    for i, (vidx, _, _, _) in enumerate(broadcast_vars)
+                                    if vidx == idx
+                                ),
+                                None,
+                            )
+                            if broadcast_idx is not None:
+                                # Same logic as concrete case
+                                has_reduction_vars = any(
+                                    str(v).startswith("r")
+                                    for _, v, _, _ in broadcast_vars
+                                )
+                                has_pointwise_vars = any(
+                                    not str(v).startswith("r")
+                                    for _, v, _, _ in broadcast_vars
+                                )
+                                is_mixed = has_reduction_vars and has_pointwise_vars
+                                if is_mixed:
+                                    axis_idx = broadcast_idx
+                                else:
+                                    axis_idx = num_broadcast_dims - 1 - broadcast_idx
+                                shape_parts = ["1"] * num_broadcast_dims
+                                shape_parts[axis_idx] = length_str
+                                shape_str = ", ".join(shape_parts)
+                                arange = f"jnp.arange({length_str})"
+                                kernel_body.writeline(
+                                    f"{var_name} = {arange}.reshape({shape_str})"
+                                )
+                                continue
                         kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
                         continue
 
                     if (
-                        first_output_shape
-                        and len(first_output_shape) > 1
-                        and length_val == first_output_numel
+                        reshape_target_shape
+                        and len(reshape_target_shape) > 1
+                        and length_val == reshape_target_numel
                     ):
-                        # This is the "total" variable - reshape to output shape
-                        shape_str = ", ".join(str(s) for s in first_output_shape)
+                        # Reshape to match output/input shape for broadcasting
+                        shape_str = ", ".join(str(s) for s in reshape_target_shape)
+                        arange = f"jnp.arange({length_str})"
                         kernel_body.writeline(
-                            f"{var_name} = jnp.arange({length_str}).reshape({shape_str})"
+                            f"{var_name} = {arange}.reshape({shape_str})"
                         )
                     elif num_broadcast_dims > 1 and idx != total_var_idx:
                         # Find position of this var among broadcast vars
@@ -2874,16 +2950,29 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                             for i, (vidx, _, _, _) in enumerate(broadcast_vars)
                             if vidx == idx
                         )
-                        # Reshape for broadcasting with other iteration vars
-                        # Order: outermost to innermost should match the output shape
-                        # Reverse the order so first var (smallest index) is innermost
-                        # and last var (largest index) is outermost
-                        reversed_idx = num_broadcast_dims - 1 - broadcast_idx
+                        # Reshape for broadcasting with other iteration vars.
+                        # Axis placement depends on var types (reduction r* vs x*):
+                        # - Mixed: pointwise first, reduction last for output reshape
+                        # - Same-type: reverse order, first var innermost
+                        has_reduction_vars = any(
+                            str(v).startswith("r") for _, v, _, _ in broadcast_vars
+                        )
+                        has_pointwise_vars = any(
+                            not str(v).startswith("r") for _, v, _, _ in broadcast_vars
+                        )
+                        is_mixed = has_reduction_vars and has_pointwise_vars
+                        if is_mixed:
+                            # Mixed kernel: pointwise vars first, reduction vars last
+                            axis_idx = broadcast_idx
+                        else:
+                            # Same-type: reverse order (first var -> innermost)
+                            axis_idx = num_broadcast_dims - 1 - broadcast_idx
                         shape_parts = ["1"] * num_broadcast_dims
-                        shape_parts[reversed_idx] = length_str
+                        shape_parts[axis_idx] = length_str
                         shape_str = ", ".join(shape_parts)
+                        arange = f"jnp.arange({length_str})"
                         kernel_body.writeline(
-                            f"{var_name} = jnp.arange({length_str}).reshape({shape_str})"
+                            f"{var_name} = {arange}.reshape({shape_str})"
                         )
                     else:
                         kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
