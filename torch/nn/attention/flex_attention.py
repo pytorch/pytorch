@@ -1359,15 +1359,22 @@ def create_varlen_block_mask(
     total_q_blocks = q_blocks_per_doc.sum().item()
     total_kv_blocks = kv_blocks_per_doc.sum().item()
 
-    # Compute document offsets (cumulative sum of rounded lengths)
-    q_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
-    kv_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
-    q_doc_offsets[1:] = torch.cumsum(q_seq_lens_rounded, dim=0)
-    kv_doc_offsets[1:] = torch.cumsum(kv_seq_lens_rounded, dim=0)
+    # Compute document offsets for both logical (rounded) and physical (actual) layouts
+    # Logical offsets: cumsum of rounded lengths (used for iteration space)
+    # Physical offsets: cumsum of actual lengths (used for memory access)
+    q_logical_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
+    kv_logical_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
+    q_logical_doc_offsets[1:] = torch.cumsum(q_seq_lens_rounded, dim=0)
+    kv_logical_doc_offsets[1:] = torch.cumsum(kv_seq_lens_rounded, dim=0)
+
+    q_physical_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
+    kv_physical_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
+    q_physical_doc_offsets[1:] = torch.cumsum(q_seq_lens, dim=0)
+    kv_physical_doc_offsets[1:] = torch.cumsum(kv_seq_lens, dim=0)
 
     # Vectorized computation of per-block offsets and limits
-    # For each block, compute: offset = doc_offset + block_within_doc * BLOCK_SIZE
-    # and limit = min(BLOCK_SIZE, seq_len - block_within_doc * BLOCK_SIZE)
+    # offset = physical_doc_start - logical_doc_start (translates logical pos to physical pos)
+    # limit = min(BLOCK_SIZE, seq_len - block_idx_in_doc * BLOCK_SIZE)
 
     # Create block indices (0, 1, 2, ... for all blocks)
     q_block_indices = torch.arange(total_q_blocks, device=device, dtype=torch.int32)
@@ -1390,9 +1397,14 @@ def create_varlen_block_mask(
     q_block_idx_in_doc = q_block_indices - q_cumsum_blocks[q_block_to_doc]
     kv_block_idx_in_doc = kv_block_indices - kv_cumsum_blocks[kv_block_to_doc]
 
-    # Compute offsets: doc_offset + block_idx_in_doc * BLOCK_SIZE
-    q_offsets_1d = q_doc_offsets[q_block_to_doc] + q_block_idx_in_doc * Q_BLOCK_SIZE
-    kv_offsets_1d = kv_doc_offsets[kv_block_to_doc] + kv_block_idx_in_doc * KV_BLOCK_SIZE
+    # Compute offsets: physical_doc_start - logical_doc_start
+    # This offset is added to logical position to get physical position for memory access
+    q_offsets_1d = (
+        q_physical_doc_offsets[q_block_to_doc] - q_logical_doc_offsets[q_block_to_doc]
+    )
+    kv_offsets_1d = (
+        kv_physical_doc_offsets[kv_block_to_doc] - kv_logical_doc_offsets[kv_block_to_doc]
+    )
 
     # Compute limits: min(BLOCK_SIZE, seq_len - block_idx_in_doc * BLOCK_SIZE)
     q_remaining = q_seq_lens[q_block_to_doc] - q_block_idx_in_doc * Q_BLOCK_SIZE
@@ -1408,18 +1420,19 @@ def create_varlen_block_mask(
 
     # Vectorized computation of position-to-document and position-to-local mappings
     # Using searchsorted for O(log n) lookup instead of O(n) loop
+    # These mappings work on the logical (padded) iteration space
 
     # For each position, find which document it belongs to
     q_positions = torch.arange(total_q_len, device=device, dtype=torch.int32)
     kv_positions = torch.arange(total_kv_len, device=device, dtype=torch.int32)
 
     # searchsorted with right=True gives us the document index
-    q_pos_to_doc = torch.searchsorted(q_doc_offsets[1:], q_positions, right=True)
-    kv_pos_to_doc = torch.searchsorted(kv_doc_offsets[1:], kv_positions, right=True)
+    q_pos_to_doc = torch.searchsorted(q_logical_doc_offsets[1:], q_positions, right=True)
+    kv_pos_to_doc = torch.searchsorted(kv_logical_doc_offsets[1:], kv_positions, right=True)
 
-    # Local position = global position - document start offset
-    q_pos_to_local = q_positions - q_doc_offsets[q_pos_to_doc]
-    kv_pos_to_local = kv_positions - kv_doc_offsets[kv_pos_to_doc]
+    # Local position = global (logical) position - logical document start offset
+    q_pos_to_local = q_positions - q_logical_doc_offsets[q_pos_to_doc]
+    kv_pos_to_local = kv_positions - kv_logical_doc_offsets[kv_pos_to_doc]
 
     # Create wrapped mask_mod
     def varlen_mask_mod(b, h, q_idx, kv_idx):
@@ -1786,26 +1799,38 @@ def flex_attention(
     else:
         block_mask_q_len = block_mask.shape[-2]
         block_mask_kv_len = block_mask.shape[-1]
-        if query.size(-2) > block_mask_q_len or key.size(-2) > block_mask_kv_len:
-            raise ValueError(
-                f"block_mask was created for block_mask.shape={block_mask.shape} but got q_len={query.size(-2)} and kv_len={key.size(-2)}. "
-                "As the block mask was created for a smaller length than you're using it for, you likely need to create a new block mask."
-            )
-        elif (
-            query.size(-2) < block_mask_q_len and key.size(-2) <= block_mask_kv_len
-        ) or (query.size(-2) <= block_mask_q_len and key.size(-2) < block_mask_kv_len):
-            raise ValueError(
-                f"block_mask was created for block_mask.shape={block_mask.shape} but got q_len={query.size(-2)} and kv_len={key.size(-2)}. "
-                "As the block mask was created for a larger length than you're using it for, you can either 1. create a new block mask with the correct length, or 2. 'adjust' the existing block mask to the correct length by calling block_mask._adjust(q_len, kv_len). This essentially 'crops' the block mask to the upper left corner, which does not work for all mask_mods!"
-            )
-        if query.size(-2) != block_mask_q_len:
-            raise AssertionError(
-                f"query.size(-2) ({query.size(-2)}) != block_mask_q_len ({block_mask_q_len})"
-            )
-        if key.size(-2) != block_mask_kv_len:
-            raise AssertionError(
-                f"key.size(-2) ({key.size(-2)}) != block_mask_kv_len ({block_mask_kv_len})"
-            )
+        # For varlen mode with offsets, physical tensor sizes can be smaller than
+        # logical block_mask sizes. The block_mask shape represents the logical
+        # (padded) iteration space, while physical tensors are compact.
+        has_offsets = block_mask.kv_offsets is not None
+        if has_offsets:
+            # In varlen mode, physical tensors must be <= logical size
+            if query.size(-2) > block_mask_q_len or key.size(-2) > block_mask_kv_len:
+                raise ValueError(
+                    f"block_mask was created for block_mask.shape={block_mask.shape} but got q_len={query.size(-2)} and kv_len={key.size(-2)}. "
+                    "Physical tensor sizes cannot exceed logical block_mask size in varlen mode."
+                )
+        else:
+            if query.size(-2) > block_mask_q_len or key.size(-2) > block_mask_kv_len:
+                raise ValueError(
+                    f"block_mask was created for block_mask.shape={block_mask.shape} but got q_len={query.size(-2)} and kv_len={key.size(-2)}. "
+                    "As the block mask was created for a smaller length than you're using it for, you likely need to create a new block mask."
+                )
+            elif (
+                query.size(-2) < block_mask_q_len and key.size(-2) <= block_mask_kv_len
+            ) or (query.size(-2) <= block_mask_q_len and key.size(-2) < block_mask_kv_len):
+                raise ValueError(
+                    f"block_mask was created for block_mask.shape={block_mask.shape} but got q_len={query.size(-2)} and kv_len={key.size(-2)}. "
+                    "As the block mask was created for a larger length than you're using it for, you can either 1. create a new block mask with the correct length, or 2. 'adjust' the existing block mask to the correct length by calling block_mask._adjust(q_len, kv_len). This essentially 'crops' the block mask to the upper left corner, which does not work for all mask_mods!"
+                )
+            if query.size(-2) != block_mask_q_len:
+                raise AssertionError(
+                    f"query.size(-2) ({query.size(-2)}) != block_mask_q_len ({block_mask_q_len})"
+                )
+            if key.size(-2) != block_mask_kv_len:
+                raise AssertionError(
+                    f"key.size(-2) ({key.size(-2)}) != block_mask_kv_len ({block_mask_kv_len})"
+                )
 
     if scale is None:
         scale = 1.0 / math.sqrt(query.size(-1))

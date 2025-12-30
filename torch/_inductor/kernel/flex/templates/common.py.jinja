@@ -131,6 +131,8 @@ def forward_inner(
     off_z, off_h, offs_m, offs_n,
     # Offsets needed for TMA loads
     kv_start,
+    # Initial kv_offset for physical memory access (logical + offset = physical)
+    kv_offset,
     # blocksparse data
     kv_indices, kv_num_blocks,
     # start kv and end kv block
@@ -148,8 +150,6 @@ def forward_inner(
 
     if PRESCALE_QK:
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
-
-    kv_offset = 0
 
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
