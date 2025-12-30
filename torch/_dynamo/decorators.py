@@ -500,10 +500,12 @@ def substitute_in_graph(
                 guard_type = GuardBuilder.MODULE_MATCH
             else:
                 guard_type = GuardBuilder.ID_MATCH
+            guards = self.install_guards(guard_type)
+            assert guards is not None
             return PolyfilledFunctionVariable(
                 value,
                 source=self.source,
-                **self.install_guards(guard_type),
+                **guards,
             )
 
         id_dispatch_map[id(original_fn)] = id_dispatch_map[id(wrapped)] = dispatch_fn
