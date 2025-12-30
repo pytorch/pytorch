@@ -2813,24 +2813,43 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
             # which are not supported by Pallas Triton backend
             if self.range_tree_nodes and not self.use_masked_ops:
                 kernel_body.writeline("# Define iteration variables as JAX arrays")
-                # Get the first output buffer's shape for reshaping
-                first_output_shape = None
-                first_output_numel = None
+
+                # Find reshape target: N-D shape whose numel matches an iteration
+                # var. Try output first (repeat/upsample), then inputs (reductions).
+                iter_lengths = OrderedSet(
+                    [
+                        int(e.length)
+                        for e in self.range_tree_nodes.values()
+                        if isinstance(e.length, (int, sympy.Integer))
+                    ]
+                )
+
+                def _get_nd_shape_if_matches(buf_name):
+                    buf = V.graph.try_get_buffer(buf_name)
+                    if buf is None or len(buf.get_size()) <= 1:
+                        return None, None
+                    shape = tuple(
+                        int(s) if isinstance(s, (int, sympy.Integer)) else s
+                        for s in buf.get_size()
+                    )
+                    numel = math.prod(shape)
+                    return (shape, numel) if numel in iter_lengths else (None, None)
+
+                # Candidate buffers: output first, then inputs
+                candidate_buf_names = []
                 if output_params:
-                    first_out_param = output_params[0]
-                    first_out_buf_name = output_buffer_lookup.get(first_out_param)
-                    if first_out_buf_name:
-                        try:
-                            buf = V.graph.get_buffer(first_out_buf_name)
-                            size = buf.get_size()
-                            first_output_shape = tuple(
-                                int(s) if hasattr(s, "__int__") else s for s in size
-                            )
-                            first_output_numel = 1
-                            for s in first_output_shape:
-                                first_output_numel *= s
-                        except Exception:
-                            pass
+                    buf_name = output_buffer_lookup.get(output_params[0])
+                    if buf_name:
+                        candidate_buf_names.append(buf_name)
+                candidate_buf_names.extend(self.args.input_buffers)
+
+                # Find first N-D buffer whose numel matches an iteration var
+                reshape_target_shape, reshape_target_numel = None, None
+                for name in candidate_buf_names:
+                    result = _get_nd_shape_if_matches(name)
+                    if result[0]:
+                        reshape_target_shape, reshape_target_numel = result
+                        break
 
                 # Collect all iteration variable info for broadcasting shape computation
                 var_items = list(self.range_tree_nodes.items())
@@ -2848,7 +2867,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                         )
                     except (TypeError, ValueError):
                         length_val = None
-                    if length_val is not None and length_val == first_output_numel:
+                    if length_val is not None and length_val == reshape_target_numel:
                         total_var_idx = idx
                     else:
                         broadcast_vars.append((idx, var_sym, entry, length_val))
@@ -2866,10 +2885,14 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                     except (TypeError, ValueError):
                         length_val = None
 
-                    # For symbolic lengths, still need to reshape for broadcasting
-                    # if there are multiple broadcast dimensions
+                    # For symbolic lengths, only reshape if we have a valid target shape
+                    # Without a target, we can't determine correct dimensions
                     if length_val is None:
-                        if num_broadcast_dims > 1 and idx != total_var_idx:
+                        if (
+                            reshape_target_shape
+                            and num_broadcast_dims > 1
+                            and idx != total_var_idx
+                        ):
                             # Symbolic var in multi-broadcast case needs reshape
                             broadcast_idx = next(
                                 (
@@ -2897,22 +2920,24 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                                 shape_parts = ["1"] * num_broadcast_dims
                                 shape_parts[axis_idx] = length_str
                                 shape_str = ", ".join(shape_parts)
+                                arange = f"jnp.arange({length_str})"
                                 kernel_body.writeline(
-                                    f"{var_name} = jnp.arange({length_str}).reshape({shape_str})"
+                                    f"{var_name} = {arange}.reshape({shape_str})"
                                 )
                                 continue
                         kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
                         continue
 
                     if (
-                        first_output_shape
-                        and len(first_output_shape) > 1
-                        and length_val == first_output_numel
+                        reshape_target_shape
+                        and len(reshape_target_shape) > 1
+                        and length_val == reshape_target_numel
                     ):
-                        # This is the "total" variable - reshape to output shape
-                        shape_str = ", ".join(str(s) for s in first_output_shape)
+                        # Reshape to match output/input shape for broadcasting
+                        shape_str = ", ".join(str(s) for s in reshape_target_shape)
+                        arange = f"jnp.arange({length_str})"
                         kernel_body.writeline(
-                            f"{var_name} = jnp.arange({length_str}).reshape({shape_str})"
+                            f"{var_name} = {arange}.reshape({shape_str})"
                         )
                     elif num_broadcast_dims > 1 and idx != total_var_idx:
                         # Find position of this var among broadcast vars
@@ -2922,12 +2947,9 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                             if vidx == idx
                         )
                         # Reshape for broadcasting with other iteration vars.
-                        # The axis placement depends on whether we have a MIX of
-                        # reduction vars (r*) and pointwise vars (x*):
-                        # - Mixed case: pointwise vars go to first axes, reduction vars
-                        #   to last axes. This ensures reshape to output works correctly.
-                        # - Same-type case (all r* or all x*): reverse the order so
-                        #   first var is innermost, matching codegen conventions.
+                        # Axis placement depends on var types (reduction r* vs x*):
+                        # - Mixed: pointwise first, reduction last for output reshape
+                        # - Same-type: reverse order, first var innermost
                         has_reduction_vars = any(
                             str(v).startswith("r") for _, v, _, _ in broadcast_vars
                         )
@@ -2944,8 +2966,9 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                         shape_parts = ["1"] * num_broadcast_dims
                         shape_parts[axis_idx] = length_str
                         shape_str = ", ".join(shape_parts)
+                        arange = f"jnp.arange({length_str})"
                         kernel_body.writeline(
-                            f"{var_name} = jnp.arange({length_str}).reshape({shape_str})"
+                            f"{var_name} = {arange}.reshape({shape_str})"
                         )
                     else:
                         kernel_body.writeline(f"{var_name} = jnp.arange({length_str})")
