@@ -1656,34 +1656,10 @@ coverage_ignore_classes = [
     "default_debug_observer",
     "default_placeholder_observer",
     "default_reuse_input_observer",
-    # torch.ao.quantization.pt2e.duplicate_dq_pass
-    "DuplicateDQPass",
-    # torch.ao.quantization.pt2e.port_metadata_pass
-    "PortNodeMetaForQDQ",
     # torch.ao.quantization.qconfig
     "QConfigDynamic",
     # torch.ao.quantization.quant_type
     "QuantType",
-    # torch.ao.quantization.quantizer.composable_quantizer
-    "ComposableQuantizer",
-    # torch.ao.quantization.quantizer.embedding_quantizer
-    "EmbeddingQuantizer",
-    # torch.ao.quantization.quantizer.quantizer
-    "DerivedQuantizationSpec",
-    "FixedQParamsQuantizationSpec",
-    "QuantizationAnnotation",
-    "QuantizationSpec",
-    "QuantizationSpecBase",
-    "SharedQuantizationSpec",
-    # torch.ao.quantization.quantizer.x86_inductor_quantizer
-    "X86InductorQuantizer",
-    # torch.ao.quantization.quantizer.xpu_inductor_quantizer
-    "XPUInductorQuantizer",
-    # torch.ao.quantization.quantizer.xnnpack_quantizer
-    "XNNPACKQuantizer",
-    # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
-    "OperatorConfig",
-    "QuantizationConfig",
     # torch.ao.quantization.stubs
     "DeQuantStub",
     "QuantStub",
