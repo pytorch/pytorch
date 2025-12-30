@@ -1,5 +1,0 @@
-ERROR
-            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/dev/pytorch/torch/_inductor/ops_handler.py", line 106, in randint64
-    raise NotImplementedError
-torch._inductor.exc.InductorError: NotImplementedError:

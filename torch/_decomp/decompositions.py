@@ -352,6 +352,18 @@ def log_sigmoid_backward(grad_output: Tensor, self: Tensor, buffer: Tensor) -> T
     # return (max_deriv - sign * (buffer / (1 + buffer))) * grad_output
 
 
+@register_decomposition(aten.ldexp)
+@out_wrapper()
+def ldexp(self: Tensor, other: Tensor) -> Tensor:
+    two_dtype = (
+        torch.float32
+        if utils.is_integer_dtype(self.dtype) or utils.is_boolean_dtype(self.dtype)
+        else self.dtype
+    )
+    two_tensor = self.new_full((), 2.0, dtype=two_dtype)
+    return self * torch.pow(two_tensor, other)
+
+
 def apply_loss_reduction(loss: Tensor, reduction: int):
     if reduction == Reduction.MEAN.value:
         return torch.mean(loss)
@@ -2040,7 +2052,7 @@ def unsafe_chunk_py_impl(tensor, chunks, dim=0) -> list[Tensor]:
     split_size = (dim_size + chunks - 1) // chunks
 
     if split_size == 0 and dim_size == 0:
-        split_sizes = [split_size for _ in chunks]
+        split_sizes = [split_size for _ in range(chunks)]
         split_sizes[chunks - 1] = split_size - (split_size * chunks - dim_size)
         return torch.ops.aten.unsafe_split_with_sizes.default(tensor, split_sizes, dim)
     return torch.ops.aten.unsafe_split.Tensor(tensor, split_size, dim)
@@ -5260,7 +5272,7 @@ def _weight_norm_interface(v, g, dim=0):
 def isin(elements, test_elements, *, assume_unique=False, invert=False):
     # handle when either elements or test_elements are Scalars (they can't both be)
     if not isinstance(elements, torch.Tensor):
-        elements = torch.tensor(elements, device=test_elements.device)
+        elements = torch.scalar_tensor(elements, device=test_elements.device)
     if not isinstance(test_elements, torch.Tensor):
         if invert:
             return torch.ne(elements, test_elements)
@@ -5365,6 +5377,7 @@ register_inplace(aten.index_reduce_, aten.index_reduce)
 register_inplace(aten.__ior__, aten.__or__)
 register_inplace(aten.__irshift__, aten.__rshift__)
 register_inplace(aten.__ixor__, aten.__xor__)
+register_inplace(aten.ldexp_, aten.ldexp)
 register_inplace(aten.leaky_relu_, aten.leaky_relu)
 register_inplace(aten.logit_, aten.logit)
 register_inplace(aten.relu_, aten.relu)

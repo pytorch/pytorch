@@ -120,7 +120,7 @@ class PYBIND11_EXPORT PythonRpcHandler {
   std::shared_ptr<jit::ScriptTypeParser> typeParser_;
 
   // Indicates whether or not we have properly initialized the handler.
-  bool initialized_;
+  bool initialized_{false};
 
   // Lock to protect initialization.
   std::mutex init_lock_;

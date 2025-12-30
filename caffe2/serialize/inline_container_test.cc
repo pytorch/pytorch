@@ -175,10 +175,15 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreads) {
 
   // Inplace multi-threading getRecord(name, dst, n, additional_readers) test
   additionalReader.clear();
+  // Each IStreamAdapter needs its own independent stream to avoid data races.
+  // IStreamAdapter does not synchronize access to the underlying istream.
+  std::vector<std::unique_ptr<std::istringstream>> additional_streams;
   std::vector<uint8_t> dst1(size1), dst2(size2);
   for (int i = 0; i < 10; ++i) {
     // Test various sizes of read threads
-    additionalReader.push_back(std::make_unique<IStreamAdapter>(&iss));
+    additional_streams.push_back(std::make_unique<std::istringstream>(the_file));
+    additionalReader.push_back(
+        std::make_unique<IStreamAdapter>(additional_streams.back().get()));
 
     ret = reader.getRecord("key1", dst1.data(), size1, additionalReader);
     ASSERT_EQ(ret, size1);
@@ -611,10 +616,15 @@ TEST(PyTorchStreamWriterAndReader, LoadWithMultiThreadsWithAllocator) {
 
   // Inplace multi-threading getRecord(name, dst, n, additional_readers) test
   additionalReader.clear();
+  // Each IStreamAdapter needs its own independent stream to avoid data races.
+  // IStreamAdapter does not synchronize access to the underlying istream.
+  std::vector<std::unique_ptr<std::istringstream>> additional_streams;
   std::vector<uint8_t> dst1(size1), dst2(size2);
   for (int i = 0; i < 10; ++i) {
     // Test various sizes of read threads
-    additionalReader.push_back(std::make_unique<IStreamAdapter>(&iss));
+    additional_streams.push_back(std::make_unique<std::istringstream>(the_file));
+    additionalReader.push_back(
+        std::make_unique<IStreamAdapter>(additional_streams.back().get()));
 
     ret = reader.getRecord("key1", dst1.data(), size1, additionalReader);
     ASSERT_EQ(ret, size1);

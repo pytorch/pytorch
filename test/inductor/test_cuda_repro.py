@@ -40,10 +40,11 @@ from torch.testing._internal.common_utils import (
     freeze_rng_state,
     instantiate_parametrized_tests,
     IS_FBCODE,
+    MI350_ARCH,
     parametrize,
+    skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
-    xfailIfPy312Plus,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
@@ -59,6 +60,7 @@ DO_PERF_TEST = os.environ.get("DO_PERF_TEST") == "1"
 requires_multigpu = functools.partial(
     unittest.skipIf, not TEST_MULTIGPU, "requires multiple cuda devices"
 )
+from torch._dynamo.utils import counters
 from torch.testing._internal.inductor_utils import skipCUDAIf
 
 
@@ -221,6 +223,11 @@ class CudaReproTests(TestCase):
         # dont check rng state
         self.assertEqual(out[:2], fn(query, key, value, input_tensor2)[:2])
 
+    # Fails on ROCm MI350
+    # Mismatched elements: 23 / 33062912 (0.0%)
+    # Greatest absolute difference: 0.07861328125 at index (14, 13, 1008, 36) (up to 1e-05 allowed)
+    # Greatest relative difference: 2.90625 at index (14, 13, 1008, 36) (up to 0.016 allowed)
+    @skipIfRocmArch(MI350_ARCH)
     def test_effn_attn_bias_padding_misaligned(self):
         seqlen_start = 1008
 
@@ -2298,9 +2305,10 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
-    @xfailIfPy312Plus  # https://github.com/pytorch/pytorch/issues/142032
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
+        counters.clear()
+
         target_size = (8, 2)
         mem_eff_temporal_upsampling_interp_chunks = 2
         from functorch.einops import rearrange
@@ -2310,7 +2318,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         x = rearrange(x, "b c t h w -> b c t (h w)")
 
         def interpolate_chunked(x):
-            # chunk along c
             chunks = x.chunk(chunks=mem_eff_temporal_upsampling_interp_chunks, dim=1)
             r = []
             for t in chunks:
@@ -2319,12 +2326,23 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                         t.float(), size=target_size, mode="nearest"
                     ).to(t.dtype)
                 )
-            out_chunked = torch.cat(r, dim=1)
-            return out_chunked
+            return torch.cat(r, dim=1)
 
         out_eager = interpolate_chunked(x)
         out_compiled = torch.compile(interpolate_chunked)(x)
+
         self.assertEqual(out_eager, out_compiled)
+
+        unique_graphs = counters["stats"].get("unique_graphs", None)
+        self.assertIsNotNone(
+            unique_graphs,
+            "Expected Dynamo to record unique_graphs counter",
+        )
+        self.assertEqual(
+            unique_graphs,
+            1,
+            "Repeated masked loads should compile to a single stable graph",
+        )
 
     def test_max_autotune_nograd(self):
         """

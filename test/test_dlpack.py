@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.utils.dlpack import DLDeviceType, from_dlpack, to_dlpack
@@ -303,14 +304,21 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_dlpack_cuda_per_thread_stream(self, device):
         # Test whether we raise an error if we are trying to use per-thread default
         # stream, which is currently not supported by PyTorch.
         x = make_tensor((5,), dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(
-            BufferError, "per-thread default stream is not supported"
-        ):
+
+        if TEST_WITH_ROCM:
+            context = self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on ROCm: 2"
+            )
+        else:
+            context = self.assertRaisesRegex(
+                BufferError, "per-thread default stream is not supported"
+            )
+
+        with context:
             x.__dlpack__(stream=2)
 
     @skipMeta
@@ -330,11 +338,18 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_dlpack_invalid_cuda_streams(self, device):
         x = make_tensor((5,), dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(AssertionError, r"unsupported stream on CUDA: \d"):
-            x.__dlpack__(stream=0)
+
+        if TEST_WITH_ROCM:
+            # On ROCm, stream=0 is valid (default stream).
+            self.assertIsNotNone(x.__dlpack__(stream=0))
+        else:
+            # CUDA raises AssertionError for stream=0
+            with self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on CUDA: \d"
+            ):
+                x.__dlpack__(stream=0)
 
     @skipMeta
     def test_dlpack_invalid_cpu_stream(self):

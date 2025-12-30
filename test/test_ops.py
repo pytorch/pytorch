@@ -739,8 +739,6 @@ class TestCommon(TestCase):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
-        if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
-            self.skipTest("Skipped on ROCm")
         if op.full_name == "_refs.div.floor_rounding" and dtype == torch.bfloat16:
             self.skipTest(
                 "Skipped _refs.div.floor_rounding with bfloat16"
@@ -753,12 +751,6 @@ class TestCommon(TestCase):
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
-        if (
-            TEST_WITH_ROCM
-            and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2")
-            and dtype == torch.float16
-        ):
-            self.skipTest("Skipped on ROCm")
         from copy import copy
 
         from torch._prims.executor import make_traced
