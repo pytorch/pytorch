@@ -1092,7 +1092,7 @@ void Engine::evaluate_function(
   auto& exec_info_ = graph_task->exec_info_;
   if (!exec_info_.empty()) {
     auto& fn_info = exec_info_.at(func);
-    const variable_list* inputs_for_captures = &inputs.buffer;
+    variable_list& inputs_for_captures = &inputs.buffer;
     variable_list new_inputs;
     if (!fn_info.needed_) {
       // We always want to call tensor pre-hooks, but want to avoid calling it
