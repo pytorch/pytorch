@@ -224,6 +224,42 @@ class TestOpaqueObject(TestCase):
             return torch.empty_like(x)
 
         @torch.library.custom_op(
+            "_TestOpaqueObject::noise_inject_with_rng", mutates_args=[]
+        )
+        def noise_inject_with_rng(x: torch.Tensor, obj: RNGState) -> torch.Tensor:
+            r = obj.rng.random()
+            return x + r
+
+        @noise_inject_with_rng.register_fake
+        def _(x: torch.Tensor, obj: RNGState) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        @torch.library.custom_op(
+            "_TestOpaqueObject::noise_inject_with_rng_backward", mutates_args=[]
+        )
+        def noise_inject_with_rng_backward(
+            grad: torch.Tensor, rng_state: RNGState
+        ) -> torch.Tensor:
+            return grad.clone()
+
+        @noise_inject_with_rng_backward.register_fake
+        def _(grad: torch.Tensor, rng_state: RNGState) -> torch.Tensor:
+            return torch.empty_like(grad)
+
+        def noise_inject_with_rng_setup_context(ctx, inputs, output):
+            ctx.save_for_backward(inputs[0])
+            ctx.rng_state = inputs[1]
+            return ctx
+
+        def noise_inject_with_rng_backward_wrapper(ctx, grad):
+            return noise_inject_with_rng_backward(grad, ctx.rng_state), None
+
+        noise_inject_with_rng.register_autograd(
+            noise_inject_with_rng_backward_wrapper,
+            setup_context=noise_inject_with_rng_setup_context,
+        )
+
+        @torch.library.custom_op(
             "_TestOpaqueObject::increment_counter",
             mutates_args=["prev"],
         )
@@ -988,6 +1024,24 @@ def forward(self, arg0_1):
         opt_f = torch.compile(foo, fullgraph=True, backend="inductor")
         x = torch.randn(3, 3)
         self.assertEqual(opt_f(x), foo(x))
+
+    def test_opaque_obj_saved_for_backward(self):
+        def foo(x, rng_state):
+            return torch.ops._TestOpaqueObject.noise_inject_with_rng(x, rng_state)
+
+        x = torch.randn(3, 3, requires_grad=True)
+        rng_state = RNGState(0)
+        opt_f = torch.compile(foo, fullgraph=True)
+        output = opt_f(x, rng_state)
+        output.sum().backward()
+
+        eager_rng_state = RNGState(0)
+        eager_x = x.detach().clone()
+        eager_x.requires_grad_(True)
+        eager_output = foo(eager_x, eager_rng_state)
+        eager_output.sum().backward()
+        self.assertTrue(torch.allclose(eager_x.grad, x.grad))
+        self.assertTrue(torch.allclose(eager_output, output))
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
