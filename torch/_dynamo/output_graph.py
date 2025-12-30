@@ -2117,6 +2117,8 @@ class OutputGraph(OutputGraphCommon):
             assert isinstance(rv, list)
             assert isinstance(root, FakeRootModule)
 
+            self.call_cleanup_hooks()
+
             output_node = self.create_node(
                 "output",
                 "output",
@@ -2211,7 +2213,6 @@ class OutputGraph(OutputGraphCommon):
                     print_output=False, include_stride=True, include_device=True
                 ),
             )
-            self.call_cleanup_hooks()
             old_fake_mode = self.tracing_context.fake_mode
             assert old_fake_mode is not None
             if not self.export:
