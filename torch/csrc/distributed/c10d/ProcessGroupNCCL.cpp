@@ -1104,8 +1104,8 @@ ErrorType ProcessGroupNCCL::getError() {
   return error_;
 }
 
-using c10::cuda::CUDACachingAllocator::SegmentInfo;
 void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
+  using c10::cuda::CUDACachingAllocator::SegmentInfo;
   const auto key = std::to_string(pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer registration for all buffers in "
