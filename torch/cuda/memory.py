@@ -13,11 +13,7 @@ from typing_extensions import deprecated
 
 import torch
 from torch import _C
-from torch._utils import _dummy_type
-from torch.utils._memory_snapshot_utils import (
-    _augment_memory_snapshot_stack_traces,
-    _Snapshot,
-)
+from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type, _Snapshot
 
 from . import (
     _get_amdsmi_device_index,
