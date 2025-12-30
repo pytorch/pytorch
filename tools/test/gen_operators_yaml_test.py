@@ -7,7 +7,7 @@ import unittest
 from collections import defaultdict
 from unittest.mock import Mock, patch
 
-# pyrefly: ignore [import-error]
+# pyrefly: ignore [import-error, missing-import]
 from gen_operators_yaml import (
     fill_output,
     get_parser_options,

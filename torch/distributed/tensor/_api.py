@@ -138,8 +138,8 @@ class _FromTorchTensor(torch.autograd.Function):
         shape: torch.Size | None = None,
         stride: tuple[int, ...] | None = None,
     ) -> "DTensor":
-        ctx.previous_placement = placements
-        ctx.previous_device_mesh = device_mesh
+        ctx.forward_input_placements = placements
+        ctx.forward_input_device_mesh = device_mesh
 
         if shape and stride:
             tensor_shape, tensor_stride = shape, stride
@@ -200,22 +200,40 @@ class _FromTorchTensor(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: "DTensor"):  # type: ignore[override]
-        previous_placement = ctx.previous_placement
-        previous_device_mesh = ctx.previous_device_mesh
+        forward_input_placements = ctx.forward_input_placements
+        forward_input_device_mesh = ctx.forward_input_device_mesh
 
         # reshard to the placement when creating DistributedTensor
         # so that the gradient layout matches, and we could return
         # local gradients directly
-        if grad_output.placements != previous_placement:
+        if grad_output.placements != forward_input_placements:
             current_spec = grad_output._spec
+
+            # for backward shard -> partial, we do shard -> replicate
+            # for backward replicate -> partial, we do replicate -> replicate / skip transformation
+            # TODO: for backward partial -> partial, right now we keep it unchanged,
+            # but this might need revisit
+            normalized_placements: list[Placement] = []
+            for current, target in zip(
+                current_spec.placements, forward_input_placements
+            ):
+                if (
+                    current.is_shard() or current.is_replicate()
+                ) and target.is_partial():
+                    normalized_placements.append(Replicate())
+                else:
+                    normalized_placements.append(target)
+
             target_spec = DTensorSpec(
-                previous_device_mesh,
-                previous_placement,
+                forward_input_device_mesh,
+                tuple(normalized_placements),
                 tensor_meta=grad_output._spec.tensor_meta,
             )
             local_tensor = grad_output._local_tensor
             output = redistribute_local_tensor(
-                local_tensor, current_spec, target_spec, is_backward=True
+                local_tensor,
+                current_spec,
+                target_spec,
             )
             # TODO: return the redistributed local tensor directly without
             # differentiable backward. see if this make sense for all cases.
