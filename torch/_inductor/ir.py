@@ -8120,9 +8120,14 @@ class FallbackKernel(ExternKernelAlloc):
         elif V.graph.cpp_wrapper:
             # For non-aten OpOverload, i.e. custom ops
             # If the op is in custom_ops_to_c_shims, generate direct function call
-            self.use_runtime_dispatch = (
-                kernel not in config.aot_inductor.custom_ops_to_c_shims
-            )
+            # Skip runtime dispatch for HOPs with custom codegen (like print)
+            # These are handled via generate_fallback_kernel with custom codegen
+            if kernel is torch.ops.higher_order.print:
+                pass  # Don't set use_runtime_dispatch, use generate_fallback_kernel path
+            else:
+                self.use_runtime_dispatch = (
+                    kernel not in config.aot_inductor.custom_ops_to_c_shims
+                )
 
         # Handle the special case where a complex number is input to a C-shim kernel for
         # a scalar input.  The torchgen'ed shim API will use type "double", which is
@@ -8170,6 +8175,7 @@ class FallbackKernel(ExternKernelAlloc):
                 exported_args,
                 # NOTE: [special handling of all_reduce_coalesced_'s return value]
                 self.outputs if self.outputs else self.mutation_outputs,
+                self,  # Pass the node for custom codegen
             )
         else:
             wrapper.generate_fallback_kernel(self)
