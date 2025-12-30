@@ -118,6 +118,7 @@ CO_VARKEYWORDS = 0x08
 _SUPPORTED_TREE_MAP_KWARGS = frozenset({"namespace", "none_is_leaf", "is_leaf"})
 _TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
 
+PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
 # Module-level cache keyed by the function object
 _spec_cache: WeakKeyDictionary[Any, Any] = WeakKeyDictionary()
@@ -993,7 +994,16 @@ class LocalGeneratorObjectVariable(VariableTracker):
             raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
-            raise
+            unimplemented(
+                gb_type="infinite generator detected",
+                context="",
+                explanation="Dynamo traced the YIELD_VALUE bytecode too many times. This could mean "
+                "that we have attempted to trace an infinite generator.",
+                hints=[
+                    f"If you are sure that your generator is not infinite, please report a bug at {PT2_ISSUE_TRACKER_URL}.",
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
         except Unsupported as e:
             torch._dynamo.eval_frame.skip_code(self.get_code())
             e.skip_frame = True

@@ -215,7 +215,7 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
-class UnknownPropertiesDuringBackwardTrace(Unsupported):
+class UnknownPropertiesDuringBackwardTrace(TorchDynamoException):
     pass
 
 
@@ -223,24 +223,12 @@ class RecompileError(TorchDynamoException):
     pass
 
 
-class ArgsMismatchError(Unsupported):
-    pass
-
-
-class AttributeMutationError(Unsupported):
-    pass
-
-
-class InfiniteGeneratorError(Unsupported):
+class InfiniteGeneratorError(TorchDynamoException):
     # Raised when the number of yielded values is greater than MAX_ITERATOR_LIMIT
     pass
 
 
-class SideEffectsError(Unsupported):
-    pass
-
-
-class CondOpArgsMismatchError(ArgsMismatchError):
+class CondOpArgsMismatchError(TorchDynamoException):
     """
     Internal error from cond() due to arguments mismatch.
     """
