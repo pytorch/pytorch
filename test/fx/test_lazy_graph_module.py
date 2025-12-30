@@ -282,7 +282,9 @@ class TestLazyGraphModule(TestCase):
             def __init__(self, features_in=10):
                 super().__init__()
 
-                self.seq = torch.nn.Sequential(torch.nn.Linear(features_in, features_in), torch.nn.ReLU())
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(features_in, features_in), torch.nn.ReLU()
+                )
                 self.a = torch.nn.Parameter(torch.randn(features_in))
                 setattr(self, "0", torch.nn.Parameter(torch.randn(features_in)))
 
@@ -296,22 +298,27 @@ class TestLazyGraphModule(TestCase):
         self.validate_module(f, in_features=in_features)
 
     def test_to_folder_sequential(self):
-
         in_features = 10
 
-        f = torch.nn.Sequential(torch.nn.Linear(in_features=in_features, out_features=in_features))
+        f = torch.nn.Sequential(
+            torch.nn.Linear(in_features=in_features, out_features=in_features)
+        )
 
         self.validate_module(f, in_features=in_features)
 
-    def validate_module(self, module: torch.nn.Module, in_features: int, n_samples: int = 100):
+    def validate_module(
+        self, module: torch.nn.Module, in_features: int, n_samples: int = 100
+    ):
         gm = torch.fx.symbolic_trace(module)
 
         with TemporaryDirectory() as tmp:
             gm.to_folder(tmp)
 
-            path = Path(tmp) / 'module.py'
+            path = Path(tmp) / "module.py"
 
-            spec = importlib.util.spec_from_file_location("module.FxModule", path.absolute())
+            spec = importlib.util.spec_from_file_location(
+                "module.FxModule", path.absolute()
+            )
             foo = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(foo)
 
