@@ -2809,7 +2809,7 @@ class TestSDPACudaOnly(NNTestCase):
                 f()
         else:
             f()
-    
+
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_preserves_query_layout(self, device):
 
