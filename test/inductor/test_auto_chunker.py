@@ -247,6 +247,25 @@ class AutoChunkerTest(TestCase):
             f"Actual peak_memory {peak_memory}, expected bound {expected_bound}",
         )
 
+    def test_set_num_chunk_with_compile_options(self):
+        B = 32
+        T = 1024
+        C = 768
+        V = 50257
+
+        dtype = torch.bfloat16
+
+        options = {
+            "auto_chunker.enable": True,
+            "auto_chunker.num_chunk": 16,
+            "auto_chunker.amplify_ratio_threshold": 10,
+        }
+        mod = torch.compile(LinearAndCEL(C, V).cuda().to(dtype), options=options)
+        x = torch.randn(B, T, C, dtype=dtype, requires_grad=True, device="cuda")
+        y = torch.randint(0, V, (B, T)).cuda()
+        mod(x, y).backward()
+        self.assertEqual(metrics.num_auto_chunking, 1)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
