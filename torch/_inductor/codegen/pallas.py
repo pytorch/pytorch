@@ -752,8 +752,12 @@ class PallasKernelOverrides(OpOverrides):
     # Additional operations
     @staticmethod
     def fma(a: str, b: str, c: str) -> str:
-        """Fused multiply-add: a * b + c"""
-        return f"jnp.fma({a}, {b}, {c})"
+        """Fused multiply-add: a * b + c
+
+        JAX doesn't have jnp.fma, so we use the unfused version.
+        The compiler may still fuse this on supported hardware.
+        """
+        return f"(({a}) * ({b}) + ({c}))"
 
     @staticmethod
     def copysign(a: str, b: str) -> str:
