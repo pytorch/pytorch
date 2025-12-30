@@ -39,16 +39,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, NamedTuple, NoReturn, Optional, TYPE_CHECKING, Union
-
-
-# TODO: consolidate on 3.11
-try:
-    # pyrefly: ignore [missing-module-attribute]
-    from typing import LiteralString
-except ImportError:
-    from typing_extensions import LiteralString
-
-from typing_extensions import TypeAliasType, TypeVar
+from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
 import torch
@@ -1086,7 +1077,6 @@ class GuardBuilder(GuardBuilderBase):
         # does not call the overridden keys method.
         for key in builtin_dict_keys(example_value):
             value = example_value[key]
-            # pyrefly: ignore[unexpected-keyword]
             value_source = DictGetItemSource(guard.originating_source, index=key)
             guard_manager_enum = self.get_guard_manager_type(
                 value_source, example_value

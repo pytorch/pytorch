@@ -105,8 +105,8 @@ def clean_nn_module_stack_and_source_fn(
     """
 
     def _process_nn_module_stack(
-        nn_module_stack: dict[str, tuple[str, Any]],
-    ) -> dict[str, tuple[str, Any]]:
+        nn_module_stack: dict[str, tuple[str, T]],
+    ) -> dict[str, tuple[str, T]]:
         if "L__self____export_root" in nn_module_stack:
             del nn_module_stack["L__self____export_root"]
 

@@ -16,6 +16,10 @@ from typing import Any, TYPE_CHECKING, TypeVar
 import torch
 
 
+T = TypeVar("T")
+U = TypeVar("U")
+
+
 if TYPE_CHECKING:
     from ..utils import dict_keys
 
@@ -58,7 +62,7 @@ class NoEnterTorchFunctionMode(BaseTorchFunctionMode):
 
 
 def index(
-    iterator: Iterator[Any], item: Any, start: int = 0, end: int | None = None
+    iterator: Iterator[T], item: T, start: int = 0, end: int | None = None
 ) -> int:
     from itertools import islice
 
@@ -69,7 +73,7 @@ def index(
     raise ValueError(f"{item} is not in {type(iterator)}")
 
 
-def repeat(item: Any, count: int) -> Iterator[Any]:
+def repeat(item: T, count: int) -> Iterator[T]:
     for _ in range(count):
         yield item
 
@@ -80,7 +84,7 @@ def radians(x: float) -> float:
     return math.pi / 180.0 * x
 
 
-def impl_CONTAINS_OP_fallback(a: Any, b: Iterable[Any]) -> bool:
+def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
     # performs fallback "a in b"
     if hasattr(b, "__iter__"):
         # use __iter__ if __contains__ is not available
@@ -108,7 +112,7 @@ def accumulate_grad(x: torch.Tensor, new_grad: torch.Tensor | None) -> None:
 # This mirrors
 # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(
-    op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]
+    op: Callable[[Any, Any], bool], left: Sequence[T], right: Sequence[T]
 ) -> bool:
     """emulate `(1,2,3) > (1,2)` etc"""
 
@@ -131,7 +135,7 @@ def list_cmp(
     return op(left_len, right_len)
 
 
-def dict___eq__(d: dict[Any, Any], other: Any) -> bool:
+def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
     if (len(d) != len(other)) or (d.keys() != other.keys()):
         return False
 
@@ -145,8 +149,10 @@ def dict___eq__(d: dict[Any, Any], other: Any) -> bool:
     return True
 
 
-def set_symmetric_difference(set1: Iterable[Any], set2: Iterable[Any], cls=set) -> Any:
-    symmetric_difference_set = set()
+def set_symmetric_difference(
+    set1: Iterable[T], set2: Iterable[T], cls: type = set
+) -> set[T]:
+    symmetric_difference_set: set[T] = set()
     for x in set1:
         if x not in set2:
             symmetric_difference_set.add(x)
@@ -156,13 +162,13 @@ def set_symmetric_difference(set1: Iterable[Any], set2: Iterable[Any], cls=set) 
     return cls(symmetric_difference_set)
 
 
-def set_symmetric_difference_update(set1: set[Any], set2: set[Any]) -> None:
+def set_symmetric_difference_update(set1: set[T], set2: set[T]) -> None:
     result = set1.symmetric_difference(set2)
     set1.clear()
     set1.update(result)
 
 
-def set_isdisjoint(set1: set[Any], set2: set[Any]) -> bool:
+def set_isdisjoint(set1: set[T], set2: set[T]) -> bool:
     if not isinstance(set2, Iterable):
         raise TypeError(f"'{type(set2)}' object is not iterable")
 
@@ -175,7 +181,7 @@ def set_isdisjoint(set1: set[Any], set2: set[Any]) -> bool:
     return True
 
 
-def set_intersection(set1: set[Any], *others: Iterable[Any], cls=set) -> Any:
+def set_intersection(set1: set[T], *others: Iterable[T], cls: type = set) -> set[T]:
     if len(others) == 0:
         return set1.copy()
 
@@ -197,13 +203,13 @@ def set_intersection(set1: set[Any], *others: Iterable[Any], cls=set) -> Any:
     return cls(intersection_set)
 
 
-def set_intersection_update(set1: set[Any], *others: Iterable[Any]) -> None:
+def set_intersection_update(set1: set[T], *others: Iterable[T]) -> None:
     result = set1.intersection(*others)
     set1.clear()
     set1.update(result)
 
 
-def set_union(set1: set[Any], *others: Iterable[Any], cls: Any | None = None) -> Any:
+def set_union(set1: set[T], *others: Iterable[T], cls: type | None = None) -> set[T]:
     # frozenset also uses this function
     if cls is None:
         # pyrefly: ignore[bad-assignment]
@@ -228,7 +234,7 @@ def set_union(set1: set[Any], *others: Iterable[Any], cls: Any | None = None) ->
     return cls(union_set)
 
 
-def set_update(set1: set[Any], *others: Iterable[Any]) -> set[Any]:
+def set_update(set1: set[T], *others: Iterable[T]) -> set[T]:
     if len(others) == 0:
         return set1
 
@@ -238,7 +244,7 @@ def set_update(set1: set[Any], *others: Iterable[Any]) -> set[Any]:
                 set1.add(x)
 
 
-def set_difference(set1: set[Any], *others: Iterable[Any], cls=set) -> Any:
+def set_difference(set1: set[T], *others: Iterable[T], cls: type = set) -> set[T]:
     if len(others) == 0:
         return set1.copy()
 
@@ -259,20 +265,20 @@ def set_difference(set1: set[Any], *others: Iterable[Any], cls=set) -> Any:
     return cls(difference_set)
 
 
-def set_difference_update(set1: set[Any], *others: Iterable[Any]) -> None:
+def set_difference_update(set1: set[T], *others: Iterable[T]) -> None:
     result = set1.difference(*others)
     set1.clear()
     set1.update(result)
 
 
 def assert_dict_equal(
-    self_: Any, d1: dict[Any, Any], d2: dict[Any, Any], msg: str | None = None
+    self_: Any, d1: dict[T, U], d2: dict[T, U], msg: str | None = None
 ) -> None:
     self_.assertTrue(d1 == d2, msg)
 
 
 def assert_multi_line_equal(
-    self_: Any, first: Any, second: Any, msg: str | None = None
+    self_: Any, first: T, second: T, msg: str | None = None
 ) -> None:
     return self_.assertTrue(first == second, msg)
 
@@ -280,10 +286,10 @@ def assert_multi_line_equal(
 # The original impl. uses difflib
 def assert_sequence_equal(
     self_: Any,
-    seq1: Sequence[Any],
-    seq2: Sequence[Any],
+    seq1: Sequence[T],
+    seq2: Sequence[T],
     msg: str | None = None,
-    seq_type: Any | None = None,
+    seq_type: type | None = None,
 ) -> None:
     return self_.assertTrue(seq1 == seq2, msg)
 
@@ -295,14 +301,16 @@ def getattr_and_trace(*args: Any, **kwargs: Any) -> Any:
     return fn(*args[2:], **kwargs)
 
 
-def mapping_get(obj: Mapping[Any, Any], key: Any, value: Any | None = None, /) -> Any:
+def mapping_get(obj: Mapping[T, U], key: T, value: U | None = None, /) -> U | None:
     try:
         return obj.__getitem__(key)
     except KeyError:
         return value
 
 
-def instantiate_user_defined_class_object(cls, /, *args: Any, **kwargs: Any) -> Any:
+def instantiate_user_defined_class_object(
+    cls: type[T], /, *args: Any, **kwargs: Any
+) -> T:
     obj = cls.__new__(cls, *args, **kwargs)
 
     # Only call __init__ if the object is an instance of the class
@@ -312,7 +320,12 @@ def instantiate_user_defined_class_object(cls, /, *args: Any, **kwargs: Any) -> 
     return obj
 
 
-def mutable_mapping_update(self, data: Any = (), /, **kwargs: Any) -> None:
+def mutable_mapping_update(
+    self,
+    data: Mapping[T, U] | Iterable[tuple[T, U]] = (),
+    /,
+    **kwargs: Any,
+) -> None:
     if isinstance(data, Mapping):
         # Merge standard mapping with PyMapping_Items
         for key, value in data.items():
@@ -347,7 +360,12 @@ def mutable_mapping_update(self, data: Any = (), /, **kwargs: Any) -> None:
 
 
 # Used with something like dict(obj)
-def construct_dict(cls, data: Any = (), /, **kwargs: Any) -> Any:
+def construct_dict(
+    cls: type[T],
+    data: Mapping[object, object] | Iterable[tuple[object, object]] = (),
+    /,
+    **kwargs: Any,
+) -> T:
     self = cls.__new__(cls)
     mutable_mapping_update(self, data, **kwargs)
     return self
@@ -407,7 +425,7 @@ def predicate(obj: object) -> bool:
     return False
 
 
-def cmp_eq(a: Any, b: Any) -> bool:
+def cmp_eq(a: object, b: object) -> bool:
     # Note that the commented `is` check should ideally be removed. This is a
     # CPython optimization that skips the __eq__ checks it the obj id's are
     # same. But, these lines adds many `is` nodes in the Fx graph for
@@ -422,7 +440,7 @@ def cmp_eq(a: Any, b: Any) -> bool:
     return result is not NotImplemented and result
 
 
-def cmp_ne(a: Any, b: Any) -> bool:
+def cmp_ne(a: object, b: object) -> bool:
     # Check if __ne__ is overridden
     if isinstance(type(a).__ne__, types.FunctionType):
         result = a.__ne__(b)

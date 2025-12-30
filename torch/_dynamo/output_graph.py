@@ -1216,7 +1216,6 @@ class OutputGraph(OutputGraphCommon):
                 return VariableTracker.build(
                     self,  # type: ignore[arg-type]
                     target,
-                    # pyrefly: ignore[unexpected-keyword]
                     ConstantSource(source_name=module_key),
                 )
 
@@ -3447,7 +3446,6 @@ class SubgraphTracer(fx.Tracer):
                         e_source = None
                         if source:
                             e_source = GetItemSource(
-                                # pyrefly: ignore[unexpected-keyword]
                                 base=source,
                                 index=i,
                                 index_is_slice=False,

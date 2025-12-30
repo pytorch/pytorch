@@ -1,6 +1,6 @@
 # A Pyrefly configuration for PyTorch
 # Based on https://github.com/pytorch/pytorch/blob/main/mypy.ini
-python-version = "3.10"
+python-version = "3.12"
 
 project-includes = [
     "torch",
@@ -135,6 +135,9 @@ errors.bad-param-name-override = false
 # Might be a good idea to turn this on in future.
 errors.implicit-import = false
 errors.deprecated = false # re-enable after we've fix import formatting
+# Pyrefly struggles with these in Source() constructros so disable
+errors.bad-argument-count = false
+errors.unexpected-keyword = false
 
 permissive-ignores = true
 replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*"]
@@ -144,6 +147,9 @@ search-path = ["tools/experimental"]
 matches = "torch/_dynamo/**"
 # All errors enabled by (default)
 [sub-config.errors]
+# pyrefly can't handle kwargs used in Source so disable
+unexpected-keyword = false
+# pyrefly can't handle args from inheritance so disable
 bad-argument-count = false
 implicit-import = false
 implicit-any = true
