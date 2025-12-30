@@ -1034,8 +1034,8 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_block", &cudaDeviceProp::maxThreadsPerBlock)
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
-#ifndef USE_ROCM
-      // NVIDIA-only properties
+      .def_readonly(
+          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
       .def_property_readonly(
           "clock_rate",
           [](const cudaDeviceProp&) {
@@ -1056,19 +1056,16 @@ static void registerCudaDeviceProperties(PyObject* module) {
           })
       .def_readonly("memory_bus_width", &cudaDeviceProp::memoryBusWidth)
       .def_readonly(
-          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
+          "shared_memory_per_multiprocessor",
+          &cudaDeviceProp::sharedMemPerMultiprocessor)
+
+#ifndef USE_ROCM
+      // NVIDIA-only properties
       .def_readonly(
           "shared_memory_per_block_optin",
           &cudaDeviceProp::sharedMemPerBlockOptin)
-      .def_readonly(
-          "shared_memory_per_multiprocessor",
-          &cudaDeviceProp::sharedMemPerMultiprocessor)
 #endif
-#if USE_ROCM
-      // ROCm: expose shared_memory_per_block for shared memory based pruning
-      .def_readonly(
-          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
-#endif
+
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
       // HIP-only property; reuse name attribute for CUDA builds
