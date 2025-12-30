@@ -1026,20 +1026,27 @@ def forward(self, arg0_1):
         self.assertEqual(opt_f(x), foo(x))
 
     def test_opaque_obj_saved_for_backward(self):
+        # Verify that saving opaque objects for backward works and
+        # eager and compiled version give the same result.
         def foo(x, rng_state):
             return torch.ops._TestOpaqueObject.noise_inject_with_rng(x, rng_state)
 
         x = torch.randn(3, 3, requires_grad=True)
         rng_state = RNGState(0)
+
+        eager_x = x.detach().clone()
+        eager_x.requires_grad_(True)
+        eager_rng_state = RNGState(0)
+
+        # Compiled
         opt_f = torch.compile(foo, fullgraph=True)
         output = opt_f(x, rng_state)
         output.sum().backward()
 
-        eager_rng_state = RNGState(0)
-        eager_x = x.detach().clone()
-        eager_x.requires_grad_(True)
+        # Eager
         eager_output = foo(eager_x, eager_rng_state)
         eager_output.sum().backward()
+
         self.assertTrue(torch.allclose(eager_x.grad, x.grad))
         self.assertTrue(torch.allclose(eager_output, output))
 
