@@ -9361,6 +9361,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
             check_state()
+            assert torch.are_deterministic_algorithms_enabled() is True
             torch.use_deterministic_algorithms(False, warn_only=False)
             return x + 1
 
