@@ -43,7 +43,7 @@ from .user_defined import UserDefinedObjectVariable, UserDefinedVariable
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
@@ -91,7 +91,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
     def call_function(  # pyrefly: ignore[bad-override]
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: "list[VariableTracker]",
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
@@ -152,7 +152,9 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         from torch._higher_order_ops.torchbind import call_torchbind
 
         from ..source import AttrSource
@@ -213,7 +215,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     )
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: Iterable[Any],
         kwargs: dict[str, Any],

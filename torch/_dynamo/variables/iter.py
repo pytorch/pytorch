@@ -38,7 +38,7 @@ from .constant import ConstantVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 MAX_ITERATOR_LIMIT = 100 * 1024  # 100k
@@ -57,7 +57,7 @@ class ItertoolsVariable(VariableTracker):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence["VariableTracker"],
         kwargs: "dict[str, VariableTracker]",
     ) -> "VariableTracker":
@@ -227,7 +227,7 @@ class IteratorVariable(VariableTracker):
     def __init__(self, **kwargs: Any) -> None:
         super().__init__(**kwargs)
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def next_variable(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         unimplemented(
             gb_type="Unimplemented next() call",
             context=f"next({self})",
@@ -240,14 +240,14 @@ class IteratorVariable(VariableTracker):
     # Example of safe eager unpacking: list(map(f, seq))
     # Example of unsafe eager unpacking: list(islice(map(f, seq), 5))
     def force_unpack_var_sequence(
-        self, tx: "InstructionTranslator"
+        self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
         result: list[VariableTracker] = []
         self.force_apply_to_var_sequence(tx, result.append)
         return result
 
     def force_apply_to_var_sequence(
-        self, tx: "InstructionTranslator", fn: Callable[[Any], Any]
+        self, tx: "InstructionTranslatorBase", fn: Callable[[Any], Any]
     ) -> None:
         while True:
             try:
@@ -258,11 +258,11 @@ class IteratorVariable(VariableTracker):
 
     # don't call force_unpack_var_sequence since it can mutate
     # IteratorVariable state!
-    def has_force_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+    def has_force_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
         return True
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
         if name == "__iter__" or name == "__next__":
             return variables.ConstantVariable.create(True)
@@ -270,7 +270,7 @@ class IteratorVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -301,7 +301,7 @@ class ObjectIteratorVariable(IteratorVariable):
         self.obj = obj
         self.generator_exhausted = False
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def next_variable(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         if self.generator_exhausted:
             raise_observed_exception(StopIteration, tx)
 
@@ -320,7 +320,7 @@ class RepeatIteratorVariable(IteratorVariable):
         self.item = item
 
     # Repeat needs no mutation, clone self
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def next_variable(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         return self.item
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -351,7 +351,7 @@ class CountIteratorVariable(IteratorVariable):
         self.item = item
         self.step = step
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def next_variable(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         assert self.is_mutable()
         old_item = self.item
         tx.output.side_effects.mutation(self)
@@ -399,14 +399,14 @@ class ZipVariable(IteratorVariable):
     def python_type(self) -> type[zip]:  # type: ignore[type-arg]
         return zip
 
-    def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
         return all(
             isinstance(it, list) or it.has_unpack_var_sequence(tx)
             for it in self.iterables
         )
 
     def unpack_var_sequence(
-        self, tx: "InstructionTranslator"
+        self, tx: "InstructionTranslatorBase"
     ) -> list["VariableTracker"]:
         assert self.has_unpack_var_sequence(tx)
         iterables = []
@@ -419,7 +419,7 @@ class ZipVariable(IteratorVariable):
         zipped = zip(*iterables, **kwargs)
         return [variables.TupleVariable(list(var)) for var in zipped]
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def next_variable(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         assert self.is_mutable()
 
         if len(self.iterables) == 0:
@@ -510,10 +510,10 @@ class MapVariable(ZipVariable):
     def python_type(self) -> type:
         return map
 
-    def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
         return False
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def next_variable(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         args = super().next_variable(tx)
         return self.fn.call_function(tx, args.items, {})  # type: ignore[attr-defined]
 
@@ -564,13 +564,13 @@ class FilterVariable(IteratorVariable):
     def python_type(self) -> type:
         return filter
 
-    def has_unpack_var_sequence(self, tx: "InstructionTranslator") -> bool:
+    def has_unpack_var_sequence(self, tx: "InstructionTranslatorBase") -> bool:
         return isinstance(self.iterable, list) or self.iterable.has_unpack_var_sequence(
             tx
         )
 
     def unpack_var_sequence(
-        self, tx: "InstructionTranslator"
+        self, tx: "InstructionTranslatorBase"
     ) -> list["VariableTracker"]:
         assert self.has_unpack_var_sequence(tx)
         it = None
@@ -581,7 +581,7 @@ class FilterVariable(IteratorVariable):
         filtered = self.fn.call_function(tx, it, {})
         return [variables.TupleVariable([filtered])]
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def next_variable(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         def _next() -> VariableTracker:
             old_index = self.index
             if isinstance(self.iterable, list):

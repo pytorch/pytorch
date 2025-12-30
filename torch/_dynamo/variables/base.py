@@ -32,7 +32,7 @@ from ..utils import cmp_name_to_op_mapping, istype
 
 if TYPE_CHECKING:
     from ..codegen import PyCodegen
-    from ..symbolic_convert import InstructionTranslator
+    from ..symbolic_convert import InstructionTranslatorBase
     from .constant import ConstantVariable
     from .functions import UserFunctionVariable
 
@@ -405,7 +405,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
 
     # TODO[@lucaskabela] - change this type to `InstructionTranslatorBase`
     # and cascade that (large blast radius)
-    def const_getattr(self, tx: "InstructionTranslator", name: str) -> Any:
+    def const_getattr(self, tx: "InstructionTranslatorBase", name: str) -> Any:
         """getattr(self, name) returning a python constant"""
         raise NotImplementedError
 
@@ -417,7 +417,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Return True for TensorVariable instances"""
         return False
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
         value = self.const_getattr(tx, name)
         if not variables.ConstantVariable.is_literal(value):
@@ -487,7 +489,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             fn(v)
 
     def call_obj_hasattr(
-        self, tx: "InstructionTranslator", name: str
+        self, tx: "InstructionTranslatorBase", name: str
     ) -> "ConstantVariable":
         unimplemented(
             gb_type="Unsupported hasattr call",

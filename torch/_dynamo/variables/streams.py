@@ -22,7 +22,7 @@ from .lazy import LazyVariableTracker
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
     from ..codegen import PyCodegen
 
@@ -246,7 +246,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
 
     @staticmethod
     def create(
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         stream_to_enter: "StreamVariable",
         **kwargs: dict[str, Any],
     ) -> "StreamContextVariable":
@@ -264,7 +264,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         )
 
     def enter(
-        self, tx: "InstructionTranslator", *args: VariableTracker
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are entering the target, and leaving the initial stream
@@ -272,7 +272,7 @@ class StreamContextVariable(FxTracebackAnnotateVariable):
         return super().enter(tx)
 
     def exit(
-        self, tx: "InstructionTranslator", *args: VariableTracker
+        self, tx: "InstructionTranslatorBase", *args: VariableTracker
     ) -> VariableTracker:
         # to stream, from stream is the order of the arguments
         # we are leaving the target, and entering the initial stream
@@ -315,7 +315,7 @@ class StreamVariable(StreamContextVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -439,7 +439,7 @@ class EventVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -501,7 +501,7 @@ class EventVariable(VariableTracker):
 
     @staticmethod
     def _get_stream_arg(
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> "StreamVariable":

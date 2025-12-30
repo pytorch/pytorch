@@ -111,10 +111,7 @@ if typing.TYPE_CHECKING:
     )
 
     from torch._dynamo.replay_record import ExecutionRecord
-    from torch._dynamo.symbolic_convert import (
-        InstructionTranslator,
-        InstructionTranslatorBase,
-    )
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
     from torch._dynamo.variables.base import VariableTracker
     from torch._prims_common import DeviceLikeType
     from torch._subclasses import FakeTensorMode
@@ -2859,7 +2856,7 @@ def raise_args_mismatch(
 def iter_contains(
     items: Iterable[Any],
     search: Any,
-    tx: InstructionTranslator,
+    tx: InstructionTranslatorBase,
     check_tensor_identity: bool = False,
 ) -> Any:
     from .variables import BuiltinVariable, ConstantVariable

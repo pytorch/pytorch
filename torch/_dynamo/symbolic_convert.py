@@ -468,7 +468,7 @@ def stack_op(fn: Callable[..., object]) -> Callable[..., Any]:
     fn_var = BuiltinVariable(fn)
 
     @functools.wraps(fn)
-    def impl(self: InstructionTranslator, inst: Instruction) -> None:
+    def impl(self: InstructionTranslatorBase, inst: Instruction) -> None:
         self.push(fn_var.call_function(self, self.popn(nargs), {}))
 
     return impl
