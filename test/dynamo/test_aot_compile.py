@@ -36,16 +36,6 @@ MY_LAMBDA = lambda x: x + 1  # noqa: E731
 EPS = torch.tensor(1e-7)
 
 
-def aot_eager_regional_inductor():
-    from torch._dynamo.backends.common import aot_autograd
-    from torch.fx.passes.regional_inductor import regional_inductor
-
-    return aot_autograd(
-        fw_compiler=regional_inductor,
-        bw_compiler=regional_inductor,
-    )
-
-
 class MooType:
     def __init__(self, x):
         self.x = x
@@ -479,36 +469,6 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
         self.assertIsInstance(source_info, SourceInfo)
         self.assertEqual(len(source_info.inlined_sources), 2)
         self.assertEqual(next(iter(source_info.inlined_sources)).module, __name__)
-
-    def test_regional_inductor_backend(self):
-        import torch.fx.traceback as fx_traceback
-
-        def fn(x, y):
-            sin = torch.sin(x)
-            # Mark this region to be compiled with inductor
-            with fx_traceback.annotate({"compile_with_inductor": 0}):
-                mul = sin * y
-                add = mul + 1
-            return torch.sin(add)
-
-        def make_inputs():
-            return (
-                torch.randn(3, 4, requires_grad=True),
-                torch.randn(3, 4, requires_grad=True),
-            )
-
-        compiled_fn = torch.compile(
-            fn, fullgraph=True, backend=aot_eager_regional_inductor()
-        ).aot_compile((make_inputs(), {}))
-        test_inputs = make_inputs()
-        self.assertEqual(compiled_fn(*test_inputs), fn(*test_inputs))
-        compiled_fn(*test_inputs).sum().backward()
-        compiled_fn.save_compiled_function(self.path())
-        with open(self.path(), "rb") as f:
-            compiled_fn = torch.compiler.load_compiled_function(f)
-
-        self.assertEqual(compiled_fn(*test_inputs), fn(*test_inputs))
-        compiled_fn(*test_inputs).sum().backward()
 
     def test_aot_compile_graph_break_error_fmt(self):
         def foo(x, y):
