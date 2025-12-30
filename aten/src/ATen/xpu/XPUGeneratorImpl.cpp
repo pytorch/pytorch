@@ -186,7 +186,6 @@ uint64_t XPUGeneratorImpl::get_offset() const {
 }
 
 uint64_t XPUGeneratorImpl::current_seed() const {
-  at::xpu::assertNotCapturing("Cannot call XPUGeneratorImpl::current_seed");
   return state_->seed_;
 }
 
@@ -221,8 +220,6 @@ c10::intrusive_ptr<c10::TensorImpl> XPUGeneratorImpl::get_state() const {
 }
 
 void XPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
-  at::xpu::assertNotCapturing(
-      "Please ensure to utilize the XPUGeneratorImpl::set_state_index method during capturing.");
   constexpr size_t seed_size = sizeof(uint64_t);
   constexpr size_t offset_size = sizeof(uint64_t);
   constexpr size_t total_size = seed_size + offset_size;
@@ -250,11 +247,19 @@ void XPUGeneratorImpl::set_state(const c10::TensorImpl& new_state) {
 
 void XPUGeneratorImpl::set_philox_offset_per_thread(uint64_t offset) {
   TORCH_CHECK(offset % 4 == 0, "offset must be a multiple of 4");
-  state_->philox_offset_per_thread_ = offset;
+  if (C10_LIKELY(at::xpu::currentStreamCaptureStatus() == at::xpu::CaptureStatus::Executing)) {
+    state_->philox_offset_per_thread_ = offset;
+  } else {
+    state_->offset_intragraph_ = offset;
+  }
 }
 
 uint64_t XPUGeneratorImpl::philox_offset_per_thread() const {
-  return state_->philox_offset_per_thread_;
+  if (C10_LIKELY(at::xpu::currentStreamCaptureStatus() == at::xpu::CaptureStatus::Executing)) {
+    return state_->philox_offset_per_thread_;
+  } else {
+    return state_->offset_intragraph_;
+  }
 }
 
 void XPUGeneratorImpl::register_graph(xpu::XPUGraph* graph) {
@@ -266,6 +271,11 @@ void XPUGeneratorImpl::unregister_graph(xpu::XPUGraph* graph) {
   state_->unregister_graph(graph);
 }
 
+// 1, During graph capture, constructs a PhiloxXpuState
+//    [extragraph seed ptr, extragraph offset ptr, intragraph offset] on host
+// 2, Before each replay, the extragraph seed and offset tensors will be updated
+//    extragraph offset = philox_offset_per_thread_ + intragraph offset
+// 3, During replay, kernel will compute final offset = *extragraph offset ptr + intragraph offset
 PhiloxXpuState XPUGeneratorImpl::philox_xpu_state(uint64_t increment) {
   if (at::xpu::currentStreamCaptureStatus() !=
       at::xpu::CaptureStatus::Executing) {
