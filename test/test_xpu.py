@@ -142,6 +142,20 @@ class TestXpu(TestCase):
         )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
         self.assertEqual(len(device_properties.uuid.bytes), 16)
 
+    def test_get_device_capability(self):
+        device_capability = torch.xpu.get_device_capability()
+        acc_capability = torch.accelerator.get_device_capability()
+        supported_dtypes = acc_capability["supported_dtypes"]
+        self.assertIn(torch.bool, supported_dtypes)
+        self.assertIn(torch.int, supported_dtypes)
+        self.assertIn(torch.float, supported_dtypes)
+        if device_capability["has_fp16"]:
+            self.assertIn(torch.float16, supported_dtypes)
+        if device_capability["has_fp64"]:
+            self.assertIn(torch.double, supported_dtypes)
+        if torch.xpu.is_bf16_supported(including_emulation=True):
+            self.assertIn(torch.bfloat16, supported_dtypes)
+
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
         stderr = TestCase.runWithPytorchAPIUsageStderr(
@@ -439,6 +453,28 @@ if __name__ == "__main__":
         torch.xpu.memory.empty_cache()
         with self.assertRaises(torch.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
+
+    @serialTest()
+    def test_1mb_allocation_uses_small_block(self):
+        gc.collect()
+        torch.xpu.empty_cache()
+        prev_allocated = torch.xpu.memory_allocated()
+        prev_reserved = torch.xpu.memory_reserved()
+
+        # Allocate a 1MB float32 tensor
+        one_mb = 1024 * 1024
+        a = torch.ones(one_mb // 4, device="xpu")
+
+        b = a.clone()
+        for _ in range(5):
+            b = b.clone() + 1
+
+        torch.xpu.synchronize()
+        current_allocated = torch.xpu.memory_allocated()
+        current_reserved = torch.xpu.memory_reserved()
+        # Two live tensors remain (a and b), each 1MB
+        self.assertEqual(current_allocated, prev_allocated + 2 * 1024 * 1024)
+        self.assertEqual(current_reserved, prev_reserved + 4 * 1024 * 1024)  # 4MB
 
     @serialTest()
     def test_set_per_process_memory_fraction(self):

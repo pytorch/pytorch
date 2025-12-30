@@ -119,6 +119,27 @@ def is_compute_node(n: fx.Node) -> bool:
     )
 
 
+def estimate_mem_bound_runtime_ms(node: fx.Node) -> float:
+    """Estimate runtime for a memory-bound node based on input/output bytes.
+
+    Returns 0 for view nodes (no memory cost).
+    """
+    from torch._inductor.fx_passes.fusion_regions import is_view_node
+    from torch.utils._pytree import tree_flatten
+    from torch.utils._runtime_estimation import get_transfer_time
+
+    if is_view_node(node):
+        return 0.0
+
+    input_vals = [inp.meta.get("val") for inp in node.all_input_nodes]
+    output_vals = [node.meta.get("val")]
+    flat_inputs, _ = tree_flatten(input_vals)
+    flat_outputs, _ = tree_flatten(output_vals)
+
+    transfer_time_ns = get_transfer_time(flat_inputs, flat_outputs)
+    return transfer_time_ns / 1e6
+
+
 def get_hint(x: int | torch.SymInt) -> int | None:
     if isinstance(x, int):
         return x
@@ -286,6 +307,7 @@ class OverlapScheduler:
         max_memory_increase_ratio: float | None = 0.05,
         log_final_collectives_estimations: bool = False,
         bucket_exposed_first: bool = True,
+        enable_fusion_regions: bool = False,
     ):
         self.gm = gm
         self.graph = gm.graph
@@ -299,6 +321,21 @@ class OverlapScheduler:
         self.collective_estimator = collective_estimator
         self.log_final_collectives_estimations = log_final_collectives_estimations
         self.bucket_exposed_first = bucket_exposed_first
+
+        # Build and collapse fusion regions FIRST so all subsequent operations
+        # work on the collapsed graph where fused ops are atomic units
+        self.region_of: dict[fx.Node, Any] = {}
+        if enable_fusion_regions:
+            from torch._inductor.fx_passes.fusion_regions import (
+                build_fusion_regions,
+                collapse_fusion_regions,
+            )
+
+            self.region_of = build_fusion_regions(self.gm)
+            if self.region_of:
+                self.region_of = collapse_fusion_regions(self.gm, self.region_of)
+                # fuse_by_partitions replaces gm.graph, so we need to update our reference
+                self.graph = gm.graph
 
         # Build structures
         stable_topological_sort(self.graph)
@@ -737,11 +774,22 @@ class OverlapScheduler:
 
         self._reorder_graph()
 
-        if self.collective_bucketing:
-            self._bucket_collectives()
-        elif self.insert_overlap_deps:
-            # If not bucketing, add effect tokens to preserve hiding dependencies
-            self._add_effect_tokens_for_overlap()
+        # Finalize: bucket collectives (if enabled), inline fusions, apply deps
+        from torch._inductor.fx_passes.overlap_preserving_bucketer import (
+            finalize_overlap_scheduling,
+        )
+
+        finalize_overlap_scheduling(
+            gm=self.gm,
+            collective_info=self.collective_info,
+            scheduled=self.scheduled,
+            collective_bucketing=self.collective_bucketing,
+            insert_overlap_deps=self.insert_overlap_deps,
+            max_bucket_memory_gb=2.0,
+            max_coll_distance=self.max_node_distance,
+            region_of=self.region_of,
+            bucket_exposed_first=self.bucket_exposed_first,
+        )
 
         if self.log_final_collectives_estimations:
             from torch._inductor.fx_passes.node_runtime_estimation import (
@@ -754,44 +802,28 @@ class OverlapScheduler:
 
         return self.gm
 
-    def _add_effect_tokens_for_overlap(self) -> None:
-        """
-        Add effect tokens to preserve hiding dependency relationships when not bucketing.
-
-        This ensures that communication-compute overlap is preserved through effect tokens
-        when overlap preserving bucketing is not enabled.
-        """
-        from torch._inductor.fx_passes.control_dependencies import (
-            preserve_node_ordering,
-        )
-
-        # Collect hiding dependencies: hiding_node -> collective_start, wait -> hiding_node
-        additional_deps: dict[fx.Node, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
-
-        for start_node, info in self.collective_info.items():
-            if info.is_exposed:
-                continue
-            for hn in info.hiding_nodes:
-                # Compute depends on collective start (compute must wait for collective to start)
-                additional_deps[hn].add(start_node)
-                # Wait depends on compute (wait must wait for compute to finish)
-                additional_deps[info.wait_node].add(hn)
-
-        # Apply effect tokens to preserve these dependencies
-        if additional_deps:
-            preserve_node_ordering(self.graph, additional_deps)
-
     def get_non_collective_runtime_estimate(self, node: fx.Node) -> float | None:
         """Get runtime estimation for a node in ms. Returns None if no estimation is available."""
-
-        # TODO: non custom estimation of aten nodes, potentially requires notion of fusion group
         if is_compute_node(node):
             return benchmark_node(node, self.custom_runtime_estimation)
 
-        if self.custom_runtime_estimation is None:
+        # Use precomputed cost for fusion region call_module nodes
+        # This takes priority even over custom estimation since fusion regions
+        # have already computed their cost based on their contents
+        if node in self.region_of:
+            return self.region_of[node].cost_ms
+
+        if self.custom_runtime_estimation is not None:
+            if (est := self.custom_runtime_estimation(node, None)) is not None:
+                return est
+            # Custom estimation provided but returned None - don't fall through to fusible estimation
             return None
 
-        return self.custom_runtime_estimation(node, None)
+        # assume any node without flop counter is mem bound
+        if node.op == "call_function":
+            return estimate_mem_bound_runtime_ms(node)
+
+        return None
 
     def _reduce_exposed_time_of_in_flight_collectives(
         self,
@@ -1345,6 +1377,7 @@ def schedule_overlap_bucketing(
     max_memory_increase_ratio: float | None = 0.05,
     log_final_collectives_estimations: bool = False,
     bucket_exposed_first: bool = True,
+    enable_fusion_regions: bool = False,
 ) -> torch.fx.GraphModule:
     """Schedule nodes to maximize compute-collective overlap.
 
@@ -1367,6 +1400,7 @@ def schedule_overlap_bucketing(
         max_memory_increase_gb: Maximum GB increase above baseline memory (absolute cap). If None, no absolute limit.
         max_memory_increase_ratio: Maximum increase as ratio of baseline peak memory. If None, no ratio limit.
             Uses minimum of absolute and ratio limits when both are specified.
+        enable_fusion_regions: Enable fusion region detection and cost estimation for fusible ops.
     """
     return OverlapScheduler(
         gm,
@@ -1382,6 +1416,7 @@ def schedule_overlap_bucketing(
         max_memory_increase_ratio=max_memory_increase_ratio,
         log_final_collectives_estimations=log_final_collectives_estimations,
         bucket_exposed_first=bucket_exposed_first,
+        enable_fusion_regions=enable_fusion_regions,
     ).run()
 
 
@@ -1412,6 +1447,7 @@ def schedule_overlap_bucketing_from_inductor_configs(
         "max_coll_distance",
         "log_final_collectives_estimations",
         "bucket_exposed_first",
+        "enable_fusion_regions",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key, None)) is not None:

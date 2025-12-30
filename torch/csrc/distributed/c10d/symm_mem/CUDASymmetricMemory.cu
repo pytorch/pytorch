@@ -222,7 +222,7 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
   c10::cuda::CUDAGuard guard(local_device_idx_);
   barrier_kernel<<<
       1,
-      at::cuda::warp_size(),
+      max(at::cuda::warp_size(), world_size_),
       0,
       at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),

@@ -6,7 +6,8 @@
 #include <cudnn_frontend.h>
 #endif
 
-#if defined(USE_ROCM) || !AT_CUDNN_ENABLED() || \
+#if defined(USE_ROCM) || !AT_CUDNN_ENABLED() ||         \
+    (defined(CUDNN_VERSION) && CUDNN_VERSION < 8900) || \
     (defined(CUDNN_FRONTEND_VERSION) && CUDNN_FRONTEND_VERSION < 10100)
 namespace at {
 namespace native {
@@ -121,7 +122,7 @@ void run_cudnn_SDP_bprop_nestedtensor(
 } // namespace native
 } // namespace at
 
-#else // AT_CUDNN_ENABLED && defined(CUDNN_VERSION)
+#else // AT_CUDNN_ENABLED && defined(CUDNN_VERSION) && CUDNN_VERSION >= 8900
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
