@@ -577,7 +577,7 @@ class TestArgmin(TestCase):
     def test_combinations(self, data):
         arr, pos = data
 
-        if np.asarray(arr).dtype.kind in "c":
+        if np.asarray(arr).dtype.kind == "c":
             pytest.xfail(reason="'min_values_cpu' not implemented for 'ComplexDouble'")
 
         #        with suppress_warnings() as sup:

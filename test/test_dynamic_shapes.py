@@ -1614,7 +1614,7 @@ class TestSymNumberMagicMethods(TestCase):
         ) and fn in sym_node.only_float_magic_methods:
             self.skipTest(f"{fn} is not an int method")
 
-        if second_type == "float" and fn in ["mod"]:
+        if second_type == "float" and fn == "mod":
             self.skipTest(f"{fn} only handles int")
 
         if fn in sym_node.bitwise_ops and (first_type != "int" or second_type != "int"):
