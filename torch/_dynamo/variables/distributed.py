@@ -137,13 +137,11 @@ class WorldMetaClassVariable(DistributedVariable):
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "WORLD":
             assert self.source
-            # pyrefly: ignore[unexpected-keyword]
             source = AttrSource(base=self.source, member="WORLD")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return ProcessGroupVariable(self.value.WORLD)
         elif name == "NON_GROUP_MEMBER":
             assert self.source
-            # pyrefly: ignore[unexpected-keyword]
             source = AttrSource(base=self.source, member="NON_GROUP_MEMBER")
             install_guard(source.make_guard(GuardBuilder.ID_MATCH))
             return EnumVariable(self.value.NON_GROUP_MEMBER)
@@ -299,7 +297,6 @@ class DeviceMeshVariable(DistributedVariable):
         if name == "mesh_dim_names":
             source = self.source
             if source:
-                # pyrefly: ignore[unexpected-keyword]
                 source = AttrSource(base=source, member="mesh_dim_names")
             return VariableTracker.build(tx, self.value.mesh_dim_names, source)
         return super().var_getattr(tx, name)

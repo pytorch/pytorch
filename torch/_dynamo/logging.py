@@ -54,7 +54,7 @@ if not disable_progress:
         num_steps = 3
     except ImportError:
         num_steps = 2
-    pbar: Any = tqdm(total=num_steps, desc="torch.compile()", delay=0)
+    pbar = tqdm(total=num_steps, desc="torch.compile()", delay=0)
 
 
 def get_step_logger(logger: logging.Logger) -> Callable[..., None]:
