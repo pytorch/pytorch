@@ -5,7 +5,7 @@ import traceback
 from collections import namedtuple
 from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -36,7 +36,7 @@ from torch.utils._pytree import TreeSpec
 if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
-
+T = TypeVar("T")
 log = logging.getLogger(__name__)
 
 
@@ -105,8 +105,8 @@ def clean_nn_module_stack_and_source_fn(
     """
 
     def _process_nn_module_stack(
-        nn_module_stack: dict[str, tuple[str, Any]],
-    ) -> dict[str, tuple[str, Any]]:
+        nn_module_stack: dict[str, tuple[str, T]],
+    ) -> dict[str, tuple[str, T]]:
         if "L__self____export_root" in nn_module_stack:
             del nn_module_stack["L__self____export_root"]
 

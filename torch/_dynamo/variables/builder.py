@@ -1069,7 +1069,6 @@ class VariableBuilder:
             )
             return GetAttrVariable(
                 AutogradFunctionVariable(
-                    # pyrefly: ignore[unexpected-keyword]
                     value.__self__,
                     source=AttrSource(self.source, member="__self__"),
                 ),
@@ -1857,7 +1856,6 @@ class VariableBuilder:
             guards = []
             # type: ignore[attr-defined]
             for i, tensor_variable in enumerate(list_variable.items):
-                # pyrefly: ignore[unexpected-keyword]
                 source_i = GetItemSource(base=source, index=i, index_is_slice=False)
                 # access unpacked tensor from this list instead of from a lifted arg
                 self.tx.output.input_source_to_var[source_i] = tensor_variable
@@ -3224,7 +3222,6 @@ def handle_traced_output(
                     source = options["source"]
                     options_i = options.copy()
                     options_i["source"] = GetItemSource(
-                        # pyrefly: ignore[unexpected-keyword]
                         base=source,
                         index=i,
                         index_is_slice=False,
