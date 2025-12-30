@@ -82,9 +82,9 @@ class DictTests(torch._dynamo.test_case.TestCase):
 
             def forward(self, x):
                 val = x.sin()
-                if TensorDim.DDP in {"ddp"}:
+                if TensorDim.DDP == "ddp":
                     val += x.cos()
-                if "ddp" in {TensorDim.DDP}:
+                if "ddp" == TensorDim.DDP:
                     val += x.cos()
                 return val
 

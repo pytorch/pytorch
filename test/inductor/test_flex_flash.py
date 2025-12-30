@@ -6,7 +6,11 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
-from torch._inductor.kernel.flex.flex_flash_attention import ensure_flash_available
+from torch._inductor.kernel.flex.flex_flash_attention import (
+    _hierarchical_indexer_cute,
+    ensure_flash_available,
+    HierarchicalIndex,
+)
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
 from torch.nn.attention.flex_attention import (
@@ -228,11 +232,14 @@ def create_test_tensors(
     dtype=torch.float16,
     device="cuda",
     requires_grad=False,
+    num_heads_kv=None,
 ):
-    shape = (batch_size, num_heads, seq_len, dim)
-    q = torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
-    k = torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
-    v = torch.randn(shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    num_heads_kv = num_heads_kv if num_heads_kv is not None else num_heads
+    q_shape = (batch_size, num_heads, seq_len, dim)
+    kv_shape = (batch_size, num_heads_kv, seq_len, dim)
+    q = torch.randn(q_shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    k = torch.randn(kv_shape, device=device, dtype=dtype, requires_grad=requires_grad)
+    v = torch.randn(kv_shape, device=device, dtype=dtype, requires_grad=requires_grad)
     return q, k, v
 
 
@@ -277,6 +284,7 @@ def cuda_kernel_profiler(kernel_pattern="flash_attncute"):
 
 def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
     compiled_fn = torch.compile(flex_attention)
+    enable_gqa = q.shape[1] != k.shape[1]
 
     out_ref_fp32 = flex_attention(
         q.to(torch.float32),
@@ -284,6 +292,7 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
         v.to(torch.float32),
         score_mod=score_mod,
         block_mask=block_mask,
+        enable_gqa=enable_gqa,
     ).to(q.dtype)
 
     out_flash = compiled_fn(
@@ -292,6 +301,7 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
         v,
         score_mod=score_mod,
         block_mask=block_mask,
+        enable_gqa=enable_gqa,
         kernel_options={"BACKEND": "FLASH"},
     )
     out_triton = compiled_fn(
@@ -300,6 +310,7 @@ def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
         v,
         score_mod=score_mod,
         block_mask=block_mask,
+        enable_gqa=enable_gqa,
         kernel_options={"BACKEND": "TRITON"},
     )
 
@@ -359,6 +370,7 @@ class ScoreModCase:
     score_mod_factory: Callable[[torch.dtype, str], Callable | None]
     batch_size: int = 2
     num_heads: int = 4
+    num_heads_kv: int | None = None
     seq_len: int = 512
     dim: int = 64
     requires_grad: bool = False
@@ -370,6 +382,7 @@ class MaskModCase:
     mask_mod_factory: Callable[[torch.dtype, str], Callable]
     batch_size: int = 2
     num_heads: int = 4
+    num_heads_kv: int | None = None
     block_mask_num_heads: int | None = None
     seq_len: int = 512
     dim: int = 64
@@ -496,6 +509,62 @@ SCORE_MOD_CASES = [
         seq_len=257,
         requires_grad=True,
     ),
+    ScoreModCase(
+        "gqa_basic",
+        lambda _dtype, _device: None,
+        num_heads=8,
+        num_heads_kv=2,
+    ),
+    ScoreModCase(
+        "gqa_causal",
+        lambda _dtype, _device: _causal,
+        num_heads=8,
+        num_heads_kv=2,
+    ),
+    ScoreModCase(
+        "mqa_basic",
+        lambda _dtype, _device: None,
+        num_heads=8,
+        num_heads_kv=1,
+    ),
+    ScoreModCase(
+        "mqa_causal",
+        lambda _dtype, _device: _causal,
+        num_heads=8,
+        num_heads_kv=1,
+    ),
+    ScoreModCase(
+        "backward_gqa_basic",
+        lambda _dtype, _device: None,
+        num_heads=8,
+        num_heads_kv=2,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_gqa_times_two",
+        lambda _dtype, _device: _times_two,
+        num_heads=8,
+        num_heads_kv=2,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_mqa_basic",
+        lambda _dtype, _device: None,
+        num_heads=8,
+        num_heads_kv=1,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    ScoreModCase(
+        "backward_mqa_times_two",
+        lambda _dtype, _device: _times_two,
+        num_heads=8,
+        num_heads_kv=1,
+        seq_len=257,
+        requires_grad=True,
+    ),
 ]
 
 
@@ -571,6 +640,73 @@ MASK_MOD_CASES = [
     ),
 ]
 
+GQA_MQA_BLOCK_MASK_CASES = [
+    MaskModCase(
+        "gqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=1,
+    ),
+    MaskModCase(
+        "gqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=8,
+    ),
+    MaskModCase(
+        "backward_gqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=1,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "backward_gqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=8,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "mqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=1,
+    ),
+    MaskModCase(
+        "mqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=8,
+    ),
+    MaskModCase(
+        "backward_mqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=1,
+        seq_len=257,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "backward_mqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=8,
+        seq_len=257,
+        requires_grad=True,
+    ),
+]
+
 
 @unittest.skipIf(
     not ensure_flash_available(), "Flash attention (CUTE) library is not available"
@@ -582,6 +718,7 @@ class TestFlexFlash(InductorTestCase):
         q, k, v = create_test_tensors(
             batch_size=case.batch_size,
             num_heads=case.num_heads,
+            num_heads_kv=case.num_heads_kv,
             seq_len=case.seq_len,
             dim=case.dim,
             dtype=dtype,
@@ -606,6 +743,44 @@ class TestFlexFlash(InductorTestCase):
         q, k, v = create_test_tensors(
             batch_size=case.batch_size,
             num_heads=case.num_heads,
+            num_heads_kv=case.num_heads_kv,
+            seq_len=case.seq_len,
+            dim=case.dim,
+            dtype=dtype,
+            device=device,
+            requires_grad=case.requires_grad,
+        )
+        flash_vs_triton(
+            q,
+            k,
+            v,
+            score_mod=(
+                case.score_mod_factory(dtype, device)
+                if case.score_mod_factory
+                else None
+            ),
+            block_mask=_create_block_mask_for_device(
+                case.mask_mod_factory(dtype, device),
+                case.batch_size,
+                case.block_mask_num_heads or case.num_heads,
+                case.seq_len,
+                case.seq_len,
+                device=device,
+            ),
+        )
+
+    @dtypes(torch.float16, torch.bfloat16)
+    @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
+    def test_flash_attention_gqa_mqa_block_mask_cases(self, device, dtype, case):
+        if case.requires_grad:
+            major, _ = torch.cuda.get_device_capability()
+            if major != 10:
+                self.skipTest("block sparse only supported on blackwell for now")
+
+        q, k, v = create_test_tensors(
+            batch_size=case.batch_size,
+            num_heads=case.num_heads,
+            num_heads_kv=case.num_heads_kv,
             seq_len=case.seq_len,
             dim=case.dim,
             dtype=dtype,
@@ -796,6 +971,210 @@ class TestFlexFlash(InductorTestCase):
 
 
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
+
+
+class TestHierarchicalIndex(InductorTestCase):
+    def test_hierarchical_index_preserves_args(self):
+        from sympy import Symbol
+
+        b = Symbol("b")
+        q_idx = Symbol("q_idx")
+        idx = HierarchicalIndex(b, q_idx)
+
+        self.assertIsInstance(idx, HierarchicalIndex)
+        self.assertEqual(idx.args, (b, q_idx))
+
+    def test_hierarchical_indexer_single_dim_no_wrap(self):
+        from sympy import Symbol
+
+        indexer = _hierarchical_indexer_cute(size=[10])
+        q_idx = Symbol("q_idx")
+
+        self.assertEqual(indexer([q_idx]), q_idx)
+
+    def test_hierarchical_indexer_multi_dim_wraps(self):
+        from sympy import Symbol
+
+        indexer = _hierarchical_indexer_cute(size=[4, 128])
+        b = Symbol("b")
+        q_idx = Symbol("q_idx")
+
+        result = indexer([b, q_idx])
+
+        self.assertIsInstance(result, HierarchicalIndex)
+        self.assertEqual(result.args, (b, q_idx))
+
+    def test_hierarchical_indexer_3d_and_4d(self):
+        from sympy import Symbol
+
+        b, h, q_idx, kv_idx = (
+            Symbol("b"),
+            Symbol("h"),
+            Symbol("q_idx"),
+            Symbol("kv_idx"),
+        )
+
+        indexer_3d = _hierarchical_indexer_cute(size=[2, 4, 512])
+        result_3d = indexer_3d([b, h, q_idx])
+        self.assertIsInstance(result_3d, HierarchicalIndex)
+        self.assertEqual(result_3d.args, (b, h, q_idx))
+
+        indexer_4d = _hierarchical_indexer_cute(size=[2, 4, 512, 512])
+        result_4d = indexer_4d([b, h, q_idx, kv_idx])
+        self.assertIsInstance(result_4d, HierarchicalIndex)
+        self.assertEqual(result_4d.args, (b, h, q_idx, kv_idx))
+
+    def test_isinstance_detection_for_load(self):
+        from sympy import Symbol
+
+        b = Symbol("b")
+        q_idx = Symbol("q_idx")
+
+        self.assertIsInstance(HierarchicalIndex(b, q_idx), HierarchicalIndex)
+        self.assertNotIsInstance(b * Symbol("S") + q_idx, HierarchicalIndex)
+
+    def test_hierarchical_indexer_rank_mismatch(self):
+        from sympy import Symbol
+
+        indexer = _hierarchical_indexer_cute(size=[2, 4])
+        b = Symbol("b")
+
+        with self.assertRaises(AssertionError) as ctx:
+            indexer([b])
+        self.assertIn("Rank mismatch", str(ctx.exception))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        not ensure_flash_available(), "Flash attention (CUTE) library not available"
+    )
+    def test_hierarchical_indexing_2d(self):
+        batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
+        dtype = torch.float16
+        device = "cuda"
+
+        bias_2d = torch.randn(batch_size, num_heads, device=device, dtype=dtype)
+
+        def score_mod_2d(score, b, h, q_idx, kv_idx):
+            return score + bias_2d[b, h]
+
+        q, k, v = create_test_tensors(
+            batch_size=batch_size,
+            num_heads=num_heads,
+            seq_len=seq_len,
+            dim=dim,
+            dtype=dtype,
+            device=device,
+        )
+
+        flash_vs_triton(q, k, v, score_mod=score_mod_2d)
+
+        compiled_fn = torch.compile(flex_attention)
+        _, code = run_and_get_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=score_mod_2d,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+        code_str = "\n".join(code)
+
+        expected_pattern = "in_ptr4[tmp3, tmp4]"
+        self.assertIn(
+            expected_pattern,
+            code_str,
+            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        not ensure_flash_available(), "Flash attention (CUTE) library not available"
+    )
+    def test_hierarchical_indexing_3d(self):
+        batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
+        dtype = torch.float16
+        device = "cuda"
+
+        bias_3d = torch.randn(
+            batch_size, num_heads, seq_len, device=device, dtype=dtype
+        )
+
+        def score_mod_3d(score, b, h, q_idx, kv_idx):
+            return score + bias_3d[b, h, q_idx]
+
+        q, k, v = create_test_tensors(
+            batch_size=batch_size,
+            num_heads=num_heads,
+            seq_len=seq_len,
+            dim=dim,
+            dtype=dtype,
+            device=device,
+        )
+
+        flash_vs_triton(q, k, v, score_mod=score_mod_3d)
+
+        compiled_fn = torch.compile(flex_attention)
+        _, code = run_and_get_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=score_mod_3d,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+        code_str = "\n".join(code)
+
+        expected_pattern = "in_ptr4[tmp4, tmp5, tmp6]"
+        self.assertIn(
+            expected_pattern,
+            code_str,
+            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+        )
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    @unittest.skipIf(
+        not ensure_flash_available(), "Flash attention (CUTE) library not available"
+    )
+    def test_hierarchical_indexing_4d(self):
+        batch_size, num_heads, seq_len, dim = 2, 4, 512, 64
+        dtype = torch.float16
+        device = "cuda"
+
+        bias_4d = torch.randn(
+            batch_size, num_heads, seq_len, seq_len, device=device, dtype=dtype
+        )
+
+        def score_mod_4d(score, b, h, q_idx, kv_idx):
+            return score + bias_4d[b, h, q_idx, kv_idx]
+
+        q, k, v = create_test_tensors(
+            batch_size=batch_size,
+            num_heads=num_heads,
+            seq_len=seq_len,
+            dim=dim,
+            dtype=dtype,
+            device=device,
+        )
+
+        flash_vs_triton(q, k, v, score_mod=score_mod_4d)
+
+        compiled_fn = torch.compile(flex_attention)
+        _, code = run_and_get_code(
+            compiled_fn,
+            q,
+            k,
+            v,
+            score_mod=score_mod_4d,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+        code_str = "\n".join(code)
+
+        expected_pattern = "in_ptr4[tmp5, tmp6, tmp7, tmp8]"
+        self.assertIn(
+            expected_pattern,
+            code_str,
+            f"Expected '{expected_pattern}' in generated code.\nExcerpt:\n{code_str[:2000]}",
+        )
 
 
 if __name__ == "__main__":
