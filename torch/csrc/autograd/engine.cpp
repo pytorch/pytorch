@@ -1110,7 +1110,7 @@ void Engine::evaluate_function(
       std::lock_guard<std::mutex> lock(graph_task->mutex_);
       for (const auto& capture : *capture_vec) {
         auto& captured_grad = graph_task->captured_vars_[capture.output_idx_];
-        captured_grad = (*inputs_for_captures)[capture.input_idx_];
+        captured_grad = inputs_for_captures[capture.input_idx_];
         // NOTE [Deprecated capture hooks]
         for (const auto& hook :
              capture.DO_NOT_USE_DEPRECATED_get_capture_hooks()) {
