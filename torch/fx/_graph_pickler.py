@@ -3,7 +3,7 @@ import importlib
 import io
 import pickle
 from abc import abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
 
@@ -44,7 +44,6 @@ class Options:
     # A filter for which ops will cause the pickler to raise a
     # BypassFxGraphCache exception. If None then all ops are allowed.
     ops_filter: Optional[Callable[[str], bool]] = _ops_filter_safe
-    ignore_metadata_fields: Sequence[str] = dataclasses.field(default_factory=tuple)
 
 
 class GraphPickler(pickle.Pickler):
@@ -391,11 +390,8 @@ class _NodePickleData:
         self.type = node.type
         # self.sort_key = node._sort_key
         # self.repr_fn = node._repr_fn
+        # self.meta = node.meta
         self.meta = node.meta
-        if options.ignore_metadata_fields:
-            self.meta = self.meta.copy()
-            for k in options.ignore_metadata_fields:
-                self.meta.pop(k, None)
 
     def unpickle(
         self,
@@ -574,7 +570,6 @@ class _GraphPickleData:
         for node in graph.nodes:
             nodes[node] = _NodePickleData(node, nodes, options)
         self.nodes = tuple(nodes.values())
-        self._codegen = graph._codegen
 
         # Unpickled variables:
         # self._used_names = graph._used_names
@@ -582,6 +577,7 @@ class _GraphPickleData:
         # self._len = graph._len
         # self._graph_namespace = graph._graph_namespace
         # self._owning_module = graph._owning_module
+        # self._codegen = graph._codegen
         # self._co_fields: Dict[str, Any] = graph._co_fields
         # -- self._find_nodes_lookup_table = _FindNodesLookupTable()
 
@@ -593,7 +589,6 @@ class _GraphPickleData:
         nodes: dict[_NodePickleData, torch.fx.Node] = {}
         for nd in self.nodes:
             nodes[nd] = nd.unpickle(graph, nodes, unpickle_state)
-        graph._codegen = self._codegen
 
         return graph
 
