@@ -298,7 +298,7 @@ def _extract_take_skip_tee(lintrunner_args):
             if sep == "":
                 tee_file = next(args_iter)
             elif sep == "=":
-                tee_file = tee_file.trim()
+                tee_file = tee_file.strip()
         else:
             remaining_args.append(arg)
     return remaining_args, take, skip, tee_file
