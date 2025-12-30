@@ -1330,7 +1330,8 @@ def _get_openmp_args(
                 lib_dir_paths.append(os.path.join(omp_prefix, "lib"))
             else:
                 warnings.warn(  # noqa: B028
-                    "environment variable `OMP_PREFIX` is invalid.")
+                    "environment variable `OMP_PREFIX` is invalid."
+                )
             omp_available = omp_available or valid_env
 
         if not omp_available:
