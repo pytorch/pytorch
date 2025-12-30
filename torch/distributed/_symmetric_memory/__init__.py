@@ -20,6 +20,39 @@ from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 
 _group_name_to_store: dict[str, c10d.Store] = {}
 
+def _is_multinode_group(group_name: c10d.GroupName) -> bool:
+    """
+    Check if a process group spans multiple nodes.
+    
+    This is a heuristic based on comparing world size to local GPU count.
+    For accurate detection, users should set LOCAL_WORLD_SIZE environment variable.
+    
+    Args:
+        group_name: Name of the process group
+        
+    Returns:
+        bool: True if the group likely spans multiple nodes
+    """
+    try:
+        group = c10d._resolve_process_group(group_name)
+        world_size = c10d.get_world_size(group)
+        
+        # Try to get local world size from environment
+        local_world_size = os.environ.get("LOCAL_WORLD_SIZE")
+        if local_world_size is not None:
+            local_world_size = int(local_world_size)
+        else:
+            # Fallback: assume local world size equals number of visible GPUs
+            local_world_size = torch.cuda.device_count()
+        
+        # If world_size > local_world_size, we're likely multi-node
+        num_nodes = (world_size + local_world_size - 1) // local_world_size
+        return num_nodes > 1
+        
+    except Exception:
+        # If we can't determine, assume single node (safer)
+        return False
+
 
 def enable_symm_mem_for_group(group_name: c10d.GroupName) -> None:
     """
@@ -1948,8 +1981,23 @@ def rendezvous(
             dtype, and device type must be identical across all participating processes.
         group (Union[str, :class:`torch.distributed.ProcessGroup`]): The group identifying the
             participating processes. This can be either a group name or a process group object.
+    
+    .. warning::
+        Multi-node symmetric memory requires special infrastructure such as IMEX 
+        (Internode Memory Exchange) or properly configured NVSHMEM. Without this 
+        infrastructure, you may encounter errors like "failed to send fd".
+        
+        For multi-node setups without IMEX/NVSHMEM:
+        
+        1. Set ``PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False``
+        2. Consider using NCCL collectives (e.g., :func:`torch.distributed.all_to_all`)
+           for internode communication
+        3. Use symmetric memory only for intranode (within-node) communication
+        
+        See https://github.com/pytorch/pytorch/issues/171495 for more details.
     """
     from torch._C._distributed_c10d import ProcessGroup
+    import warnings
 
     if isinstance(group, str):
         group_name = c10d.GroupName(group)
@@ -1959,6 +2007,29 @@ def rendezvous(
         raise TypeError(f"rendezvous: unsupported group type: {type(group)}")
 
     enable_symm_mem_for_group(group_name)
+    
+    # Check for multi-node setup and issue warning if needed
+    if _is_multinode_group(group_name):
+        # Check if expandable segments is enabled
+        alloc_conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
+        expandable_disabled = (
+            "expandable_segments:False" in alloc_conf or 
+            "expandable_segments:false" in alloc_conf
+        )
+        
+        if not expandable_disabled:
+            warnings.warn(
+                "Symmetric memory rendezvous detected across multiple nodes. "
+                "This requires IMEX or properly configured NVSHMEM. "
+                "If you encounter 'failed to send fd' errors, consider:\n"
+                "  1. Setting PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False\n"
+                "  2. Using NCCL collectives (e.g., dist.all_to_all()) for internode communication\n"
+                "  3. Using symmetric memory only within nodes (intranode)\n"
+                "See https://github.com/pytorch/pytorch/issues/171495 for details.",
+                UserWarning,
+                stacklevel=2
+            )
+    
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
@@ -2109,10 +2180,56 @@ def get_mem_pool(device: _device) -> torch.cuda.MemPool:
     return _symm_mem_pools[device]
 
 
+def is_multinode_capable() -> bool:
+    """
+    Check if the current setup supports multi-node symmetric memory.
+    
+    Multi-node symmetric memory requires special infrastructure such as:
+    - IMEX (Internode Memory Exchange) for NVLink multi-node systems
+    - Properly configured NVSHMEM with IB/RDMA transport
+    - Disabled expandable segments (PYTORCH_CUDA_ALLOC_CONF=expandable_segments:False)
+    
+    Returns:
+        bool: True if multi-node symmetric memory is likely supported
+        
+    Note:
+        This is a best-effort check. Even if this returns True, internode
+        symmetric memory may still fail if not properly configured.
+        
+    Example::
+    
+        >>> # doctest: +SKIP
+        >>> if torch.distributed._symmetric_memory.is_multinode_capable():
+        >>>     # Use symmetric memory across nodes
+        >>>     pass
+        >>> else:
+        >>>     # Use NCCL for internode communication
+        >>>     pass
+    """
+    # Check for IMEX device
+    imex_available = os.path.exists("/dev/imex_channel")
+    
+    # Check for NVSHMEM environment variables
+    nvshmem_configured = any([
+        os.environ.get("NVSHMEM_BOOTSTRAP_TWO_STAGE"),
+        os.environ.get("NVSHMEM_BOOTSTRAP"),
+    ])
+    
+    # Check if expandable segments is disabled (required for multi-node)
+    alloc_conf = os.environ.get("PYTORCH_CUDA_ALLOC_CONF", "")
+    expandable_disabled = (
+        "expandable_segments:False" in alloc_conf or 
+        "expandable_segments:false" in alloc_conf
+    )
+    
+    return (imex_available or nvshmem_configured) and expandable_disabled
+
+
 __all__ = [
     "empty",
     "rendezvous",
     "is_nvshmem_available",
+    "is_multinode_capable",
     "set_backend",
     "get_backend",
     "set_signal_pad_size",
