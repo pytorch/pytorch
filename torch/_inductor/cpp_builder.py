@@ -1195,7 +1195,7 @@ def _get_python_include_dirs() -> list[str]:
         std_lib = Path(sysconfig.get_path("stdlib"))
         include_dir = (std_lib.parent.parent / "Headers").absolute()
     if not (include_dir / "Python.h").exists():
-        warnings.warn(f"Can't find Python.h in {str(include_dir)}", stacklevel=2)
+        warnings.warn(f"Can't find Python.h in {str(include_dir)}")  # noqa: B028
     return [str(include_dir)]
 
 
@@ -1329,9 +1329,8 @@ def _get_openmp_args(
                 include_dir_paths.append(os.path.join(omp_prefix, "include"))
                 lib_dir_paths.append(os.path.join(omp_prefix, "lib"))
             else:
-                warnings.warn(
-                    "environment variable `OMP_PREFIX` is invalid.", stacklevel=2
-                )
+                warnings.warn(  # noqa: B028
+                    "environment variable `OMP_PREFIX` is invalid.")
             omp_available = omp_available or valid_env
 
         if not omp_available:

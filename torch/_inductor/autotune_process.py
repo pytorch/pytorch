@@ -325,18 +325,16 @@ class TuningProcessPool:
                 config.max_autotune_subproc_result_timeout_seconds,
             )
         except TimeoutError:
-            warnings.warn(
+            warnings.warn(  # noqa: B028
                 f"Timed out benchmarking choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains.",
-                stacklevel=2,
             )
             # Set to INF so this choice will be ignored
             return float("inf")
         except Exception as process_exception:
-            warnings.warn(
+            warnings.warn(  # noqa: B028
                 f"Failed to benchmark choice '{choice}'. It will be ignored. "
                 "Please debug the root cause in case the choice can bring perf gains.",
-                stacklevel=2,
             )
             # An unspecified launch failure (cudaErrorLaunchFailure) corrupts the
             # CUDA context, making it unrecoverable. All subsequent CUDA calls will

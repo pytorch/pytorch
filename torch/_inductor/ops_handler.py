@@ -769,8 +769,8 @@ class DefaultHandler(OpsHandler[Any]):
             return self._default(name, args, kwargs)
 
         # would like to remove this function entirely, but it's used in MTIA backend
-        warnings.warn(
-            f"undefined OpHandler.{name}, please add missing op schema", stacklevel=2
+        warnings.warn(  # noqa: B028
+            f"undefined OpHandler.{name}, please add missing op schema"
         )
         return fallback
 

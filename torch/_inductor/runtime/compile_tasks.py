@@ -48,7 +48,7 @@ def _set_triton_ptxas_path() -> None:
     if ptxas.is_file() and os.access(ptxas, os.X_OK):
         os.environ["TRITON_PTXAS_PATH"] = str(ptxas)
     else:
-        warnings.warn(f"{ptxas} exists but is not an executable", stacklevel=2)
+        warnings.warn(f"{ptxas} exists but is not an executable")  # noqa: B028
 
 
 def _worker_compile_triton(
