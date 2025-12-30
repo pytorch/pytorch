@@ -71,6 +71,17 @@ if TYPE_CHECKING:
 # Main function suffix used in generated Pallas code
 MAIN_SUFFIX = "main"
 
+# Mosaic GPU warpgroup size: 4 warps × 32 threads = 128 threads per warpgroup.
+# This is a hardware constant for Hopper and Blackwell GPUs.
+# See: jax/_src/pallas/mosaic_gpu/lowering.py
+WARPGROUP_SIZE = 128
+
+
+def _align_to_warpgroup(size: int) -> int:
+    """Align size to WARPGROUP_SIZE (128) for Mosaic GPU compatibility."""
+    return ((size + WARPGROUP_SIZE - 1) // WARPGROUP_SIZE) * WARPGROUP_SIZE
+
+
 # Logger for Pallas kernel code
 kernel_code_log = torch._logging.getArtifactLogger(__name__, "kernel_code")
 
@@ -878,6 +889,9 @@ class PallasKernel(SIMDKernel):
         device = V.graph.get_current_device_or_throw()
         self.is_gpu = device.type == "cuda"
         self.use_masked_ops: bool | None = None
+        # Enable warpgroup padding for GPU to handle non-aligned tensor sizes
+        # Mosaic GPU requires tensor sizes to be multiples of 128 (WARPGROUP_SIZE)
+        self.use_warpgroup_padding = self.is_gpu
         self.tensor_masks = {}  # Map tensor name to mask variable name
         # Track which output param each store uses: list of (out_ptr_name, store_line)
         self.store_with_output: list[tuple[str, str]] = []
@@ -2695,8 +2709,7 @@ class PallasKernel(SIMDKernel):
 
         # For GPU (Mosaic backend), import plgpu for masked loads/stores
         # Import math for masked ops and symbolic expressions (e.g., math.floor, math.log2)
-        imports = (
-            """
+        imports = """
 import functools
 import math
 import torch
@@ -2728,17 +2741,10 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
     reordered = jnp.moveaxis(v, pw_axes, list(range(len(pw_axes))))
     result = reduce_fn(reordered.reshape(pw_numel, red_numel), axis=-1)
     return result.reshape(out_shape)
-"""
-            + (
-                "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
-                if not interpret_is_cpu
-                else ""
-            )
-            + (
-                "\nfrom torch._inductor.runtime.runtime_utils import next_power_of_2"
-                if self.use_masked_ops
-                else ""
-            )
+""" + (
+            "\nfrom jax.experimental.pallas import mosaic_gpu as plgpu"
+            if not interpret_is_cpu
+            else ""
         )
         code.splice(imports, strip=True)
 
@@ -3056,10 +3062,12 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
             code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
             code.writeline(")")
 
-            # For masked ops, calculate block_size as next power of 2 of max flattened size
+            # For masked ops, calculate block_size aligned to WARPGROUP_SIZE (128)
+            # Mosaic GPU runs with 128 threads (1 warpgroup), so data sizes should
+            # be at least 128 and aligned to 128 for efficient processing.
             if self.use_masked_ops:
                 code.writeline(
-                    "# Calculate block_size as next power of 2 for Mosaic backend"
+                    "# Calculate block_size aligned to warpgroup size (128) for Mosaic GPU"
                 )
                 code.writeline("# Find maximum flattened size across all tensors")
                 code.writeline("max_size = 0")
@@ -3072,7 +3080,11 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                     "    tensor_size = shape[0] if len(shape) == 1 else math.prod(shape)"
                 )
                 code.writeline("    max_size = max(max_size, tensor_size)")
-                code.writeline("block_size = next_power_of_2(max_size)")
+                # Align to WARPGROUP_SIZE (128) and ensure at least 128
+                code.writeline(
+                    "# Align to warpgroup size (128) for efficient GPU processing"
+                )
+                code.writeline("block_size = max(128, ((max_size + 127) // 128) * 128)")
 
             alias_pairs: list[tuple[int, int]] = []
             for out_idx, name in enumerate(output_params):
@@ -3101,13 +3113,79 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
 
             # Use plgpu.kernel for GPU (Mosaic), pl.pallas_call for CPU/TPU
             if self.is_gpu:
-                code.writeline("return plgpu.kernel(")
+                # For GPU, pad inputs to align to WARPGROUP_SIZE (128)
+                # Mosaic GPU requires tensor sizes to be multiples of 128
+                code.writeline("# Pad inputs to align to warpgroup size (128)")
+                code.writeline("_orig_out_shapes = out_shapes")
+                code.writeline("_padded_inputs = []")
+                for i, param in enumerate(kernel_input_params):
+                    code.writeline(f"_orig_size_{i} = {param}.size")
+                    code.writeline(
+                        f"_aligned_size_{i} = ((_orig_size_{i} + 127) // 128) * 128"
+                    )
+                    code.writeline(f"if _orig_size_{i} != _aligned_size_{i}:")
+                    code.writeline(f"    _flat_{i} = {param}.flatten()")
+                    code.writeline(
+                        f"    _padded_{i} = jnp.pad(_flat_{i}, (0, _aligned_size_{i} - _orig_size_{i}))"
+                    )
+                    code.writeline(f"    _padded_inputs.append(_padded_{i})")
+                    code.writeline("else:")
+                    code.writeline(f"    _padded_inputs.append({param}.flatten())")
+
+                # Calculate aligned output shapes
+                # NOTE: Skip padding for scalar outputs (reductions) - they don't need alignment
+                code.writeline("# Align output shapes to warpgroup size (128)")
+                code.writeline("# Skip padding for scalar outputs (e.g., reductions)")
+                code.writeline("_aligned_out_specs = []")
+                code.writeline("_is_scalar_output = []")
+                code.writeline("for shape, dtype in zip(out_shapes, out_dtypes):")
+                code.writeline("    _numel = 1")
+                code.writeline("    for s in shape:")
+                code.writeline("        _numel *= s")
+                code.writeline("    if _numel <= 1:")
+                code.writeline("        # Scalar output (e.g., reduction) - don't pad")
+                code.writeline(
+                    "        _aligned_out_specs.append(jax.ShapeDtypeStruct(shape, dtype))"
+                )
+                code.writeline("        _is_scalar_output.append(True)")
+                code.writeline("    else:")
+                code.writeline("        # Non-scalar output - pad to 128")
+                code.writeline("        _aligned_numel = ((_numel + 127) // 128) * 128")
+                code.writeline(
+                    "        _aligned_out_specs.append(jax.ShapeDtypeStruct((_aligned_numel,), dtype))"
+                )
+                code.writeline("        _is_scalar_output.append(False)")
+                code.writeline("_aligned_out_specs = tuple(_aligned_out_specs)")
+
+                code.writeline("# Execute kernel with padded inputs")
+                code.writeline("_result = plgpu.kernel(")
                 code.writeline("    " + kernel_arg)
-                code.writeline("    out_shape=out_specs,")
-                code.writeline(")(")
-                if kernel_input_params:
-                    code.writeline(f"    {', '.join(kernel_input_params)},")
-                code.writeline(")")
+                code.writeline("    out_shape=_aligned_out_specs,")
+                code.writeline(")(*_padded_inputs)")
+
+                # Slice results to remove padding (skip for scalar outputs)
+                code.writeline(
+                    "# Remove padding from results (skip for scalar outputs)"
+                )
+                code.writeline("if not isinstance(_result, tuple):")
+                code.writeline("    _result = (_result,)")
+                code.writeline("_unpadded_results = []")
+                code.writeline(
+                    "for _res, _shape, _is_scalar in zip(_result, _orig_out_shapes, _is_scalar_output):"
+                )
+                code.writeline("    if _is_scalar:")
+                code.writeline("        # Scalar output - no unpadding needed")
+                code.writeline("        _unpadded_results.append(_res)")
+                code.writeline("    else:")
+                code.writeline("        # Non-scalar output - slice to remove padding")
+                code.writeline("        _orig_numel = 1")
+                code.writeline("        for _s in _shape:")
+                code.writeline("            _orig_numel *= _s")
+                code.writeline("        _unpadded = _res[:_orig_numel].reshape(_shape)")
+                code.writeline("        _unpadded_results.append(_unpadded)")
+                code.writeline(
+                    "return _unpadded_results[0] if len(_unpadded_results) == 1 else tuple(_unpadded_results)"
+                )
             else:
                 code.writeline("return pl.pallas_call(")
                 code.writeline("    " + kernel_arg)

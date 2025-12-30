@@ -1108,6 +1108,278 @@ class PallasTestsMixin:
         expected = fn(x)
         self.assertEqual(result, expected)
 
+    def test_warpgroup_size_exact_128(self):
+        """Test with exactly 128 elements (1 warpgroup)."""
+
+        def fn(a, b):
+            return a + b
+
+        compiled = self._compile(fn)
+
+        # 128 = WARPGROUP_SIZE (exactly 1 warpgroup)
+        a = torch.randn(128, device=self.DEVICE)
+        b = torch.randn(128, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_multiple_256(self):
+        """Test with 256 elements (multiple of 128)."""
+
+        def fn(a, b):
+            return a * b + a
+
+        compiled = self._compile(fn)
+
+        # 256 = 2 * WARPGROUP_SIZE
+        a = torch.randn(256, device=self.DEVICE)
+        b = torch.randn(256, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_multiple_512(self):
+        """Test with 512 elements (multiple of 128)."""
+
+        def fn(a, b):
+            return a + b * 2
+
+        compiled = self._compile(fn)
+
+        # 512 = 4 * WARPGROUP_SIZE
+        a = torch.randn(512, device=self.DEVICE)
+        b = torch.randn(512, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_below_128(self):
+        """Test with fewer than 128 elements.
+
+        Mosaic GPU requires tensor sizes to be multiples of 128 (WARPGROUP_SIZE).
+        Automatic padding aligns tensors to 128 for GPU.
+        """
+
+        def fn(a, b):
+            return a + b
+
+        compiled = self._compile(fn)
+
+        # 100 < 128, automatic padding aligns to 128
+        a = torch.randn(100, device=self.DEVICE)
+        b = torch.randn(100, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_non_aligned(self):
+        """Test with non-aligned size (not a multiple of 128).
+
+        Mosaic GPU requires tensor sizes to be multiples of 128 (WARPGROUP_SIZE).
+        Automatic padding aligns tensors to 128 for GPU.
+        """
+
+        def fn(a, b):
+            return a * b
+
+        compiled = self._compile(fn)
+
+        # 200 is not a multiple of 128, automatic padding aligns to 256
+        a = torch.randn(200, device=self.DEVICE)
+        b = torch.randn(200, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_2d_128x128(self):
+        """Test 2D tensor with 128x128 elements."""
+
+        def fn(x, y):
+            return x + y
+
+        compiled = self._compile(fn)
+
+        # 128x128 = 16384 elements, multiple of 128
+        x = torch.randn(128, 128, device=self.DEVICE)
+        y = torch.randn(128, 128, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_small_tensor(self):
+        """Test with very small tensor (less than warpgroup size).
+
+        Mosaic GPU requires tensor sizes to be multiples of 128 (WARPGROUP_SIZE).
+        Automatic padding aligns tensors to 128 for GPU.
+        """
+
+        def fn(a, b):
+            return a + b
+
+        compiled = self._compile(fn)
+
+        # Small tensor, automatic padding aligns to 128
+        a = torch.randn(64, device=self.DEVICE)
+        b = torch.randn(64, device=self.DEVICE)
+        result = compiled(a, b)
+        expected = fn(a, b)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_2d_non_aligned_10x10(self):
+        """Test 2D tensor with 10x10 = 100 elements (not multiple of 128).
+
+        Mosaic GPU requires total tensor size to be multiples of 128.
+        Automatic padding aligns tensors to 128 for GPU.
+        """
+
+        def fn(x, y):
+            return x + y
+
+        compiled = self._compile(fn)
+
+        # 10x10 = 100 elements, automatic padding aligns to 128
+        x = torch.randn(10, 10, device=self.DEVICE)
+        y = torch.randn(10, 10, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_2d_non_aligned_15x15(self):
+        """Test 2D tensor with 15x15 = 225 elements (not multiple of 128).
+
+        Mosaic GPU requires total tensor size to be multiples of 128.
+        Automatic padding aligns tensors to 256 for GPU.
+        """
+
+        def fn(x, y):
+            return x * y + x
+
+        compiled = self._compile(fn)
+
+        # 15x15 = 225 elements, automatic padding aligns to 256
+        x = torch.randn(15, 15, device=self.DEVICE)
+        y = torch.randn(15, 15, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_3d_non_aligned(self):
+        """Test 3D tensor with non-aligned size (5x5x5 = 125 elements).
+
+        Mosaic GPU requires total tensor size to be multiples of 128.
+        Automatic padding aligns tensors to 128 for GPU.
+        """
+
+        def fn(x, y):
+            return x + y
+
+        compiled = self._compile(fn)
+
+        # 5x5x5 = 125 elements, automatic padding aligns to 128
+        x = torch.randn(5, 5, 5, device=self.DEVICE)
+        y = torch.randn(5, 5, 5, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_3d_aligned(self):
+        """Test 3D tensor with aligned size (4x4x8 = 128 elements)."""
+
+        def fn(x, y):
+            return x + y
+
+        compiled = self._compile(fn)
+
+        # 4x4x8 = 128 elements, exactly 1 warpgroup
+        x = torch.randn(4, 4, 8, device=self.DEVICE)
+        y = torch.randn(4, 4, 8, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_2d_non_aligned_7x19(self):
+        """Test 2D tensor with 7x19 = 133 elements (not multiple of 128).
+
+        Mosaic GPU requires tensor sizes to be multiples of 128 (WARPGROUP_SIZE).
+        The backend automatically pads inputs and unpads outputs to handle this.
+        """
+
+        def fn(x, y):
+            return x - y
+
+        compiled = self._compile(fn)
+
+        # 7x19 = 133 elements, just above 128 but not aligned
+        x = torch.randn(7, 19, device=self.DEVICE)
+        y = torch.randn(7, 19, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_4d_non_aligned(self):
+        """Test 4D tensor with non-aligned size (2x3x4x5 = 120 elements).
+
+        Mosaic GPU requires tensor sizes to be multiples of 128 (WARPGROUP_SIZE).
+        The backend automatically pads inputs and unpads outputs to handle this.
+        """
+
+        def fn(x, y):
+            return x + y
+
+        compiled = self._compile(fn)
+
+        # 2x3x4x5 = 120 elements, not a multiple of 128
+        x = torch.randn(2, 3, 4, 5, device=self.DEVICE)
+        y = torch.randn(2, 3, 4, 5, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_4d_aligned(self):
+        """Test 4D tensor with aligned size (2x2x4x16 = 256 elements)."""
+
+        def fn(x, y):
+            return x * y
+
+        compiled = self._compile(fn)
+
+        # 2x2x4x16 = 256 elements, multiple of 128
+        x = torch.randn(2, 2, 4, 16, device=self.DEVICE)
+        y = torch.randn(2, 2, 4, 16, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_2d_aligned_16x8(self):
+        """Test 2D tensor with 16x8 = 128 elements (exactly 1 warpgroup)."""
+
+        def fn(x, y):
+            return x + y * 2
+
+        compiled = self._compile(fn)
+
+        # 16x8 = 128 elements, exactly 1 warpgroup
+        x = torch.randn(16, 8, device=self.DEVICE)
+        y = torch.randn(16, 8, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    def test_warpgroup_size_2d_aligned_32x8(self):
+        """Test 2D tensor with 32x8 = 256 elements (2 warpgroups)."""
+
+        def fn(x, y):
+            return x + y
+
+        compiled = self._compile(fn)
+
+        # 32x8 = 256 elements, 2 warpgroups
+        x = torch.randn(32, 8, device=self.DEVICE)
+        y = torch.randn(32, 8, device=self.DEVICE)
+        result = compiled(x, y)
+        expected = fn(x, y)
+        self.assertEqual(result, expected)
+
 
 if test_torchinductor.RUN_CPU and has_cpu_pallas():
 
