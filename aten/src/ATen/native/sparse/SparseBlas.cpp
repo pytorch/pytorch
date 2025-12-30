@@ -125,6 +125,7 @@ Tensor& sparse_sampled_addmm_out_sparse_csr_cpu(
   // Allow only same types as for the CUDA path
   auto t = self.scalar_type();
   TORCH_CHECK(t == ScalarType::Double || t == ScalarType::Float ||
+    t == ScalarType::Half || t == ScalarType::BFloat16 ||
     t == ScalarType::ComplexFloat || t == ScalarType::ComplexDouble,
     "sparse_sampled_addmm: Expected self to be a floating-point or complex tensor, but got ", t);
   if (&result != &self) {
