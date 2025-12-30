@@ -219,13 +219,22 @@ class LoggingTests(LoggingTestCase):
         fn_opt(x, ys, zs)
         fn_opt(x, ys[:1], zs)
 
-        record_str = "\n".join(r.getMessage() for r in records)
+        record_str = re.sub(
+            r'"[^"]*"',
+            "[file_path]",
+            "\n".join(r.getMessage() for r in records),
+        )
         self.assertIn(
             """\
-    -     frame 0: outmost_fn - return outer_fn(x, ys, zs)
-    -     frame 1: outer_fn - return fn(x, ys, zs)
-    -     frame 2: fn - return inner(x, ys, zs)
-    -     frame 3: inner - for y, z in zip(ys, zs):""",
+    - User stack trace:
+    -   File [file_path], line 201, in outmost_fn
+    -     return outer_fn(x, ys, zs)
+    -   File [file_path], line 204, in outer_fn
+    -     return fn(x, ys, zs)
+    -   File [file_path], line 207, in fn
+    -     return inner(x, ys, zs)
+    -   File [file_path], line 210, in inner
+    -     for y, z in zip(ys, zs):""",
             record_str,
         )
 

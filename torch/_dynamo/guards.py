@@ -3414,6 +3414,10 @@ class GuardsStatePickler(pickle.Pickler):
         return getattr(torch.ops._C, name)
 
     @classmethod
+    def _unpickle_op(cls, namespace: str, opname: str, overloadname: str) -> Any:
+        return getattr(getattr(getattr(torch.ops, namespace), opname), overloadname)
+
+    @classmethod
     def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
         return types.MethodType(func, base)
 
@@ -3490,6 +3494,15 @@ class GuardsStatePickler(pickle.Pickler):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
 
+            for attr in obj.__dict__.values():
+                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+                    continue
+                if id(attr) in self.guard_tree_values:
+                    continue
+                if callable(attr):
+                    continue
+                self.missing_values[id(attr)] = attr
+
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
@@ -3539,6 +3552,13 @@ class GuardsStatePickler(pickle.Pickler):
             obj, torch._ops.OpOverloadPacket
         ) and obj._qualified_op_name.startswith("_C::"):
             return type(self)._unpickle_c_op, (obj.__name__,)
+
+        elif isinstance(obj, torch._ops.OpOverload):
+            return type(self)._unpickle_op, (
+                obj.namespace,
+                obj._opname,
+                obj._overloadname,
+            )
 
         elif (
             obj.__class__.__module__ == "builtins"
@@ -4449,9 +4469,14 @@ def format_user_stack_trace(
         return ""
 
     lines: list[str] = []
-    for idx, frame in enumerate(user_stack):
+    for frame in user_stack:
+        filename = frame.filename
+        lineno = frame.lineno
+        name = frame.name
         source_line = frame.line.strip() if frame.line else ""
-        lines.append(f"    frame {idx}: {frame.name} - {source_line}")
+        lines.append(f'  File "{filename}", line {lineno}, in {name}')
+        if source_line:
+            lines.append(f"    {source_line}")
     return "\n".join(lines)
 
 
@@ -4553,11 +4578,11 @@ def get_guard_fail_reason_helper(
     # Build reason string - simple format for normal logging
     # Use singular "reason" when there's only one, plural "reasons" for multiple
     if len(reasons) == 1:
-        reason_str = f"compile_id: {compile_id}, reason: {reasons[0]}"
+        reason_str = f"{compile_id}: {reasons[0]}"
     else:
-        reason_str = f"compile_id: {compile_id}, reasons: {reasons}"
+        reason_str = f"{compile_id}: " + "; ".join(reasons)
     if user_stack_str:
-        reason_str += f"\n  user_stack:\n{user_stack_str}"
+        reason_str += f"\nUser stack trace:\n{user_stack_str}"
     return strip_local_scope(reason_str)
 
 
@@ -4720,7 +4745,7 @@ def unique(seq: Sequence[T]) -> Generator[T, None, None]:
 
 
 def make_dupe_guard(
-    obj_source: Source, dupe_source: Source
+    obj_source: Source, dupe_source: Source | None
 ) -> Optional[functools.partial[Any]]:
     # Note - we may end up in a situation where we invoke something like
     # def fn(x, y)
