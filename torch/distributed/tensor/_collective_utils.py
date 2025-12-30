@@ -398,6 +398,8 @@ def redistribute_cost(
             cost += reduce_scatter_cost(comm_bytes_gb, mesh_topo, mesh_dim)
             # after reduce_scatter the comm bytes for further collectives halved.
             comm_bytes_gb /= num_devices_on_mesh_dim
+        elif current.is_replicate() and target.is_shard():
+            comm_bytes_gb /= num_devices_on_mesh_dim
         elif current.is_shard() and target.is_partial():
             # ban shard -> partial as it does not make sense to perform
             # this redistribute
