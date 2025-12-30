@@ -732,7 +732,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
                  CUDNN_VERSION,
                  " and frontend version ",
                  CUDNN_FRONTEND_VERSION,
-                 ". query seq_len % 128 != 0 requires cuDNN backend 9.15.1+ _and cuDNN frontend 1.16.0+.",
+                 ". query seq_len % 128 != 0 requires cuDNN backend 9.15.1+ _and_ cuDNN frontend 1.16.0+.",
                  "Please consider upgrading to a nightly build or newer PyTorch release if you require this functionality."
                  );
     }
