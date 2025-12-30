@@ -250,8 +250,6 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
 #endif
 }
 
-# if defined(CUDA_VERSION) || defined(USE_ROCM)
-
 template<typename T>
 struct BlockPrefixCallbackOp
 {
@@ -458,7 +456,6 @@ inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * out
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-#endif
 
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT, int max_cub_size=impl::max_cub_size>
 inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {
