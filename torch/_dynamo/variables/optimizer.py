@@ -50,7 +50,7 @@ from .user_defined import UserDefinedObjectVariable
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 class ArgMappingException(Exception):
@@ -108,7 +108,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -142,7 +142,9 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         # Note: this allows us to intercept the call in call_method
         # in the typical case, we return a UserMethodVariable
         # which will directly inline
@@ -161,7 +163,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
         return super().var_getattr(tx, name)
 
-    def graph_break_if_pending_mutation(self, tx: "InstructionTranslator") -> None:
+    def graph_break_if_pending_mutation(self, tx: "InstructionTranslatorBase") -> None:
         # If there are pending mutations on a parameter (due to using closure)
         # then we need to graph break to allow the python version of the parameter
         # to update, so that running _init_group will initialize the states with
@@ -180,7 +182,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                         hints=[],
                     )
 
-    def _set_capturable(self, tx: "InstructionTranslator") -> None:
+    def _set_capturable(self, tx: "InstructionTranslatorBase") -> None:
         from . import LazyVariableTracker
 
         # We only set capturable if params are on cuda
@@ -247,7 +249,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             if "step" in state and state["step"].is_cpu:
                 state["step"] = state["step"].to(p.device)
 
-    def map_sources_and_install_guards(self, tx: "InstructionTranslator") -> None:
+    def map_sources_and_install_guards(self, tx: "InstructionTranslatorBase") -> None:
         from ..decorators import mark_static_address
         from .lazy import LazyVariableTracker
 
@@ -351,7 +353,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                     )
 
     def wrap_tensor(
-        self, tx: "InstructionTranslator", tensor_value: torch.Tensor
+        self, tx: "InstructionTranslatorBase", tensor_value: torch.Tensor
     ) -> TensorVariable:
         """Wrap state tensor in a TensorVariable"""
         from ..decorators import mark_static_address
@@ -380,7 +382,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
     def update_list_args(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Iterable[VariableTracker],
         kwargs: Any,
         py_args: Iterable[Any],
@@ -400,7 +402,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
                         source = arg.source and GetItemSource(arg.source, i)
                         arg.items.append(VariableTracker.build(tx, val, source))
 
-    def create_finalizer(self, tx: "InstructionTranslator") -> None:
+    def create_finalizer(self, tx: "InstructionTranslatorBase") -> None:
         names_to_delete = self.static_tensor_names
         value = self.value
         tc = tx.output.tracing_context

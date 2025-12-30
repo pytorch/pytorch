@@ -40,7 +40,7 @@ from .constant import ConstantVariable, EnumVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 
 class DistributedVariable(VariableTracker):
@@ -131,7 +131,9 @@ class WorldMetaClassVariable(DistributedVariable):
 
         return type(value) is _WorldMeta
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if name == "WORLD":
             assert self.source
             source = AttrSource(base=self.source, member="WORLD")
@@ -161,7 +163,7 @@ class PlacementClassVariable(DistributedVariable):
 
     def call_function(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
@@ -190,14 +192,16 @@ class PlacementVariable(DistributedVariable):
     def as_python_constant(self) -> Any:
         return self.value
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if name == "dim":
             return ConstantVariable.create(self.value.dim)
         return super().var_getattr(tx, name)
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -286,7 +290,9 @@ class DeviceMeshVariable(DistributedVariable):
     def as_python_constant(self) -> Any:
         return self.value
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if name == "ndim":
             return ConstantVariable.create(self.value.ndim)
         if name == "device_type":
@@ -300,7 +306,7 @@ class DeviceMeshVariable(DistributedVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -362,7 +368,7 @@ class ProcessGroupVariable(DistributedVariable):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -376,7 +382,9 @@ class ProcessGroupVariable(DistributedVariable):
 
         return super().call_method(tx, name, args, kwargs)
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         if name == "group_name":
             return variables.ConstantVariable.create(self.value.group_name)
         if name in ["rank", "size"]:
@@ -405,7 +413,7 @@ class BackwardHookVariable(VariableTracker):
 
     @staticmethod
     def create(
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         module: VariableTracker,
         user_hooks: VariableTracker,
         user_pre_hooks: VariableTracker,
@@ -482,7 +490,7 @@ class BackwardHookVariable(VariableTracker):
 
     def call_method(
         self,
-        tx: "InstructionTranslator",
+        tx: "InstructionTranslatorBase",
         name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
@@ -492,7 +500,10 @@ class BackwardHookVariable(VariableTracker):
         return super().call_method(tx, name, args, kwargs)
 
     def _setup_hook(
-        self, tx: "InstructionTranslator", hook_method_name: str, args: VariableTracker
+        self,
+        tx: "InstructionTranslatorBase",
+        hook_method_name: str,
+        args: VariableTracker,
     ) -> VariableTracker:
         from .builder import wrap_fx_proxy
 

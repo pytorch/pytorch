@@ -14,7 +14,7 @@ from .base import VariableTracker
 
 if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
 
 PARAM_NAMES = [
     "query",
@@ -33,7 +33,7 @@ class SDPAParamsVariable(VariableTracker):
 
     @staticmethod
     def create(
-        tx: "InstructionTranslator", value: Any, source: Source
+        tx: "InstructionTranslatorBase", value: Any, source: Source
     ) -> VariableTracker:
         from .torch import TorchInGraphFunctionVariable
 
@@ -62,7 +62,9 @@ class SDPAParamsVariable(VariableTracker):
     def as_proxy(self) -> Proxy:
         return self.proxy
 
-    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+    def var_getattr(
+        self, tx: "InstructionTranslatorBase", name: str
+    ) -> VariableTracker:
         import torch._C
 
         from .builder import wrap_fx_proxy
