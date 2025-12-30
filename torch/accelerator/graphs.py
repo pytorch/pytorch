@@ -109,8 +109,8 @@ def is_graph_available() -> bool:
     This function checks if the current :ref:`accelerator<accelerators>` supports graph capture and replay.
 
     Returns:
-        bool: ``True`` if the current :ref:`accelerator<accelerators>` supports graph,
-        ``False`` otherwise.
+        bool: ``True`` if the current :ref:`accelerator<accelerators>` supports graph capture and replay,
+            ``False`` otherwise.
     """
     return torch._C._accelerator_isGraphAvailable()
 

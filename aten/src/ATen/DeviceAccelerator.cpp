@@ -32,11 +32,11 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
   // 2. Check compile-time backends
   std::optional<c10::DeviceType> device_type = std::nullopt;
 
-#define DETECT_AND_ASSIGN_ACCELERATOR_COMP(device_name) \
-  if (at::detail::get##device_name##Hooks().isBuilt()) {  \
+#define DETECT_AND_ASSIGN_ACCELERATOR_COMP(device_name)  \
+  if (at::detail::get##device_name##Hooks().isBuilt()) { \
     TORCH_CHECK(                                         \
         !device_type.has_value(),                        \
-        "Cannot have both " #device_name " and ",             \
+        "Cannot have both " #device_name " and ",        \
         device_type.value(), ".");                       \
     device_type = k##device_name;                        \
   }

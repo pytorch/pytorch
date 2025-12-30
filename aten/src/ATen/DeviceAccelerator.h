@@ -5,6 +5,7 @@
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 
+#include <ATen/accelerator/Graph.h>
 #include <optional>
 
 namespace at::accelerator {
