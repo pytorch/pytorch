@@ -868,54 +868,54 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         return "DisableTorchFunction"
 
 
-class DeterministicAlgorithmsVariable(ContextWrappingVariable):
-    """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
+# class DeterministicAlgorithmsVariable(ContextWrappingVariable):
+#     """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
 
-    _guards_singleton = Guard(
-        GlobalStateSource(),
-        GuardBuilder.DETERMINISTIC_ALGORITHMS,  # type: ignore[arg-type]
-    )
+#     _guards_singleton = Guard(
+#         GlobalStateSource(),
+#         GuardBuilder.DETERMINISTIC_ALGORITHMS,  # type: ignore[arg-type]
+#     )
 
-    @staticmethod
-    def create(
-        tx: "InstructionTranslator", target_value: bool, **kwargs: Any
-    ) -> "DeterministicAlgorithmsVariable":
-        var = DeterministicAlgorithmsVariable(
-            target_values=[target_value],
-            initial_values=[torch.are_deterministic_algorithms_enabled()],
-            **kwargs,
-        )
-        var._call_func(tx, [target_value])
-        var.set_cleanup_hook(tx)
-        return var
+#     @staticmethod
+#     def create(
+#         tx: "InstructionTranslator", target_value: bool, **kwargs: Any
+#     ) -> "DeterministicAlgorithmsVariable":
+#         var = DeterministicAlgorithmsVariable(
+#             target_values=[target_value],
+#             initial_values=[torch.are_deterministic_algorithms_enabled()],
+#             **kwargs,
+#         )
+#         var._call_func(tx, [target_value])
+#         var.set_cleanup_hook(tx)
+#         return var
 
-    def __init__(
-        self,
-        target_values: Sequence[bool],
-        initial_values: Optional[Sequence[bool]] = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(
-            target_values=target_values, initial_values=initial_values, **kwargs
-        )
-        install_guard(self._guards_singleton)
+#     def __init__(
+#         self,
+#         target_values: Sequence[bool],
+#         initial_values: Optional[Sequence[bool]] = None,
+#         **kwargs: Any,
+#     ) -> None:
+#         super().__init__(
+#             target_values=target_values, initial_values=initial_values, **kwargs
+#         )
+#         install_guard(self._guards_singleton)
 
-    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
-        return variables.ConstantVariable.create(None)
+#     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
+#         return variables.ConstantVariable.create(None)
 
-    def _call_func(self, tx: "InstructionTranslator", values: Sequence[bool]) -> None:
-        assert len(values) == 1
-        value = values[0]
-        tx.output.create_node(
-            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-        )
-        torch._C._set_deterministic_algorithms(value)
+#     def _call_func(self, tx: "InstructionTranslator", values: Sequence[bool]) -> None:
+#         assert len(values) == 1
+#         value = values[0]
+#         tx.output.create_node(
+#             "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+#         )
+#         torch._C._set_deterministic_algorithms(value)
 
-    def module_name(self) -> str:
-        return "torch"
+#     def module_name(self) -> str:
+#         return "torch"
 
-    def fn_name(self) -> str:
-        return "use_deterministic_algorithms"
+#     def fn_name(self) -> str:
+#         return "use_deterministic_algorithms"
 
 
 class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
