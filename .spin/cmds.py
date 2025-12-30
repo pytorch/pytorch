@@ -361,7 +361,6 @@ def lint(ctx, *, lintrunner_args, apply_patches, **kwargs):
     all_files_linters = VERY_FAST_LINTERS | FAST_LINTERS
     changed_files_linters = SLOW_LINTERS
     write_json_output = bool(tee_file)
-    breakpoint()
     lint_found_all, json_output_all = _run_lintrunner(
         all_files_linters,
         take=take,
