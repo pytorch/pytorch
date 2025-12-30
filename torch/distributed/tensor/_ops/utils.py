@@ -10,7 +10,7 @@ import torch
 from torch._prims_common import DimsSequenceType, DimsType
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._collective_utils import redistribute_cost
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
@@ -30,24 +30,50 @@ from torch.distributed.tensor.placement_types import (
 )
 
 
-# convenient wrapper to register sharding propagation rules
-def register_prop_rule(
+def _get_registration_wrapper(
+    registration_fn,
     op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
-) -> Callable[
-    [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
-]:
-    def wrapper(
-        impl: Callable[[OpSchema], OutputSharding],
-    ) -> Callable[[OpSchema], OutputSharding]:
+    schema_info: Optional[RuntimeSchemaInfo],
+    arg_names_that_require_specializing_cache_strategy: Optional[list[str]],
+):
+    def wrapper(impl):
         overloads = op if isinstance(op, list) else [op]
         for overload in overloads:
-            DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule(
-                overload, impl, schema_info
-            )
+            curr_schema_info = None
+            if (
+                schema_info is None
+                and arg_names_that_require_specializing_cache_strategy is not None
+            ):
+                specialized_args = [
+                    a.name
+                    for a in overload._schema.arguments
+                    if a.name in arg_names_that_require_specializing_cache_strategy
+                ]
+                if any(specialized_args):
+                    curr_schema_info = RuntimeSchemaInfo(
+                        static_kwargkey=specialized_args
+                    )
+            else:
+                curr_schema_info = schema_info
+            registration_fn(overload, impl, curr_schema_info)
         return impl
 
     return wrapper
+
+
+# convenient wrapper to register sharding propagation rules
+def register_prop_rule(
+    op: torch._ops.OpOverload | list[torch._ops.OpOverload],
+    schema_info: RuntimeSchemaInfo | None = None,
+) -> Callable[
+    [Callable[[OpSchema], OutputSharding]], Callable[[OpSchema], OutputSharding]
+]:
+    return _get_registration_wrapper(
+        DTensor._op_dispatcher.sharding_propagator.register_sharding_prop_rule,
+        op,
+        schema_info,
+        arg_names_that_require_specializing_cache_strategy=None,
+    )
 
 
 # Note:
@@ -61,8 +87,8 @@ _ShardingStrategyFunc: TypeAlias = Callable[[_OpSchemaT], _StrategyTypeT]
 
 
 def register_op_strategy(
-    op: Union[torch._ops.OpOverload, list[torch._ops.OpOverload]],
-    schema_info: Optional[RuntimeSchemaInfo] = None,
+    op: torch._ops.OpOverload | list[torch._ops.OpOverload],
+    schema_info: RuntimeSchemaInfo | None = None,
 ) -> Callable[[_ShardingStrategyFunc], _ShardingStrategyFunc]:
     # For every ATen op that accepts any args in this list,
     # the arg itself can impact the strides (and potentially the sharding strategy)
@@ -72,33 +98,12 @@ def register_op_strategy(
     arg_names_that_require_specializing_cache_strategy = [
         "memory_format",
     ]
-
-    def wrapper(impl: _ShardingStrategyFunc) -> _ShardingStrategyFunc:
-        if isinstance(op, list):
-            overloads = op
-        else:
-            overloads = [op]
-
-        for overload in overloads:
-            curr_schema_info = None
-            if schema_info is None:
-                specialized_args = [
-                    a.name
-                    for a in overload._schema.arguments
-                    if a.name in arg_names_that_require_specializing_cache_strategy
-                ]
-                if any(specialized_args):
-                    curr_schema_info = RuntimeSchemaInfo(
-                        static_kwargkey=specialized_args
-                    )
-            else:
-                curr_schema_info = schema_info
-            DTensor._op_dispatcher.sharding_propagator.register_op_strategy(
-                overload, impl, curr_schema_info
-            )
-        return impl
-
-    return wrapper
+    return _get_registration_wrapper(
+        DTensor._op_dispatcher.sharding_propagator.register_op_strategy,
+        op,
+        schema_info,
+        arg_names_that_require_specializing_cache_strategy,
+    )
 
 
 def replicate_op_strategy(op_schema: OpSchema) -> StrategyType:
@@ -349,6 +354,7 @@ def expand_to_full_mesh_op_strategy(
     op_schema: OpSchema,
     single_mesh_dim_strategies: list[PlacementList],
     *,
+    output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None = None,
     input_index: int = 1,
     inplace_op: bool = False,
     is_valid_strategy_cb: Callable[
@@ -358,7 +364,7 @@ def expand_to_full_mesh_op_strategy(
 ) -> OpStrategy:
     """
     Convenience function to allow writing a sharding strategy considering only a single mesh dimension,
-    and have it expanded combinatorically to all mesh dimensions.
+    and have it expanded combinatorially to all mesh dimensions.
 
     Args:
         mesh (DeviceMesh): the device mesh to expand the strategy to
@@ -366,6 +372,7 @@ def expand_to_full_mesh_op_strategy(
         single_mesh_dim_strategies (list[PlacementList]): the sharding strategies to expand. The outer list is over
             different strategies.  The inner PlacementList is over the outputs and inputs of the op. If input_index is 1,
             a PlacementList looks like [output_placement, input_placement1, input_placement2, ...].
+        output_tensor_meta: tensor metadata for the output(s), used to populate DTensorSpec.tensor_meta field
         input_index: the number of outputs of the op, defaults to 1
         inplace_op: whether the op is inplace or not, defaults to False
         is_valid_strategy_cb: a callback function to filter out invalid sharding rules, defaults to None.
@@ -387,24 +394,41 @@ def expand_to_full_mesh_op_strategy(
 
     strategy_combs = itertools.product(*all_mesh_dim_strategies)
 
+    args_strategy = op_schema.args_strategy
+    kwargs_strategy = op_schema.kwargs_strategy
+    input_args_strategy = args_strategy + kwargs_strategy
     all_strategies = []
     for strategy_comb in strategy_combs:
         spec_list: list[DTensorSpec | None] = []
+        spec_index = 0
         for specs in zip(*strategy_comb):
             if specs[0] is not None:
-                # TODO: we should fill in tensor_meta here.  If nothing else, it helps the filter strategy callback
+                # Populate tensor_meta field for both output and input specs,
+                # including for tuple output cases
+                tensor_meta = None
+                if spec_index < input_index:
+                    if output_tensor_meta is not None:
+                        if isinstance(output_tensor_meta, TensorMeta):
+                            tensor_meta = output_tensor_meta
+                        elif isinstance(output_tensor_meta, (tuple, list)):
+                            if spec_index < len(output_tensor_meta):
+                                tensor_meta = output_tensor_meta[spec_index]
+                else:
+                    input_strategy_index = spec_index - input_index
+                    if input_strategy_index < len(input_args_strategy):
+                        tensor_meta = input_args_strategy[
+                            input_strategy_index
+                        ].tensor_meta
+
                 # pyrefly: ignore [bad-argument-type]
-                spec_list.append(DTensorSpec(mesh, specs))
+                spec_list.append(DTensorSpec(mesh, specs, tensor_meta=tensor_meta))
+                spec_index += 1
             else:
                 spec_list.append(None)
 
         input_specs: list[DTensorSpec] = [
             s for s in spec_list[input_index:] if isinstance(s, DTensorSpec)
         ]
-
-        args_strategy = op_schema.args_strategy
-        kwargs_strategy = op_schema.kwargs_strategy
-        input_args_strategy = args_strategy + kwargs_strategy
 
         if len(input_specs) != len(input_args_strategy):
             raise AssertionError(

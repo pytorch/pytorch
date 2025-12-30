@@ -453,6 +453,109 @@ class TestCustomOpAutoTune(TestCase):
             multi_param_op, (test_x, test_factor), expected_result, "MultiParam"
         )
 
+    @skipIfXpu
+    def test_range_based_static_shape_no_cond_dispatch(self):
+        """Test dispatch code generation for static vs dynamic shapes.
+
+        Static shapes (dynamic=False): No dispatch logic, best impl is inlined.
+        Dynamic shapes (dynamic=True): Dispatch logic generated for runtime selection.
+        """
+        import re
+
+        from torch._inductor.utils import run_and_get_code
+
+        test_op_name = f"test_lib::static_no_cond_{id(self)}"
+
+        def impl_a(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x + weight
+
+        def impl_b(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x + weight.view(1, 1, -1).expand_as(x)
+
+        def impl_c(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.add(x, weight)
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def static_no_cond_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x + weight
+
+        @static_no_cond_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            static_no_cond_op,
+            configs=[
+                CustomOpConfig(impl_a),
+                CustomOpConfig(impl_b),
+                CustomOpConfig(impl_c),
+            ],
+            dispatch_on={"tensor_name": "x", "dim": 1},
+            split_points=[64, 128, 256, 512],
+            input_gen_fns={
+                "x": lambda fake: torch.randn_like(fake, device=self.device),
+                "weight": lambda fake: torch.randn_like(fake, device=self.device),
+            },
+        )
+
+        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
+        test_x = torch.randn(2, 96, 32, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
+
+        def find_shape_dispatch(code_list):
+            pattern = re.compile(r"if\s+s\d+\s*[<>=]")
+            return [
+                line.strip()
+                for code in code_list
+                for line in code.split("\n")
+                if pattern.search(line)
+            ]
+
+        def test_model(x, weight):
+            return static_no_cond_op(x, weight)
+
+        # Static shape (dynamic=False) - should NOT have shape dispatch
+        torch._dynamo.reset()
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends=autotune_backends,
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+            result_static, code_list_static = run_and_get_code(
+                torch.compile(test_model, dynamic=False), test_x, test_weight
+            )
+            self.assertEqual(result_static, test_x + test_weight)
+
+        dispatch_static = find_shape_dispatch(code_list_static)
+        if dispatch_static:
+            print(f"[Static] Found dispatch logic: {dispatch_static}")
+        else:
+            print("[Static] No dispatch logic found (expected for static shapes)")
+        self.assertFalse(
+            dispatch_static, "Static shapes should not have dispatch logic"
+        )
+
+        # Dynamic shape (dynamic=True) - SHOULD have shape dispatch
+        torch._dynamo.reset()
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends=autotune_backends,
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+            result_dynamic, code_list_dynamic = run_and_get_code(
+                torch.compile(test_model, dynamic=True), test_x, test_weight
+            )
+            self.assertEqual(result_dynamic, test_x + test_weight)
+
+        dispatch_dynamic = find_shape_dispatch(code_list_dynamic)
+        if dispatch_dynamic:
+            print(f"[Dynamic] Found dispatch logic: {dispatch_dynamic}")
+        else:
+            print("[Dynamic] No dispatch logic found (unexpected for dynamic shapes)")
+        self.assertTrue(dispatch_dynamic, "Dynamic shapes should have dispatch logic")
+
 
 if __name__ == "__main__":
     run_tests()

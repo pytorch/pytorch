@@ -405,6 +405,8 @@ class SideEffects:
         item: Any,
         variable: VariableTracker,
     ) -> VariableTracker:
+        # TODO: Modify this API so that we preserve type info of
+        # variable
         return self._track_obj(
             item,
             variable,
@@ -413,7 +415,7 @@ class SideEffects:
 
     def track_object_new(
         self,
-        cls_source: Source,
+        cls_source: Source | None,
         user_cls: Any,
         variable_cls: Any,
         options: dict[str, Any],
