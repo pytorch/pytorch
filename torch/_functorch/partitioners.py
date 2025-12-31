@@ -898,7 +898,6 @@ def _extract_fwd_bwd_modules(
     *,
     num_fwd_outputs: int,
     static_lifetime_input_nodes: Optional[OrderedSet[fx.Node]] = None,
-    num_saved_values_with_no_vc_check: Optional[int] = None,
 ) -> tuple[fx.GraphModule, fx.GraphModule]:
     fwd_outputs, bwd_outputs, fwd_outputs_descs, bwd_outputs_descs = (
         _extract_fwd_bwd_outputs(joint_module, num_fwd_outputs=num_fwd_outputs)
@@ -984,6 +983,13 @@ def _extract_fwd_bwd_modules(
 
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
+    # Calculate which saved values have no VC check by checking their metadata directly.
+    # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, symints)
+    no_vc_check_start_idx = len(saved_values)
+    for i, node in enumerate(saved_values):
+        if node.meta.get("saved_tensor_with_no_vc_check", False):
+            no_vc_check_start_idx = i
+            break
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
@@ -991,8 +997,7 @@ def _extract_fwd_bwd_modules(
         fwd_outputs_descs
         + [
             SavedForBackwardsNoVcCheckAOTOutput(i)
-            if num_saved_values_with_no_vc_check is not None
-            and num_saved_values_with_no_vc_check <= i < len(saved_values)
+            if i >= no_vc_check_start_idx and i < len(saved_values)
             else SavedForBackwardsAOTOutput(i)
             for i in range(len(saved_values) + len(saved_sym_nodes))
         ],
@@ -1192,7 +1197,6 @@ def default_partition(
             saved_values_no_vc_check.append(node)
         else:
             saved_values_with_vc_check.append(node)
-    num_saved_with_no_vc_check = len(saved_values_no_vc_check)
     saved_values = saved_values_with_vc_check + saved_values_no_vc_check
 
     if static_lifetime_input_nodes is None:
@@ -1203,7 +1207,6 @@ def default_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=static_lifetime_input_nodes,
-        num_saved_values_with_no_vc_check=num_saved_with_no_vc_check,
     )
 
     # Run DCE while overriding the definition of is_impure_node
@@ -3061,7 +3064,6 @@ def min_cut_rematerialization_partition(
             saved_values_no_vc_check.append(node)
         else:
             saved_values_with_vc_check.append(node)
-    num_saved_with_no_vc_check = len(saved_values_no_vc_check)
     saved_values = saved_values_with_vc_check + saved_values_no_vc_check
 
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
@@ -3072,7 +3074,6 @@ def min_cut_rematerialization_partition(
         saved_sym_nodes=saved_sym_nodes,
         num_fwd_outputs=num_fwd_outputs,
         static_lifetime_input_nodes=node_info.static_lifetime_input_nodes,
-        num_saved_values_with_no_vc_check=num_saved_with_no_vc_check,
     )
     if graph_has_recomputable_ops:
         if graph_has_recomputable_rng_ops:

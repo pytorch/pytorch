@@ -2247,22 +2247,32 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check
                 )
 
-                def mark_dynamic_activations(activations: list[torch.Tensor]):
-                    for (
-                        idx,
-                        dims,
-                    ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
-                        maybe_mark_dynamic_helper(activations[idx], dims)
-                    return activations
+                num_vc_check = len(tensors_saved_with_vc_check)
+                for (
+                    idx,
+                    dims,
+                ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
+                    # dynamic_saved_tensors_idxs has indices relative to all saved tensors
+                    # (vc_check + no_vc_check combined)
+                    # We could make this indexing logic a bit simpler by merging
+                    # tensors_saved_with_vc_check + tensors_saved_no_vc_check,
+                    # but to avoid runtime overhead we are indexing into each list separately.
+                    # The convention is `activations = (acts_with_check, acts_without_check)`
+                    if idx < num_vc_check:
+                        maybe_mark_dynamic_helper(
+                            tensors_saved_with_vc_check[idx], dims
+                        )
+                    else:
+                        maybe_mark_dynamic_helper(
+                            tensors_saved_no_vc_check[idx - num_vc_check], dims
+                        )
 
                 # See Note [Detaching saved tensors in AOTAutograd]
                 # Only save tensors that need VC checks via save_for_backward
                 ctx.save_for_backward(
-                    *mark_dynamic_activations(
-                        [
-                            x.detach() if x._is_view() else x
-                            for x in tensors_saved_with_vc_check
-                        ]
+                    *(
+                        x.detach() if x._is_view() else x
+                        for x in tensors_saved_with_vc_check
                     )
                 )
                 # Stash tensors that don't need VC checks directly on ctx
