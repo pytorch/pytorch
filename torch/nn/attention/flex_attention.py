@@ -12,21 +12,10 @@ import warnings
 from collections.abc import Callable
 from enum import Enum
 from typing import Literal, NamedTuple, TypeAlias
+from typing_extensions import NotRequired, TypedDict
 
 import torch
 from torch import Tensor
-
-
-try:
-    from typing import TypedDict
-except ImportError:
-    from typing_extensions import TypedDict
-
-try:
-    from typing import NotRequired
-except ImportError:
-    from typing_extensions import NotRequired
-
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
 from torch._prims_common import DeviceLikeType
