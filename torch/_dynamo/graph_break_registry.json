@@ -687,6 +687,17 @@
       ]
     }
   ],
+  "GB4197": [
+    {
+      "Gb_type": "Unsupported Tensor.share_memory_() call",
+      "Context": "call_method {self} share_memory_",
+      "Explanation": "Dynamo does not support Tensor.share_memory_() which modifies tensor storage for IPC",
+      "Hints": [
+        "Move share_memory_() call outside the compiled region. ",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0062": [
     {
       "Gb_type": "Failed to unpack object for UNPACK_EX",
