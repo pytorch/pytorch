@@ -11,6 +11,7 @@ from pathlib import Path
 import torch
 from torch.export.experimental._utils import _get_main_cpp_file, _get_make_file
 from torch.export.exported_program import _decompose_exported_program
+from torch.utils._ordered_set import OrderedSet
 
 
 _InputT = typing_extensions.ParamSpec("_InputT")
@@ -364,6 +365,7 @@ class _ExportPackage:
         }
         aoti_files_map = {}
         model_names = []
+        device_type = "cpu"
         for name, ep in self._method_overloads:
             name = name.replace(":", "__")
             model_names.append(name)
@@ -405,16 +407,16 @@ class _ExportPackage:
             if not ep.example_inputs:
                 continue
 
-            device_type = "cpu"
+            device_types: OrderedSet[str] = OrderedSet()
+
             for inp in ep.example_inputs[0]:
-                if isinstance(inp, torch.Tensor) and inp.device.type != "cpu":
-                    # TODO: more carefully determine the device type
-                    if device_type == "cpu":
-                        device_type = inp.device.type
-                    else:
-                        assert device_type == inp.device.type, (
-                            "Mixed device types in example inputs are not supported yet."
-                        )
+                if isinstance(inp, torch.Tensor):
+                    device_types.add(inp.device.type)
+            device_types.discard("cpu")
+            assert len(device_types) <= 1, "Does not support mixing {}".format(
+                "+".join(list(device_types))
+            )
+            device_type = "cpu" if len(device_types) == 0 else device_types.pop()
 
             if package_example_inputs:
                 assert example_inputs_map is not None
@@ -423,7 +425,9 @@ class _ExportPackage:
                     path = Path(base_directory) / f"{name}_input_{i}.pt"
                     torch.save(t, path)
 
-        cmake_file_str = _get_make_file(package_name, model_names, device_type)
+        cmake_file_str = _get_make_file(
+            package_name, model_names, device_type=device_type
+        )
 
         with open(Path(base_directory) / "CMakeLists.txt", "w") as file:
             file.write(cmake_file_str)
