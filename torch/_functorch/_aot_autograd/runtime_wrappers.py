@@ -2254,17 +2254,21 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     for x in tensors_saved_with_vc_check
                 ]
                 tensors_no_vc = [
-                    x.detach() if x._is_view() else x
-                    for x in tensors_saved_no_vc_check
+                    x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
                 ]
 
                 # dynamic_saved_tensors_idxs has indices relative to all saved tensors
                 # (vc_check + no_vc_check combined). Mark dynamics on the detached tensors.
-                for idx, dims in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
+                for (
+                    idx,
+                    dims,
+                ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
                     if idx < num_vc_check:
                         maybe_mark_dynamic_helper(tensors_to_save[idx], dims)
                     else:
-                        maybe_mark_dynamic_helper(tensors_no_vc[idx - num_vc_check], dims)
+                        maybe_mark_dynamic_helper(
+                            tensors_no_vc[idx - num_vc_check], dims
+                        )
 
                 # Only save tensors that need VC checks via save_for_backward
                 ctx.save_for_backward(*tensors_to_save)
