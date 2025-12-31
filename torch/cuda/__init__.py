@@ -1344,12 +1344,12 @@ def _get_amdsmi_device_memory_used(device: Device = None) -> int:
 
 def _get_amdsmi_memory_usage(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"]
+    return int(amdsmi.amdsmi_get_gpu_activity(handle)["umc_activity"])
 
 
 def _get_amdsmi_utilization(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"]
+    return int(amdsmi.amdsmi_get_gpu_activity(handle)["gfx_activity"])
 
 
 def _get_amdsmi_temperature(device: Device = None) -> int:
