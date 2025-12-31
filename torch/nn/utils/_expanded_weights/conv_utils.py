@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
 import math
+
 import torch
 import torch.nn.functional as F
 
@@ -346,9 +347,9 @@ def unfold3d(
     tensor = tensor.permute(0, 2, 3, 4, 1, 5, 6, 7)
     # Output shape: (B, D_out, H_out, W_out, C, kernel_size[0], kernel_size[1], kernel_size[2])
 
-    tensor = tensor.reshape(batch_size, -1, channels * math.prod(kernel_size)).transpose(
-        1, 2
-    )
+    tensor = tensor.reshape(
+        batch_size, -1, channels * math.prod(kernel_size)
+    ).transpose(1, 2)
     # Output shape: (B, D_out * H_out * W_out, C * kernel_size[0] * kernel_size[1] * kernel_size[2]
 
     return tensor
