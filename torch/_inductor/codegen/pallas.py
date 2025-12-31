@@ -2335,8 +2335,12 @@ class PallasKernel(SIMDKernel):
         is_scalar = buf is not None and len(buf.get_size()) == 0
 
         if is_scalar:
-            # For scalar outputs, use [...] to assign the entire scalar
-            store_expr = f"{out}[...] = {value}"
+            # For scalar outputs, use jnp.full to handle shape mismatch
+            store_expr = (
+                f"{out}[...] = ("
+                f"jnp.full({out}.shape, {value}) if jnp.asarray({value}).ndim == 0 "
+                f"else jnp.asarray({value}).reshape({out}.shape))"
+            )
         else:
             # Check for scatter pattern (indirect indexing for stores)
             scatter_info = self._detect_scatter_pattern(index, name)
