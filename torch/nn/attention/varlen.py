@@ -44,6 +44,8 @@ def _varlen_attn(
     max_k: int,
     is_causal: bool = False,
     scale: float | None = None,
+    window_size_left: int = -1,
+    window_size_right: int = -1,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
@@ -55,6 +57,7 @@ def _varlen_attn(
 
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
+        assert window_size_left == -1 and window_size_right == -1, "cuDNN backend does not support windowed attention"
         result = torch.ops.aten._cudnn_attention_forward(
             query,
             key,
@@ -86,6 +89,8 @@ def _varlen_attn(
             is_causal,
             return_debug_mask=False,
             scale=scale,
+            window_size_left=window_size_left,
+            window_size_right=window_size_right,
         )
 
     rng_state_ = torch.zeros(
@@ -146,6 +151,8 @@ def varlen_attn(
     is_causal: bool = False,
     return_aux: AuxRequest | None = None,
     scale: float | None = None,
+    window_size_left: int = -1,
+    window_size_right: int = -1,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Compute variable-length attention using Flash Attention.
@@ -211,7 +218,7 @@ def varlen_attn(
         ... )
     """
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
-        query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale
+        query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size_left, window_size_right
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -219,7 +226,7 @@ def varlen_attn(
 
 
 def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
-    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale = inputs
+    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size_left, window_size_right = inputs
     out, lse, rng_state = output
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
@@ -228,6 +235,8 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     ctx.max_k = max_k
     ctx.is_causal = is_causal
     ctx.scale = scale
+    ctx.window_size_left = window_size_left
+    ctx.window_size_right = window_size_right
 
 
 @torch.library.custom_op("torch_attn::_varlen_attn_backward", mutates_args={})
@@ -245,6 +254,8 @@ def _varlen_attn_backward(
     is_causal: bool,
     rng_state: torch.Tensor,
     scale: float | None = None,
+    window_size_left: int = -1,
+    window_size_right: int = -1,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     unused = torch.empty(0, device=query.device)
 
@@ -286,6 +297,8 @@ def _varlen_attn_backward(
             rng_state,
             unused,
             scale=scale,
+            window_size_left=window_size_left,
+            window_size_right=window_size_right,
         )
     return dq, dk, dv
 
@@ -326,6 +339,8 @@ def _backward(
     max_k = ctx.max_k
     is_causal = ctx.is_causal
     scale = ctx.scale
+    window_size_left = ctx.window_size_left
+    window_size_right = ctx.window_size_right
 
     dq, dk, dv = torch.ops.torch_attn._varlen_attn_backward(
         grad_out,
@@ -341,8 +356,10 @@ def _backward(
         is_causal,
         rng_state,
         scale,
+        window_size_left,
+        window_size_right,
     )
-    return dq, dk, dv, None, None, None, None, None, None
+    return dq, dk, dv, None, None, None, None, None, None, None, None
 
 
 _varlen_attn.register_autograd(_backward, setup_context=_setup_context)
