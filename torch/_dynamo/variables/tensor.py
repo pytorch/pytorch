@@ -1511,6 +1511,17 @@ class TensorVariable(VariableTracker):
         else:
             return self
 
+    def method_share_memory_(self) -> NoReturn:
+        unimplemented(
+            gb_type="Unsupported Tensor.share_memory_() call",
+            context=f"call_method {self} share_memory_",
+            explanation="Dynamo does not support Tensor.share_memory_() which modifies tensor storage for IPC",
+            hints=[
+                "Move share_memory_() call outside the compiled region. ",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )
+
     def method_new(
         self, *args: VariableTracker, **kwargs: VariableTracker
     ) -> VariableTracker | None:
