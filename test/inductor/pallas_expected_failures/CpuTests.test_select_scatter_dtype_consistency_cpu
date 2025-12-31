@@ -1,3 +1,2 @@
-# https://github.com/pytorch/pytorch/issues/XXXXX
-# ValueError: Incompatible shapes for broadcasting
-# select_scatter with 2D and 3D inputs - same issue as test_select_scatter_cpu
+ERROR
+ValueError: Incompatible shapes for broadcasting
