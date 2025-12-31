@@ -7706,6 +7706,25 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                 ),
             )
 
+    # https://github.com/pytorch/pytorch/issues/151296
+    def test_select_scatter_mixed_dtype(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                src = torch.tensor([0])
+                out = torch.select_scatter(x, src, 1, 0)
+                return out
+
+        model = Model()
+        x = torch.randn(1, 10)
+        inputs = [x]
+
+        compiled_model = torch.compile(model, backend="eager")
+
+        self.assertEqual(model(*inputs), compiled_model(*inputs))
+
     def test_autograd_function_ctx_stash_no_vc_check(self):
         # Test that tensors stashed directly on ctx (e.g., ctx.x = x) in an
         # autograd.Function don't trigger version counter checks, while tensors
