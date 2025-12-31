@@ -5,6 +5,7 @@ import typing
 from collections.abc import Callable, Sequence
 from typing import Any
 
+import sympy
 import torch
 import torch._inductor.runtime.runtime_utils
 from torch import Tensor
@@ -289,8 +290,7 @@ def is_mm_compute_bound(M: int, K: int, N: int, dtype: torch.dtype) -> bool:
     # we have experienced some large perf hits in this case, even in bandwidth bound regimes
     if (
         dtype is torch.bfloat16
-        and K > M
-        and K > N
+        and bool(sympy.And(sympy.Gt(K, M), sympy.Gt(K, N)))
         and (torch.xpu.is_available() or torch.cuda.get_device_capability() < (9, 0))
     ):  # doesn't repro on h100s:
         return True

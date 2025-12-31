@@ -11038,6 +11038,33 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.common(lambda x, y, z: torch.baddbmm(z, x, y), (x, y, z))
 
     @requires_gpu()
+    @torch._inductor.config.patch("shape_padding", True)
+    def test_pad_mm_recompile_guard(self):
+        from torch._inductor.fx_passes.pad_mm import is_mm_compute_bound
+
+        DTYPE = torch.bfloat16
+        K, N = 128, 255  # N not aligned to trigger pad_mm
+        M1 = 8  # K > M1
+        M2 = 200  # K <= M2
+
+        model = torch.nn.Linear(K, N, device=GPU_TYPE, dtype=DTYPE)
+
+        cnts = CompileCounterWithBackend("inductor")
+        compiled = torch.compile(model, backend=cnts, dynamic=True)
+
+        compiled(torch.randn(M1, K, device=GPU_TYPE, dtype=DTYPE))
+        self.assertEqual(cnts.frame_count, 1)
+
+        compiled(torch.randn(M2, K, device=GPU_TYPE, dtype=DTYPE))
+
+        # pad_mm is skipped if the mm is not compute bound, only recompile
+        # if the mm changes from compute -> memory bound (or vice versa)
+        should_recompile = is_mm_compute_bound(M1, K, N, DTYPE) != is_mm_compute_bound(
+            M2, K, N, DTYPE
+        )
+        self.assertEqual(cnts.frame_count, 2 if should_recompile else 1)
+
+    @requires_gpu()
     @torch._inductor.config.patch("layout_optimization", True)
     @tf32_on_and_off(0.005)
     def test_inductor_layout_optimization_input_mutations(self):
