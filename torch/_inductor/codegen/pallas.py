@@ -1866,9 +1866,11 @@ class PallasKernel(SIMDKernel):
         index_str: str,
         needs_flatten: bool,
         use_masked: bool,
+        mode: Any = None,
     ) -> str:
         """
         Build the store expression based on indexing mode.
+        mode can be None (set) or "atomic_add" (accumulate).
         """
         if use_masked:
             # GPU masked store: flatten tensor and apply per-tensor mask
@@ -1884,11 +1886,12 @@ class PallasKernel(SIMDKernel):
 
         if needs_flatten:
             # Block variable indexing (e.g., im2col) - use flattened scatter
+            scatter_op = "add" if mode == "atomic_add" else "set"
             if self.is_gpu:
                 return f"pltriton.store({out}.at[{index_str}], jnp.asarray({value}))"
             else:
                 return (
-                    f"{out}[...] = {out}[...].flatten().at[({index_str}).flatten()].set("
+                    f"{out}[...] = {out}[...].flatten().at[({index_str}).flatten()].{scatter_op}("
                     f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
                 )
 
@@ -1903,12 +1906,24 @@ class PallasKernel(SIMDKernel):
                 return self._build_full_array_store_expr(out, value, False)
 
         if has_indirect:
-            # Indirect indexed store (scatter): broadcast scalar value
-            return (
-                f"{out}[{index_str}] = ("
-                f"jnp.full({index_str}.shape, {value}) "
+            # Indirect indexed store (scatter): use .add() for atomic_add, .set() otherwise
+            scatter_op = "add" if mode == "atomic_add" else "set"
+            value_expr = (
+                f"(jnp.full({index_str}.shape, {value}) "
                 f"if jnp.asarray({value}).ndim == 0 else {value})"
             )
+            if mode == "atomic_add":
+                # For atomic_add, mark output as needing to be readable (for aliasing)
+                self.outputs_need_read.add(out)
+                alias_param = f"{out}_alias"
+                return (
+                    f"{out}[...] = {alias_param}[...].flatten().at[({index_str}).flatten()].{scatter_op}("
+                    f"{value_expr}.flatten()).reshape({out}.shape)"
+                )
+            else:
+                return (
+                    f"{out}[{index_str}] = {value_expr}"
+                )
 
         return f"{out}[{index_str}] = {value}"
 
@@ -2281,7 +2296,7 @@ class PallasKernel(SIMDKernel):
 
                 # Build the store expression
                 store_expr = self._build_store_expr(
-                    out, name, index, value, index_str, needs_flatten, use_masked
+                    out, name, index, value, index_str, needs_flatten, use_masked, mode
                 )
 
         self.stores.writeline(store_expr)

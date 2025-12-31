@@ -1,0 +1,2 @@
+ERROR
+AssertionError: TritonCSEVariable must have dtype
