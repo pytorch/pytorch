@@ -34,7 +34,7 @@ from torch.testing._internal.common_device_type import (
     precisionOverride,
     skipIf,
     skipMeta,
-    skipXPUIf,
+    skipXPU,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -979,10 +979,9 @@ class TestBinaryUfuncs(TestCase):
         d_trunc = torch.divide(a, b, rounding_mode="trunc")
         rounding_unsupported = (
             dtype == torch.half
-            and device != "cuda"
+            and torch.device(device).type not in ["cuda", "xpu"]
             or dtype == torch.bfloat16
-            and device != "cpu"
-            and device != "xpu"
+            and torch.device(device).type not in ["cpu", "xpu"]
         )
         d_ref = d_true.float() if rounding_unsupported else d_true
         self.assertEqual(d_trunc, d_ref.trunc().to(dtype))
@@ -1513,9 +1512,7 @@ class TestBinaryUfuncs(TestCase):
                     isinstance(exponent, torch.Tensor)
                     and base.dim() == 0
                     and base.device.type == "cpu"
-                    and (
-                        exponent.device.type == "cuda" or exponent.device.type == "xpu"
-                    )
+                    and exponent.device.type in ["cuda", "xpu"]
                 ):
                     regex = (
                         f"Expected all tensors to be on the same device, "
@@ -2724,9 +2721,7 @@ class TestBinaryUfuncs(TestCase):
     @dtypesIfCUDA(
         *set(get_all_math_dtypes("cuda")) - {torch.complex64, torch.complex128}
     )
-    @dtypesIfXPU(
-        *set(get_all_math_dtypes("cuda")) - {torch.complex64, torch.complex128}
-    )
+    @dtypesIfXPU(*set(get_all_math_dtypes("xpu")) - {torch.complex64, torch.complex128})
     @dtypes(*set(get_all_math_dtypes("cpu")) - {torch.complex64, torch.complex128})
     def test_floor_divide_tensor(self, device, dtype):
         x = torch.randn(10, device=device).mul(30).to(dtype)
@@ -2741,9 +2736,7 @@ class TestBinaryUfuncs(TestCase):
     @dtypesIfCUDA(
         *set(get_all_math_dtypes("cuda")) - {torch.complex64, torch.complex128}
     )
-    @dtypesIfXPU(
-        *set(get_all_math_dtypes("cuda")) - {torch.complex64, torch.complex128}
-    )
+    @dtypesIfXPU(*set(get_all_math_dtypes("xpu")) - {torch.complex64, torch.complex128})
     @dtypes(*set(get_all_math_dtypes("cpu")) - {torch.complex64, torch.complex128})
     def test_floor_divide_scalar(self, device, dtype):
         x = torch.randn(100, device=device).mul(10).to(dtype)
@@ -2925,7 +2918,7 @@ class TestBinaryUfuncs(TestCase):
 
     @dtypesIfCPU(torch.bfloat16, torch.half, torch.float32, torch.float64)
     @dtypes(torch.float32, torch.float64)
-    @skipXPUIf(True, "Skipped, see https://github.com/intel/torch-xpu-ops/issues/2634")
+    @skipXPU
     def test_hypot(self, device, dtype):
         inputs = [
             (
@@ -2953,7 +2946,7 @@ class TestBinaryUfuncs(TestCase):
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected, exact_dtype=False)
 
-        if torch.device(device).type == "cuda" or torch.device(device).type == "xpu":
+        if torch.device(device).type in ["cuda", "xpu"]:
             # test using cpu scalar with cuda.
             x = torch.randn(10, device=device).to(dtype)
             y = torch.tensor(2.0).to(dtype)
@@ -3708,7 +3701,6 @@ class TestBinaryUfuncs(TestCase):
         torch.complex64,
         torch.complex128,
     )
-    # XPU issue, see https://github.com/intel/torch-xpu-ops/issues/2376
     @dtypesIfXPU(
         torch.float32,
         torch.float64,
