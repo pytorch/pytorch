@@ -1337,7 +1337,7 @@ def _get_amdsmi_device_index(device: Device) -> int:
 def _get_amdsmi_device_memory_used(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     # amdsmi_get_gpu_vram_usage returns mem usage in megabytes
-    mem_mega_bytes = amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"]
+    mem_mega_bytes = int(amdsmi.amdsmi_get_gpu_vram_usage(handle)["vram_used"])
     mem_bytes = mem_mega_bytes * 1024 * 1024
     return mem_bytes
 
@@ -1354,22 +1354,22 @@ def _get_amdsmi_utilization(device: Device = None) -> int:
 
 def _get_amdsmi_temperature(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return amdsmi.amdsmi_get_temp_metric(
+    return int(amdsmi.amdsmi_get_temp_metric(
         handle,
         amdsmi.AmdSmiTemperatureType.JUNCTION,
         amdsmi.AmdSmiTemperatureMetric.CURRENT,
-    )
+    ))
 
 
 def _get_amdsmi_power_draw(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
     if socket_power != "N/A":
-        return socket_power
+        return int(socket_power)
     else:
         socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
         if socket_power != "N/A":
-            return socket_power
+            return int(socket_power)
         else:
             return 0
 
@@ -1382,7 +1382,7 @@ def _get_amdsmi_clock_rate(device: Device = None) -> int:
     else:
         clock_rate = clock_info["clk"]
     if clock_rate != "N/A":
-        return clock_rate
+        return int(clock_rate)
     else:
         return 0
 
