@@ -7757,22 +7757,47 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
         out2.sum().backward()
         # If we got here without error, the test passed
         # Also, assert that the AOTAutograd output descriptors on the fw graph show up
-        # Of 5 total activations, 3 of them are smuggled through ctx without VC checks
-        self.assertExpectedInline(
-            "\n".join(
-                [
-                    str(x)
-                    for x in fw_graph[0].graph.find_nodes(op="output")[0].meta["desc"]
-                ]
-            ),
-            """\
+        # Of 5 total activations, 2 of them are smuggled through ctx without VC checks
+        # (b and y via ctx.b = b, ctx.y = y) while 3 are saved via save_for_backward
+        # (a, c, x via ctx.save_for_backward(a, c, x))
+        # In dynamic shapes mode, there's also a symint saved for backward.
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                "\n".join(
+                    [
+                        str(x)
+                        for x in fw_graph[0]
+                        .graph.find_nodes(op="output")[0]
+                        .meta["desc"]
+                    ]
+                ),
+                """\
 PlainAOTOutput(idx=0)
 SavedForBackwardsAOTOutput(idx=0)
 SavedForBackwardsAOTOutput(idx=1)
-SavedForBackwardsNoVcCheckAOTOutput(idx=2)
+SavedForBackwardsAOTOutput(idx=2)
 SavedForBackwardsNoVcCheckAOTOutput(idx=3)
 SavedForBackwardsNoVcCheckAOTOutput(idx=4)""",
-        )
+            )
+        else:
+            self.assertExpectedInline(
+                "\n".join(
+                    [
+                        str(x)
+                        for x in fw_graph[0]
+                        .graph.find_nodes(op="output")[0]
+                        .meta["desc"]
+                    ]
+                ),
+                """\
+PlainAOTOutput(idx=0)
+SavedForBackwardsAOTOutput(idx=0)
+SavedForBackwardsAOTOutput(idx=1)
+SavedForBackwardsAOTOutput(idx=2)
+SavedForBackwardsNoVcCheckAOTOutput(idx=3)
+SavedForBackwardsNoVcCheckAOTOutput(idx=4)
+SavedForBackwardsAOTOutput(idx=5)""",
+            )
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):

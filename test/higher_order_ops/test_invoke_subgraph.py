@@ -2316,7 +2316,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[8, 8]"):
             fwd_body_0 = self.fwd_body_0
             bwd_body_0 = self.bwd_body_0
-            autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
+            autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = [], saved_for_backward_idx = [0]);  fwd_body_0 = bwd_body_0 = l_x_ = None
             getitem: "f32[8, 8]" = autograd_function_apply[0];  autograd_function_apply = None
             return (getitem,)
 
