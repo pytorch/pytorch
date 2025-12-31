@@ -4255,8 +4255,24 @@ class GraphModule(torch.nn.Module):
         opt_tensor_fn = torch._dynamo.optimize(cnts)(patma_tensor_safety)
         t = torch.randn(2)
         self.assertEqual(opt_tensor_fn(t), "Mismatch")
-    @unittest.skipIf(not HAS_GPU, "requires gpu")
     
+    def test_match_class_backends_coverage(self):
+        def fn(x):
+            match x:
+                case torch.Tensor():
+                    return x * 2
+                case _:
+                    return torch.zeros(1)
+
+        inp = torch.randn(4)
+        eager_res = fn(inp)
+        
+        for backend in ("eager", "aot_eager", "inductor"):
+            torch._dynamo.reset()
+            comp_res = torch.compile(fn, backend=backend)(inp)
+            self.assertEqual(eager_res, comp_res)
+            
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
     def test_wrap_triton_handled_during_tracing(self):
         import triton
         import triton.language as tl
@@ -5514,6 +5530,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
 
         self.assertEqual(result_a, torch.full((2,), 3.14, dtype=torch.float32))
         self.assertEqual(result_b, torch.full((2,), 2.71, dtype=torch.float32))
+        
 
 
 instantiate_parametrized_tests(FunctionTests)
