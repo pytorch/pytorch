@@ -254,6 +254,36 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected)
 
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_bmm_sliced(self, dtype):
+        """Test BMM path with sliced tensors"""
+        batch, m, n, k = 8, 64, 256, 128
+        device = "cuda"
+
+        def bmm(a, b):
+            return torch.bmm(a, b)
+
+        a_full = torch.randn(batch * 2, m, k, device=device, dtype=dtype)
+        b_full = torch.randn(batch * 2, k, n, device=device, dtype=dtype)
+        a = a_full[:batch]
+        b = b_full[batch:]
+
+        expected = bmm(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "cuda.nvgemm_max_profiling_configs": 3,
+            }
+        ):
+            compiled_fn = torch.compile(bmm)
+            result = compiled_fn(a, b)
+
+        torch.testing.assert_close(result, expected)
+
 
 if __name__ == "__main__":
     run_tests()
