@@ -1670,6 +1670,74 @@ class PallasKernel(SIMDKernel):
 
         return load_expr
 
+    def _maybe_broadcast_1d_buffer(
+        self, name: str, index: sympy.Expr, load_expr: str
+    ) -> str:
+        """
+        Reshape 1D buffers to broadcast correctly with higher-dimensional outputs.
+
+        When a 1D buffer (e.g., batch norm mean with shape (C,)) is used in a
+        kernel with higher-dimensional iteration space (e.g., (N, C, H, W)),
+        we need to reshape it to (1, C, 1, 1) for proper broadcasting.
+        """
+        buf_obj = V.graph.get_buffer(name)
+        if buf_obj is None:
+            return load_expr
+
+        buf_size = buf_obj.get_size()
+        if len(buf_size) != 1:
+            # Only handle 1D buffers
+            return load_expr
+
+        buf_length = self._safe_int(buf_size[0])
+        if buf_length is None:
+            return load_expr
+
+        # Find a higher-dimensional buffer to determine output shape
+        ref_buf_size = None
+        for buf_name in self.args.input_buffers:
+            other_buf = V.graph.get_buffer(buf_name)
+            if other_buf is not None and len(other_buf.get_size()) > 1:
+                ref_buf_size = [self._safe_int(s) for s in other_buf.get_size()]
+                if all(s is not None for s in ref_buf_size):
+                    break
+                ref_buf_size = None
+
+        if ref_buf_size is None or len(ref_buf_size) <= 1:
+            return load_expr
+
+        # Find which dimension of the reference buffer has the same size
+        # as our 1D buffer. For batch norm mean (3,) with input (2, 3, 4, 4),
+        # dimension 1 has size 3.
+        # Only apply this optimization if the size is unique (appears once)
+        matching_dims = [
+            idx for idx, dim_size in enumerate(ref_buf_size) if dim_size == buf_length
+        ]
+
+        if len(matching_dims) != 1:
+            # Size is not unique - can't determine which dimension to use
+            return load_expr
+
+        axis_pos = matching_dims[0]
+
+        # Only apply this optimization for graph inputs (like batch norm params),
+        # not for intermediate buffers which may have coincidental size matches
+        # (e.g., complex real/imag components with size 2)
+        if name.startswith("buf"):
+            return load_expr
+
+        # Don't reshape integer buffers - they're likely index tensors
+        dtype = V.graph.get_dtype(name)
+        if dtype is not None and not dtype.is_floating_point:
+            return load_expr
+
+        # Build reshape: 1 for all dims except the matching one
+        reshape_dims = [1] * len(ref_buf_size)
+        reshape_dims[axis_pos] = -1
+
+        reshape_str = ", ".join(str(d) for d in reshape_dims)
+        return f"{load_expr}.reshape({reshape_str})"
+
     def _check_im2col_pattern(
         self, index: sympy.Expr, index_str: str, needs_flatten: bool
     ) -> tuple[str, bool]:
@@ -2041,6 +2109,8 @@ class PallasKernel(SIMDKernel):
         # Handle intermediate buffer squeezing for correct broadcasting
         if not needs_flatten and index_str == "...":
             load_expr = self._maybe_squeeze_intermediate_buffer(name, load_expr)
+            # Handle 1D buffer broadcasting for higher-dimensional kernels
+            load_expr = self._maybe_broadcast_1d_buffer(name, index, load_expr)
 
         return self.cse.generate(
             self.compute,
