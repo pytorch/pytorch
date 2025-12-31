@@ -51,10 +51,28 @@ Tensor spdiags(
       offsets_1d.numel() == std::get<0>(at::_unique(offsets_1d)).numel(),
       "Offset tensor contains duplicate values");
 
-  auto nnz_per_diag = at::where(
-      offsets_1d.le(0),
-      offsets_1d.add(shape[0]).clamp_max_(diagonals_2d.size(1)),
-      offsets_1d.add(-std::min<int64_t>(shape[1], diagonals_2d.size(1))).neg());
+  // The number of non-zero elements in each diagonal is determined by two
+  // factors: the size of that diagonal and the number of elements available
+  // to fill that diagonal.
+  //
+  // If the size of the target matrix is (R, C) then the size of diagonal at
+  // index k is given by min(R, R+k, C, C-k).
+  //
+  // If the number of columns in the diagonals matrix is D, the number of
+  // elements available to fill the diagonal at index k is given by D - max(k, 0)
+  // because we skip first k elements for positive indices.
+  //
+  // Taking both factors into account, the final number of non-zero elements
+  // per diagonal is: min(R, R+k, C, C-k, D, D-k). This simplifies to:
+  //
+  //   k <= 0: min(R+k, min(C, D))
+  //   k >= 0: min(R, min(C, D) - k) = min(R+k, min(C, D)) - k
+  //
+  // Combining: min(R+k, min(C, D)) - max(k, 0)
+  auto nnz_per_diag =
+      offsets_1d.add(shape[0])
+          .clamp_max_(std::min<int64_t>(shape[1], diagonals_2d.size(1)))
+          .sub_(offsets_1d.clamp_min(0));
 
   auto nnz_per_diag_cumsum = nnz_per_diag.cumsum(-1);
   const auto nnz = diagonals_2d.size(0) > 0

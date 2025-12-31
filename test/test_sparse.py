@@ -4193,6 +4193,12 @@ class TestSparse(TestSparseBase):
             yield (make_diags((1, 3)), make_offsets(2), (4, 4))
             # offsets out of range
             yield (make_diags((1, 3)), make_offsets([3]), (3, 3))
+            # Non-square matrices: more rows than columns (gh-171558)
+            yield (make_diags((2, 3)), make_offsets([0, 1]), (5, 2))
+            yield (make_diags((2, 5)), make_offsets([0, -1]), (7, 3))
+            # Non-square matrices: more columns than rows
+            yield (make_diags((2, 5)), make_offsets([0, 1]), (3, 7))
+            yield (make_diags((2, 4)), make_offsets([0, -1]), (2, 5))
             yield (make_diags((1, 3)), make_offsets([-3]), (3, 3))
 
         for case in valid_cases():
