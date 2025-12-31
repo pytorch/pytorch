@@ -1885,9 +1885,7 @@ class GraphLowering(torch.fx.Interpreter):
                             result = ir.ExternKernel.require_stride_order(
                                 result,
                                 ir.get_stride_order(
-                                    make_channels_last_strides_for(
-                                        n.meta["val"].shape
-                                    ),
+                                    make_channels_last_strides_for(n.meta["val"].shape),
                                     self._shape_env,
                                 ),
                             )
