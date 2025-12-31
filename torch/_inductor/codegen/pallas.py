@@ -1679,6 +1679,9 @@ class PallasKernel(SIMDKernel):
         When a 1D buffer (e.g., batch norm mean with shape (C,)) is used in a
         kernel with higher-dimensional iteration space (e.g., (N, C, H, W)),
         we need to reshape it to (1, C, 1, 1) for proper broadcasting.
+
+        We use the INDEX EXPRESSION to determine which dimension the buffer
+        aligns with, and the reference buffer's shape for output dimensionality.
         """
         buf_obj = V.graph.get_buffer(name)
         if buf_obj is None:
@@ -1691,6 +1694,15 @@ class PallasKernel(SIMDKernel):
 
         buf_length = self._safe_int(buf_size[0])
         if buf_length is None:
+            return load_expr
+
+        # Only apply for graph inputs (like batch norm params)
+        if name.startswith("buf"):
+            return load_expr
+
+        # Don't reshape integer buffers - they're likely index tensors
+        dtype = V.graph.get_dtype(name)
+        if dtype is not None and not dtype.is_floating_point:
             return load_expr
 
         # Find a higher-dimensional buffer to determine output shape
@@ -1706,32 +1718,53 @@ class PallasKernel(SIMDKernel):
         if ref_buf_size is None or len(ref_buf_size) <= 1:
             return load_expr
 
-        # Find which dimension of the reference buffer has the same size
-        # as our 1D buffer. For batch norm mean (3,) with input (2, 3, 4, 4),
-        # dimension 1 has size 3.
-        # Only apply this optimization if the size is unique (appears once)
+        # Use the index expression to determine which iteration variable is used
+        used_vars = self._get_used_iter_vars(index)
+        if len(used_vars) != 1:
+            # Complex indexing - don't try to handle
+            return load_expr
+
+        used_var = next(iter(used_vars))
+        if used_var not in self.range_tree_nodes:
+            return load_expr
+
+        entry = self.range_tree_nodes[used_var]
+        var_length = self._safe_int(entry.length)
+
+        # Verify the buffer length matches the variable length
+        if var_length is None or var_length != buf_length:
+            return load_expr
+
+        # Check if this buffer length UNIQUELY matches one iteration variable
+        # If multiple variables have the same length, we can't determine alignment
+        matching_vars = []
+        for var_sym, var_entry in self.range_tree_nodes.items():
+            v_len = self._safe_int(var_entry.length)
+            # pyrefly: ignore [missing-argument]
+            if v_len == buf_length and not var_entry.is_reduction:
+                matching_vars.append(var_sym)
+
+        if len(matching_vars) != 1:
+            # Multiple variables have the same length - ambiguous, skip reshape
+            return load_expr
+
+        # Find which dimension of the reference buffer has this size
+        # This tells us where in the output shape this 1D buffer aligns
         matching_dims = [
             idx for idx, dim_size in enumerate(ref_buf_size) if dim_size == buf_length
         ]
 
         if len(matching_dims) != 1:
-            # Size is not unique - can't determine which dimension to use
+            # Size is not unique in ref buffer - can't determine which dimension
             return load_expr
 
         axis_pos = matching_dims[0]
 
-        # Only apply this optimization for graph inputs (like batch norm params),
-        # not for intermediate buffers which may have coincidental size matches
-        # (e.g., complex real/imag components with size 2)
-        if name.startswith("buf"):
+        # If aligned with last dimension, default broadcasting works
+        if axis_pos == len(ref_buf_size) - 1:
             return load_expr
 
-        # Don't reshape integer buffers - they're likely index tensors
-        dtype = V.graph.get_dtype(name)
-        if dtype is not None and not dtype.is_floating_point:
-            return load_expr
-
-        # Build reshape: 1 for all dims except the matching one
+        # Build reshape: 1 for all dims except the aligned one
         reshape_dims = [1] * len(ref_buf_size)
         reshape_dims[axis_pos] = -1
 
