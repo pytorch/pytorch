@@ -321,8 +321,6 @@ def unfold3d(
         torch.Size([3, 32, 120])
     """
 
-    import numpy as np
-
     if len(tensor.shape) != 5:
         raise ValueError(
             f"Input tensor must be of the shape [B, C, D, H, W]. Got{tensor.shape}"
