@@ -1179,7 +1179,6 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    @unittest.expectedFailure  # Currently ops that call other ops does not properly invalidate cache
     def test_triton_op_cache_multiple_ops_invalidation(self):
         @triton.jit
         def my_jit(x):
