@@ -104,6 +104,8 @@ HAS_OMEGACONG = importlib.util.find_spec("omegaconf")
 if HAS_OMEGACONG:
     from omegaconf import OmegaConf
 
+HAS_CUDA = torch.cuda.is_available()
+
 
 def exists(val):
     return val is not None
@@ -7427,9 +7429,9 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     device=x.device,
                     _compile=False,
                 )
-                q = processed.view(batch_size, 1, seq_len, self.dim)
-                k = processed.view(batch_size, 1, seq_len, self.dim)
-                v = processed.view(batch_size, 1, seq_len, self.dim)
+                q = processed.view(batch_size, 1, seq_len, self.dim).detach()
+                k = processed.view(batch_size, 1, seq_len, self.dim).detach()
+                v = processed.view(batch_size, 1, seq_len, self.dim).detach()
 
                 out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
                 out = flex_attention(q, k, v, block_mask=block_mask)
@@ -7662,6 +7664,66 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             self.assertEqual(cnt.frame_count, 1)
         finally:
             trace_rules.FORCE_SKIP_FILES = old_force_skip_files
+
+    @parametrize("set_type", [set, frozenset], name_fn=lambda t: t.__name__)
+    def test_set_doesnt_recompile_with_ac(self, set_type):
+        import torch
+
+        with torch._dynamo.config.patch({"error_on_recompile": True}):
+            import functools
+
+            from torch.utils.checkpoint import (
+                checkpoint,
+                CheckpointPolicy,
+                create_selective_checkpoint_contexts,
+            )
+
+            def policy(compute_heavy_ops, ctx, func, *args, **kwargs):
+                if func in compute_heavy_ops:
+                    return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+            def g(x):
+                return torch.mm(x, x).sin().exp()
+
+            @torch.compile(fullgraph=True, backend="eager")
+            def f(x, policy):
+                return checkpoint(g, x, use_reentrant=False, context_fn=policy)
+
+            x = torch.randn(4, 4, requires_grad=True)
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, set_type([torch.ops.aten.mm.default])),
+                ),
+            )
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, set_type([torch.ops.aten.mm.default])),
+                ),
+            )
+
+    # https://github.com/pytorch/pytorch/issues/151296
+    def test_select_scatter_mixed_dtype(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                src = torch.tensor([0])
+                out = torch.select_scatter(x, src, 1, 0)
+                return out
+
+        model = Model()
+        x = torch.randn(1, 10)
+        inputs = [x]
+
+        compiled_model = torch.compile(model, backend="eager")
+
+        self.assertEqual(model(*inputs), compiled_model(*inputs))
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -8396,6 +8458,47 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # Should compile successfully with fullgraph=True
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_ordered_set_doesnt_recompile_with_ac(self):
+        import torch
+
+        with torch._dynamo.config.patch({"error_on_recompile": True}):
+            import functools
+
+            from torch.utils._ordered_set import OrderedSet
+            from torch.utils.checkpoint import (
+                checkpoint,
+                CheckpointPolicy,
+                create_selective_checkpoint_contexts,
+            )
+
+            def policy(compute_heavy_ops, ctx, func, *args, **kwargs):
+                if func in compute_heavy_ops:
+                    return CheckpointPolicy.MUST_SAVE
+                return CheckpointPolicy.PREFER_RECOMPUTE
+
+            def g(x):
+                return torch.mm(x, x).sin().exp()
+
+            @torch.compile(fullgraph=True, backend="eager")
+            def f(x, policy):
+                return checkpoint(g, x, use_reentrant=False, context_fn=policy)
+
+            x = torch.randn(4, 4, requires_grad=True)
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, OrderedSet([torch.ops.aten.mm.default])),
+                ),
+            )
+            f(
+                x,
+                functools.partial(
+                    create_selective_checkpoint_contexts,
+                    functools.partial(policy, OrderedSet([torch.ops.aten.mm.default])),
+                ),
+            )
+
     def test_pytree_tree_is_leaf_with_namedtuple(self):
         # Test that torch.utils._pytree.tree_is_leaf handles namedtuples correctly
         from collections import namedtuple
@@ -8427,6 +8530,78 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(result, expected))
         # Should compile successfully with fullgraph=True
         self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not HAS_CUDA, "Tests moving from cuda to cpu and back")
+    def test_move_tensor_subclass_parameter_after_compile(self):
+        aten = torch.ops.aten
+
+        class Subclass(torch.Tensor):
+            def __new__(cls, data):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls, data.shape, dtype=data.dtype, device=data.device
+                )
+
+            def __init__(self, data):
+                self._data = data
+
+            def __repr__(self):
+                return f"{self.__class__.__name__}(data={self._data})"
+
+            def __tensor_flatten__(self):
+                return ["_data"], []
+
+            @classmethod
+            def __tensor_unflatten__(cls, inner_tensors, ctx, outer_size, outer_stride):
+                return cls(inner_tensors["_data"])
+
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if func == torch.nn.functional.linear:
+                    return func(args[0], args[1]._data, *args[2:])
+
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **(kwargs or dict()))
+
+            def __torch_dispatch__(self, func, types, args, kwargs):
+                if func in (aten._to_copy.default, aten.detach.default):
+                    args = [x._data if isinstance(x, Subclass) else x for x in args]
+                    out = func(*args, **kwargs)
+                    return Subclass(out)
+
+                raise NotImplementedError(f"{func=}")
+
+        # Compile on cuda
+        device = "cuda"
+        linear = torch.nn.Linear(2, 2, device=device)
+        linear.weight = torch.nn.Parameter(Subclass(linear.weight.detach()))
+        linear.compile()
+        linear(torch.randn(1, 2, device=device))
+
+        # TODO @azahed98: We wish to test that there are no weakrefs, but there are known issues
+        # with weakrefs from
+        # 1. TracingContext.tensor_to_context
+        # 2. MetaTensorDescriber.lookup_tensor
+
+        # Check for weakrefs
+        t1 = linear.weight
+        self.assertEqual(len(weakref.getweakrefs(t1)), 2)
+
+        # TODO @azahed98: Once the aforementioned issue is fixed, we can remove the self.assertRaises
+        with self.assertRaises(RuntimeError):
+            # Move to cpu. Should work with no weakrefs
+            linear.cpu()
+
+            # Move back to cuda and check that there is no recompile
+            linear.to(device)
+            prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
+                "ok", 0
+            )
+            linear(torch.randn(1, 2, device=device))
+            new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
+                "ok", 0
+            )
+            assert new_frame_count == prev_frame_count, (
+                "linear() call caused a recompile"
+            )
 
 
 instantiate_parametrized_tests(ReproTests)

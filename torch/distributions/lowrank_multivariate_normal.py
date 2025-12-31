@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -100,7 +99,7 @@ class LowRankMultivariateNormal(Distribution):
         loc: Tensor,
         cov_factor: Tensor,
         cov_diag: Tensor,
-        validate_args: Optional[bool] = None,
+        validate_args: bool | None = None,
     ) -> None:
         if loc.dim() < 1:
             raise ValueError("loc must be at least one-dimensional.")

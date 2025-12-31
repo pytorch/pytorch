@@ -685,6 +685,48 @@ def prepare_for_partitioner(mod, num_primals, num_fw_outputs):
     return out
 
 
+def _get_partition_fn(fw_hop_node, aot_config):
+    """
+    Return either the default `partition_fn` in aot_config or a HOP specific partition
+    function.
+
+    If a HOP specific partition function is returned, used_hop_custom_partition is True.
+
+    See Note [InvokeSubgraphHOP Partitioner]
+    """
+    used_hop_custom_partition = False
+    partition_fn: Callable[..., tuple[torch.fx.GraphModule, torch.fx.GraphModule]] = (
+        aot_config.partition_fn
+    )
+    if (
+        fw_hop_node.target == torch._higher_order_ops.invoke_subgraph
+        and "custom" in fw_hop_node.meta
+        and "nested_region_config" in fw_hop_node.meta["custom"]
+    ):
+        hop_partition_fn = fw_hop_node.meta["custom"][
+            "nested_region_config"
+        ].partitioner
+        if hop_partition_fn is None:
+            # inherit the parent paritioner
+            return used_hop_custom_partition, partition_fn
+
+        if callable(hop_partition_fn):
+            partition_fn = hop_partition_fn  # pyrefly: ignore [bad-assignment]
+            used_hop_custom_partition = True
+        else:
+            assert isinstance(hop_partition_fn, str)
+            match hop_partition_fn:
+                case "default_partition":
+                    partition_fn = torch._functorch.partitioners.default_partition
+                case "min_cut_rematerialization_partition":
+                    partition_fn = torch._functorch.partitioners.min_cut_rematerialization_partition
+                case _:
+                    raise ValueError(
+                        f"Unknown HOP partitioner config: {hop_partition_fn}"
+                    )
+    return used_hop_custom_partition, partition_fn
+
+
 def run_joint_graph_passes_on_hops(
     joint_gm: torch.fx.GraphModule,
     joint_inputs: Any,
@@ -789,13 +831,26 @@ def run_joint_graph_passes_on_hops(
         # TODO: invoke_subgraph should track which of its inputs static indices
         # so it can propagate them to the partitioner (and use in cudagraphs)
         static_lifetime_input_indices: list[int] = []
-        # Step 2) and 3) - Run joint graph passes and partitioner
-        new_fw_hop_gm, new_bw_hop_gm = aot_config.partition_fn(
-            joint_hop_gm,
-            [],
-            num_fwd_outputs=num_fw_outputs,
-            static_lifetime_input_indices=static_lifetime_input_indices,
+
+        used_hop_custom_partition, partition_fn = _get_partition_fn(
+            fw_hop_node, aot_config
         )
+
+        # Step 2) and 3) - Run joint graph passes and partitioner
+        try:
+            new_fw_hop_gm, new_bw_hop_gm = partition_fn(
+                joint_hop_gm,
+                [],
+                num_fwd_outputs=num_fw_outputs,
+                static_lifetime_input_indices=static_lifetime_input_indices,
+            )
+        except Exception as e:
+            if used_hop_custom_partition:
+                raise RuntimeError(
+                    f"Error in custom partition function for invoke_subgraph node {fw_hop_node.name}: {e}"
+                ) from e
+            else:
+                raise
 
         # Save the new forward and backward graph modules
         new_hop_graphs[identifier].new_fw_hop_gm = new_fw_hop_gm

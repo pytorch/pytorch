@@ -250,7 +250,6 @@ test_Bq_Bkv = [
 test_block_size = [
     64,
     128,
-    (1, 64),
     (128, 64),
 ]
 
@@ -1176,14 +1175,14 @@ class TestFlexDecoding(InductorTestCase):
             (2, 2, 128, 4),
             dtype=dtype,
             device=device,
-            requires_grad=True,
+            requires_grad=False,
         )
         make_q = functools.partial(
             torch.randn,
             (2, 2, 8, 4),
             dtype=dtype,
             device=device,
-            requires_grad=True,
+            requires_grad=False,
         )
         query, key, value = make_q(), make_kv(), make_kv()
         # floor_div is not decomposed in decomposition_table is empty
@@ -1909,6 +1908,45 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
                 self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 1)
             else:
                 self.assertEqual(torch._dynamo.utils.counters["frames"]["ok"], 2)
+
+    @supported_platform
+    @common_utils.parametrize("q_seq_len", [4, 8, 16, 23, 64])
+    def test_multi_block_m(self, q_seq_len, device):
+        def mask_mod(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        B, KV_SEQ_LEN, NUM_Q_HEAD, NUM_KV_HEAD, HEAD_DIM = 1, 128, 32, 8, 128
+        mask = create_block_mask(
+            mask_mod=mask_mod,
+            B=1,
+            H=1,
+            Q_LEN=q_seq_len,
+            KV_LEN=KV_SEQ_LEN,
+            device=device,
+            BLOCK_SIZE=16,  # follow the vllm integration
+        )
+
+        flex_attention_compiled = torch.compile(flex_attention)
+
+        dtype = torch.float
+        q = torch.randn(B, NUM_Q_HEAD, q_seq_len, HEAD_DIM, device=device, dtype=dtype)
+        k = torch.randn(
+            B, NUM_KV_HEAD, KV_SEQ_LEN, HEAD_DIM, device=device, dtype=dtype
+        )
+        v = torch.randn(
+            B, NUM_KV_HEAD, KV_SEQ_LEN, HEAD_DIM, device=device, dtype=dtype
+        )
+
+        # settings for vllm integration
+        kernel_options = dict(BLOCK_M=16, BLOCK_N=16)
+        kwargs = dict(
+            block_mask=mask,
+            kernel_options=kernel_options,
+            enable_gqa=True,
+        )
+        eager = flex_attention(q, k, v, **kwargs)
+        out = flex_attention_compiled(q, k, v, **kwargs)
+        torch.testing.assert_close(eager, out, atol=5e-3, rtol=5e-3)
 
     @supported_platform
     @common_utils.parametrize("dtype", test_dtypes_fast)
