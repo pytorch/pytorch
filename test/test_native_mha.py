@@ -12,7 +12,7 @@ from torch.testing._internal.common_device_type import (
     skipMeta,
     skipXPUIf,
 )
-from torch.testing._internal.common_utils import parametrize, run_tests, TestCase, TEST_WITH_ROCM
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 from torch.nn.attention import SDPBackend
 
 class TestMHADeviceType(TestCase):

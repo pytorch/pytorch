@@ -3329,6 +3329,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_flex_attention_stride_ordering(self, device, mode, permute_order, shape):
         from torch._inductor.ir import get_stride_order
 
+        if (
+            torch.version.hip
+            and mode == "paged_attention"
+            and permute_order == (2, 0, 1, 3)
+            and shape == (2, 1, 128, 16)
+        ):
+            raise self.skipTest(
+                "ROCm paged attention permute_order3 shape0 triggers HIP illegal memory access"
+            )
+
         dtype = torch.float32
         # Setup
         requires_grad = device in DEVICE_SUPPORTS_BACKWARDS

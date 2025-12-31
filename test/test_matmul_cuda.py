@@ -81,6 +81,32 @@ def blas_library_context(backend):
     finally:
         torch.backends.cuda.preferred_blas_library(prev_backend)
 
+
+_ROCM_BLA_REGRESSION_MSG = (
+    "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
+)
+
+
+def _skip_rocm_blas_accuracy_regression(
+    input_dtype: torch.dtype, M: int, N: int, K: int, batch_size: int | None
+) -> bool:
+    if not TEST_WITH_ROCM:
+        return False
+    rocm_version = getRocmVersion()
+    if rocm_version != (7, 0):
+        return False
+    if input_dtype == torch.bfloat16 and N == 1 and K in (32, 64) and batch_size:
+        return True
+    if (
+        input_dtype == torch.float16
+        and M in (32, 64)
+        and N == 1
+        and K == 64
+        and batch_size == 1
+    ):
+        return True
+    return False
+
 class TestMatmulCuda(InductorTestCase):
     def setUp(self):
         super().setUp()
@@ -685,6 +711,8 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("batch_size", [None, 1, 16])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size, backend):
+        if _skip_rocm_blas_accuracy_regression(input_dtype, M, N, K, batch_size):
+            raise unittest.SkipTest(_ROCM_BLA_REGRESSION_MSG)
         device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
@@ -741,6 +769,8 @@ class TestMatmulCuda(InductorTestCase):
     @parametrize("high_precision_self", [False, True])
     @parametrize("backend", ["cublas", "cublaslt"])
     def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size, broadcast_self, high_precision_self, backend):
+        if _skip_rocm_blas_accuracy_regression(input_dtype, M, N, K, batch_size):
+            raise unittest.SkipTest(_ROCM_BLA_REGRESSION_MSG)
         device = "cuda"
         dtype = input_dtype
         with blas_library_context(backend):
