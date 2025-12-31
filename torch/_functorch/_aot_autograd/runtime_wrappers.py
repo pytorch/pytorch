@@ -2247,40 +2247,31 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check
                 )
 
-                num_vc_check = len(tensors_saved_with_vc_check)
-                for (
-                    idx,
-                    dims,
-                ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
-                    # dynamic_saved_tensors_idxs has indices relative to all saved tensors
-                    # (vc_check + no_vc_check combined)
-                    # We could make this indexing logic a bit simpler by merging
-                    # tensors_saved_with_vc_check + tensors_saved_no_vc_check,
-                    # but to avoid runtime overhead we are indexing into each list separately.
-                    # The convention is `activations = (acts_with_check, acts_without_check)`
-                    if idx < num_vc_check:
-                        maybe_mark_dynamic_helper(
-                            tensors_saved_with_vc_check[idx], dims
-                        )
-                    else:
-                        maybe_mark_dynamic_helper(
-                            tensors_saved_no_vc_check[idx - num_vc_check], dims
-                        )
-
                 # See Note [Detaching saved tensors in AOTAutograd]
+                num_vc_check = len(tensors_saved_with_vc_check)
+                tensors_to_save = [
+                    x.detach() if x._is_view() else x
+                    for x in tensors_saved_with_vc_check
+                ]
+                tensors_no_vc = [
+                    x.detach() if x._is_view() else x
+                    for x in tensors_saved_no_vc_check
+                ]
+
+                # dynamic_saved_tensors_idxs has indices relative to all saved tensors
+                # (vc_check + no_vc_check combined). Mark dynamics on the detached tensors.
+                for idx, dims in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
+                    if idx < num_vc_check:
+                        maybe_mark_dynamic_helper(tensors_to_save[idx], dims)
+                    else:
+                        maybe_mark_dynamic_helper(tensors_no_vc[idx - num_vc_check], dims)
+
                 # Only save tensors that need VC checks via save_for_backward
-                ctx.save_for_backward(
-                    *(
-                        x.detach() if x._is_view() else x
-                        for x in tensors_saved_with_vc_check
-                    )
-                )
+                ctx.save_for_backward(*tensors_to_save)
                 # Stash tensors that don't need VC checks directly on ctx
                 # These are tensors from autograd.Function that were saved via ctx.x = x
                 # rather than ctx.save_for_backward(x)
-                ctx._tensors_no_vc_check = [
-                    x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
-                ]
+                ctx._tensors_no_vc_check = tensors_no_vc
 
                 symint_outs = fw_outs[
                     CompiledFunction.metadata.symints_saved_for_backwards_slice
