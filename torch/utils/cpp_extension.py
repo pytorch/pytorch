@@ -2416,7 +2416,7 @@ def is_ninja_available() -> bool:
     """Return ``True`` if the `ninja <https://ninja-build.org/>`_ build system is available on the system, ``False`` otherwise."""
     try:
         subprocess.check_output(['ninja', '--version'])
-    except Exception:
+    except (subprocess.CalledProcessError, OSError):
         return False
     else:
         return True
