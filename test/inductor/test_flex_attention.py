@@ -233,6 +233,13 @@ DEVICE_SUPPORTS_BACKWARDS = SubstringSet(
     ]
 )
 
+# Varlen support requires offsets/limits which are only implemented in CUDA/Triton kernels
+DEVICE_SUPPORTS_VARLEN = SubstringSet(
+    [
+        "cuda",
+    ]
+)
+
 device_configs["cuda"] = DeviceConfig(
     dtypes=(
         [torch.float32, torch.bfloat16, torch.float16]
@@ -1900,6 +1907,7 @@ class TestFlexAttention(InductorTestCase):
         self.assertTrue(dense_block_mask[0, 0, 1, 1].item())
 
     @supported_platform
+    @skip_on_cpu
     def test_varlen_block_mask_forward(self, device):
         """Test create_varlen_block_mask works end-to-end with flex_attention forward.
 
@@ -2047,6 +2055,7 @@ class TestFlexAttention(InductorTestCase):
         # Note: We don't compare with eager mode because eager doesn't support offsets
 
     @supported_platform
+    @skip_on_cpu
     def test_varlen_block_mask_batch_invariance(self, device):
         """Test that varlen block mask produces batch-invariant results.
 
@@ -2186,6 +2195,7 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
+    @skip_on_cpu
     @common_utils.parametrize("doc_lens", [
         [128],  # Single doc, exact block boundary
         [127],  # Single doc, just under block boundary
@@ -2238,8 +2248,17 @@ class TestFlexAttention(InductorTestCase):
         self.assertEqual(out.shape, (1, NUM_HEADS, total_q_len, HEAD_DIM))
 
     @supported_platform
+    @skip_on_cpu
     def test_varlen_vs_regular_document_mask_correctness(self, device):
-        """Compare varlen document mask output against regular document mask implementation."""
+        """Compare varlen document mask output against regular document mask implementation.
+
+        Uses physical (compact) tensor layout:
+        - Physical tensor size = sum of actual doc lengths (no padding between docs)
+        - Documents are laid out consecutively: [Doc0][Doc1][Doc2]
+
+        For comparison, we process each document separately using regular causal mask
+        and verify the outputs match.
+        """
         torch.manual_seed(42)
         BLOCK_SIZE = 128
         HEAD_DIM = 64
@@ -2266,41 +2285,44 @@ class TestFlexAttention(InductorTestCase):
             BLOCK_SIZE=BLOCK_SIZE,
         )
 
-        total_len_varlen = block_mask_varlen.seq_lengths[0]
+        # Physical tensor size (compact - sum of actual doc lengths)
+        physical_len = sum(doc_lens)
 
-        # Create packed inputs
-        query_varlen = torch.randn(1, NUM_HEADS, total_len_varlen, HEAD_DIM, device=device, dtype=torch.float16)
-        key_varlen = torch.randn(1, NUM_HEADS, total_len_varlen, HEAD_DIM, device=device, dtype=torch.float16)
-        value_varlen = torch.randn(1, NUM_HEADS, total_len_varlen, HEAD_DIM, device=device, dtype=torch.float16)
+        # Create packed inputs with PHYSICAL (compact) size
+        query_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        key_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        value_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
 
         # Run varlen
         compiled_flex = torch.compile(flex_attention)
         out_varlen = compiled_flex(query_varlen, key_varlen, value_varlen, block_mask=block_mask_varlen)
 
+        # Output shape matches physical size
+        self.assertEqual(out_varlen.shape, (1, NUM_HEADS, physical_len, HEAD_DIM))
+
         # ============ Regular document mask approach ============
         # Process each document separately with regular causal mask
+        # Physical doc offsets (documents are consecutive in memory)
         doc_offsets = [0]
         for doc_len in doc_lens:
-            rounded_len = ((doc_len + BLOCK_SIZE - 1) // BLOCK_SIZE) * BLOCK_SIZE
-            doc_offsets.append(doc_offsets[-1] + rounded_len)
+            doc_offsets.append(doc_offsets[-1] + doc_len)
 
         outputs_regular = []
         for i, doc_len in enumerate(doc_lens):
             start = doc_offsets[i]
-            rounded_len = doc_offsets[i + 1] - doc_offsets[i]
 
-            # Extract this document's Q, K, V (padded region)
-            q_doc = query_varlen[:, :, start:start + rounded_len, :].clone()
-            k_doc = key_varlen[:, :, start:start + rounded_len, :].clone()
-            v_doc = value_varlen[:, :, start:start + rounded_len, :].clone()
+            # Extract this document's Q, K, V
+            q_doc = query_varlen[:, :, start:start + doc_len, :].clone()
+            k_doc = key_varlen[:, :, start:start + doc_len, :].clone()
+            v_doc = value_varlen[:, :, start:start + doc_len, :].clone()
 
             # Create causal block mask for this document
             block_mask_doc = create_block_mask(
-                causal_mask, 1, NUM_HEADS, rounded_len, rounded_len, device=device
+                causal_mask, 1, NUM_HEADS, doc_len, doc_len, device=device
             )
 
             out_doc = compiled_flex(q_doc, k_doc, v_doc, block_mask=block_mask_doc)
-            outputs_regular.append(out_doc[:, :, :doc_len, :])  # Take only valid positions
+            outputs_regular.append(out_doc)
 
         # Compare outputs for each document
         for i, doc_len in enumerate(doc_lens):
@@ -2316,6 +2338,7 @@ class TestFlexAttention(InductorTestCase):
             )
 
     @supported_platform
+    @skip_on_cpu
     def test_varlen_backward_gradient_flow(self, device):
         """Test that gradients flow correctly through varlen document mask backward pass."""
         if device not in DEVICE_SUPPORTS_BACKWARDS:
@@ -2372,6 +2395,7 @@ class TestFlexAttention(InductorTestCase):
         self.assertTrue(value.grad.abs().sum() > 0, "Value gradient is all zeros")
 
     @supported_platform
+    @skip_on_cpu
     @common_utils.parametrize("num_docs", [2, 4])
     @common_utils.parametrize("gqa_ratio", [1, 2, 4])
     def test_varlen_with_gqa(self, device, num_docs, gqa_ratio):
@@ -2416,6 +2440,7 @@ class TestFlexAttention(InductorTestCase):
         self.assertFalse(torch.isinf(out).any(), "Output contains Inf values")
 
     @supported_platform
+    @skip_on_cpu
     def test_varlen_non_causal_full_attention(self, device):
         """Test varlen with non-causal (full) attention within documents."""
         torch.manual_seed(42)
@@ -2531,6 +2556,7 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
+    @skip_on_cpu
     @common_utils.parametrize("score_mod_type", ["none", "alibi", "relative_bias"])
     def test_varlen_with_score_mod(self, device, score_mod_type):
         """Test varlen document mask with various score modifications."""
@@ -2585,6 +2611,7 @@ class TestFlexAttention(InductorTestCase):
         self.assertFalse(torch.isinf(out).any(), f"Output contains Inf with score_mod={score_mod_type}")
 
     @supported_platform
+    @skip_on_cpu
     def test_varlen_cross_document_isolation(self, device):
         """Verify that attention does not leak across document boundaries.
 

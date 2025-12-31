@@ -46,9 +46,12 @@ def forward_block_mn(
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     # If this is the last block of a non divisible seqlen, we still need to load [BLOCK_M, BLOCK_N] elements,
     # which is larger than the actual number of elements. To avoid access memory out of bound,
-    # we need to mask out the elements that are out of Q_LEN & KV_LEN.
-    m = get_bounded_indices(offs_m, Q_LEN if CHECK_BLOCK_BOUNDARY else None)
-    n = get_bounded_indices(offs_n, KV_LEN if CHECK_BLOCK_BOUNDARY else None)
+    # we need to mask out the elements that are out of the sequence length.
+    # For varlen, use LOGICAL_Q/KV_LEN (logical iteration space) for mask_mod bounds,
+    # since mask_mod captures tensors sized for the logical space.
+    # For non-varlen, LOGICAL_Q/KV_LEN == Q/KV_LEN (physical tensor size).
+    m = get_bounded_indices(offs_m, LOGICAL_Q_LEN if CHECK_BLOCK_BOUNDARY else None)
+    n = get_bounded_indices(offs_n, LOGICAL_KV_LEN if CHECK_BLOCK_BOUNDARY else None)
 
     {{ modification(
         subgraph_number=0,
@@ -62,8 +65,10 @@ def forward_block_mn(
     ) | indent_except_first(1) }}
 
     if CHECK_BLOCK_BOUNDARY:
-        # Mask out the elements that are out of the KV_LEN for non divisible seqlen.
-        post_mod_scores = tl.where(offs_n < KV_LEN, post_mod_scores, float("-inf"))
+        # Mask out the elements that are out of the logical sequence length.
+        # For varlen, offs_n uses logical positions which can exceed physical KV_LEN,
+        # so we use LOGICAL_KV_LEN for bounds checking.
+        post_mod_scores = tl.where(offs_n < LOGICAL_KV_LEN, post_mod_scores, float("-inf"))
 
     if not IS_FULL_BLOCKS:
         {{ modification(
@@ -77,7 +82,7 @@ def forward_block_mn(
         ) | indent_except_first(2) }}
 
         if CHECK_BLOCK_BOUNDARY:
-            mask_mod_output = tl.where(offs_n < KV_LEN, mask_mod_output, False)
+            mask_mod_output = tl.where(offs_n < LOGICAL_KV_LEN, mask_mod_output, False)
         # apply mask for partially unmasked blocks
         post_mod_scores = tl.where(mask_mod_output, post_mod_scores, float("-inf"))
 
