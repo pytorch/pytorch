@@ -3715,7 +3715,7 @@ class InstructionTranslatorBase(
         else:
             self.push(ConstantVariable.create(False))
 
-    def MATCH_CLASS(self, inst: Instruction) -> None :
+    def MATCH_CLASS(self, inst: Instruction) -> None:
         import builtins
 
         from torch._dynamo.variables.builtin import BuiltinVariable
@@ -3741,9 +3741,7 @@ class InstructionTranslatorBase(
         try:
             is_match = match_result.as_python_constant()
         except NotImplementedError:
-            raise Unsupported(
-                "MATCH_CLASS: cannot statically resolve isinstance"
-            ) 
+            raise Unsupported("MATCH_CLASS: cannot statically resolve isinstance")  # noqa: B904
 
         if is_match:
             attr_names = names.as_python_constant()
