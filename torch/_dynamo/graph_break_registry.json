@@ -388,6 +388,17 @@
   ],
   "GB0039": [
     {
+      "Gb_type": "Dynamo recompile limit exceeded",
+      "Context": "Limit type: {limit_type}",
+      "Explanation": "Dynamo attempted to recompile the code object too many times, exceeding the {limit_type} cache size limit (currently set to {getattr(config, limit_type)}). Excessive recompilations can degrade performance due to the compilation overhead of each recompilation.",
+      "Hints": [
+        "To monitor recompilations, enable TORCH_LOGS=recompiles. ",
+        "If recompilations are expected, consider ",
+        "increasing torch._dynamo.config.{limit_type} to an appropriate value.",
+        "See {troubleshooting_url} for tips on dealing with recompilations."
+      ]
+    },
+    {
       "Gb_type": "Dynamo cache limit exceeded",
       "Context": "Limit type: {limit_type}",
       "Explanation": "Dynamo attempted to recompile the code object too many times, exceeding the {limit_type} cache size limit.Giving up on compiling as the compile time tradeoff is likely not worth the performance gain.",
@@ -673,6 +684,17 @@
       "Explanation": "{seq} cannot be unpacked into a list for the BUILD_LIST_UNPACK bytecode (`[*x, *y, ...]`).",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB4197": [
+    {
+      "Gb_type": "Unsupported Tensor.share_memory_() call",
+      "Context": "call_method {self} share_memory_",
+      "Explanation": "Dynamo does not support Tensor.share_memory_() which modifies tensor storage for IPC",
+      "Hints": [
+        "Move share_memory_() call outside the compiled region. ",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
