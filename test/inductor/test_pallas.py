@@ -27,6 +27,13 @@ if os.path.isdir(_pallas_expected_failures_dir):
 else:
     PALLAS_EXPECTED_FAILURES = set()
 
+# Load pallas skip tests from sentinel files (for flaky tests)
+_pallas_skip_tests_dir = os.path.join(os.path.dirname(__file__), "pallas_skip_tests")
+if os.path.isdir(_pallas_skip_tests_dir):
+    PALLAS_SKIP_TESTS = set(os.listdir(_pallas_skip_tests_dir))
+else:
+    PALLAS_SKIP_TESTS = set()
+
 
 if IS_WINDOWS and IS_CI:
     sys.stderr.write(
@@ -51,9 +58,7 @@ def make_pallas(cls):
     suffix = "_pallas"
     cls_prefix = "Pallas"
 
-    # Mark tests as expected failures based on sentinel files
-    # Sentinel file format: TestClassName.test_method_name
-    # Must set attribute on the underlying function object in __dict__
+    # Mark tests based on sentinel files in pallas_expected_failures/ and pallas_skip_tests/
     for name in cls.__dict__:
         if name.startswith("test_"):
             fn = cls.__dict__[name]
@@ -61,6 +66,13 @@ def make_pallas(cls):
                 key = f"{cls.__name__}.{name}"
                 if key in PALLAS_EXPECTED_FAILURES:
                     fn._expected_failure_pallas = True
+                elif key in PALLAS_SKIP_TESTS:
+                    fn._skip_pallas = True
+
+    def skip_decorator(fn):
+        if hasattr(fn, "_skip_pallas"):
+            return unittest.skip("Skipped in Pallas backend")(fn)
+        return fn
 
     test_class = make_test_cls_with_patches(
         cls,
@@ -69,6 +81,7 @@ def make_pallas(cls):
         (config, "cpu_backend", "pallas"),
         (config, "cuda_backend", "pallas"),
         xfail_prop="_expected_failure_pallas",
+        decorator=skip_decorator,
     )
 
     test_classes[test_class.__name__] = test_class
