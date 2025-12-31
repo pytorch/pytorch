@@ -15,10 +15,7 @@ from torch._export.wrappers import mark_subclass_constructor_exportable_experime
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
-from torch.distributed.tensor._redistribute import (
-    Redistribute,
-    redistribute_local_tensor,
-)
+from torch.distributed.tensor._redistribute import redistribute_local_tensor
 from torch.distributed.tensor._utils import (
     compute_global_tensor_info,
     compute_local_shape_and_global_offset,
@@ -527,7 +524,8 @@ class DTensor(torch.Tensor):
         placements = tuple(placements)
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
-        return Redistribute.apply(
+        # return Redistribute.apply(
+        return torch.ops._dtensor._redistribute(
             self, device_mesh, placements, async_op, forward_dtype, backward_dtype
         )
 
