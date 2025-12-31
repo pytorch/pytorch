@@ -2339,6 +2339,204 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
+    def test_varlen_backward_vs_regular_document_correctness(self, device):
+        """Compare varlen backward pass against regular per-document backward pass.
+
+        This is the backward counterpart to test_varlen_vs_regular_document_mask_correctness.
+        For each document, gradients should match what we'd get from processing each doc separately.
+        """
+        if device not in DEVICE_SUPPORTS_BACKWARDS:
+            self.skipTest("Backward not supported on this device")
+
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+        NUM_HEADS = 2
+
+        # Use document lengths that create a reasonable test case
+        doc_lens = [200, 150, 250]
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        # ============ Varlen approach ============
+        q_seq_lens = torch.tensor(doc_lens, device=device)
+        kv_seq_lens = torch.tensor(doc_lens, device=device)
+
+        block_mask_varlen = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=NUM_HEADS,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Physical tensor size (compact - sum of actual doc lengths)
+        physical_len = sum(doc_lens)
+
+        # Physical doc offsets (documents are consecutive in memory)
+        doc_offsets = [0]
+        for doc_len in doc_lens:
+            doc_offsets.append(doc_offsets[-1] + doc_len)
+
+        # Create packed inputs with PHYSICAL (compact) size
+        query_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
+        key_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
+        value_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
+
+        # Use same grad_out for deterministic comparison
+        grad_out_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
+
+        # Run varlen forward and backward
+        compiled_flex = torch.compile(flex_attention)
+        out_varlen = compiled_flex(query_varlen, key_varlen, value_varlen, block_mask=block_mask_varlen)
+        out_varlen.backward(grad_out_varlen)
+
+        # Store varlen gradients
+        grad_q_varlen = query_varlen.grad.clone()
+        grad_k_varlen = key_varlen.grad.clone()
+        grad_v_varlen = value_varlen.grad.clone()
+
+        # ============ Regular document mask approach ============
+        # Process each document separately with regular causal mask
+        grad_q_regular_list = []
+        grad_k_regular_list = []
+        grad_v_regular_list = []
+
+        for i, doc_len in enumerate(doc_lens):
+            start = doc_offsets[i]
+
+            # Extract this document's Q, K, V with requires_grad
+            q_doc = query_varlen[:, :, start:start + doc_len, :].detach().clone().requires_grad_(True)
+            k_doc = key_varlen[:, :, start:start + doc_len, :].detach().clone().requires_grad_(True)
+            v_doc = value_varlen[:, :, start:start + doc_len, :].detach().clone().requires_grad_(True)
+
+            # Create causal block mask for this document
+            block_mask_doc = create_block_mask(
+                causal_mask, 1, NUM_HEADS, doc_len, doc_len, device=device
+            )
+
+            # Forward + backward for this document
+            out_doc = compiled_flex(q_doc, k_doc, v_doc, block_mask=block_mask_doc)
+            grad_out_doc = grad_out_varlen[:, :, start:start + doc_len, :]
+            out_doc.backward(grad_out_doc)
+
+            grad_q_regular_list.append(q_doc.grad)
+            grad_k_regular_list.append(k_doc.grad)
+            grad_v_regular_list.append(v_doc.grad)
+
+        # Compare gradients for each document
+        for i, doc_len in enumerate(doc_lens):
+            start = doc_offsets[i]
+
+            grad_q_varlen_doc = grad_q_varlen[:, :, start:start + doc_len, :]
+            grad_k_varlen_doc = grad_k_varlen[:, :, start:start + doc_len, :]
+            grad_v_varlen_doc = grad_v_varlen[:, :, start:start + doc_len, :]
+
+            torch.testing.assert_close(
+                grad_q_varlen_doc, grad_q_regular_list[i],
+                rtol=1e-2, atol=1e-2,
+                msg=f"Document {i} grad_query mismatch"
+            )
+            torch.testing.assert_close(
+                grad_k_varlen_doc, grad_k_regular_list[i],
+                rtol=1e-2, atol=1e-2,
+                msg=f"Document {i} grad_key mismatch"
+            )
+            torch.testing.assert_close(
+                grad_v_varlen_doc, grad_v_regular_list[i],
+                rtol=1e-2, atol=1e-2,
+                msg=f"Document {i} grad_value mismatch"
+            )
+
+    @supported_platform
+    @skip_on_cpu
+    def test_varlen_backward_gradient_isolation(self, device):
+        """Verify that gradients do not leak across document boundaries in backward pass.
+
+        If grad_out is only non-zero for one document, gradients should only flow
+        to Q/K/V positions within that document.
+        """
+        if device not in DEVICE_SUPPORTS_BACKWARDS:
+            self.skipTest("Backward not supported on this device")
+
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+        NUM_HEADS = 1
+
+        # Use document lengths aligned to BLOCK_SIZE for clear isolation testing
+        doc_lens = [256, 256]
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        q_seq_lens = torch.tensor(doc_lens, device=device)
+        kv_seq_lens = torch.tensor(doc_lens, device=device)
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=NUM_HEADS,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Physical (compact) tensor layout
+        physical_len = sum(doc_lens)
+        doc_offsets = [0, doc_lens[0], sum(doc_lens)]
+
+        # Create inputs
+        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
+        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
+        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
+
+        # Forward pass
+        compiled_flex = torch.compile(flex_attention)
+        out = compiled_flex(query, key, value, block_mask=block_mask)
+
+        # Create grad_out that is ONLY non-zero for document 0
+        grad_out = torch.zeros_like(out)
+        grad_out[:, :, :doc_lens[0], :] = torch.randn(1, NUM_HEADS, doc_lens[0], HEAD_DIM, device=device, dtype=torch.float32)
+
+        # Backward pass
+        out.backward(grad_out)
+
+        # Gradients for document 1 should be zero since grad_out for doc1 was zero
+        # and doc1's output doesn't depend on doc0's Q/K/V
+        grad_q_doc1 = query.grad[:, :, doc_offsets[1]:doc_offsets[2], :]
+        grad_k_doc1 = key.grad[:, :, doc_offsets[1]:doc_offsets[2], :]
+        grad_v_doc1 = value.grad[:, :, doc_offsets[1]:doc_offsets[2], :]
+
+        # Check that doc1 gradients are zero (no gradient leakage)
+        self.assertTrue(
+            torch.allclose(grad_q_doc1, torch.zeros_like(grad_q_doc1), atol=1e-6),
+            f"Gradient leaked to doc1 query: max abs = {grad_q_doc1.abs().max().item()}"
+        )
+        self.assertTrue(
+            torch.allclose(grad_k_doc1, torch.zeros_like(grad_k_doc1), atol=1e-6),
+            f"Gradient leaked to doc1 key: max abs = {grad_k_doc1.abs().max().item()}"
+        )
+        self.assertTrue(
+            torch.allclose(grad_v_doc1, torch.zeros_like(grad_v_doc1), atol=1e-6),
+            f"Gradient leaked to doc1 value: max abs = {grad_v_doc1.abs().max().item()}"
+        )
+
+        # Conversely, doc0 should have non-zero gradients
+        grad_q_doc0 = query.grad[:, :, :doc_offsets[1], :]
+        grad_k_doc0 = key.grad[:, :, :doc_offsets[1], :]
+        grad_v_doc0 = value.grad[:, :, :doc_offsets[1], :]
+
+        self.assertTrue(grad_q_doc0.abs().sum() > 0, "Doc0 query gradient should be non-zero")
+        self.assertTrue(grad_k_doc0.abs().sum() > 0, "Doc0 key gradient should be non-zero")
+        self.assertTrue(grad_v_doc0.abs().sum() > 0, "Doc0 value gradient should be non-zero")
+
+    @supported_platform
+    @skip_on_cpu
     def test_varlen_backward_gradient_flow(self, device):
         """Test that gradients flow correctly through varlen document mask backward pass."""
         if device not in DEVICE_SUPPORTS_BACKWARDS:

@@ -906,6 +906,19 @@ def flex_attention_backward(*args, **kwargs):
         q_limits, kv_limits = (
             empty(0, device=query.get_device(), dtype=torch.int32) for _ in range(2)
         )
+        # For non-varlen, logical = physical sequence length
+        logical_seq_len_q = seq_len_q
+        logical_seq_len_kv = seq_len_kv
+    else:
+        # For varlen, logical sequence length = num_sparse_blocks * SPARSE_Q_BLOCK_SIZE
+        # kv_num_blocks has shape [B, H, num_q_sparse_blocks]
+        num_q_sparse_blocks = kv_num_blocks.get_size()[2]
+        logical_seq_len_q = num_q_sparse_blocks * SPARSE_Q_BLOCK_SIZE
+        # For simplicity, assume KV has same number of sparse blocks (symmetric case)
+        logical_seq_len_kv = logical_seq_len_q
+    # Pass logical sequence lengths to kernel for mask_mod bounds checking
+    kernel_options.setdefault("LOGICAL_Q_LEN", V.graph.sizevars.guard_int(logical_seq_len_q))
+    kernel_options.setdefault("LOGICAL_KV_LEN", V.graph.sizevars.guard_int(logical_seq_len_kv))
 
     set_head_dim_values(kernel_options, qk_head_dim, v_head_dim, V.graph.sizevars)
 
@@ -988,6 +1001,8 @@ def flex_attention_backward(*args, **kwargs):
                 full_q_indices,
                 q_offsets,
                 kv_offsets,
+                q_limits,
+                kv_limits,
             ],
             layout=layout_broadcasted_k,  # We use store_output only for grad_key
             subgraphs=[
@@ -1001,7 +1016,9 @@ def flex_attention_backward(*args, **kwargs):
                 broadcasted_grad_value,
                 *joint_outputs.mutated_grads,
             ],
-            call_sizes=query.get_size() + key.get_size()[1:3],
+            # Use logical sequence lengths for grid calculation
+            # For varlen, this is the padded iteration space, not physical tensor size
+            call_sizes=[Bq, Hq, logical_seq_len_q, qk_head_dim, Hkv, logical_seq_len_kv],
             **cur_kernel_options,
         )
     inputs_for_autotuning = (
@@ -1024,6 +1041,8 @@ def flex_attention_backward(*args, **kwargs):
             full_q_indices,
             q_offsets,
             kv_offsets,
+            q_limits,
+            kv_limits,
         ]
         + list(score_mod_other_buffers)
         + list(mask_mod_other_buffers)
@@ -1038,7 +1057,7 @@ def flex_attention_backward(*args, **kwargs):
         13: create_indices_fake,
         14: create_num_blocks_fake_generator(full_q_indices),  # full_q_num_blocks
         15: create_indices_fake,
-        # q_offsets and kv_offsets at indices 16 and 17 don't need special generators
+        # q_offsets, kv_offsets, q_limits, kv_limits at indices 16-19 don't need special generators
     }
 
     broadcasted_grad_key = autotune_select_algorithm(

@@ -1,4 +1,4 @@
-{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ", "DV", "KV_NUM_BLKS", "KV_IDX", "Q_NUM_BLKS", "Q_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "Q_OFFSETS", "KV_OFFSETS")}}
+{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ", "DV", "KV_NUM_BLKS", "KV_IDX", "Q_NUM_BLKS", "Q_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "Q_OFFSETS", "KV_OFFSETS", "Q_LIMITS", "KV_LIMITS")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
@@ -52,8 +52,15 @@
     MATMUL_PRECISION = Q.dtype.element_ty
 
     pid = tl.program_id(0).to(INDEX_DTYPE)
+    # For varlen, use logical sequence lengths for grid iteration
+    # (logical = padded to block boundaries, physical = actual data size)
+    {%- if HAS_OFFSETS %}
+    NUM_KV_BLOCKS = tl.cdiv(LOGICAL_KV_LEN, BLOCK_N1)
+    NUM_Q_BLOCKS = tl.cdiv(LOGICAL_Q_LEN, BLOCK_M2)
+    {%- else %}
     NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1)
     NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
+    {%- endif %}
 
     off_zq = tl.program_id(1).to(INDEX_DTYPE) # q batch idx
     off_hkv = tl.program_id(2).to(INDEX_DTYPE) # kv head idx
@@ -118,19 +125,27 @@
         # Logical Q positions (used for mask_mod/score_mod)
         offs_m2 = start_m2 + tl.arange(0, BLOCK_M2)
 
-        # Load Q offset for variable-length sequences
+        # Load Q offset and limit for variable-length sequences
         {%- if HAS_OFFSETS %}
         stride_q_offsets_z = {{stride("Q_OFFSETS", 0)}}
         stride_q_offsets_h = {{stride("Q_OFFSETS", 1)}}
         q_sparse_block_idx = start_m2_block // SPARSE_Q_MULTIPLE
         q_offset_ptr = Q_OFFSETS + off_zq * stride_q_offsets_z + sparse_idx_hq2 * stride_q_offsets_h + q_sparse_block_idx
         q_offset = tl.load(q_offset_ptr).to(INDEX_DTYPE)
+        stride_q_limits_z = {{stride("Q_LIMITS", 0)}}
+        stride_q_limits_h = {{stride("Q_LIMITS", 1)}}
+        q_limit_ptr = Q_LIMITS + off_zq * stride_q_limits_z + sparse_idx_hq2 * stride_q_limits_h + q_sparse_block_idx
+        q_limit = tl.load(q_limit_ptr).to(INDEX_DTYPE)
         {%- else %}
         q_offset = 0
+        q_limit = BLOCK_M2
         {%- endif %}
 
         # Physical Q positions (used for memory access)
         offs_m2_physical = offs_m2 + q_offset
+
+        # Local position within the Q block for limit checking
+        local_m2 = tl.arange(0, BLOCK_M2)
 
         # load Q and do: they stay in SRAM throughout the inner loop.
         q = load_checked_2d(Q2, offs_m2_physical, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
@@ -139,12 +154,13 @@
         if PRESCALE_QK:
             q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
 
+        # LSE and Delta are stored at physical positions, so use offs_m2_physical
         if IS_DIVISIBLE:
-            Di = tl.load(DELTA2 + offs_m2)
-            lse = tl.load(LSE2 + offs_m2)
+            Di = tl.load(DELTA2 + offs_m2_physical)
+            lse = tl.load(LSE2 + offs_m2_physical)
         else:
-            Di = tl.load(DELTA2 + offs_m2, mask=offs_m2 < Q_LEN)
-            lse = tl.load(LSE2 + offs_m2, mask=offs_m2 < Q_LEN)
+            Di = tl.load(DELTA2 + offs_m2_physical, mask=offs_m2_physical < Q_LEN)
+            lse = tl.load(LSE2 + offs_m2_physical, mask=offs_m2_physical < Q_LEN)
         lse = tl.where(lse == -float("inf"), 0.0, lse)
         lse = lse[:, None]
 
@@ -170,10 +186,10 @@
 
         dq = bwd_dq_inner(
             {{gen_argdefs()}},
-            K, V,
+            K, V, KV_OFFSETS, KV_LIMITS,
             dq, q, do, Di, lse,
-            off_zq, off_hq2, offs_m2, offs_n2,
-            kv_start,
+            off_zq, off_hq2, sparse_idx_hq2, offs_m2, offs_n2,
+            kv_start, first_kv_block_idx,
             kv_offset,
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
@@ -201,10 +217,10 @@
 
             dq = bwd_dq_inner(
                 {{gen_argdefs()}},
-                K, V,
+                K, V, KV_OFFSETS, KV_LIMITS,
                 dq, q, do, Di, lse,
-                off_zq, off_hq2, offs_m2, offs_n2,
-                kv_start,
+                off_zq, off_hq2, sparse_idx_hq2, offs_m2, offs_n2,
+                kv_start, first_full_kv_block_idx,
                 kv_offset_full,
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
@@ -215,10 +231,16 @@
         # Write back dQ at physical positions (using offset for varlen support)
         dq_ptrs = DQ2 + offs_m2_physical[:, None] * stride_dqm + offs_k[None, :] * stride_dqd
         dq *= SM_SCALE
+        # For varlen, also check local position against q_limit to mask out invalid positions
+        {%- if HAS_OFFSETS %}
+        dq_mask = (offs_m2_physical[:, None] < Q_LEN) & (offs_k[None, :] < QK_HEAD_DIM) & (local_m2[:, None] < q_limit)
+        tl.store(dq_ptrs, dq, mask=dq_mask)
+        {%- else %}
         if IS_DIVISIBLE and SAFE_HEAD_DIM:
             tl.store(dq_ptrs, dq)
         else:
             tl.store(dq_ptrs, dq, mask=(offs_m2_physical[:, None] < Q_LEN) & (offs_k[None, :] < QK_HEAD_DIM))
+        {%- endif %}
     else:
         # THIS BLOCK DOES DK & DV
         SPARSE_Q_MULTIPLE = (SPARSE_Q_BLOCK_SIZE // BLOCK_M1)
@@ -238,7 +260,7 @@
         # Logical KV positions (used for mask_mod/score_mod)
         offs_n1 = start_n1 + tl.arange(0, BLOCK_N1)
 
-        # Load KV offset for variable-length sequences
+        # Load KV offset and limit for variable-length sequences
         {%- if HAS_OFFSETS %}
         stride_kv_offsets_z = {{stride("KV_OFFSETS", 0)}}
         stride_kv_offsets_h = {{stride("KV_OFFSETS", 1)}}
@@ -246,12 +268,20 @@
         # Note: For DK/DV, we use off_hkv for the head index since we iterate over KV heads
         kv_offset_ptr = KV_OFFSETS + off_zq * stride_kv_offsets_z + (off_hkv % SPARSE_HQ) * stride_kv_offsets_h + kv_sparse_block_idx
         kv_offset_dkdv = tl.load(kv_offset_ptr).to(INDEX_DTYPE)
+        stride_kv_limits_z = {{stride("KV_LIMITS", 0)}}
+        stride_kv_limits_h = {{stride("KV_LIMITS", 1)}}
+        kv_limit_ptr = KV_LIMITS + off_zq * stride_kv_limits_z + (off_hkv % SPARSE_HQ) * stride_kv_limits_h + kv_sparse_block_idx
+        kv_limit_dkdv = tl.load(kv_limit_ptr).to(INDEX_DTYPE)
         {%- else %}
         kv_offset_dkdv = 0
+        kv_limit_dkdv = BLOCK_N1
         {%- endif %}
 
         # Physical KV positions (used for memory access)
         offs_n1_physical = offs_n1 + kv_offset_dkdv
+
+        # Local position within the KV block for limit checking
+        local_n1 = tl.arange(0, BLOCK_N1)
 
         # load K and V: they stay in SRAM throughout the inner loop.
         # Use physical indices for memory access
@@ -305,10 +335,10 @@
 
             dk, dv = bwd_dkdv_inner(
                 {{gen_argdefs()}},
-                Q1, DO1, DELTA1, LSE1,
+                Q1, DO1, DELTA1, LSE1, Q_OFFSETS, Q_LIMITS,
                 dk, dv, k, v,
-                off_zq, off_hq1, offs_n1, offs_m1,
-                q_start,
+                off_zq, off_hq1, sparse_idx_hq1, offs_n1, offs_m1,
+                q_start, first_q_block_idx,
                 q_offset_dkdv,
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
@@ -337,10 +367,10 @@
 
                 dk, dv = bwd_dkdv_inner(
                     {{gen_argdefs()}},
-                    Q1, DO1, DELTA1, LSE1,
+                    Q1, DO1, DELTA1, LSE1, Q_OFFSETS, Q_LIMITS,
                     dk, dv, k, v,
-                    off_zq, off_hq1, offs_n1, offs_m1,
-                    q_start,
+                    off_zq, off_hq1, sparse_idx_hq1, offs_n1, offs_m1,
+                    q_start, first_full_q_block_idx,
                     q_offset_dkdv_full,
                     stride_qm, stride_qd, stride_dom, stride_dod,
                     q_indices, sparse_q_num_blocks,
@@ -356,17 +386,27 @@
         index_k = offs_k[None, :]
         index_v = offs_v[None, :]
 
+        # For varlen, also check local position against kv_limit to mask out invalid positions
+        {%- if HAS_OFFSETS %}
+        dv_mask = (index_n < KV_LEN) & (index_v < V_HEAD_DIM) & (local_n1[:, None] < kv_limit_dkdv)
+        tl.store(dv_ptrs, dv, mask=dv_mask)
+        {%- else %}
         if IS_DIVISIBLE and SAFE_HEAD_DIM:
             tl.store(dv_ptrs, dv)
         else:
             tl.store(dv_ptrs, dv, mask=(index_n < KV_LEN) & (index_v < V_HEAD_DIM))
+        {%- endif %}
 
         dk *= SM_SCALE
 
+        {%- if HAS_OFFSETS %}
+        mask = (index_n < KV_LEN) & (index_k < QK_HEAD_DIM) & (local_n1[:, None] < kv_limit_dkdv)
+        {%- else %}
         if SAFE_HEAD_DIM:
             mask = index_n < KV_LEN
         else:
             mask = (index_n < KV_LEN) & (index_k < QK_HEAD_DIM)
+        {%- endif %}
 
         # first compute broadcasted dk of shape [Bq, Hkv, KV_LEN, V_HEAD_DIM]
         # then reduce to dk of shape [Bkv, Hkv, KV_LEN, V_HEAD_DIM]
@@ -376,11 +416,11 @@
 @triton.jit
 def bwd_dq_inner(
     {{gen_argdefs()}},
-    K, V,  # pointers
+    K, V, KV_OFFSETS, KV_LIMITS,  # pointers
     dq, q, do, Di, lse,
-    off_z, off_hq, offs_m2, offs_n2,
+    off_z, off_hq, sparse_idx_hq, offs_m2, offs_n2,
     # Offsets needed for memory access
-    kv_start,
+    kv_start, first_kv_block_idx,
     kv_offset,
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
@@ -406,9 +446,30 @@ def bwd_dq_inner(
     # BLOCK_M2 must be a multiple of BLOCK_N2, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_M2 % BLOCK_N2 == 0)
 
+    # For varlen, use logical length for iteration limit since we iterate over logical blocks
+    {%- if HAS_OFFSETS %}
+    hi = tl.minimum(sparse_kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(LOGICAL_KV_LEN, BLOCK_N2), 1))
+    {%- else %}
     hi = tl.minimum(sparse_kv_num_blocks * SPARSE_KV_MULTIPLE, tl.maximum(tl.cdiv(KV_LEN, BLOCK_N2), 1))
+    {%- endif %}
+
+    # Track current sparse block index for loading kv_limit
+    current_sparse_block_idx = first_kv_block_idx
+
+    {%- if HAS_OFFSETS %}
+    stride_kv_limits_z = {{stride("KV_LIMITS", 0)}}
+    stride_kv_limits_h = {{stride("KV_LIMITS", 1)}}
+    {%- endif %}
 
     for start_n in range(0, hi):
+        # Load kv_limit for current KV block (for varlen masking)
+        {%- if HAS_OFFSETS %}
+        kv_limit_ptr = KV_LIMITS + off_z * stride_kv_limits_z + sparse_idx_hq * stride_kv_limits_h + current_sparse_block_idx
+        kv_limit = tl.load(kv_limit_ptr).to(INDEX_DTYPE)
+        {%- else %}
+        kv_limit = BLOCK_N2
+        {%- endif %}
+
         dq = bwd_dq_block_mn(
             {{gen_argdefs()}},
             dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
@@ -416,7 +477,7 @@ def bwd_dq_inner(
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
             MATMUL_PRECISION, RCP_LN2,
-            IS_FULL_BLOCKS,
+            IS_FULL_BLOCKS, kv_limit,
         )
 
         # Increment pointers.
@@ -430,6 +491,13 @@ def bwd_dq_inner(
 
         offs_n2 += offset
 
+        # Update sparse block index for next iteration
+        {%- if HAS_OFFSETS %}
+        # Check if we crossed a sparse block boundary
+        if (start_n + 1) % SPARSE_KV_MULTIPLE == 0:
+            current_sparse_block_idx += 1
+        {%- endif %}
+
     return dq
 
 
@@ -441,23 +509,39 @@ def bwd_dq_block_mn(
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
-    IS_FULL_BLOCKS,
+    IS_FULL_BLOCKS, kv_limit,
 ):
     {{gen_defines() | indent_except_first(1)}}
 
+    # Local position within the KV block for limit checking (varlen)
+    local_n2 = tl.arange(0, BLOCK_N2)
+
     # NB reversed order to since K is transposed
     # Use global indices (offs_n2) for memory access via kT_ptrs
+    # For varlen, use logical length for bounds checking since offs_n2 are logical positions
+    {%- if HAS_OFFSETS %}
+    kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, LOGICAL_KV_LEN)
+    {%- else %}
     kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN)
+    {%- endif %}
     qk = tl.dot(q, kT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
         qk *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     pre_mod_scores = qk
     # Use global indices for score_mod/mask_mod
+    # For varlen, use logical lengths since these are logical positions
+    {%- if HAS_OFFSETS %}
+    n = get_bounded_indices(offs_n2[None, :], LOGICAL_KV_LEN if not IS_DIVISIBLE else None)
+    # The boundary check is done for the outer loop, but here it's possible since we're iterating across N dim
+    # that the M reads out of bounds for the PIDS spanning the Q_LEN boundary
+    m = get_bounded_indices(offs_m2[:, None], LOGICAL_Q_LEN if not IS_DIVISIBLE else None)
+    {%- else %}
     n = get_bounded_indices(offs_n2[None, :], KV_LEN if not IS_DIVISIBLE else None)
     # The boundary check is done for the outer loop, but here it's possible since we're iterating across N dim
     # that the M reads out of bounds for the PIDS spanning the Q_LEN boundary
     m = get_bounded_indices(offs_m2[:, None], Q_LEN if not IS_DIVISIBLE else None)
+    {%- endif %}
 
     {{ modification(
         subgraph_number=0,
@@ -476,8 +560,19 @@ def bwd_dq_block_mn(
     Example: lambda x, *_: 1 / score, this NaN would propagate regardless of other masking
     We only need to do this on the m1 dim since these elements take part in the final reduction
     for DQ #}
+    # For varlen, use logical lengths since offs_n2 contains logical positions
+    {%- if HAS_OFFSETS %}
+    if not IS_DIVISIBLE:
+        post_mod_scores = tl.where(offs_n2[None, :] < LOGICAL_KV_LEN, post_mod_scores, float("-inf"))
+    {%- else %}
     if not IS_DIVISIBLE:
         post_mod_scores = tl.where(offs_n2[None, :] < KV_LEN, post_mod_scores, float("-inf"))
+    {%- endif %}
+
+    # Note: For DQ computation with varlen, we DON'T need to mask based on kv_limit here
+    # because the sparse block structure already ensures document isolation. The kv_limit
+    # is only needed for storage masking, not computation masking (unlike DK/DV which
+    # iterates over Q blocks from potentially different documents).
 
     if not IS_FULL_BLOCKS:
         {{ modification(
@@ -498,7 +593,12 @@ def bwd_dq_block_mn(
     p = tl.math.exp2(post_mod_scores - lse)
     # Compute dP and dS.
     # NB reversed order to since V is transposed
+    # For varlen, use logical length for bounds checking since offs_n2 are logical positions
+    {%- if HAS_OFFSETS %}
+    vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, LOGICAL_KV_LEN)
+    {%- else %}
     vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN)
+    {%- endif %}
 
     dp = tl.dot(do, vT, input_precision=FLOAT32_PRECISION)
     ds = p * (dp - Di[:, None])
@@ -514,12 +614,25 @@ def bwd_dq_block_mn(
         grad_score_mod="ds"
     ) | indent_except_first(1) }}
     {# See Note Selective masking DQ #}
+    # For varlen, use logical lengths since offs_n2 contains logical positions
+    {%- if HAS_OFFSETS %}
+    if not IS_DIVISIBLE:
+        grad_scores = tl.where(offs_n2[None, :] < LOGICAL_KV_LEN, grad_scores, 0.0)
+    {%- else %}
     if not IS_DIVISIBLE:
         grad_scores = tl.where(offs_n2[None, :] < KV_LEN, grad_scores, 0.0)
+    {%- endif %}
+
+    # Note: For DQ computation with varlen, kv_limit masking is not needed here
+    # because the sparse block structure already ensures document isolation.
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
     if WRITE_DQ:
+        {%- if HAS_OFFSETS %}
+        scatter_mask = (offs_m2[:, None] < LOGICAL_Q_LEN) & (offs_n2[None, :] < LOGICAL_KV_LEN)
+        {%- else %}
         scatter_mask = (offs_m2[:, None] < Q_LEN ) & (offs_n2[None, :] < KV_LEN)
+        {%- endif %}
         {{ modification(
             subgraph_number=3,
             output_name=None,
@@ -548,11 +661,11 @@ def bwd_dq_block_mn(
 @triton.jit
 def bwd_dkdv_inner(
     {{gen_argdefs()}},
-    Q, DO, DELTA, LSE, # pointers
+    Q, DO, DELTA, LSE, Q_OFFSETS, Q_LIMITS, # pointers
     dk, dv, k, v,
-    off_z, off_hq, offs_n1, offs_m1,
+    off_z, off_hq, sparse_idx_hq, offs_n1, offs_m1,
     # Offsets needed for memory access
-    q_start,
+    q_start, first_q_block_idx,
     q_offset,
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
@@ -580,17 +693,38 @@ def bwd_dkdv_inner(
 
     # The minimum is needed to handle the case where we run with a super large
     # SPARSE_BLOCK_SIZE (i.e. no block-mask!)
+    # For varlen, use logical length for iteration limit since we iterate over logical blocks
+    {%- if HAS_OFFSETS %}
+    hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(tl.cdiv(LOGICAL_Q_LEN, BLOCK_M1), 1))
+    {%- else %}
     hi = tl.minimum(sparse_q_num_blocks * SPARSE_Q_MULTIPLE, tl.maximum(tl.cdiv(Q_LEN, BLOCK_M1), 1))
+    {%- endif %}
+
+    # Track current sparse block index for loading q_limit
+    current_sparse_block_idx = first_q_block_idx
+
+    {%- if HAS_OFFSETS %}
+    stride_q_limits_z = {{stride("Q_LIMITS", 0)}}
+    stride_q_limits_h = {{stride("Q_LIMITS", 1)}}
+    {%- endif %}
 
     for start_m in range(0, hi):
+        # Load q_limit for current Q block (for varlen masking)
+        {%- if HAS_OFFSETS %}
+        q_limit_ptr = Q_LIMITS + off_z * stride_q_limits_z + sparse_idx_hq * stride_q_limits_h + current_sparse_block_idx
+        q_limit = tl.load(q_limit_ptr).to(INDEX_DTYPE)
+        {%- else %}
+        q_limit = BLOCK_M1
+        {%- endif %}
+
         dk, dv = bwd_dkdv_block_mn(
             {{gen_argdefs()}},
             dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
-            off_z, off_hq, offs_n1, offs_m1, offs_k, offs_v,
+            off_z, off_hq, offs_n1, offs_m1, offs_m1_physical, offs_k, offs_v,
             stride_qm, stride_qd, stride_dom, stride_dod,
             q_indices, sparse_q_num_blocks,
             MATMUL_PRECISION, RCP_LN2,
-            IS_FULL_BLOCKS,
+            IS_FULL_BLOCKS, q_limit,
         )
         # Increment pointers.
         offset = get_offset_for_next_block(
@@ -601,6 +735,14 @@ def bwd_dkdv_inner(
         qT_ptrs += offset * stride_qm
         do_ptrs += offset * stride_dom
         offs_m1 += offset
+        offs_m1_physical += offset
+
+        # Update sparse block index for next iteration
+        {%- if HAS_OFFSETS %}
+        # Check if we crossed a sparse block boundary
+        if (start_m + 1) % SPARSE_Q_MULTIPLE == 0:
+            current_sparse_block_idx += 1
+        {%- endif %}
 
     return dk, dv
 
@@ -609,33 +751,49 @@ def bwd_dkdv_inner(
 def bwd_dkdv_block_mn(
     {{gen_argdefs()}},
     dk, dv, qT_ptrs, k, v, do_ptrs, DELTA, LSE, Q_LEN, KV_LEN,
-    off_z, off_hq, offs_n1, offs_m1, offs_k, offs_v,
+    off_z, off_hq, offs_n1, offs_m1, offs_m1_physical, offs_k, offs_v,
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
-    IS_FULL_BLOCKS,
+    IS_FULL_BLOCKS, q_limit,
 ):
     {{gen_defines() | indent_except_first(1) }}
 
+    # Local position within the Q block for limit checking (varlen)
+    local_m1 = tl.arange(0, BLOCK_M1)
+
     # NB reversed order since Q is transposed
     # Use global indices (offs_m1) for memory access via qT_ptrs
+    # For varlen, use logical length for bounds checking since offs_m1 are logical positions
+    {%- if HAS_OFFSETS %}
+    qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, LOGICAL_Q_LEN)
+    {%- else %}
     qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN)
+    {%- endif %}
     # Load LSE before computing qk to reduce pipeline stall.
-    # Use global indices for memory access
+    # LSE is stored at physical positions, so use offs_m1_physical
     if IS_DIVISIBLE:
-        lse = tl.load(LSE + offs_m1)
+        lse = tl.load(LSE + offs_m1_physical)
     else:
-        lse = tl.load(LSE + offs_m1, mask=offs_m1 < Q_LEN)
+        lse = tl.load(LSE + offs_m1_physical, mask=offs_m1_physical < Q_LEN)
     lse = tl.where(lse == -float("inf"), 0.0, lse)
     qkT = tl.dot(k, qT, input_precision=FLOAT32_PRECISION)
     if not PRESCALE_QK:
         qkT *= SM_SCALE
     # ~~~~~~~~~~~~~~~~~~~ Apply score modification  ~~~~~~~~~~~~~~~~~~~
     # Use global indices for score_mod/mask_mod
+    # For varlen, use logical lengths since these are logical positions
+    {%- if HAS_OFFSETS %}
+    m = get_bounded_indices(offs_m1[None, :], LOGICAL_Q_LEN if not IS_DIVISIBLE else None)
+    # The boundary check is done for the outer loop, but here it's possible since we're iterating across M dim
+    # that the n reads out of bounds for the PIDS spanning the KV_LEN boundary
+    n = get_bounded_indices(offs_n1[:, None], LOGICAL_KV_LEN if not IS_DIVISIBLE else None)
+    {%- else %}
     m = get_bounded_indices(offs_m1[None, :], Q_LEN if not IS_DIVISIBLE else None)
     # The boundary check is done for the outer loop, but here it's possible since we're iterating across M dim
     # that the n reads out of bounds for the PIDS spanning the KV_LEN boundary
     n = get_bounded_indices(offs_n1[:, None], KV_LEN if not IS_DIVISIBLE else None)
+    {%- endif %}
 
     pre_mod_scores = qkT
     {{ modification(
@@ -654,8 +812,19 @@ def bwd_dkdv_block_mn(
     Example: lambda x, *_: 1 / score, this NaN would propagate regardless of other masking
     We only need to do this on the m1 dim since these elements take part in the final reduction
     for DK/DV #}
+    # For varlen, use logical lengths since offs_m1 contains logical positions
+    {%- if HAS_OFFSETS %}
+    if not IS_DIVISIBLE:
+        post_mod_scores = tl.where(offs_m1[None, :] < LOGICAL_Q_LEN, post_mod_scores, float("-inf"))
+    {%- else %}
     if not IS_DIVISIBLE:
         post_mod_scores = tl.where(offs_m1[None, :] < Q_LEN, post_mod_scores, float("-inf"))
+    {%- endif %}
+
+    # For varlen, mask out positions beyond q_limit (to prevent data from other documents leaking in)
+    {%- if HAS_OFFSETS %}
+    post_mod_scores = tl.where(local_m1[None, :] < q_limit, post_mod_scores, float("-inf"))
+    {%- endif %}
 
     if not IS_FULL_BLOCKS:
         {{ modification(
@@ -672,14 +841,20 @@ def bwd_dkdv_block_mn(
     if not PRESCALE_QK:
         post_mod_scores *= RCP_LN2
     pT = tl.math.exp2(post_mod_scores - lse[None, :])
+    # For varlen, use logical length for bounds checking since offs_m1 are logical positions
+    {%- if HAS_OFFSETS %}
+    do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, LOGICAL_Q_LEN, V_HEAD_DIM)
+    {%- else %}
     do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
+    {%- endif %}
     # Compute dV.
     ppT = pT
     dv += tl.dot(ppT.to(MATMUL_PRECISION), do, input_precision=FLOAT32_PRECISION)
+    # Delta is stored at physical positions, so use offs_m1_physical
     if IS_DIVISIBLE:
-        Di = tl.load(DELTA + offs_m1)
+        Di = tl.load(DELTA + offs_m1_physical)
     else:
-        Di = tl.load(DELTA + offs_m1, mask=offs_m1 < Q_LEN)
+        Di = tl.load(DELTA + offs_m1_physical, mask=offs_m1_physical < Q_LEN)
     # Compute dP and dS.
     dpT = tl.dot(v, tl.trans(do), input_precision=FLOAT32_PRECISION)
     dsT = pT * (dpT - Di[None, :])
@@ -696,8 +871,19 @@ def bwd_dkdv_block_mn(
     ) | indent_except_first(1) }}
 
     {# See Note: Selective masking DK/DV#}
+    # For varlen, use logical lengths since offs_m1 contains logical positions
+    {%- if HAS_OFFSETS %}
+    if not IS_DIVISIBLE:
+        grad_scores = tl.where(offs_m1[None, :] < LOGICAL_Q_LEN, grad_scores, 0.0)
+    {%- else %}
     if not IS_DIVISIBLE:
         grad_scores = tl.where(offs_m1[None, :] < Q_LEN, grad_scores, 0.0)
+    {%- endif %}
+
+    # For varlen, mask out positions beyond q_limit
+    {%- if HAS_OFFSETS %}
+    grad_scores = tl.where(local_m1[None, :] < q_limit, grad_scores, 0.0)
+    {%- endif %}
 
     # ~~~~~~~~~~~~~~~~~~~ Apply other buffer grad writes ~~~~~~~~~~~~~
     if not WRITE_DQ:
@@ -705,7 +891,12 @@ def bwd_dkdv_block_mn(
         idx_h = off_hq
         idx_m = m
         idx_n = n
+        {%- if HAS_OFFSETS %}
+        scatter_mask = (offs_m1[None, :] < LOGICAL_Q_LEN) & (offs_n1[:, None] < LOGICAL_KV_LEN)
+        scatter_mask = scatter_mask & (local_m1[None, :] < q_limit)
+        {%- else %}
         scatter_mask = (offs_m1[None, :] < Q_LEN) & (offs_n1[:, None] < KV_LEN)
+        {%- endif %}
         {{ modification(
             subgraph_number=3,
             output_name=None,
