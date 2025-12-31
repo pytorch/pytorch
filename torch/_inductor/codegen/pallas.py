@@ -1921,9 +1921,7 @@ class PallasKernel(SIMDKernel):
                     f"{value_expr}.flatten()).reshape({out}.shape)"
                 )
             else:
-                return (
-                    f"{out}[{index_str}] = {value_expr}"
-                )
+                return f"{out}[{index_str}] = {value_expr}"
 
         return f"{out}[{index_str}] = {value}"
 
