@@ -12380,6 +12380,25 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, (inp, offsets), check_lowp=False)
 
+    def test_bucketize_scalar_various_values(self):
+        def fn(boundaries, scalar_val):
+            return torch.bucketize(scalar_val, boundaries)
+
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        for scalar_val in [-1.0, 0.0, 0.15, 0.5, 1.0]:
+            self.common(fn, (boundaries, scalar_val), check_lowp=False)
+
+    def test_bucketize_scalar_with_options(self):
+        def fn(boundaries, out_int32, right):
+            return torch.bucketize(0.5, boundaries, out_int32=out_int32, right=right)
+
+        boundaries = torch.tensor([-0.9, -0.8, 0.1, 0.2, 0.5, 0.9])
+
+        for out_int32 in [True, False]:
+            for right in [True, False]:
+                self.common(fn, (boundaries, out_int32, right), check_lowp=False)
+
     @requires_gpu()
     @skip_if_gpu_halide
     @skip_if_not_triton
