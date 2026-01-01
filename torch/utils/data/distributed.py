@@ -1,6 +1,6 @@
 import math
 from collections.abc import Iterator
-from typing import TypeVar
+from typing import TypeVar, Union
 
 import torch
 import torch.distributed as dist
@@ -23,12 +23,18 @@ class DistributedSampler(Sampler[_T_co]):
     :class:`~torch.utils.data.DataLoader` sampler, and load a subset of the
     original dataset that is exclusive to it.
 
+    This sampler can wrap either a :class:`~torch.utils.data.Dataset` or another
+    :class:`~torch.utils.data.Sampler`, enabling composition of sampling strategies
+    in distributed training.
+
     .. note::
         Dataset is assumed to be of constant size and that any instance of it always
         returns the same elements in the same order.
 
     Args:
-        dataset: Dataset used for sampling.
+        dataset: Dataset or Sampler used for sampling. When a Sampler is
+            provided, its indices are used as the base for distributed
+            partitioning, enabling composition of sampling strategies.
         num_replicas (int, optional): Number of processes participating in
             distributed training. By default, :attr:`world_size` is retrieved from the
             current distributed group.
@@ -54,6 +60,7 @@ class DistributedSampler(Sampler[_T_co]):
     Example::
 
         >>> # xdoctest: +SKIP
+        >>> # Using with a Dataset (original behavior)
         >>> sampler = DistributedSampler(dataset) if is_distributed else None
         >>> loader = DataLoader(dataset, shuffle=(sampler is None),
         ...                     sampler=sampler)
@@ -61,17 +68,29 @@ class DistributedSampler(Sampler[_T_co]):
         ...     if is_distributed:
         ...         sampler.set_epoch(epoch)
         ...     train(loader)
+
+        >>> # Using with a Sampler (new behavior)
+        >>> base_sampler = WeightedRandomSampler(weights, num_samples)
+        >>> sampler = DistributedSampler(base_sampler, shuffle=False)
+        >>> loader = DataLoader(dataset, sampler=sampler)
     """
 
     def __init__(
         self,
-        dataset: Dataset,
+        dataset: Union[Dataset, Sampler],
         num_replicas: int | None = None,
         rank: int | None = None,
         shuffle: bool = True,
         seed: int = 0,
         drop_last: bool = False,
     ) -> None:
+        # Determine if input is a Sampler (but not a Dataset, since Dataset
+        # could technically be iterable). We check if it's a Sampler and not
+        # a Dataset to handle edge cases properly.
+        self._input_is_sampler = isinstance(dataset, Sampler) and not isinstance(
+            dataset, Dataset
+        )
+
         if num_replicas is None:
             if not dist.is_available():
                 raise RuntimeError("Requires distributed package to be available")
@@ -105,13 +124,26 @@ class DistributedSampler(Sampler[_T_co]):
         self.seed = seed
 
     def __iter__(self) -> Iterator[_T_co]:
-        if self.shuffle:
-            # deterministically shuffle based on epoch and seed
-            g = torch.Generator()
-            g.manual_seed(self.seed + self.epoch)
-            indices = torch.randperm(len(self.dataset), generator=g).tolist()  # type: ignore[arg-type]
+        if self._input_is_sampler:
+            # Get indices from the wrapped sampler
+            base_indices = list(iter(self.dataset))
+            if self.shuffle:
+                # Shuffle the sampler's indices deterministically
+                g = torch.Generator()
+                g.manual_seed(self.seed + self.epoch)
+                perm = torch.randperm(len(base_indices), generator=g).tolist()
+                indices = [base_indices[i] for i in perm]
+            else:
+                indices = base_indices
         else:
-            indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
+            # Original behavior for Dataset
+            if self.shuffle:
+                # deterministically shuffle based on epoch and seed
+                g = torch.Generator()
+                g.manual_seed(self.seed + self.epoch)
+                indices = torch.randperm(len(self.dataset), generator=g).tolist()  # type: ignore[arg-type]
+            else:
+                indices = list(range(len(self.dataset)))  # type: ignore[arg-type]
 
         if not self.drop_last:
             # add extra samples to make it evenly divisible

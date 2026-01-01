@@ -2276,6 +2276,139 @@ except RuntimeError as e:
 
         self.assertEqual(scanned_data.size(), scanned_data.unique().size())
 
+    def test_distributed_sampler_with_sampler_input(self):
+        """Test that DistributedSampler accepts a Sampler as input."""
+        from torch.utils.data import SequentialSampler
+        from torch.utils.data.distributed import DistributedSampler
+
+        # Create a simple dataset
+        dataset = list(range(100))
+        seq_sampler = SequentialSampler(dataset)
+
+        # Wrap with DistributedSampler (simulating 2 workers)
+        dist_sampler_rank0 = DistributedSampler(
+            seq_sampler, num_replicas=2, rank=0, shuffle=False
+        )
+        dist_sampler_rank1 = DistributedSampler(
+            seq_sampler, num_replicas=2, rank=1, shuffle=False
+        )
+
+        indices_rank0 = list(dist_sampler_rank0)
+        indices_rank1 = list(dist_sampler_rank1)
+
+        # Verify no overlap between ranks
+        overlap = set(indices_rank0) & set(indices_rank1)
+        self.assertEqual(len(overlap), 0, "Ranks should have no overlapping indices")
+
+        # Verify each rank gets half the data
+        self.assertEqual(len(indices_rank0), 50)
+        self.assertEqual(len(indices_rank1), 50)
+
+    def test_distributed_sampler_with_weighted_sampler(self):
+        """Test DistributedSampler with WeightedRandomSampler."""
+        from torch.utils.data import WeightedRandomSampler
+        from torch.utils.data.distributed import DistributedSampler
+
+        weights = [1.0] * 100
+        weighted_sampler = WeightedRandomSampler(
+            weights, num_samples=100, replacement=False
+        )
+
+        dist_sampler = DistributedSampler(
+            weighted_sampler, num_replicas=4, rank=0, shuffle=False
+        )
+
+        indices = list(dist_sampler)
+        # 100 samples / 4 replicas = 25 per rank
+        self.assertEqual(len(indices), 25)
+
+    def test_distributed_sampler_sampler_set_epoch(self):
+        """Test that set_epoch affects shuffling with Sampler input."""
+        from torch.utils.data import SequentialSampler
+        from torch.utils.data.distributed import DistributedSampler
+
+        dataset = list(range(100))
+        seq_sampler = SequentialSampler(dataset)
+
+        dist_sampler = DistributedSampler(
+            seq_sampler, num_replicas=2, rank=0, shuffle=True
+        )
+
+        dist_sampler.set_epoch(0)
+        indices_epoch0 = list(dist_sampler)
+
+        dist_sampler.set_epoch(1)
+        indices_epoch1 = list(dist_sampler)
+
+        # Different epochs should produce different orderings when shuffle=True
+        self.assertNotEqual(
+            indices_epoch0, indices_epoch1,
+            "Different epochs should produce different orderings"
+        )
+
+    def test_distributed_sampler_backward_compatibility(self):
+        """Ensure DistributedSampler still works with Dataset input."""
+        from torch.utils.data import TensorDataset
+        from torch.utils.data.distributed import DistributedSampler
+
+        data = torch.randn(100, 10)
+        tensor_dataset = TensorDataset(data)
+
+        dist_sampler = DistributedSampler(
+            tensor_dataset, num_replicas=2, rank=0
+        )
+
+        indices = list(dist_sampler)
+        # 100 samples / 2 replicas = 50 per rank
+        self.assertEqual(len(indices), 50)
+
+    def test_distributed_sampler_with_random_sampler(self):
+        """Test DistributedSampler with RandomSampler."""
+        from torch.utils.data import RandomSampler
+        from torch.utils.data.distributed import DistributedSampler
+
+        dataset = list(range(100))
+        random_sampler = RandomSampler(dataset)
+
+        dist_sampler = DistributedSampler(
+            random_sampler, num_replicas=2, rank=0, shuffle=False
+        )
+
+        indices = list(dist_sampler)
+        self.assertEqual(len(indices), 50)
+
+    def test_distributed_sampler_with_subset_random_sampler(self):
+        """Test DistributedSampler with SubsetRandomSampler."""
+        from torch.utils.data import SubsetRandomSampler
+        from torch.utils.data.distributed import DistributedSampler
+
+        subset_indices = list(range(0, 100, 2))  # 50 even indices
+        subset_sampler = SubsetRandomSampler(subset_indices)
+
+        dist_sampler = DistributedSampler(
+            subset_sampler, num_replicas=2, rank=0, shuffle=False
+        )
+
+        indices = list(dist_sampler)
+        self.assertEqual(len(indices), 25)  # 50 / 2 replicas
+
+    def test_distributed_sampler_with_sampler_drop_last(self):
+        """Test DistributedSampler with Sampler input and drop_last=True."""
+        from torch.utils.data import SequentialSampler
+        from torch.utils.data.distributed import DistributedSampler
+
+        # 99 samples, 4 replicas - should drop 3 to get 96 (24 per rank)
+        dataset = list(range(99))
+        seq_sampler = SequentialSampler(dataset)
+
+        dist_sampler = DistributedSampler(
+            seq_sampler, num_replicas=4, rank=0, shuffle=False, drop_last=True
+        )
+
+        indices = list(dist_sampler)
+        # With drop_last, each rank should get floor(99/4) = 24 samples
+        self.assertEqual(len(indices), 24)
+
     def test_sampler_reproducibility(self):
         from torch.utils.data import (
             RandomSampler,
