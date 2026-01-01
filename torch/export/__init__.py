@@ -49,6 +49,7 @@ from .exported_program import (
 )
 from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
+from ._state_dict_utils import _restore_state_dict
 
 
 PassType = Callable[[torch.fx.GraphModule], PassResult | None]
