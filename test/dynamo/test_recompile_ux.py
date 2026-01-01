@@ -106,6 +106,31 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
             .startswith("torch._dynamo hit config.recompile_limit")
         )
 
+    def test_recompile_limit_not_hit_across_module_instances(self):
+        import torch.nn as nn
+
+        cache: dict[float, torch.Tensor] = {}
+
+        class Module(nn.Module):
+            def __init__(self, key: float):
+                super().__init__()
+                self.key = key
+                cache[key] = torch.randn(16)
+
+            def forward(self, x):
+                return x + cache[self.key]
+
+        x = torch.randn(16)
+        keys = [1.0, 2.0, 3.0]
+
+        compile_counter = torch._dynamo.testing.CompileCounter()
+        with torch._dynamo.config.patch("recompile_limit", 2):
+            for key in keys:
+                model = torch.compile(Module(key), backend=compile_counter)
+                model(x)
+
+        self.assertEqual(compile_counter.frame_count, len(keys))
+
     @unittest.skipIf(
         not torch.cuda.is_available() and not torch.xpu.is_available(),
         "requires cuda or xpu",
