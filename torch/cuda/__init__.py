@@ -1354,11 +1354,13 @@ def _get_amdsmi_utilization(device: Device = None) -> int:
 
 def _get_amdsmi_temperature(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
-    return int(amdsmi.amdsmi_get_temp_metric(
-        handle,
-        amdsmi.AmdSmiTemperatureType.JUNCTION,
-        amdsmi.AmdSmiTemperatureMetric.CURRENT,
-    ))
+    return int(
+        amdsmi.amdsmi_get_temp_metric(
+            handle,
+            amdsmi.AmdSmiTemperatureType.JUNCTION,
+            amdsmi.AmdSmiTemperatureMetric.CURRENT,
+        )
+    )
 
 
 def _get_amdsmi_power_draw(device: Device = None) -> int:
