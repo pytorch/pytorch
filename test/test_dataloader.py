@@ -2409,6 +2409,72 @@ except RuntimeError as e:
         # With drop_last, each rank should get floor(99/4) = 24 samples
         self.assertEqual(len(indices), 24)
 
+    def test_distributed_sampler_split_contiguous(self):
+        """Test DistributedSampler with split_contiguous=True."""
+        from torch.utils.data.distributed import DistributedSampler
+        dataset = list(range(100))
+        dist_sampler_rank0 = DistributedSampler(
+            dataset, num_replicas=2, rank=0, shuffle=False, split_contiguous=True
+        )
+        dist_sampler_rank1 = DistributedSampler(
+            dataset, num_replicas=2, rank=1, shuffle=False, split_contiguous=True
+        )
+
+        indices_rank0 = list(dist_sampler_rank0)
+        indices_rank1 = list(dist_sampler_rank1)
+
+        # Verify contiguous blocks: rank 0 should have 0-49, rank 1 should have 50-99
+        self.assertEqual(indices_rank0, list(range(50)))
+        self.assertEqual(indices_rank1, list(range(50, 100)))
+
+    def test_distributed_sampler_set_epoch_propagation(self):
+        """Test that set_epoch is propagated to the child sampler."""
+        from torch.utils.data.distributed import DistributedSampler
+        from torch.utils.data.sampler import Sampler
+
+        class MockSampler(Sampler):
+            def __init__(self):
+                self.epoch = None
+
+            def set_epoch(self, epoch):
+                self.epoch = epoch
+
+            def __iter__(self):
+                return iter(range(10))
+
+            def __len__(self):
+                return 10
+
+        child_sampler = MockSampler()
+        dist_sampler = DistributedSampler(child_sampler, num_replicas=1, rank=0)
+        dist_sampler.set_epoch(42)
+
+        self.assertEqual(child_sampler.epoch, 42)
+
+    def test_distributed_sampler_set_seed_propagation(self):
+        """Test that set_seed is propagated to the child sampler if set_epoch is missing."""
+        from torch.utils.data.distributed import DistributedSampler
+        from torch.utils.data.sampler import Sampler
+
+        class MockSampler(Sampler):
+            def __init__(self):
+                self.seed = None
+
+            def set_seed(self, seed):
+                self.seed = seed
+
+            def __iter__(self):
+                return iter(range(10))
+
+            def __len__(self):
+                return 10
+
+        child_sampler = MockSampler()
+        dist_sampler = DistributedSampler(child_sampler, num_replicas=1, rank=0)
+        dist_sampler.set_epoch(42)
+
+        self.assertEqual(child_sampler.seed, 42)
+
     def test_sampler_reproducibility(self):
         from torch.utils.data import (
             RandomSampler,

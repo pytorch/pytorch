@@ -50,6 +50,9 @@ class DistributedSampler(Sampler[_T_co]):
             tail of the data to make it evenly divisible across the number of
             replicas. If ``False``, the sampler will add extra indices to make
             the data evenly divisible across the replicas. Default: ``False``.
+        split_contiguous (bool, optional): If ``True``, the sampler will split the
+            data into contiguous chunks across replicas. If ``False`` (default),
+            the sampler used an interleaved splitting strategy.
 
     .. warning::
         In distributed mode, calling the :meth:`set_epoch` method at
@@ -83,6 +86,7 @@ class DistributedSampler(Sampler[_T_co]):
         shuffle: bool = True,
         seed: int = 0,
         drop_last: bool = False,
+        split_contiguous: bool = False,
     ) -> None:
         # Determine if input is a Sampler (but not a Dataset, since Dataset
         # could technically be iterable). We check if it's a Sampler and not
@@ -122,6 +126,7 @@ class DistributedSampler(Sampler[_T_co]):
         self.total_size = self.num_samples * self.num_replicas
         self.shuffle = shuffle
         self.seed = seed
+        self.split_contiguous = split_contiguous
 
     def __iter__(self) -> Iterator[_T_co]:
         if self._input_is_sampler:
@@ -163,7 +168,11 @@ class DistributedSampler(Sampler[_T_co]):
             )
 
         # subsample
-        indices = indices[self.rank : self.total_size : self.num_replicas]
+        if self.split_contiguous:
+            indices = indices[self.rank * self.num_samples : (self.rank + 1) * self.num_samples]
+        else:
+            indices = indices[self.rank : self.total_size : self.num_replicas]
+
         if len(indices) != self.num_samples:
             raise AssertionError(
                 f"Number of subsampled indices ({len(indices)}) does not match num_samples ({self.num_samples})"
@@ -187,3 +196,7 @@ class DistributedSampler(Sampler[_T_co]):
             epoch (int): Epoch number.
         """
         self.epoch = epoch
+        if hasattr(self.dataset, "set_epoch"):
+            self.dataset.set_epoch(epoch)
+        elif hasattr(self.dataset, "set_seed"):
+            self.dataset.set_seed(epoch)
