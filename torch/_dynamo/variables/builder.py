@@ -3754,13 +3754,14 @@ def wrap_to_fake_tensor_and_record(
                 fake_inner = getattr(fake_e, attr)
                 inner = getattr(e, attr)
                 inner_source = AttrSource(source, attr)
-                wrap_to_fake_tensor_and_record(
+                new_fake_tensor = wrap_to_fake_tensor_and_record(
                     inner,
                     tx,
                     source=inner_source,
                     is_tensor=isinstance(fake_inner, torch.Tensor),
                     parent_context=symbolic_context,
                 )
+                setattr(fake_e, attr, new_fake_tensor)
 
         tx.output.tracing_context.tensor_to_context[e] = symbolic_context
         if is_sparse_any(fake_e):

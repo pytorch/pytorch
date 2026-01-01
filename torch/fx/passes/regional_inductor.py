@@ -94,7 +94,13 @@ def _compile_submod(gm, prefix):
 
             with inductor_config.patch(inductor_options):
                 compiled_fn = torch._inductor.standalone_compile(
-                    submod, fake_inputs, dynamic_shapes="from_tracing_context", aot=True
+                    submod,
+                    fake_inputs,
+                    # There are some cases where we don't have a tracing context when using
+                    # regional inductor, notably the compiler toolkit flow. Thus we instead
+                    # derive fake mode/shape env from the outputs of the graph.
+                    dynamic_shapes="from_graph",
+                    aot=True,
                 )
             assert isinstance(compiled_fn, AOTCompiledArtifact)
             # _dummy_wrapper is to make call_function happy

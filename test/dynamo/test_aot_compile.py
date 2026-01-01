@@ -1,5 +1,6 @@
 # Owner(s): ["module: dynamo"]
 
+import contextlib
 import copy
 import functools
 import inspect
@@ -16,18 +17,33 @@ import torch._dynamo.testing
 import torch._inductor.config
 import torch._inductor.test_case
 import torch.distributed as c10d
+import torch.fx.traceback as fx_traceback
+import torch.nn as nn
+import torch.nn.functional as F
 import torch.onnx.operators
 import torch.utils.cpp_extension
 from torch._dynamo.aot_compile import AOTCompiledModel, ModelInput, SerializableCallable
+from torch._dynamo.aot_compile_types import BundledAOTAutogradSerializableCallable
 from torch._dynamo.exc import PackageError, Unsupported
 from torch._dynamo.package import DynamoCache
 from torch._dynamo.precompile_context import PrecompileContext
+from torch._functorch.aot_autograd import (
+    aot_compile_joint_with_descriptors,
+    aot_export_joint_with_descriptors,
+)
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._subclasses.fake_tensor import FakeTensorMode
+from torch.distributed._tensor import DTensor
+from torch.distributed.device_mesh import init_device_mesh
+from torch.distributed.tensor import Replicate, Shard
+from torch.export import _restore_state_dict
 from torch.fx._graph_pickler import GraphPickler
+from torch.fx.passes.regional_inductor import regional_inductor
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     TEST_CUDA,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 MY_LAMBDA = lambda x: x + 1  # noqa: E731
@@ -80,6 +96,102 @@ class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
 
     def __call__(self, *args, **kwargs):
         return self.gm(*args, **kwargs)
+
+
+class MultiHeadSelfAttention(nn.Module):
+    def __init__(self, embed_dim: int, num_heads: int):
+        super().__init__()
+        if embed_dim % num_heads != 0:
+            raise ValueError("embed_dim must be divisible by num_heads")
+        self.embed_dim = embed_dim
+        self.num_heads = num_heads
+        self.head_dim = embed_dim // num_heads
+        self.q_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, embed_dim)
+        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.out_proj = nn.Linear(embed_dim, embed_dim)
+
+    def forward(self, x):
+        B, S, E = x.shape
+        H = self.num_heads
+        D = self.head_dim
+        q = self.q_proj(x).view(B, S, H, D).transpose(1, 2)
+        k = self.k_proj(x).view(B, S, H, D).transpose(1, 2)
+        v = self.v_proj(x).view(B, S, H, D).transpose(1, 2)
+        attn_scores = torch.matmul(q, k.transpose(-2, -1)) / (D**0.5)
+        attn_probs = F.softmax(attn_scores, dim=-1)
+        attn_out = torch.matmul(attn_probs, v)
+        attn_out = attn_out.transpose(1, 2).contiguous().view(B, S, E)
+        return self.out_proj(attn_out)
+
+
+class TransformerBlock(nn.Module):
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        mlp_ratio: float = 4.0,
+        dropout: float = 0.0,
+    ):
+        super().__init__()
+        self.ln1 = nn.LayerNorm(embed_dim)
+        self.attn = MultiHeadSelfAttention(embed_dim, num_heads)
+        self.dropout1 = nn.Dropout(dropout)
+        self.ln2 = nn.LayerNorm(embed_dim)
+        hidden_dim = int(embed_dim * mlp_ratio)
+        self.mlp = nn.Sequential(
+            nn.Linear(embed_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, embed_dim),
+            nn.Dropout(dropout),
+        )
+
+    def forward(self, x):
+        with fx_traceback.annotate({"compile_with_inductor": 0}):
+            x = x + torch.utils.checkpoint.checkpoint(
+                lambda h: self.dropout1(self.attn(self.ln1(h))), x, use_reentrant=False
+            )
+        x = x + torch.utils.checkpoint.checkpoint(
+            lambda h: self.mlp(self.ln2(h)), x, use_reentrant=False
+        )
+        return x
+
+
+class Transformer(nn.Module):
+    def __init__(
+        self,
+        vocab_size: int,
+        embed_dim: int,
+        num_heads: int,
+        num_layers: int,
+        max_seq_len: int,
+        device_mesh=None,
+    ):
+        super().__init__()
+        self.embed = nn.Embedding(vocab_size, embed_dim)
+        self.pos_embed = nn.Parameter(torch.zeros(1, max_seq_len, embed_dim))
+        self.layers = nn.ModuleList(
+            [TransformerBlock(embed_dim, num_heads) for _ in range(num_layers)]
+        )
+        self.ln_f = nn.LayerNorm(embed_dim)
+        self.head = nn.Linear(embed_dim, vocab_size, bias=False)
+        self.device_mesh = device_mesh
+
+    def forward(self, input_ids: DTensor):
+        input_ids = input_ids.redistribute(self.device_mesh, [Replicate()])
+        x = self.embed(input_ids) + self.pos_embed[:, : input_ids.shape[1], :]
+
+        def _run_block(block, hidden):
+            return block(hidden)
+
+        for block in self.layers:
+            x = torch.utils.checkpoint.checkpoint(
+                _run_block, block, x, use_reentrant=False
+            )
+
+        x = self.ln_f(x)
+        logits = self.head(x)
+        return logits
 
 
 class SimpleLinearModule(torch.nn.Module):
@@ -885,6 +997,197 @@ from user code:
             )
         actual = compiled_fn(*test_inputs)
         self.assertEqual(expected.x, actual.x)
+
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_cross_aot_compile(self):
+        """Test cross-compilation using fake cuda tensors"""
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        def fn(x, y):
+            return x + y
+
+        with FakeTensorMode(allow_non_fake_inputs=True):
+            fake_inputs = (
+                torch.randn(3, 4, device="cuda"),
+                torch.randn(3, 4, device="cuda"),
+            )
+            compiled_fn = torch.compile(
+                fn,
+                fullgraph=True,
+            ).aot_compile((fake_inputs, {}))
+
+        compiled_fn.save_compiled_function(self.path())
+        torch._dynamo.reset()
+
+        with open(self.path(), "rb") as f:
+            loaded_fn = torch.compiler.load_compiled_function(f)
+
+        inputs = (torch.randn(3, 4, device="cuda"), torch.randn(3, 4, device="cuda"))
+        expected = fn(*inputs)
+        actual = loaded_fn(*inputs)
+        self.assertEqual(expected, actual)
+
+    @unittest.skipIf(not c10d.is_available(), "requires c10d")
+    @unittest.skipIf(not TEST_CUDA, "requires cuda")
+    def test_cross_compile_dtensor_transformer(self):
+        """Test cross-compilation with DTensor transformer using compiler toolkit"""
+
+        def dtensorify_module(
+            module: nn.Module,
+            device_mesh,
+            *,
+            param_placements=None,
+            buffer_placements=None,
+        ) -> None:
+            if param_placements is None:
+                param_placements = [Replicate()]
+            if buffer_placements is None:
+                buffer_placements = [Replicate()]
+
+            for name, p in list(module.named_parameters(recurse=False)):
+                if p is None or isinstance(p, DTensor):
+                    continue
+                dt = DTensor.from_local(p.data, device_mesh, param_placements)
+                new_p = nn.Parameter(dt, requires_grad=p.requires_grad)
+                setattr(module, name, new_p)
+
+            for name, b in list(module.named_buffers(recurse=False)):
+                if b is None or isinstance(b, DTensor):
+                    continue
+                dt = DTensor.from_local(b, device_mesh, buffer_placements)
+                module._buffers[name] = dt
+
+            for child in module.children():
+                dtensorify_module(
+                    child,
+                    device_mesh,
+                    param_placements=param_placements,
+                    buffer_placements=buffer_placements,
+                )
+
+        fake_store = FakeStore()
+        c10d.init_process_group(backend="fake", store=fake_store, rank=0, world_size=1)
+
+        try:
+            rank = c10d.get_rank()
+            device = torch.device(f"cuda:{rank}")
+            torch.cuda.set_device(device)
+
+            vocab_size = 1000
+            embed_dim = 64
+            num_heads = 4
+            num_layers = 2
+            max_seq_len = 32
+            batch_size = 2
+            seq_len = 16
+            torch.manual_seed(0)
+            torch.set_default_device(device)
+
+            device_mesh = init_device_mesh(
+                "cuda",
+                (1,),
+                mesh_dim_names=("dp",),
+            )
+
+            model = Transformer(
+                vocab_size,
+                embed_dim,
+                num_heads,
+                num_layers,
+                max_seq_len,
+                device_mesh=device_mesh,
+            ).to(device)
+
+            dtensorify_module(
+                model,
+                device_mesh,
+                param_placements=[Replicate()],
+                buffer_placements=[Replicate()],
+            )
+
+            model.eval()
+
+            outer_fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
+            with outer_fake_mode, torch._dynamo.config.patch(install_free_tensors=True):
+                local_input_ids = torch.randint(
+                    0, vocab_size, (batch_size, seq_len), device=device
+                )
+                input_ids_dt = DTensor.from_local(
+                    local_input_ids, device_mesh, [Shard(0)]
+                )
+
+                from torch._dynamo.functional_export import (
+                    _dynamo_graph_capture_for_export,
+                )
+
+                gm = _dynamo_graph_capture_for_export(model)(input_ids_dt)
+
+                _restore_state_dict(model, gm)
+
+                fake_mode = gm.meta["fake_mode"]
+
+            with contextlib.ExitStack() as stack:
+                if fake_mode is not None:
+                    stack.enter_context(fake_mode)
+
+                with contextlib.ExitStack() as export_stack:
+                    jd = aot_export_joint_with_descriptors(
+                        export_stack,
+                        gm,
+                        (input_ids_dt,),
+                    )
+
+                    def fwd_compile(gm: torch.fx.GraphModule, example_inputs):
+                        gm = regional_inductor(gm, example_inputs)
+                        from torch._inductor.output_code import RegionalOutputCode
+
+                        return RegionalOutputCode(gm)
+
+                    def bwd_compile(gm: torch.fx.GraphModule, example_inputs):
+                        gm = regional_inductor(gm, example_inputs)
+                        from torch._inductor.output_code import RegionalOutputCode
+
+                        return RegionalOutputCode(gm)
+
+                    compiled_wrapper = aot_compile_joint_with_descriptors(
+                        jd,
+                        fw_compiler=fwd_compile,
+                        bw_compiler=bwd_compile,
+                    )
+
+                with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as f:
+                    serialization_path = f.name
+                    f.write(
+                        BundledAOTAutogradSerializableCallable.serialize_compile_artifacts(
+                            compiled_wrapper
+                        )
+                    )
+
+            with open(serialization_path, "rb") as f:
+                loaded_fn = BundledAOTAutogradSerializableCallable.deserialize_compile_artifacts(
+                    f.read()
+                )
+
+            local_input_ids = torch.randint(
+                0, vocab_size, (batch_size, seq_len), device=device
+            )
+            input_ids_dt = DTensor.from_local(local_input_ids, device_mesh, [Shard(0)])
+            targets = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+
+            (logits_dt,) = loaded_fn(
+                *model.parameters(), *model.buffers(), input_ids_dt
+            )
+
+            logits = (
+                logits_dt.to_local() if isinstance(logits_dt, DTensor) else logits_dt
+            )
+            loss = F.cross_entropy(logits.view(-1, vocab_size), targets.view(-1))
+            loss.backward()
+
+            os.unlink(serialization_path)
+
+        finally:
+            c10d.destroy_process_group()
 
 
 if __name__ == "__main__":

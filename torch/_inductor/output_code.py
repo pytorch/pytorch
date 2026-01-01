@@ -953,6 +953,7 @@ class RegionalOutputCode(OutputCode):
         super().__init__()
         self._graph_module = graph_module
         self._serialized_graph_module = None
+        self._boxed_call = True
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         """Execute the regional compiled graph."""
@@ -1008,8 +1009,17 @@ class RegionalOutputCode(OutputCode):
         custom pickling.
         """
         if self._graph_module is not None:
-            from torch.fx._graph_pickler import GraphPickler
+            from torch.fx._graph_pickler import GraphPickler, Options
 
-            self._serialized_graph_module = GraphPickler.dumps(self._graph_module)
+            # These often times contain stacks with pointers to unserializable
+            # objects, so we clear them out.
+            for node in self._graph_module.graph.nodes:
+                node.meta.pop("source_fn_stack", None)
+                node.meta.pop("nn_module_stack", None)
+                node.meta.pop("fwd_source_fn_stack", None)
+
+            self._serialized_graph_module = GraphPickler.dumps(
+                self._graph_module, Options(ops_filter=None)
+            )
             # Clear the graph module to avoid pickling it with standard pickle
             self._graph_module = None

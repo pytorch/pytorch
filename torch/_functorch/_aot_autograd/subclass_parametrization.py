@@ -59,6 +59,7 @@ class UnwrapTensorSubclass(torch.nn.Module):
                     val, new_idx, plain_tensor_container
                 )
                 attr_to_meta[attr] = subclass_meta
+
             return (
                 SubclassCreationMeta(
                     start_idx=idx,

@@ -380,7 +380,6 @@ class FakeTensorConverter:
         maybe_memo = self._get_memo(t)
         if maybe_memo is not None:
             return maybe_memo
-        # not yet supported in metatensors
         if t.is_quantized:
             raise UnsupportedFakeTensorException("quantized nyi in meta tensors")
         if type(t) is torch.nn.Parameter:
@@ -413,14 +412,18 @@ class FakeTensorConverter:
                     constant=constant,
                 )
 
-        out = self.meta_converter(
-            t,
-            shape_env=shape_env,
-            callback=mk_fake_tensor,
-            source=source,
-            symbolic_context=symbolic_context,
-            trace=trace,
-        )
+        # Ensure the correct fake_mode is active during meta_converter processing.
+        # Without this we can sometimes end up using a different fake mode than the
+        # one that contains this instance of FakeTensorConverter.
+        with fake_mode:
+            out = self.meta_converter(
+                t,
+                shape_env=shape_env,
+                callback=mk_fake_tensor,
+                source=source,
+                symbolic_context=symbolic_context,
+                trace=trace,
+            )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
 
@@ -3053,6 +3056,20 @@ class FakeTensorMode(TorchDispatchMode):
         symbolic_context: Optional[SymbolicContext] = None,
         trace: bool = True,
     ) -> FakeTensor:
+        # If we are given a FakeTensor from a different FakeTensorMode, re-fakeify it under this mode.
+        if isinstance(tensor, FakeTensor) and tensor.fake_mode is not self:
+            # Use the wrapped meta tensor as the element, and preserve the apparent device.
+            with in_kernel_invocation_manager(tensor.fake_mode):
+                return FakeTensor(
+                    self,
+                    tensor,
+                    tensor.fake_device,
+                    constant=tensor.constant,
+                    real_tensor=tensor.real_tensor,
+                    pytype=tensor.pytype,
+                    dispatch_keys=tensor.dispatch_keys,
+                )
+
         shape_env: Optional[ShapeEnv] = self.shape_env
         if static_shapes is None:
             static_shapes = self.static_shapes
