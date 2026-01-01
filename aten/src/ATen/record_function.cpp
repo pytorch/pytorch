@@ -743,6 +743,14 @@ void RecordFunction::before(RecordFunction::FunctionDescriptor fn, int64_t seque
   invalidateInputs();
 }
 
+void RecordFunction::before(
+    RecordFunction::FunctionDescriptor fn,
+    int64_t sequence_nr,
+    c10::DispatchKey dispatch_key) {
+  dispatch_key_ = dispatch_key;
+  before(fn, sequence_nr);
+}
+
 /* static */ void RecordFunction::setDefaultNodeId(int64_t newDefaultNodeId) {
   TORCH_CHECK(newDefaultNodeId >= 0, "setDefaultNodeId expects an id >= 0.");
   defaultNodeId = newDefaultNodeId;

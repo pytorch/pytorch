@@ -121,6 +121,7 @@ struct TorchOpBasicFields {
   int64_t debug_handle_{0};
   std::string name_;
   std::string overload_name_;
+  c10::DispatchKey dispatch_key_{c10::DispatchKey::Undefined};
 
   // Set in the exit callback.
   uint64_t end_tid_{0};
