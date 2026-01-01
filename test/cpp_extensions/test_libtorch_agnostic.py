@@ -16,11 +16,11 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_dtype import all_types_and
 from torch.testing._internal.common_utils import (
     install_cpp_extension,
-    IS_WINDOWS,
     parametrize,
     run_tests,
     skipIfRocm,
     skipIfTorchDynamo,
+    skipIfWindows,
     TestCase,
     xfailIfTorchDynamo,
 )
@@ -72,9 +72,7 @@ def skipIfTorchVersionLessThan(major, minor):
     return decorator
 
 
-# TODO: Fix this error in Windows:
-# LINK : error LNK2001: unresolved external symbol PyInit__C
-if not IS_WINDOWS:
+if True:
 
     class TestLibtorchAgnostic(TestCase):
         """
@@ -472,6 +470,7 @@ if not IS_WINDOWS:
             for tensor_t, expected_t in zip(tensors, expected_values):
                 self.assertEqual(tensor_t, expected_t)
 
+        @skipIfWindows(msg="ValueError: vector too long")
         @skipIfTorchVersionLessThan(2, 10)
         def test_my__foreach_mul(self, device):
             import libtorch_agn_2_10 as libtorch_agnostic
@@ -501,6 +500,7 @@ if not IS_WINDOWS:
                     curr_mem = torch.cuda.memory_allocated(device)
                     self.assertEqual(curr_mem, init_mem)
 
+        @skipIfWindows(msg="ValueError: vector too long")
         @skipIfTorchVersionLessThan(2, 10)
         def test_make_tensor_clones_and_call_foreach(self, device):
             import libtorch_agn_2_10 as libtorch_agnostic
@@ -993,6 +993,7 @@ if not IS_WINDOWS:
             expected = torch.cuda.current_blas_handle()
             self.assertEqual(res, expected)
 
+        @skipIfWindows(msg="ValueError: vector too long")
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op(self, device):
             import libtorch_agn_2_10 as libtorch_agnostic
@@ -1018,6 +1019,7 @@ if not IS_WINDOWS:
             with self.assertRaisesRegex(RuntimeError, "Unsupported accessor value: "):
                 libtorch_agnostic.ops.my_string_op(t, "invalid", "")
 
+        @skipIfWindows(msg="ValueError: vector too long")
         @skipIfTorchVersionLessThan(2, 10)
         def test_my__foreach_mul_vec(self, device):
             """Test my__foreach_mul_vec which uses const std::vector<Tensor>& parameters."""
@@ -1033,6 +1035,7 @@ if not IS_WINDOWS:
             for result_t, expected_t in zip(result, expected):
                 self.assertEqual(result_t, expected_t)
 
+        @skipIfWindows(msg="ValueError: vector too long")
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op_const_string_ref(self, device):
             """Test my_string_op_const_string_ref which uses const std::string& parameters."""
@@ -1052,6 +1055,7 @@ if not IS_WINDOWS:
             self.assertEqual(size_vec, ["size", str(t.size(0)), "test2"])
             self.assertEqual(result_size, t.size(0))
 
+        @skipIfWindows(msg="ValueError: vector too long")
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op_const_string_view_ref(self, device):
             """Test my_string_op_const_string_view_ref which uses const std::string_view& parameters."""
@@ -1075,6 +1079,7 @@ if not IS_WINDOWS:
             self.assertEqual(stride_vec, ["stride", str(t.stride(0)), "view2"])
             self.assertEqual(result_stride, t.stride(0))
 
+        @skipIfWindows(msg="ValueError: vector too long")
         @skipIfTorchVersionLessThan(2, 10)
         def test_my_string_op_string_ref(self, device):
             """Test my_string_op_string_ref which uses std::string& (non-const) parameters."""

@@ -42,7 +42,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
-    AttributeMutationError,
     ObservedAttributeError,
     ObservedUserStopIteration,
     raise_observed_exception,
@@ -2858,8 +2857,14 @@ class BuiltinVariable(VariableTracker):
             return val
         elif isinstance(obj, variables.NNModuleVariable):
             if not tx.output.is_root_tracer():
-                raise AttributeMutationError(
-                    "Can't inplace modify module params/buffers inside HigherOrderOp"
+                unimplemented(
+                    gb_type="nn.Module mutation in HigherOrderOp",
+                    context=f"nn.Module: {obj}",
+                    explanation="Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
+                    hints=[
+                        "Remove the mutation or move it outside of the HigherOrderOp.",
+                        *graph_break_hints.FUNDAMENTAL,
+                    ],
                 )
             if name_var.is_python_constant() and isinstance(
                 val, variables.TensorVariable
