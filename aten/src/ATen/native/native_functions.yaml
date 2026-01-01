@@ -8856,14 +8856,14 @@
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA, MPS: __rshift__
+    CPU, CUDA, MPS, MTIA: __rshift__
   tags: pointwise
 
 - func: __rshift__.Tensor(Tensor self, Tensor other) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: method, function
   dispatch:
-    CPU, CUDA, MPS: __rshift__
+    CPU, CUDA, MPS, MTIA: __rshift__
   tags: pointwise
 
 - func: __irshift__.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
