@@ -2,7 +2,8 @@
 import functools
 import math
 import operator
-from typing import *  # noqa: F403
+from collections.abc import Callable
+from typing import Any
 
 import torch
 import torch.nn.functional as F
@@ -14,7 +15,7 @@ from .nested_tensor import NestedTensor
 
 __all__: list[Any] = []
 
-JAGGED_OPS_TABLE: Dict[Any, Any] = {}
+JAGGED_OPS_TABLE: dict[Any, Any] = {}
 
 
 def _get_padding_value(dtype, padding_type):
@@ -245,7 +246,7 @@ register_jagged_func = functools.partial(register_func, JAGGED_OPS_TABLE)
 
 
 def lookup_jagged(func, *args, **kwargs) -> Callable | None:
-    dispatch_func = JAGGED_OPS_TABLE.get(func, None)
+    dispatch_func = JAGGED_OPS_TABLE.get(func)
     if dispatch_func is not None:
         return dispatch_func
 

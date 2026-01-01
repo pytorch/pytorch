@@ -17,7 +17,7 @@ from torch.testing._internal.autograd_function_db import (
 )
 from torch import Tensor
 from torch.types import Number
-from typing import *  # noqa: F403
+from collections.abc import Sequence
 
 # Note: [custom op db]
 #
@@ -305,7 +305,7 @@ def sample_inputs_numpy_cat(opinfo, device, dtype, requires_grad, **kwargs):
     yield SampleInput([r0, r1, r2], args=(0,))
 
 @torch.library.custom_op('_torch_testing::numpy_split_copy', mutates_args=())
-def numpy_split_copy(x: Tensor, splits: Sequence[int], dim: int) -> List[Tensor]:
+def numpy_split_copy(x: Tensor, splits: Sequence[int], dim: int) -> list[Tensor]:
     x_np = to_numpy(x)
     arrs = np.split(x_np, splits, axis=dim)
     return [torch.tensor(arr, device=x.device, dtype=x.dtype) for arr in arrs]
@@ -338,7 +338,7 @@ def sample_inputs_numpy_split_copy(opinfo, device, dtype, requires_grad, **kwarg
     yield SampleInput(x, args=([1, 3, 6], 1))
 
 @torch.library.custom_op('_torch_testing::numpy_split_copy_with_int', mutates_args=())
-def numpy_split_copy_with_int(x: Tensor, splits: Sequence[int], dim: int) -> tuple[List[Tensor], int]:
+def numpy_split_copy_with_int(x: Tensor, splits: Sequence[int], dim: int) -> tuple[list[Tensor], int]:
     x_np = to_numpy(x)
     arrs = np.split(x_np, splits, axis=dim)
     return [torch.tensor(arr, device=x.device, dtype=x.dtype) for arr in arrs], len(splits)
