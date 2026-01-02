@@ -536,12 +536,25 @@ def create_aot_state(
     # so we need to duplicate the fake script objects so that subsequent tracing
     # won't be affected.
     def _dup_fake_script_obj(fake_flat_args):
-        return [
-            maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
-            if isinstance(arg, FakeScriptObject) or is_opaque_type(type(arg))
-            else arg
-            for arg in fake_flat_args
-        ]
+        import copy
+
+        result = []
+        for arg in fake_flat_args:
+            if isinstance(arg, FakeScriptObject):
+                # Copy FakeScriptObject, preserving wrapped_obj
+                # while isolating mutations
+                result.append(
+                    FakeScriptObject(
+                        copy.deepcopy(arg.wrapped_obj),
+                        arg.script_class_name,
+                        x=None,
+                    )
+                )
+            elif is_opaque_type(type(arg)):
+                result.append(maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg))
+            else:
+                result.append(arg)
+        return result
 
     needs_autograd = any(
         x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)

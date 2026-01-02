@@ -190,6 +190,7 @@ class ReInplaceTrigger(enum.Enum):
     AUTO_FUNC_V1 = 1
     AUTO_FUNC_V2 = 2
     TRITON_OPS = 3
+    OTHER = 4
 
 
 class ReinplaceCounters:

@@ -21,6 +21,8 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any, Optional, TYPE_CHECKING, Union
 
+from torch._library.fake_class_registry import FakeScriptObject
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -1711,6 +1713,7 @@ def _aot_stage2a_partition(
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
             num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
             symint_outs_saved_for_bw = []
+            opaque_outs_saved_for_bw = []
             for idx, node in enumerate(fw_outs_saved_for_bw):
                 if is_sym_node(node):
                     symint_outs_saved_for_bw.append(node)
@@ -1727,10 +1730,22 @@ def _aot_stage2a_partition(
                     }
                     if dynamic_dims:
                         fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
+                elif (
+                    isinstance(node, torch.fx.Node)
+                    and "val" in getattr(node, "meta", {})
+                    and isinstance(node.meta["val"], FakeScriptObject)
+                ):
+                    # Opaque objects (like FakeScriptObject) saved for backward
+                    opaque_outs_saved_for_bw.append(node)
 
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+            num_opaque_objects_saved_for_bw = len(opaque_outs_saved_for_bw)
             fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
+            fw_metadata.num_opaque_objects_saved_for_bw = (
+                num_opaque_objects_saved_for_bw
+            )
             inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
+            inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
             if torch._functorch.config.donated_buffer:
                 fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
                     fw_module,

@@ -27,7 +27,11 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
-from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
+from torch._library.opaque_object import (
+    get_opaque_obj_repr,
+    is_opaque_type,
+    is_opaque_value_type,
+)
 from torch._logging import trace_structured
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
@@ -2186,6 +2190,8 @@ class PythonWrapperCodegen(CodeGen):
         self.writeline(f"{node.get_name()} = None")
 
     def benchmark_compiled_module(self, output):
+        """Generate code for benchmarking the compiled module."""
+
         def add_fake_input(name, shape, stride, device, dtype):
             output.writeline(
                 f"{name} = rand_strided("
@@ -2202,9 +2208,15 @@ class PythonWrapperCodegen(CodeGen):
                 output.writeline(f"{name} = None")
                 return
 
-            import pickle
+            if is_opaque_type(type(value)):
+                output.writeline(
+                    f'raise TypeError("Unsupported opaque type: {type(value)} for variable {name}")'
+                )
+                return
 
             assert isinstance(value, torch.ScriptObject)
+
+            import pickle
 
             output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
 
