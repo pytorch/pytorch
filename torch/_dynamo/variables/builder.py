@@ -806,7 +806,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[VariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
