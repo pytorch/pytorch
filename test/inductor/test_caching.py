@@ -10,7 +10,7 @@ from functools import wraps
 from itertools import combinations
 from random import Random
 from shutil import rmtree
-from threading import Lock
+from threading import Event, Lock
 from typing import Any, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 from unittest.mock import patch
@@ -2555,6 +2555,559 @@ class ShouldPadMemoizerTest(TestMixin, TestCase):
         # Assert: both return the same cached result
         self.assertTrue(result1)
         self.assertTrue(result2)
+
+
+@instantiate_parametrized_tests
+class DeferredRecordingTest(TestMixin, TestCase):
+    """Test class for DeferredRecording functionality."""
+
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-deferred-recording-{cls.cls_id}"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    # ============= DeferredRecording Basic Tests =============
+
+    @set_caching_module_enabled(True)
+    def test_deferred_recording_finalize_caches_result(self) -> None:
+        """Test that DeferredRecording.finalize() caches the result.
+
+        Verifies that when an encoder returns a DeferredRecording and
+        finalize() is called later, the result is cached properly.
+        """
+        # Setup: create a memoizer and a custom encoder that returns DeferredRecording
+        memoizer = Memoizer()
+        deferred_obj: interfaces.DeferredRecording | None = None
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: object) -> interfaces.DeferredRecording:
+                nonlocal deferred_obj
+                deferred_obj = interfaces.DeferredRecording()
+                return deferred_obj
+
+            return encode
+
+        call_count = 0
+
+        @memoizer.record(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Execute: call the function (should NOT cache immediately)
+        result = compute(5)
+        self.assertEqual(result, 10)
+        self.assertEqual(call_count, 1)
+
+        # Verify: cache should be empty since we returned DeferredRecording
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+        cache_hit = memoizer._cache.get(cache_key)
+        self.assertIsNone(cache_hit)
+
+        # Execute: finalize the deferred recording
+        self.assertIsNotNone(deferred_obj)
+        deferred_obj.finalize(100)  # Cache encoded value 100
+
+        # Assert: cache should now have the result
+        cache_hit = memoizer._cache.get(cache_key)
+        self.assertIsNotNone(cache_hit)
+        cache_entry = cache_hit.value
+        self.assertEqual(cache_entry.encoded_result, 100)
+
+    @set_caching_module_enabled(True)
+    def test_deferred_recording_replay_after_complete(self) -> None:
+        """Test that replay works after deferred recording completes.
+
+        Verifies end-to-end flow: record with deferred -> complete -> replay.
+        """
+        # Setup: create a memoizer with deferred recording
+        memoizer = Memoizer()
+        deferred_obj: interfaces.DeferredRecording | None = None
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: object) -> interfaces.DeferredRecording:
+                nonlocal deferred_obj
+                deferred_obj = interfaces.DeferredRecording()
+                return deferred_obj
+
+            return encode
+
+        @memoizer.record(custom_result_encoder=deferred_encoder)
+        def compute_record(x: int) -> int:
+            return x * 2
+
+        @memoizer.replay()
+        def compute_replay(x: int) -> int:
+            raise AssertionError("Should not be called during replay")
+
+        # Execute: record with deferred
+        compute_record(5)
+
+        # Verify: replay should fail before complete
+        with self.assertRaises(KeyError):
+            compute_replay(5)
+
+        # Complete the deferred recording
+        self.assertIsNotNone(deferred_obj)
+        deferred_obj.finalize(10)
+
+        # Assert: replay should now work
+        result = compute_replay(5)
+        self.assertEqual(result, 10)
+
+    @set_caching_module_enabled(True)
+    def test_deferred_recording_with_future_pattern(self) -> None:
+        """Test DeferredRecording with a Future-like pattern.
+
+        Simulates the real use case where a Future callback completes
+        the deferred recording.
+        """
+        # Setup: create a memoizer and simulate a Future
+        memoizer = Memoizer()
+        cache_populated = Event()
+
+        def future_encoder(*args: object, **kwargs: object) -> object:
+            def encode(future_result: Future[int]) -> interfaces.DeferredRecording:
+                deferred = interfaces.DeferredRecording()
+
+                def on_complete(completed_future: Future[int]) -> None:
+                    actual_result = completed_future.result()
+                    deferred.finalize(actual_result)
+
+                future_result.add_done_callback(on_complete)
+                return deferred
+
+            return encode
+
+        with ThreadPoolExecutor() as executor:
+
+            @memoizer.record(custom_result_encoder=future_encoder)
+            def compute_async(x: int) -> Future[int]:
+                return executor.submit(lambda: x * 2)
+
+            # Execute: call the function and get a future
+            future = compute_async(5)
+
+            # Register our own callback on the DeferredRecording to know when
+            # the cache is populated. This must be done AFTER compute_async()
+            # returns, so our callback is registered after the memoizer's callback.
+            # This ensures our callback runs after the cache is populated.
+            cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+            pending = memoizer._pending_deferred.get(cache_key)
+            if pending is not None:
+                # Register callback - will be called after memoizer's callback
+                # (either when complete() runs, or immediately if already completed)
+                pending.register_callback(lambda _: cache_populated.set())
+            else:
+                # Deferred already completed and removed from tracking.
+                # This means complete() and callbacks already ran, cache is populated.
+                cache_populated.set()
+
+            # Wait for the future to complete
+            result = future.result(timeout=5)
+            self.assertEqual(result, 10)
+
+            # Wait for the cache to be populated (with timeout)
+            self.assertTrue(
+                cache_populated.wait(timeout=5),
+                "Cache was not populated within timeout",
+            )
+
+        # Assert: cache should have the result after future completed
+        cache_hit = memoizer._cache.get(cache_key)
+        self.assertIsNotNone(cache_hit)
+        cache_entry = cache_hit.value
+        self.assertEqual(cache_entry.encoded_result, 10)
+
+    @set_caching_module_enabled(True)
+    def test_deferred_recording_preserves_original_return(self) -> None:
+        """Test that deferred recording returns the original result.
+
+        Verifies that even when using deferred recording, the function
+        returns the original (non-encoded) result immediately.
+        """
+        # Setup
+        memoizer = Memoizer()
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: object) -> interfaces.DeferredRecording:
+                return interfaces.DeferredRecording()
+
+            return encode
+
+        @memoizer.record(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Execute: call the function
+        result = compute(5)
+
+        # Assert: should return the original result (not the DeferredRecording)
+        self.assertEqual(result, 10)
+        self.assertIsInstance(result, int)
+
+    @set_caching_module_enabled(True)
+    def test_deferred_recording_finalize_without_callback(self) -> None:
+        """Test that finalize() is safe when no callback is set.
+
+        Verifies that calling finalize() on a DeferredRecording without
+        a registered callback does not raise an error.
+        """
+        # Setup: create a standalone DeferredRecording
+        deferred = interfaces.DeferredRecording()
+
+        # Execute & Assert: finalize should not raise
+        deferred.finalize(42)  # Should do nothing but not raise
+
+    # ============= PersistentMemoizer DeferredRecording Tests =============
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_deferred_recording_caches_to_both(self) -> None:
+        """Test that PersistentMemoizer deferred recording caches to both memory and disk.
+
+        Verifies that when complete() is called, the result is stored
+        in both the in-memory cache and the on-disk cache.
+        """
+        # Setup
+        persistent = PersistentMemoizer(sub_dir=self.sub_dir())
+        deferred_obj: interfaces.DeferredRecording | None = None
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: object) -> interfaces.DeferredRecording:
+                nonlocal deferred_obj
+                deferred_obj = interfaces.DeferredRecording()
+                return deferred_obj
+
+            return encode
+
+        @persistent.record(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Execute: call the function (should NOT cache immediately)
+        result = compute(5)
+        self.assertEqual(result, 10)
+
+        # Verify: both caches should be empty
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNone(memory_hit)
+        disk_hit = persistent._disk_cache.get(cache_key)
+        self.assertIsNone(disk_hit)
+
+        # Complete the deferred recording
+        self.assertIsNotNone(deferred_obj)
+        deferred_obj.finalize(100)
+
+        # Assert: memory cache should have the result
+        memory_hit = persistent._memoizer._cache.get(cache_key)
+        self.assertIsNotNone(memory_hit)
+        cache_entry = memory_hit.value
+        self.assertEqual(cache_entry.encoded_result, 100)
+
+        # Assert: disk cache should also have the result
+        disk_hit = persistent._disk_cache.get(cache_key)
+        self.assertIsNotNone(disk_hit)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_deferred_replays_from_disk(self) -> None:
+        """Test that deferred recording can be replayed from disk cache.
+
+        Verifies that after completing a deferred recording, the result
+        can be replayed even after clearing the memory cache.
+        """
+        # Setup
+        persistent = PersistentMemoizer(sub_dir=self.sub_dir())
+        deferred_obj: interfaces.DeferredRecording | None = None
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: object) -> interfaces.DeferredRecording:
+                nonlocal deferred_obj
+                deferred_obj = interfaces.DeferredRecording()
+                return deferred_obj
+
+            return encode
+
+        @persistent.record(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Record with deferred
+        compute(5)
+        self.assertIsNotNone(deferred_obj)
+        deferred_obj.finalize(100)
+
+        # Clear memory cache to simulate new process
+        persistent._memoizer._cache = impls._InMemoryCacheImpl()
+
+        # Create replay function
+        @persistent.replay()
+        def compute_replay(x: int) -> int:
+            raise AssertionError("Should not be called during replay")
+
+        # Execute: replay should work from disk
+        result = compute_replay(5)
+
+        # Assert
+        self.assertEqual(result, 100)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_memoize_with_deferred(self) -> None:
+        """Test that memoize() works correctly with deferred recording.
+
+        Verifies that when using memoize() with a deferred encoder,
+        subsequent calls work correctly after the deferred completes.
+        """
+        # Setup
+        persistent = PersistentMemoizer(sub_dir=self.sub_dir())
+        deferred_objects: list[interfaces.DeferredRecording] = []
+        call_count = 0
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: object) -> interfaces.DeferredRecording:
+                deferred = interfaces.DeferredRecording()
+                deferred_objects.append(deferred)
+                return deferred
+
+            return encode
+
+        @persistent.memoize(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # First call: should execute function
+        result1 = compute(5)
+        self.assertEqual(result1, 10)
+        self.assertEqual(call_count, 1)
+
+        # Second call before complete: should execute again (cache miss)
+        result2 = compute(5)
+        self.assertEqual(result2, 10)
+        self.assertEqual(call_count, 2)
+
+        # Complete the first deferred recording
+        deferred_objects[0].finalize(10)
+
+        # Third call after complete: should use cache
+        result3 = compute(5)
+        self.assertEqual(result3, 10)
+        self.assertEqual(call_count, 2)  # No additional call
+
+    # ============= Edge Cases =============
+
+    @set_caching_module_enabled(True)
+    def test_deferred_recording_with_none_result(self) -> None:
+        """Test that deferred recording works with None as the result.
+
+        Verifies that complete(None) caches None correctly.
+        """
+        # Setup
+        memoizer = Memoizer()
+        deferred_obj: interfaces.DeferredRecording | None = None
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: object) -> interfaces.DeferredRecording:
+                nonlocal deferred_obj
+                deferred_obj = interfaces.DeferredRecording()
+                return deferred_obj
+
+            return encode
+
+        @memoizer.record(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> None:
+            return None
+
+        # Execute
+        compute(5)
+        self.assertIsNotNone(deferred_obj)
+        deferred_obj.finalize(None)
+
+        # Assert: cache should have None as the result
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+        cache_hit = memoizer._cache.get(cache_key)
+        self.assertIsNotNone(cache_hit)
+        cache_entry = cache_hit.value
+        self.assertIsNone(cache_entry.encoded_result)
+
+    @set_caching_module_enabled(True)
+    def test_deferred_recording_multiple_calls_different_keys(self) -> None:
+        """Test that multiple deferred recordings with different keys work.
+
+        Verifies that deferred recordings for different parameters are
+        independent and can be completed in any order.
+        """
+        # Setup
+        memoizer = Memoizer()
+        deferred_objects: dict[int, interfaces.DeferredRecording] = {}
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            x = args[0]
+
+            def encode(result: object) -> interfaces.DeferredRecording:
+                deferred = interfaces.DeferredRecording()
+                deferred_objects[x] = deferred
+                return deferred
+
+            return encode
+
+        @memoizer.record(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Record multiple calls
+        compute(5)
+        compute(10)
+        compute(15)
+
+        # Complete in reverse order
+        deferred_objects[15].finalize(30)
+        deferred_objects[5].finalize(10)
+        deferred_objects[10].finalize(20)
+
+        # Assert: all caches should be correct
+        for x, expected in [(5, 10), (10, 20), (15, 30)]:
+            cache_key = interfaces._BaseMemoizer._make_key(None, x)
+            cache_hit = memoizer._cache.get(cache_key)
+            self.assertIsNotNone(cache_hit)
+            self.assertEqual(cache_hit.value.encoded_result, expected)
+
+    @set_caching_module_enabled(True)
+    def test_deferred_recording_double_finalize_raises(self) -> None:
+        """Test that calling finalize() twice raises RuntimeError.
+
+        Verifies that the race condition prevention logic correctly
+        rejects duplicate finalize() calls.
+        """
+        # Setup: create a DeferredRecording
+        deferred: interfaces.DeferredRecording[int] = interfaces.DeferredRecording()
+
+        # Execute: first finalize succeeds
+        deferred.finalize(42)
+
+        # Assert: second finalize raises RuntimeError
+        with self.assertRaises(RuntimeError) as ctx:
+            deferred.finalize(100)
+
+        self.assertIn("finalize() called multiple times", str(ctx.exception))
+
+    @set_caching_module_enabled(True)
+    def test_deferred_recording_callback_after_finalize(self) -> None:
+        """Test that callbacks registered after finalize() are invoked immediately.
+
+        Verifies the race condition handling where finalize() completes before
+        the memoizer registers its callback - the callback should still be invoked.
+        """
+        # Setup: create a DeferredRecording and finalize it first
+        deferred: interfaces.DeferredRecording[int] = interfaces.DeferredRecording()
+        deferred.finalize(42)
+
+        # Execute: register a callback after finalize
+        callback_invoked = False
+        callback_value: int | None = None
+
+        def callback(result: int) -> None:
+            nonlocal callback_invoked, callback_value
+            callback_invoked = True
+            callback_value = result
+
+        deferred.register_callback(callback)
+
+        # Assert: callback was invoked immediately with the finalized result
+        self.assertTrue(callback_invoked)
+        self.assertEqual(callback_value, 42)
+
+    @set_caching_module_enabled(True)
+    def test_deferred_recording_multiple_callbacks_order(self) -> None:
+        """Test that multiple callbacks are invoked in registration order.
+
+        Verifies that when multiple callbacks are registered before finalize(),
+        they are all invoked in the order they were registered.
+        """
+        # Setup: create a DeferredRecording and register multiple callbacks
+        deferred: interfaces.DeferredRecording[int] = interfaces.DeferredRecording()
+        invocation_order: list[int] = []
+
+        def make_callback(idx: int) -> object:
+            def callback(result: int) -> None:
+                invocation_order.append(idx)
+
+            return callback
+
+        # Register callbacks in order 0, 1, 2
+        deferred.register_callback(make_callback(0))
+        deferred.register_callback(make_callback(1))
+        deferred.register_callback(make_callback(2))
+
+        # Execute: finalize the deferred recording
+        deferred.finalize(100)
+
+        # Assert: callbacks were invoked in registration order
+        self.assertEqual(invocation_order, [0, 1, 2])
+
+    @set_caching_module_enabled(True)
+    def test_deferred_recording_thread_safety(self) -> None:
+        """Test that concurrent finalize() and register_callback() are thread-safe.
+
+        Verifies that when finalize() and register_callback() are called
+        concurrently from different threads, no race conditions occur.
+        """
+        # Setup: create multiple deferred recordings to test concurrency
+        num_iterations = 100
+        errors: list[Exception] = []
+
+        def run_concurrent_test() -> None:
+            deferred: interfaces.DeferredRecording[int] = interfaces.DeferredRecording()
+            callback_results: list[int] = []
+            barrier = Event()
+
+            def callback(result: int) -> None:
+                callback_results.append(result)
+
+            def finalize_thread() -> None:
+                barrier.wait()
+                try:
+                    deferred.finalize(42)
+                except RuntimeError:
+                    pass
+
+            def register_thread() -> None:
+                barrier.wait()
+                deferred.register_callback(callback)
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                f1 = executor.submit(finalize_thread)
+                f2 = executor.submit(register_thread)
+                barrier.set()
+                wait([f1, f2], timeout=5)
+
+            if len(callback_results) != 1 or callback_results[0] != 42:
+                errors.append(AssertionError(f"Expected [42], got {callback_results}"))
+
+        # Execute: run many iterations to catch race conditions
+        for _ in range(num_iterations):
+            run_concurrent_test()
+
+        # Assert: no errors occurred
+        self.assertEqual(errors, [])
 
 
 if __name__ == "__main__":
