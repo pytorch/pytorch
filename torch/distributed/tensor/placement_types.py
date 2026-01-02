@@ -12,8 +12,6 @@ from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import (
     fill_empty_tensor_to_shards,
-    mesh_broadcast,
-    mesh_scatter,
     pad_tensor,
     shard_dim_alltoall,
     unpad_tensor,
@@ -195,9 +193,7 @@ class Shard(torch._C._distributed.Shard):
         output = torch.empty_like(first)
 
         # perform scatter from the src_data_rank as data source when it is not None
-        mesh_scatter(
-            output, scatter_list, mesh, mesh_dim=mesh_dim, group_src=src_data_rank
-        )
+        output = funcol.scatter(output, scatter_list, src_data_rank, (mesh, mesh_dim))
 
         return Shard._maybe_unpad_tensor_with_sizes(
             self.dim, output, pad_sizes, mesh_dim_local_rank, True
@@ -639,9 +635,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         output = torch.empty_like(first)
 
         # perform scatter from the src_data_rank as data source when it is not None
-        mesh_scatter(
-            output, scatter_list, mesh, mesh_dim=mesh_dim, group_src=src_data_rank
-        )
+        output = funcol.scatter(output, scatter_list, src_data_rank, (mesh, mesh_dim))
 
         return Shard._maybe_unpad_tensor_with_sizes(
             self.dim, output, pad_sizes, mesh_dim_local_rank, True
@@ -881,7 +875,7 @@ class Replicate(torch._C._distributed.Replicate):
 
         if src_data_rank is not None:
             # perform broadcast from the src_data_rank as data source when it is not None
-            mesh_broadcast(tensor, mesh, mesh_dim=mesh_dim, group_src=src_data_rank)
+            tensor = funcol.broadcast(tensor, src_data_rank, (mesh, mesh_dim))
         return tensor
 
     def _replicate_tensor(
