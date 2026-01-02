@@ -255,6 +255,24 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch("combo_kernel_max_xnumel_ratio", 64)
+    def test_combo_kernel_max_xnumel_ratio(self):
+        def fn(small, large):
+            t1 = small * 2 + 1
+            t2 = large * 2 + 1
+            return t1, t2
+
+        inps = [
+            torch.randn(1024, device="cuda"),
+            torch.randn(1024, 5000, device="cuda"),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
 
 @instantiate_parametrized_tests
 class ComboKernelBenchmarkTests(TestCase):
