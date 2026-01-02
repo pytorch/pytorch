@@ -745,7 +745,7 @@ class AutogradFunctionApply(HigherOrderOperator):
     def __call__(self, fwd, bwd, *fwd_args, **fwd_kwargs):
         saved_values = None
         non_differentiable_idx = fwd_kwargs["non_differentiable_idx"]
-        saved_for_backward_idx = fwd_kwargs.get("saved_for_backward_idx", [])
+        saved_for_backward_idx = fwd_kwargs["saved_for_backward_idx"]
 
         class ApplyTemplate(torch.autograd.Function):
             @staticmethod
@@ -758,6 +758,7 @@ class AutogradFunctionApply(HigherOrderOperator):
                 # This is required for fx_traceback.annotate for work.
                 output, saved_values = torch.fx.Interpreter(fwd).run(*args)
 
+                # See Note [Activations with no version counter checks in eager]
                 # Mark tensors that came from ctx.save_for_backward with metadata.
                 # This allows AOT autograd to distinguish between tensors saved via
                 # save_for_backward vs those stashed directly on ctx (e.g., ctx.x = x).

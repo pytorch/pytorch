@@ -436,6 +436,7 @@ class ViewAndMutationMeta:
 
     num_symints_saved_for_bw: Optional[int] = None
 
+    # See Note [Activations with no version counter checks in eager]
     # Number of tensors saved for backward that were stashed on ctx (e.g., ctx.x = x)
     # rather than via save_for_backward in an autograd.Function.
     # These tensors are placed at the end of the saved tensors and should skip
@@ -682,6 +683,7 @@ class ViewAndMutationMeta:
         Slice of forward outputs that are tensors saved for backward that
         require version counter checks (i.e., were saved via save_for_backward).
         """
+        # See Note [Activations with no version counter checks in eager]
         assert self.num_symints_saved_for_bw is not None
         assert self.num_tensors_saved_with_no_vc_check is not None
         # The tensors with VC check come first, followed by tensors without VC check
