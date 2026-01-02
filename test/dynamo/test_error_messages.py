@@ -1588,6 +1588,26 @@ call to a lru_cache wrapped function at: test_error_messages.py:N
 """,
         )
 
+    def test_lru_cache_warning(self):
+        # test only the warning message itself
+        @lru_cache
+        def bax(x):
+            return x + 1
+
+        def bar(x):
+            return bax(x)
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def foo(x):
+            return bar(x)
+
+        x = torch.randn(2)
+        with self.assertWarnsOnceRegex(
+            UserWarning,
+            r"(?s).*This call originates from:\n.*File .*, line (\d+), in bar",
+        ):
+            foo(x)
+
     def test_disable_message(self):
         @torch.compile(backend="eager", fullgraph=True)
         def outer(fn, x):
@@ -2088,6 +2108,54 @@ from user code:
     l = list(generator())
   File "test_error_messages.py", line N, in generator
     torch._dynamo.graph_break()""",
+            )
+
+    @make_logging_test()
+    @torch._dynamo.config.patch(recompile_limit=1)
+    def test_recompile_limit_hit_message(self, records):
+        @torch.compile(backend="eager", dynamic=False)
+        def fn(x, n):
+            return x + n
+
+        def outer(x):
+            for i in range(2):
+                x = fn(x, i)
+            return x
+
+        outer(torch.ones(3))
+
+        def post_munge(s):
+            return re.sub(
+                r"# \S+/test_error_messages\.py", "# test_error_messages.py", s
+            )
+
+        self.assertExpectedInline(
+            post_munge(
+                munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0)
+            ),
+            """\
+torch._dynamo hit config.recompile_limit (1)
+   function: 'fn' (test_error_messages.py:N)
+   last reason: 0/0: n == 0                                                   # return x + n  # test_error_messages.py:N in fn
+To log all recompilation reasons, use TORCH_LOGS="recompiles".
+To diagnose recompilation issues, see https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.recompilation.html""",
+        )
+
+        torch.compiler.reset()
+
+        with torch._dynamo.error_on_graph_break(True):
+            self.assertExpectedInlineMunged(
+                Unsupported,
+                lambda: outer(torch.ones(3)),
+                """\
+Dynamo recompile limit exceeded
+  Explanation: Dynamo attempted to recompile the code object too many times, exceeding the recompile_limit cache size limit (currently set to 1). Excessive recompilations can degrade performance due to the compilation overhead of each recompilation.
+  Hint: To monitor recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider increasing torch._dynamo.config.recompile_limit to an appropriate value.
+  Hint: See https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.recompilation.html for tips on dealing with recompilations.
+
+  Developer debug context: Limit type: recompile_limit
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0039.html""",
             )
 
 
