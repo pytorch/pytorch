@@ -196,6 +196,23 @@ def _default_custom_combo_kernel_horizontal_partition(
                 "ComboKernels: %d long reduction nodes are separated",
                 len(long_reduction),
             )
+
+        threshold = config.combo_kernel_reduction_saturation_threshold
+        if threshold > 0 and reduction:
+            large_grid_reduction = [
+                n
+                for n in reduction
+                if V.graph.sizevars.size_hint(kernel_map[n].numels.get("x", 1)) // 64
+                > threshold
+            ]
+            if large_grid_reduction:
+                log.debug(
+                    "ComboKernels: %d reduction nodes excluded (grid > %d)",
+                    len(large_grid_reduction),
+                    threshold,
+                )
+                reduction = [n for n in reduction if n not in large_grid_reduction]
+                nodes_per_ndim.extend([node] for node in large_grid_reduction)
         large_pointwise = [
             n
             for n in not_reduction
