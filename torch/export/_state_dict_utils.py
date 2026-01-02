@@ -5,6 +5,7 @@ State dict utilities for torch.export.
 This module provides utilities for restoring state dicts to traced modules,
 ensuring that FQNs (Fully Qualified Names) match the original module structure.
 """
+
 from collections.abc import Callable
 from typing import Any
 
@@ -52,7 +53,7 @@ def _clear_traced_params_buffers(
         const_keys: List of keys that represent constants to be cleared.
     """
     for key in const_keys:
-        assert key in traced_module._buffers.keys()
+        assert key in traced_module._buffers
         # We don't want constants to show up as a buffer in the state dict.
         # Instead they should just be a direct attribute.
         buffer = getattr(traced_module, key)
@@ -86,6 +87,7 @@ def _restore_state_dict(
         from torch._dynamo.functional_export import _dynamo_graph_capture_for_export
         from torch.export import _restore_state_dict
 
+
         class Model(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -93,6 +95,7 @@ def _restore_state_dict(
 
             def forward(self, x):
                 return self.layer(x)
+
 
         model = Model()
         gm = _dynamo_graph_capture_for_export(model)(torch.randn(1, 10))
@@ -137,7 +140,9 @@ def _restore_state_dict(
             processed_traced_names.add(traced_name)
             if traced_name != orig_name:
                 # Only reassign if the name is different
-                torch.fx.graph_module._assign_attr(traced_param, traced_module, orig_name)
+                torch.fx.graph_module._assign_attr(
+                    traced_param, traced_module, orig_name
+                )
                 torch.fx.graph_module._del_attr(traced_module, traced_name)
                 name_mapping[traced_name] = orig_name
         else:
@@ -152,7 +157,9 @@ def _restore_state_dict(
             processed_traced_names.add(traced_name)
             if traced_name != orig_name:
                 # Only reassign if the name is different
-                torch.fx.graph_module._assign_attr(orig_buffer, traced_module, orig_name)
+                torch.fx.graph_module._assign_attr(
+                    orig_buffer, traced_module, orig_name
+                )
                 torch.fx.graph_module._del_attr(traced_module, traced_name)
                 name_mapping[traced_name] = orig_name
         else:
