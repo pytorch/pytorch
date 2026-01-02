@@ -1,11 +1,13 @@
 # Owner(s): ["module: inductor"]
 
+import functools
 import unittest
 from collections.abc import Callable
 from contextlib import contextmanager
 from dataclasses import dataclass
 
 import torch
+from torch._dynamo.testing import CompileCounterWithBackend, EagerAndRecordGraphs
 from torch._inductor.kernel.flex.flex_flash_attention import (
     _hierarchical_indexer_cute,
     ensure_flash_available,
@@ -282,8 +284,8 @@ def cuda_kernel_profiler(kernel_pattern="flash_attncute"):
     result["found"] = any(kernel_pattern in name for name in kernel_names)
 
 
-def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2):
-    compiled_fn = torch.compile(flex_attention)
+def flash_vs_triton(q, k, v, score_mod=None, block_mask=None, rtol=2, *, dynamic=False):
+    compiled_fn = torch.compile(flex_attention, dynamic=dynamic)
     enable_gqa = q.shape[1] != k.shape[1]
 
     out_ref_fp32 = flex_attention(
@@ -971,6 +973,376 @@ class TestFlexFlash(InductorTestCase):
 
 
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
+
+
+@unittest.skipIf(
+    not ensure_flash_available(), "Flash attention (CUTE) library is not available"
+)
+class TestFlexFlashDynamicShapes(InductorTestCase):
+    """
+    Dynamic-shape coverage for flex flash attention: score_mod captures and masks,
+    plus backward, batch, and length variants.
+    """
+
+    def _run_dynamic_test(
+        self, seq_lens, score_mod=None, block_mask_factory=None, requires_grad=False
+    ):
+        """Helper to run dynamic=True tests across multiple sequence lengths."""
+
+        for seq_len in seq_lens:
+            q, k, v = create_test_tensors(
+                seq_len=seq_len,
+                device="cuda",
+                dtype=torch.float16,
+                requires_grad=requires_grad,
+            )
+            block_mask = block_mask_factory(seq_len) if block_mask_factory else None
+            flash_vs_triton(
+                q,
+                k,
+                v,
+                score_mod=score_mod,
+                block_mask=block_mask,
+                dynamic=True,
+            )
+
+    def _flash_triton_dynamic(self, q, k, v, **kwargs):
+        flash_vs_triton(q, k, v, dynamic=True, **kwargs)
+
+    def test_dynamic_seq_len_no_score_mod(self):
+        """Test dynamic sequence lengths without score_mod."""
+        self._run_dynamic_test(seq_lens=[128, 256, 512])
+
+    def test_dynamic_seq_len_inline_literal(self):
+        """Test dynamic sequence lengths with inline literal score_mod."""
+
+        def score_mod(score, _b, _h, _q, _k):
+            return score * 2.0  # Inline literal, not captured
+
+        self._run_dynamic_test(seq_lens=[128, 256, 512], score_mod=score_mod)
+
+    def test_dynamic_seq_len_captured_tensor_buffer(self):
+        """Test dynamic sequence lengths with captured tensor buffer (ALiBi-style)."""
+        num_heads = 4
+        slopes = torch.exp2(
+            -torch.linspace(1, 8, num_heads, device="cuda", dtype=torch.float16)
+        )
+
+        def alibi_score_mod(score, b, h, q_idx, kv_idx):
+            return score + (kv_idx - q_idx) * slopes[h]
+
+        self._run_dynamic_test(seq_lens=[128, 256, 512], score_mod=alibi_score_mod)
+
+    def test_dynamic_seq_len_with_block_mask(self):
+        """Test dynamic sequence lengths with block mask."""
+
+        def block_mask_factory(seq_len):
+            return _create_block_mask_for_device(
+                _causal_mask, 2, 4, seq_len, seq_len, device="cuda"
+            )
+
+        self._run_dynamic_test(
+            seq_lens=[128, 256, 512], block_mask_factory=block_mask_factory
+        )
+
+    def test_dynamic_batch_size(self):
+        """Test dynamic batch sizes."""
+        for batch_size in [1, 2, 4, 8]:
+            q, k, v = create_test_tensors(
+                batch_size=batch_size, seq_len=256, device="cuda", dtype=torch.float16
+            )
+            self._flash_triton_dynamic(q, k, v)
+
+    def test_dynamic_backward(self):
+        """Test backward with dynamic sequence lengths."""
+        self._run_dynamic_test(seq_lens=[128, 256, 512], requires_grad=True)
+
+    def test_dynamic_backward_with_score_mod(self):
+        """Test backward with score_mod and dynamic sequence lengths."""
+
+        def score_mod(score, _b, _h, _q, _k):
+            return score * 2.0
+
+        self._run_dynamic_test(
+            seq_lens=[128, 256, 512], score_mod=score_mod, requires_grad=True
+        )
+
+    def test_dynamic_backward_with_block_mask(self):
+        """Test backward with block mask and dynamic sequence lengths."""
+        major, _ = torch.cuda.get_device_capability()
+        if major != 10:
+            self.skipTest("block sparse backward only supported on SM100")
+
+        def block_mask_factory(seq_len):
+            return _create_block_mask_for_device(
+                _causal_mask, 2, 4, seq_len, seq_len, device="cuda"
+            )
+
+        self._run_dynamic_test(
+            seq_lens=[128, 256, 512],
+            block_mask_factory=block_mask_factory,
+            requires_grad=True,
+        )
+
+    def test_dynamic_gqa(self):
+        """Test GQA with dynamic sequence lengths."""
+        q_heads, kv_heads = 8, 2
+        for seq_len in [128, 256, 512]:
+            q = torch.randn(2, q_heads, seq_len, 64, device="cuda", dtype=torch.float16)
+            k = torch.randn(
+                2, kv_heads, seq_len, 64, device="cuda", dtype=torch.float16
+            )
+            v = torch.randn(
+                2, kv_heads, seq_len, 64, device="cuda", dtype=torch.float16
+            )
+            self._flash_triton_dynamic(q, k, v, score_mod=None, block_mask=None)
+
+    def test_dynamic_mqa(self):
+        """Test MQA with dynamic sequence lengths."""
+        q_heads, kv_heads = 8, 1
+        for seq_len in [128, 256, 512]:
+            q = torch.randn(2, q_heads, seq_len, 64, device="cuda", dtype=torch.float16)
+            k = torch.randn(
+                2, kv_heads, seq_len, 64, device="cuda", dtype=torch.float16
+            )
+            v = torch.randn(
+                2, kv_heads, seq_len, 64, device="cuda", dtype=torch.float16
+            )
+            self._flash_triton_dynamic(q, k, v)
+
+    def test_dynamic_non_divisible_seq_len(self):
+        """Test non-block-divisible sequence lengths with dynamic shapes."""
+        for seq_len in [127, 255, 383, 511, 513]:
+            q, k, v = create_test_tensors(
+                seq_len=seq_len, device="cuda", dtype=torch.float16
+            )
+            self._flash_triton_dynamic(q, k, v)
+
+    def test_dynamic_asymmetric_qkv_lengths(self):
+        """Test asymmetric Q and KV lengths with dynamic shapes."""
+        test_cases = [(256, 512), (512, 256), (128, 1024)]
+        for q_len, kv_len in test_cases:
+            q = torch.randn(2, 4, q_len, 64, device="cuda", dtype=torch.float16)
+            k = torch.randn(2, 4, kv_len, 64, device="cuda", dtype=torch.float16)
+            v = torch.randn(2, 4, kv_len, 64, device="cuda", dtype=torch.float16)
+            self._flash_triton_dynamic(q, k, v)
+
+    def test_captured_float_fails_with_dynamic(self):
+        """Test that captured Python float fails with dynamic=True."""
+        val = 2.0  # Captured float
+
+        def score_mod(score, _b, _h, _q, _k):
+            return score * val
+
+        compiled_fn = torch.compile(flex_attention, dynamic=True)
+        q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"captures a dynamic scalar \(SymInt/SymFloat\)"
+        ):
+            compiled_fn(
+                q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
+            )
+
+    def test_captured_int_fails_with_dynamic(self):
+        """Captured Python int should fail with dynamic=True."""
+        val = 2  # Captured int
+
+        def score_mod(score, _b, _h, _q, _k):
+            return score * val
+
+        compiled_fn = torch.compile(flex_attention, dynamic=True)
+        q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
+
+        with self.assertRaisesRegex(
+            RuntimeError, r"captures a dynamic scalar \(SymInt/SymFloat\)"
+        ):
+            compiled_fn(
+                q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
+            )
+
+    def test_captured_float_works_with_static(self):
+        """Test that captured Python float works with dynamic=False."""
+        val = 2.0  # Captured float
+
+        def score_mod(score, _b, _h, _q, _k):
+            return score * val
+
+        compiled_fn = torch.compile(flex_attention, dynamic=False)
+        q, k, v = create_test_tensors(seq_len=256, device="cuda", dtype=torch.float16)
+
+        out = compiled_fn(
+            q, k, v, score_mod=score_mod, kernel_options={"BACKEND": "FLASH"}
+        )
+        self.assertEqual(out.shape, q.shape)
+
+    def test_dynamic_mask_from_input_lengths_single_graph(self):
+        """Dynamic mask creation driven by input lengths should stay single-graph."""
+        counter = CompileCounterWithBackend("inductor")
+
+        def _flex_attention_mask(b, h, q_idx, kv_idx, input_lengths):
+            return (q_idx < input_lengths[b]) & (kv_idx < input_lengths[b])
+
+        class Model(torch.nn.Module):
+            def __init__(self, dim=128, heads=4):
+                super().__init__()
+                self.proj = torch.nn.Linear(dim, dim)
+                self.heads: int = int(heads)
+
+            def forward(self, x, input_lengths):
+                x = self.proj(x)
+                B, T, C = x.shape
+                head_dim = C // self.heads
+                x = x.view(B, T, self.heads, head_dim).permute(0, 2, 1, 3)
+
+                max_time = x.size(-2)
+                mask = torch.compile(create_block_mask, dynamic=True, fullgraph=False)(
+                    functools.partial(
+                        _flex_attention_mask, input_lengths=input_lengths
+                    ),
+                    B=B,
+                    H=None,
+                    Q_LEN=max_time,
+                    KV_LEN=max_time,
+                    device=x.device,
+                )
+
+                return torch.compile(
+                    flex_attention, dynamic=True, fullgraph=True, backend=counter
+                )(x, x, x, block_mask=mask, kernel_options={"BACKEND": "FLASH"})
+
+        model = Model().cuda().half()
+        B, T, F = 8, 64, 128
+        for _ in range(3):
+            x = torch.randn(B, T, F, device="cuda", dtype=torch.float16)
+            lens = torch.randint(1, T + 1, (B,), device="cuda")
+            model(x, lens)
+
+        self.assertEqual(
+            counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
+        )
+
+    def test_dynamic_free_symbol_mask_single_graph(self):
+        """Free-symbol dense mask under dynamic=True should not recompile."""
+        counter = CompileCounterWithBackend("inductor")
+
+        def make_mask(batch_shape, seq_len):
+            rand_mask = torch.randint(
+                0, 2, (batch_shape, seq_len), device="cuda"
+            ).bool()
+            return torch.compile(create_block_mask, dynamic=True)(
+                B=batch_shape,
+                BLOCK_SIZE=128,
+                mask_mod=lambda b, h, q_idx, kv_idx: ~rand_mask[b, q_idx],
+                H=None,
+                Q_LEN=seq_len,
+                KV_LEN=seq_len,
+                device="cuda",
+            )
+
+        @torch.compile(dynamic=True, fullgraph=True, backend=counter)
+        def run(q, k, v, block_mask):
+            return flex_attention(
+                q, k, v, block_mask=block_mask, kernel_options={"BACKEND": "FLASH"}
+            )
+
+        seq_len = 128
+        for batch_shape in [2, 4, 8]:
+            q, k, v = create_test_tensors(
+                batch_shape, 4, seq_len, 64, device="cuda", dtype=torch.float16
+            )
+            block_mask = make_mask(batch_shape, seq_len)
+            run(q, k, v, block_mask)
+
+        self.assertEqual(
+            counter.frame_count, 1, f"Expected 1 graph, got {counter.frame_count}"
+        )
+
+    def test_dynamic_max_autotune_with_block_mask(self):
+        """Dynamic=True with max-autotune should succeed for FLASH backend."""
+        q, k, v = create_test_tensors(
+            batch_size=2,
+            num_heads=4,
+            seq_len=256,
+            dim=64,
+            dtype=torch.bfloat16,
+            device="cuda",
+        )
+        block_mask = _create_block_mask_for_device(
+            _causal_mask, 2, 4, 256, 256, device="cuda"
+        )
+
+        compiled_fn = torch.compile(
+            flex_attention, dynamic=True, mode="max-autotune-no-cudagraphs"
+        )
+        out = compiled_fn(
+            q,
+            k,
+            v,
+            block_mask=block_mask,
+            kernel_options={"BACKEND": "FLASH"},
+        )
+        self.assertEqual(out.shape, q.shape)
+
+    def test_dynamic_captured_buffer_varying_heads(self):
+        """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
+        torch._dynamo.reset()
+
+        def run_with_head_count(head_count):
+            head_scale = torch.randn(
+                head_count, device="cuda", dtype=torch.float16, requires_grad=False
+            )
+
+            def score_mod(score, batch, head, token_q, token_kv):
+                return score * head_scale[head]
+
+            q, k, v = create_test_tensors(
+                batch_size=2,
+                num_heads=head_count,
+                seq_len=256,
+                dim=64,
+                dtype=torch.float16,
+                device="cuda",
+                requires_grad=True,
+            )
+            self._flash_triton_dynamic(q, k, v, score_mod=score_mod)
+
+        for head_count in [4, 8, 4, 16, 4]:
+            run_with_head_count(head_count)
+
+    def test_dynamic_symbol_closure_in_score_mod(self):
+        """Capturing a SymInt in score_mod should compile to one dynamic graph."""
+
+        class SimpleAttention(torch.nn.Module):
+            def __init__(self, dim=512, n_head=8):
+                super().__init__()
+                self.qkv = torch.nn.Linear(dim, 3 * dim)
+                self.n_head: int = int(n_head)
+                self.head_dim: int = int(dim // n_head)
+
+            def forward(self, x):
+                B, T, C = x.size()
+                qkv = self.qkv(x).view(B, T, 3, self.n_head, self.head_dim)
+                qkv = qkv.permute(2, 0, 3, 1, 4)
+                q, k, v = qkv
+                return flex_attention(
+                    q,
+                    k,
+                    v,
+                    score_mod=lambda s, b, h, q_idx, kv_idx: s + B,
+                    kernel_options={"BACKEND": "FLASH"},
+                )
+
+        model = SimpleAttention().cuda()
+        backend = EagerAndRecordGraphs()
+        model.compile(mode="default", dynamic=True, backend=backend)
+
+        torch._dynamo.reset()
+        for batch_shape in [2, 4, 8]:
+            x = torch.randn(batch_shape, 256, 512, device="cuda")
+            model(x)
+
+        self.assertEqual(len(backend.graphs), 1, "Expected a single dynamic graph")
 
 
 class TestHierarchicalIndex(InductorTestCase):
