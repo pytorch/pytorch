@@ -717,7 +717,9 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     return wrapper  # type: ignore[return-value]
 
 
-def cache_property_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
+def cache_property_on_self(
+    fn: Callable[Concatenate[Any, P], RV],
+) -> CachedMethod[P, RV]:
     """
     Variant of cache_on_self for properties. The only difference is the type signature.
     """
