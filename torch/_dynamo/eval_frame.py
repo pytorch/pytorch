@@ -98,6 +98,7 @@ from .code_context import code_context
 from .exc import (
     CondOpArgsMismatchError,
     ShortenTraceback,
+    UncapturedHigherOrderOpError,
     Unsupported,
     UserError,
     UserErrorType,
@@ -972,7 +973,7 @@ class _TorchDynamoContext:
 
                 try:
                     return fn(*args, **kwargs)
-                except Unsupported as e:
+                except (Unsupported, UncapturedHigherOrderOpError) as e:
                     if config.verbose:
                         raise
                     # strip internal tracebacks from causes
