@@ -770,6 +770,9 @@ class LocalDTensorOpTestBase(DTensorOpTestBase):
     def _spawn_processes(self) -> None:
         pass
 
+    def _spawn_threads(self) -> None:
+        pass
+
     def run_test(self, test_name: str, parent_pipe) -> None:
         getattr(self, test_name)()
 

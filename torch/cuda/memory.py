@@ -433,55 +433,41 @@ def reset_peak_memory_stats(device: "Device" = None) -> None:
 
 
 def host_memory_stats() -> dict[str, Any]:
-    r"""Return a dictionary of CUDA memory allocator statistics for a given device.
+    r"""Return a dictionary of pinned (host) allocator statistics.
 
-     The return value of this function is a dictionary of statistics, each of
-     which is a non-negative integer.
+    Core statistics (host pinned allocator):
 
-     Core statistics:
+    - ``"allocations.{current,peak,allocated,freed}"``:
+      pinned blocks owned by the allocator (active + cached). Grows when a new
+      block is created via CUDA and shrinks when cached blocks are returned.
+    - ``"allocated_bytes.{current,peak,allocated,freed}"``:
+      bytes of pinned blocks owned by the allocator (active + cached), using
+      the rounded block size requested from CUDA.
+    - ``"active_requests.{current,peak,allocated,freed}"``:
+      blocks currently checked out to callers (increments on handout, decrements
+      when the block becomes reusable after stream deps finish).
+    - ``"active_bytes.{current,peak,allocated,freed}"``:
+      bytes corresponding to active blocks.
 
-     - ``"allocated.{current,peak,allocated,freed}"``:
-       number of allocation requests received by the memory allocator.
-     - ``"allocated_bytes.{current,peak,allocated,freed}"``:
-       amount of allocated memory.
-     - ``"segment.{current,peak,allocated,freed}"``:
-       number of reserved segments from ``cudaMalloc()``.
-     - ``"reserved_bytes.{current,peak,allocated,freed}"``:
-       amount of reserved memory.
+    Metric type:
 
-     For these core statistics, values are broken down as follows.
+    - ``current``: current value.
+    - ``peak``: maximum value.
+    - ``allocated``: historical total increase.
+    - ``freed``: historical total decrease.
 
-     Metric type:
+    Event/timing counters:
 
-     - ``current``: current value of this metric.
-     - ``peak``: maximum value of this metric.
-     - ``allocated``: historical total increase in this metric.
-     - ``freed``: historical total decrease in this metric.
+    - ``"num_host_alloc"`` / ``"num_host_free"``: blocks created to grow the
+      pool / cached blocks returned to CUDA (matches allocations allocated/freed).
+    - ``"host_alloc_time.{total,max,min,count,avg}"``: time in CUDA alloc calls
+      when growing the pool (microseconds).
+    - ``"host_free_time.{total,max,min,count,avg}"``: time in CUDA free calls
+      when cached blocks are returned (microseconds).
 
-     In addition to the core statistics, we also provide some simple event
-     counters:
-
-     - ``"num_host_alloc"``: number of CUDA allocation calls. This includes both
-       cudaHostAlloc and cudaHostRegister.
-     - ``"num_host_free"``: number of CUDA free calls. This includes both cudaHostFree
-       and cudaHostUnregister.
-
-     Finally, we also provide some simple timing counters:
-
-     - ``"host_alloc_time.{total,max,min,count,avg}"``:
-       timing of allocation requests going through CUDA calls.
-     - ``"host_free_time.{total,max,min,count,avg}"``:
-       timing of free requests going through CUDA calls.
-
-    For these timing statistics, values are broken down as follows.
-
-     Metric type:
-
-     - ``total``: total time spent.
-     - ``max``: maximum value per call.
-     - ``min``: minimum value per call.
-     - ``count``: number of times it was called.
-     - ``avg``: average time per call.
+    Block sizes are rounded up to the next power of two before calling CUDA, so
+    byte stats reflect the rounded size. Peak values are aggregated per bucket
+    and are a best-effort approximation of the true peak.
     """
     result = []
 

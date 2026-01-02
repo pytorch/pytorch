@@ -98,6 +98,7 @@ from .code_context import code_context
 from .exc import (
     CondOpArgsMismatchError,
     ShortenTraceback,
+    UncapturedHigherOrderOpError,
     Unsupported,
     UserError,
     UserErrorType,
@@ -972,7 +973,7 @@ class _TorchDynamoContext:
 
                 try:
                     return fn(*args, **kwargs)
-                except Unsupported as e:
+                except (Unsupported, UncapturedHigherOrderOpError) as e:
                     if config.verbose:
                         raise
                     # strip internal tracebacks from causes
@@ -1188,14 +1189,21 @@ class DisableContext(_TorchDynamoContext):
             try:
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
-                    if torch.compiler.is_exporting():
+                    fn_name = getattr(fn, "__name__", type(fn).__name__)
+                    # Skip annotation for __torch_dispatch__ to avoid polluting
+                    # node metadata during export. The disable on __torch_dispatch__
+                    # is an internal implementation detail, not user-facing.
+                    # TODO: Ideally we shouldn't need this check because nested
+                    # annotate() calls shouldn't override existing keys.
+                    if (
+                        torch.compiler.is_exporting()
+                        and fn_name != "__torch_dispatch__"
+                    ):
                         with fx_traceback.annotate(
                             {
                                 "_torchdynamo_disable": True,
                                 "_torchdynamo_disable_recursive": True,
-                                "_torchdynamo_disable_method": getattr(
-                                    fn, "__name__", type(fn).__name__
-                                ),
+                                "_torchdynamo_disable_method": fn_name,
                             }
                         ):
                             return fn(*args, **kwargs)

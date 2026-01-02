@@ -624,35 +624,26 @@ def can_use_triton_kernel(
         return offs is None
 
 
-def create_offsets(x, m1_size, m2_size, offs_size):
-    m1_is_2d = len(m1_size) == 2
-    m2_is_2d = len(m2_size) == 2
+def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
     if m1_is_2d:
         if m2_is_2d:
-            k = V.graph.sizevars.size_hint(m1_size[1])
-            noffs = V.graph.sizevars.size_hint(offs_size[0])
-            step = k / noffs
-            return torch.linspace(
-                step, k, noffs, dtype=x.get_dtype(), device=x.get_device()
-            )
-
+            end = k
         else:
-            m = V.graph.sizevars.size_hint(m1_size[0])
-            noffs = V.graph.sizevars.size_hint(offs_size[0])
-            step = m / noffs
-            return torch.linspace(
-                step, m, noffs, dtype=x.get_dtype(), device=x.get_device()
-            )
+            end = m
     else:
         if m2_is_2d:
-            n = V.graph.sizevars.size_hint(m2_size[0])
-            noffs = V.graph.sizevars.size_hint(offs_size[0])
-            step = n / noffs
-            return torch.linspace(
-                step, n, noffs, dtype=x.get_dtype(), device=x.get_device()
-            )
+            end = n
         else:
             return None
+
+    end_hint = V.graph.sizevars.size_hint(end)
+    noffs_hint = V.graph.sizevars.size_hint(offs_box.get_size()[0])
+    offs = torch.arange(1, noffs_hint + 1, dtype=torch.float32) * (
+        end_hint / noffs_hint
+    )
+    offs[:-1] = (offs[:-1] / alignment).round() * alignment
+    offs[-1] = end_hint
+    return offs.to(dtype=offs_box.get_dtype(), device=offs_box.get_device())
 
 
 def _tuned_grouped_mm_common(
@@ -728,31 +719,31 @@ def _tuned_grouped_mm_common(
     if len(m1_size) == 2:
         if len(m2_size) == 2:
             m, k1 = m1_size
-            k2, _ = m2_size
-
+            k2, n = m2_size
+            # pyrefly: ignore [missing-attribute]
             g = offs.get_size()[0]
-            V.graph.sizevars.check_equals(k1, k2)
+            k = V.graph.sizevars.check_equals(k1, k2)
             a_is_2d, b_is_2d = True, True
         else:
             g1 = offs.layout.size[0]
             m, k1 = m1_size
-            g2, k2, _ = m2_size
+            g2, k2, n = m2_size
             g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-            V.graph.sizevars.check_equals(k1, k2)
+            k = V.graph.sizevars.check_equals(k1, k2)
             a_is_2d, b_is_2d = True, False
     else:
         if len(m2_size) == 2:
             g1 = offs.layout.size[0]
             g2, m, k1 = m1_size
-            k2, _ = m2_size
+            k2, n = m2_size
             g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-            V.graph.sizevars.check_equals(k1, k2)
+            k = V.graph.sizevars.check_equals(k1, k2)
             a_is_2d, b_is_2d = False, True
         else:
             g1, m, k1 = m1_size
-            g2, k2, _ = m2_size
+            g2, k2, n = m2_size
             g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-            V.graph.sizevars.check_equals(k1, k2)
+            k = V.graph.sizevars.check_equals(k1, k2)
             a_is_2d, b_is_2d = False, False
 
     if (
@@ -814,11 +805,13 @@ def _tuned_grouped_mm_common(
                 **asdict(config),
             )
 
-    input_gen_fns = {
-        4: lambda x: create_offsets(
-            x, m1_size, m2_size, offs.get_size() if offs is not None else None
-        ),
-    }
+    input_gen_fns = {}
+    if offs is not None:
+        input_offs_idx = 2 if scale_a is None else 4
+        alignment = 16 // mat_a.dtype.itemsize
+        input_gen_fns[input_offs_idx] = lambda x: create_offsets(
+            x, a_is_2d, b_is_2d, m, n, k, alignment
+        )
     return autotune_select_algorithm(
         algorithm_name, choices, input_nodes, layout, input_gen_fns=input_gen_fns
     )

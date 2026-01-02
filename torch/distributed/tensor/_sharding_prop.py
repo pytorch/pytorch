@@ -433,6 +433,13 @@ class ShardingPropagator:
         # Ideally, this function would be deleted, but there are a handful of
         # one off call sites here that aren't cleaned up.
 
+        # NOTE: schema should always be populated when calling this function,
+        # as it's only called after unwrap_to_op_info (create_schema=True).
+        assert op_info.schema is not None, (
+            "op_info.schema should not be None in propagate. "
+            "This function should only be called after unwrap_to_op_info."
+        )
+
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
@@ -479,10 +486,17 @@ class ShardingPropagator:
             if single_dim_strategy is not None:
                 mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
                 assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
+                # if we run into a case where we register a single-dim rule for an op that can't propagate tensor meta,
+                # we could loosen this assert, but it's better to fix gaps in tensor meta prop. We want to end up
+                # with the invariant that all DTensorSpec have a valid tensormeta, but many existing sharding rules
+                # skip this.  We try to enforce it for all newly added single-dim rules.
+                assert out_tensor_meta is not None, (
+                    f"_propagate_tensor_meta_non_cached returned None for {op_schema}, but tensor_meta is required"
+                )
                 # expand to generate the full set of strategy combinations, each one
                 # with a redistribute cost, and then find the min strategy over those costs.
                 _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                    mesh, strategy_schema, single_dim_strategy
+                    mesh, strategy_schema, single_dim_strategy, out_tensor_meta
                 )
                 op_strategy = _expanded_strategy_fn(
                     op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta

@@ -924,6 +924,9 @@ class LocalTensor(torch.Tensor):
                 "Make a custom autograd function and make sure you detach the inner tensors."
             )
 
+        if len(local_tensors) == 0:
+            raise ValueError("LocalTensor cannot be empty!")
+
         (shape, strides, device, dtype, layout, extra_dispatch_keys) = (
             _compute_local_tensor_meta(local_tensors)
         )
@@ -1054,14 +1057,7 @@ class LocalTensor(torch.Tensor):
         self,
         memory_format: torch.memory_format = torch.contiguous_format,
     ) -> torch.Tensor:
-        # pyrefly: ignore [bad-argument-type]
-        return LocalTensor(
-            # pyrefly: ignore [bad-argument-count]
-            {
-                r: t.contiguous(memory_format=memory_format)
-                for r, t in self._local_tensors.items()
-            }
-        )
+        return _LocalContiguous.apply(self, memory_format)
 
     def is_contiguous(
         self,
@@ -1130,6 +1126,33 @@ class LocalTensor(torch.Tensor):
             self._size = shape
 
 
+class _LocalContiguous(torch.autograd.Function):
+    """Autograd function for LocalTensor.contiguous() that preserves gradient flow."""
+
+    @staticmethod
+    def forward(  # type: ignore[override]
+        ctx: torch.autograd.function.FunctionCtx,
+        input: LocalTensor,
+        memory_format: torch.memory_format,
+    ) -> LocalTensor:
+        # pyrefly: ignore [bad-argument-type]
+        return LocalTensor(
+            # pyrefly: ignore [bad-argument-count]
+            {
+                r: t.contiguous(memory_format=memory_format)
+                for r, t in input._local_tensors.items()
+            },
+            input.requires_grad,
+        )
+
+    @staticmethod
+    def backward(  # type: ignore[override]
+        ctx: torch.autograd.function.FunctionCtx,
+        grad_output: torch.Tensor,
+    ) -> tuple[torch.Tensor, None]:
+        return grad_output, None
+
+
 # If set to `True` the LocalTensorMode stack will be created for the whole process,
 # otherwise it will be created for each thread.
 _PROCESS_MODE: bool = True
@@ -1186,11 +1209,9 @@ class LocalTensorMode(TorchDispatchMode):
             int, tuple[torch.Tensor, dict[int, torch.Tensor]]
         ] = {}
 
-        self.enable_()
-
     def __enter__(self) -> "LocalTensorMode":
-        self.enable_()
         get_local_tensor_mode_list().append(self)
+        self.enable_()
 
         # _distribute_region will compute correct per-shard offsets
         # but we want all ranks to start with the same state
@@ -1210,8 +1231,14 @@ class LocalTensorMode(TorchDispatchMode):
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> None:
+        local_tensor_mode_list = get_local_tensor_mode_list()
+        local_tensor_mode_list.pop()
         self.disable_()
-        get_local_tensor_mode_list().pop()
+        if len(local_tensor_mode_list) > 0:
+            if local_tensor_mode_list[-1]._disable:
+                local_tensor_mode_list[-1].disable_()
+            else:
+                local_tensor_mode_list[-1].enable_()
         super().__exit__(exc_type, exc_val, exc_tb)
 
     def __torch_dispatch__(
@@ -1519,8 +1546,11 @@ class _LocalDeviceMesh:
         assert lm is not None, "Unexpectedly not in LocalTensorMode"
 
         coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
+        # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
+        # error when running under torch.inference_mode()
+        rank_map = self._rank_map.clone()
         for r in lm.ranks:
-            rank_tensor = self._layout.remap_to_tensor(self._rank_map)
+            rank_tensor = self._layout.remap_to_tensor(rank_map)
             rank_coords = (rank_tensor == r).nonzero().tolist()
             assert len(rank_coords) == 1
             for d, c in enumerate(rank_coords[0][1:]):

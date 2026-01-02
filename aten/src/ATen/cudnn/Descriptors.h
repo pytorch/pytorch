@@ -18,7 +18,7 @@
 #include <ATen/ops/empty.h>
 #endif
 
-#if defined(CUDNN_VERSION)
+#if defined(CUDNN_VERSION) && CUDNN_VERSION >= 8907
 #define USE_CUDNN_RNN_V8_API
 #endif
 
@@ -271,12 +271,48 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
                                              &cudnnDestroyRNNDescriptor> {
   DropoutDescriptor dropout_desc_;
   void set(cudnnHandle_t handle,
+#ifdef USE_CUDNN_RNN_V8_API
        int input_size,
        bool packed,
+#endif
        int hidden_size, int proj_size, int num_layers, DropoutDescriptor&& dropout_desc,
            cudnnRNNInputMode_t input_mode, cudnnDirectionMode_t bidirectional,
            cudnnRNNMode_t mode, cudnnDataType_t datatype, cudnnDataType_t input_type, cudnnRNNAlgo_t algo, bool allow_tf32) {
     dropout_desc_ = std::move(dropout_desc);
+#ifndef USE_CUDNN_RNN_V8_API
+    AT_CUDNN_CHECK(cudnnSetRNNDescriptor_v6(
+          handle,
+          mut_desc(),
+          hidden_size,
+          num_layers,
+          dropout_desc_.desc(),
+          input_mode,
+          bidirectional,
+          mode,
+          algo,
+          datatype));
+    if (proj_size != 0) {
+      AT_CUDNN_CHECK(cudnnSetRNNProjectionLayers(
+            handle,
+            /*rnnDesc=*/mut_desc(),
+            /*recProjSize=*/proj_size,
+            /*outProjSize=*/0));
+    }
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
+    if (prop->major >= 7) {
+      if (input_type == CUDNN_DATA_HALF) {
+        cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);
+      }
+      else if (input_type == CUDNN_DATA_FLOAT && !allow_tf32) {
+        cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_FMA_MATH);
+      }
+      else {
+        // Technically, as the default it's not necessary to explicitly
+        // set this.
+        cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_DEFAULT_MATH);
+      }
+    }
+#else
     cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     auto math_type = CUDNN_DEFAULT_MATH;
     if (prop->major >= 7) {
@@ -302,6 +338,7 @@ struct TORCH_CUDA_CPP_API RNNDescriptor : public Descriptor<
           num_layers,
           dropout_desc_.desc(),
           packed ? CUDNN_RNN_PADDED_IO_DISABLED : CUDNN_RNN_PADDED_IO_ENABLED));
+#endif
   }
 };
 
