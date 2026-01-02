@@ -45,6 +45,59 @@ LARGE_NUMELS = 512e5
 BLOCK_UTILIZATION = 0.8
 
 
+def _partition_by_ynumel_ratio(
+    nodes: list[BaseSchedulerNode],
+    node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+    max_ratio: float,
+) -> list[list[BaseSchedulerNode]]:
+    """Partition nodes so that ynumel ratio within each group is <= max_ratio.
+
+    This prevents combining kernels with vastly different Y dimensions, which
+    would cause most Y-blocks to do nothing for smaller sub-kernels.
+    """
+    if len(nodes) <= 1:
+        return [nodes] if nodes else []
+
+    # Get ynumel for each node
+    def get_ynumel(node: BaseSchedulerNode) -> int:
+        tiled_groups = node_info_map[node][1]
+        if "y" in tiled_groups:
+            y_elem = tiled_groups["y"]
+            if V.graph.sizevars.shape_env.has_hint(y_elem):
+                return V.graph.sizevars.size_hint(y_elem)
+        return 1
+
+    # Sort by ynumel to group similar sizes together
+    ynumel_cache = {node: get_ynumel(node) for node in nodes}
+    sorted_nodes = sorted(nodes, key=lambda n: ynumel_cache[n])
+
+    partitions: list[list[BaseSchedulerNode]] = []
+    current_partition: list[BaseSchedulerNode] = [sorted_nodes[0]]
+    current_min = ynumel_cache[sorted_nodes[0]]
+
+    for node in sorted_nodes[1:]:
+        node_ynumel = ynumel_cache[node]
+        if node_ynumel / max(current_min, 1) > max_ratio:
+            partitions.append(current_partition)
+            current_partition = [node]
+            current_min = node_ynumel
+        else:
+            current_partition.append(node)
+
+    if current_partition:
+        partitions.append(current_partition)
+
+    if len(partitions) > 1:
+        log.debug(
+            "ComboKernels: Partitioned %d nodes into %d groups by ynumel ratio (max_ratio=%.1f)",
+            len(nodes),
+            len(partitions),
+            max_ratio,
+        )
+
+    return partitions
+
+
 def _default_custom_combo_kernel_horizontal_partition(
     nodes: list[BaseSchedulerNode],
     triton_scheduling: SIMDScheduling,
@@ -119,9 +172,17 @@ def _default_custom_combo_kernel_horizontal_partition(
             not_reduction = [n for n in not_reduction if n not in large_pointwise]
             nodes_per_ndim.extend([node] for node in large_pointwise)
 
-        nodes_per_ndim.extend(
-            g for g in (not_reduction, short_reduction, long_reduction) if g
-        )
+        # Partition not_reduction by Y-numel ratio to prevent grid waste
+        if config.combo_kernel_max_ynumel_ratio > 0 and not_reduction:
+            not_reduction_partitions = _partition_by_ynumel_ratio(
+                not_reduction, node_info_map, config.combo_kernel_max_ynumel_ratio
+            )
+            nodes_per_ndim.extend(not_reduction_partitions)
+        elif not_reduction:
+            nodes_per_ndim.append(not_reduction)
+
+        # Add reduction partitions as before
+        nodes_per_ndim.extend(g for g in (short_reduction, long_reduction) if g)
 
     assert sum(len(p) for p in nodes_per_ndim) == len(nodes)
     return nodes_per_ndim
