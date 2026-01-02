@@ -10,7 +10,7 @@ beit_base_patch16_224,pass,7
 
 
 
-convnextv2_nano.fcmae_ft_in22k_in1k,fail_accuracy,7
+convnextv2_nano.fcmae_ft_in22k_in1k,pass,7
 
 
 

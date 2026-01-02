@@ -142,6 +142,15 @@
       "Context": "str(value)",
       "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
       "Hints": [
+        "Set torch._dynamo.config.enable_rnn=True to enable experimental support for RNN, GRU, and LSTM in Dynamo",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "Attempted to wrap RNN, GRU, or LSTM",
+      "Context": "str(value)",
+      "Explanation": "Dynamo does not support RNN, GRU, or LSTM.",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -379,6 +388,17 @@
   ],
   "GB0039": [
     {
+      "Gb_type": "Dynamo recompile limit exceeded",
+      "Context": "Limit type: {limit_type}",
+      "Explanation": "Dynamo attempted to recompile the code object too many times, exceeding the {limit_type} cache size limit (currently set to {getattr(config, limit_type)}). Excessive recompilations can degrade performance due to the compilation overhead of each recompilation.",
+      "Hints": [
+        "To monitor recompilations, enable TORCH_LOGS=recompiles. ",
+        "If recompilations are expected, consider ",
+        "increasing torch._dynamo.config.{limit_type} to an appropriate value.",
+        "See {troubleshooting_url} for tips on dealing with recompilations."
+      ]
+    },
+    {
       "Gb_type": "Dynamo cache limit exceeded",
       "Context": "Limit type: {limit_type}",
       "Explanation": "Dynamo attempted to recompile the code object too many times, exceeding the {limit_type} cache size limit.Giving up on compiling as the compile time tradeoff is likely not worth the performance gain.",
@@ -509,6 +529,53 @@
       ]
     }
   ],
+  "GB9741": [
+    {
+      "Gb_type": "skip frame due to being in functorh mode",
+      "Context": "",
+      "Explanation": "torch.compile cannot be run in context: {functorch_subclass_name}. Skipping frame.",
+      "Hints": []
+    },
+    {
+      "Gb_type": "skip frame due to being in functorch mode",
+      "Context": "",
+      "Explanation": "torch.compile cannot be run in context: {functorch_subclass_name}. Skipping frame.",
+      "Hints": []
+    }
+  ],
+  "GB7000": [
+    {
+      "Gb_type": "graph break in loop",
+      "Context": "frame skipped: {format_frame_info(code)}",
+      "Explanation": "torch.compile detected a graph break in a for/while loop. Skipping the frame and falling back to eager, as graph breaks in loops are not supported.",
+      "Hints": [
+        "This graph break may have been caused by an earlier graph break. Resolving the earlier graph break may resolve this one."
+      ]
+    }
+  ],
+  "GB3326": [
+    {
+      "Gb_type": "invalid ptr argument for create_tma_descriptor",
+      "Context": "args = {args}, kwargs = {kwargs}",
+      "Explanation": "Expected `ptr` argument of `create_{self.rank}d_tma_descriptor`to be from a `.data_ptr()` call, represented internally by `DataPtrVariable`",
+      "Hints": [
+        "`torch.compile` may fail to internally represent result of `.data_ptr()` ",
+        "with `DataPtrVariable` due to a graph break between the `.data_ptr()` call and ",
+        "`create_{self.rank}d_tma_descriptor`. Please ensure there were no graph breaks ",
+        "between these two calls."
+      ]
+    }
+  ],
+  "GB4297": [
+    {
+      "Gb_type": "Call to `torch._dynamo.skip_frame()`",
+      "Context": "Called `torch._dynamo.skip_frame()` with args `{args}`, kwargs `{kwargs}`. Skipping frame {format_frame_info(tx.f_code)}.",
+      "Explanation": "User-inserted skip frame. Message: {skip_frame_msg}",
+      "Hints": [
+        "Remove the `torch._dynamo.skip_frame()` call."
+      ]
+    }
+  ],
   "GB0051": [
     {
       "Gb_type": "Exception with non-type expectation",
@@ -617,6 +684,17 @@
       "Explanation": "{seq} cannot be unpacked into a list for the BUILD_LIST_UNPACK bytecode (`[*x, *y, ...]`).",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB4197": [
+    {
+      "Gb_type": "Unsupported Tensor.share_memory_() call",
+      "Context": "call_method {self} share_memory_",
+      "Explanation": "Dynamo does not support Tensor.share_memory_() which modifies tensor storage for IPC",
+      "Hints": [
+        "Move share_memory_() call outside the compiled region. ",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
@@ -1557,6 +1635,12 @@
     {
       "Gb_type": "Unsupported function call (delayed)",
       "Context": "source: {self.source}",
+      "Explanation": "Dynamo determined that a graph break should occur when calling `{name}`. Reason: {self.msg}",
+      "Hints": []
+    },
+    {
+      "Gb_type": "Unsupported function call (delayed)",
+      "Context": "source: {self.source}",
       "Explanation": "Dynamo determined that a graph break should occur when calling `{self.source.name}`. Reason: {self.msg}",
       "Hints": []
     }
@@ -1691,6 +1775,59 @@
       ]
     }
   ],
+  "GB2533": [
+    {
+      "Gb_type": "reconstructing @contextmanager object",
+      "Context": "object: {value}",
+      "Explanation": "Returning a @contextmanager object from a compiled function is not supported.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7312": [
+    {
+      "Gb_type": "failed to bind arguments when attempting to inline",
+      "Context": "func='{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}; args = {[arg.python_type() for arg in args]}; kwargs = {kwargs}",
+      "Explanation": "Argument mismatch when attempting to trace function {func.get_name()}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB8335": [
+    {
+      "Gb_type": "Generator reconstruction with mutations",
+      "Context": "mutating object: {item}",
+      "Explanation": "Cannot reconstruct a generator with variable mutations. Dynamo needs to fully exhaust the generator, which may cause unintended variable modifications.",
+      "Hints": [
+        "Remove mutations from the generator.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB2549": [
+    {
+      "Gb_type": "infinite generator detected",
+      "Context": "",
+      "Explanation": "Dynamo traced the YIELD_VALUE bytecode too many times. This could mean that we have attempted to trace an infinite generator.",
+      "Hints": [
+        "If you are sure that your generator is not infinite, please report a bug at {PT2_ISSUE_TRACKER_URL}.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB1177": [
+    {
+      "Gb_type": "nn.Module mutation in HigherOrderOp",
+      "Context": "nn.Module: {obj}",
+      "Explanation": "Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
+      "Hints": [
+        "Remove the mutation or move it outside of the HigherOrderOp.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
   "GB0163": [
     {
       "Gb_type": "Unsupported tensor subclass attribute access",
@@ -1761,6 +1898,15 @@
     }
   ],
   "GB0170": [
+    {
+      "Gb_type": "Data-dependent branching",
+      "Context": "attempted to jump with {value}",
+      "Explanation": "Detected data-dependent branching (e.g. `if my_tensor.sum() > 0:`). Dynamo does not support tracing dynamic control flow.",
+      "Hints": [
+        "Use `torch.cond` to express dynamic control flow.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    },
     {
       "Gb_type": "Data-dependent branching",
       "Context": "attempted to jump with {value}",
@@ -1888,6 +2034,14 @@
     }
   ],
   "GB0181": [
+    {
+      "Gb_type": "dtype mismatch between tensor and its gradient",
+      "Context": "tensor dtype: {value.dtype}; grad dtype: {grad_str}",
+      "Explanation": "Inconsistent dtype between tensor and its gradient. This can happen in FSDP and crashes meta tensor creation.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
     {
       "Gb_type": "dtype mismatch between tensor and its gradient",
       "Context": "tensor dtype: {value.dtype}; grad dtype: {safe_grad(value).dtype}",
@@ -3311,6 +3465,17 @@
       "Explanation": "HigherOrderOperator body's output must consist of tensors or ints/bools only but got {out.python_type()}.",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB6735": [
+    {
+      "Gb_type": "torch.library.wrap_triton call with > 1 args",
+      "Context": "args={args}, kwargs={kwargs}",
+      "Explanation": "Attempted to call `torch.library.wrap_triton` with > 1 args. Dynamo does not support this.",
+      "Hints": [
+        "Remove the torch.library.wrap_triton call or its additional args.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
   ],
