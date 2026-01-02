@@ -317,7 +317,8 @@ class RNNBase(Module):
                 and not torch._C._is_any_autocast_enabled()
             ):
                 raise ValueError(
-                    f"input must have the type {self._flat_weights[0].dtype}, got type {input.dtype}"  # type: ignore[union-attr]
+                    f"RNN input dtype ({input.dtype}) does not match weight dtype ({self._flat_weights[0].dtype}). "  # type: ignore[union-attr]
+                    f"Convert input: input.to({self._flat_weights[0].dtype}), or convert model: model.to({input.dtype})"  # type: ignore[union-attr]
                 )
         expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
