@@ -103,6 +103,8 @@ class ExpRelaxedCategorical(Distribution):
         ).lgamma() - self.temperature.log().mul(-(K - 1))
         score = logits - value.mul(self.temperature)
         score = (score - score.logsumexp(dim=-1, keepdim=True)).sum(-1)
+        while log_scale.dim() > score.dim():
+            log_scale = log_scale.squeeze(-1)
         return score + log_scale
 
 
