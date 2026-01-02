@@ -1,3 +1,2 @@
 ERROR
 ValueError: Incompatible shapes for broadcasting
-shapes=[(1, 100), (32, 100), (4, 8, 100)]
