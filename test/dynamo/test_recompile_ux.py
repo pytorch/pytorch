@@ -137,6 +137,37 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
                 model = torch.compile(Module(key), backend="eager")
                 model(x)
 
+    def test_recompile_limit_not_hit_module_arg_local(self):
+        import torch.nn as nn
+
+        cache: dict[float, torch.Tensor] = {}
+
+        class Module(nn.Module):
+            def __init__(self, key: float):
+                super().__init__()
+                self.key = key
+                cache[key] = torch.randn(16)
+
+            def forward(self, x):
+                return x + cache[self.key]
+
+        def call_module(mod: nn.Module, x):
+            return mod(x)
+
+        x = torch.randn(16)
+        keys = [1.0, 2.0, 3.0]
+
+        torch._dynamo.reset()
+        # Covers the LocalSource-based tracking path: the module is a function
+        # argument local (not necessarily named "self").
+        with torch._dynamo.config.patch(
+            recompile_limit=2,
+            fail_on_recompile_limit_hit=True,
+        ):
+            opt_call = torch.compile(call_module, backend="eager")
+            for key in keys:
+                opt_call(Module(key), x)
+
     @unittest.skipIf(
         not torch.cuda.is_available() and not torch.xpu.is_available(),
         "requires cuda or xpu",

@@ -4105,18 +4105,33 @@ class CheckFunctionManager:
         )
 
         # Cache-size accounting: bucket cache entries by nn.Module instance for
-        # common method frames (e.g. `forward(self, ...)`). This avoids hitting
-        # global `recompile_limit` when guard provenance is lost (e.g. an
-        # attribute-derived value becomes an "unknown source"), while not
-        # changing guard semantics or installing invalidation finalizers.
+        # common frames where guard provenance is lost (e.g. an attribute-derived
+        # value becomes an "unknown source"). We key by argument local names to
+        # avoid changing guard semantics or installing invalidation finalizers.
         try:
-            self_obj = output_graph.local_scope.get("self", None)
-            if (
-                isinstance(self_obj, torch.nn.Module)
-                and "self" not in builder.id_matched_objs
-            ):
-                builder.id_matched_objs["self"] = weakref.ref(self_obj)
+            # Prefer the first positional argument name (typically `self` for
+            # methods, but not always literally spelled "self").
+            if f_code.co_argcount:
+                first_arg_name = f_code.co_varnames[0]
+                first_arg_val = output_graph.local_scope.get(first_arg_name, None)
+                if (
+                    isinstance(first_arg_val, torch.nn.Module)
+                    and first_arg_name not in builder.id_matched_objs
+                ):
+                    builder.id_matched_objs[first_arg_name] = weakref.ref(first_arg_val)
+
+            # Also consider any other function arguments that are nn.Modules.
+            # This is still restricted to argument locals (not arbitrary locals)
+            # to avoid unintentionally suppressing legitimate recompile-limit hits.
+            total_args = f_code.co_argcount + f_code.co_kwonlyargcount
+            for arg_name in f_code.co_varnames[:total_args]:
+                if arg_name in builder.id_matched_objs:
+                    continue
+                arg_val = output_graph.local_scope.get(arg_name, None)
+                if isinstance(arg_val, torch.nn.Module):
+                    builder.id_matched_objs[arg_name] = weakref.ref(arg_val)
         except TypeError:
+            # Some objects (or test doubles) may not be weakref-able.
             pass
 
         # Break retain cycle. See test_release_scope_memory
