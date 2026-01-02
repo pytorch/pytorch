@@ -445,6 +445,10 @@ def get_proxy_slot(
     return res
 
 
+# Recursively traverses tensor subclasses,
+# returnining an (unordered) list of Proxy objects that are tracked
+# for all inner tensors, given the current extant proxy mode.
+# Returns an empty list if no proxy mode is active.
 def _get_proxies(t: torch.Tensor) -> list[Proxy]:
     proxies = []
     mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
