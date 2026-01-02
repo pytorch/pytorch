@@ -2230,6 +2230,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 )
                 num_forward_returns = CompiledFunction.metadata.num_forward_returns
 
+                # See Note [Activations with no version counter checks in eager]
                 # Partitioners must put symint arguments at the end separate from tensor arguments
                 # Split tensors into those that need VC checks (via save_for_backward)
                 # and those that don't (stashed directly on ctx).
@@ -2366,9 +2367,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # 1. ctx.saved_tensors - tensors that went through save_for_backward (with VC check)
                 # 2. ctx._tensors_no_vc_check - tensors stashed directly on ctx (no VC check)
                 # The order matches the partitioner's output: VC-check tensors first, then no-VC-check tensors
-                all_saved_tensors = list(ctx.saved_tensors) + getattr(
-                    ctx, "_tensors_no_vc_check", []
-                )
+                if len(ctx._tensors_no_vc_check) > 0:
+                    all_saved_tensors = (
+                        list(ctx.saved_tensors) + ctx._tensors_no_vc_check
+                    )
+                else:
+                    all_saved_tensors = ctx.saved_tensors
                 all_args = _backward_prologue_functional(
                     all_saved_tensors,
                     ctx.symints,
