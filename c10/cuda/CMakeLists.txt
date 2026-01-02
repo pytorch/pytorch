@@ -70,8 +70,8 @@ if(NOT BUILD_LIBTORCHLESS)
 
   if(NOT WIN32)
   target_link_libraries(c10_cuda PRIVATE dl)
-  target_compile_options(c10_cuda PRIVATE "-DPYTORCH_C10_DRIVER_API_SUPPORTED")
   endif()
+  target_compile_options(c10_cuda PRIVATE "-DPYTORCH_C10_DRIVER_API_SUPPORTED")
 
   target_include_directories(
       c10_cuda PUBLIC
