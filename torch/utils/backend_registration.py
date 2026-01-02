@@ -251,12 +251,10 @@ def _generate_packed_sequence_methods_for_privateuse1_backend(
             device (int, optional): if specified, all parameters will be copied to that device
         """
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
-
             *args,
             **kwargs,
         )
         if ex.device.type == custom_backend_name:
-
             return self.to(*args, **kwargs)
         kwargs.update({"device": custom_backend_name})
 

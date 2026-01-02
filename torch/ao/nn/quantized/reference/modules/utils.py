@@ -105,7 +105,6 @@ class ReferenceQuantizedModule(torch.nn.Module):
             return _quantize_and_dequantize_weight_decomposed(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
-
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
@@ -117,7 +116,6 @@ class ReferenceQuantizedModule(torch.nn.Module):
             return _quantize_and_dequantize_weight(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
-
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
@@ -133,7 +131,6 @@ class ReferenceQuantizedModule(torch.nn.Module):
             return _quantize_weight_decomposed(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
-
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,
@@ -145,7 +142,6 @@ class ReferenceQuantizedModule(torch.nn.Module):
             return _quantize_weight(
                 self.weight,  # type: ignore[arg-type]
                 self.weight_qscheme,
-
                 self.weight_dtype,
                 self.weight_scale,
                 self.weight_zero_point,

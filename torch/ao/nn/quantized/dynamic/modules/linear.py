@@ -121,7 +121,6 @@ class Linear(nnq.Linear):
             mod = mod[0]
 
         if mod.qconfig is not None and mod.qconfig.weight is not None:
-
             weight_observer = mod.qconfig.weight()
         else:
             # We have the circular import issues if we import the qconfig in the beginning of this file:
