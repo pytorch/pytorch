@@ -13722,7 +13722,7 @@ fn
             compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
             with torch._functorch.config.patch(
                 check_custom_op_aliasing=True,
-                error_on_custom_op_aliasing=False,
+                error_on_custom_op_aliasing=True,
             ):
                 with self.assertRaisesRegex(
                     RuntimeError,
