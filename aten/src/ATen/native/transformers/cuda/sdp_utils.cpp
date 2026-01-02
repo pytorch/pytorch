@@ -83,7 +83,7 @@ bool check_prefer_cudnn_attention() {
 // cuDNN 9.15.1 required for seq_len not divisible by 128 fix, CUDA <= 12.8 wheels
 // ship with older cuDNN see #169849
 #if defined(CUDNN_VERSION)
-  long cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
+  static long cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
   try {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     auto major = dprops->major;
