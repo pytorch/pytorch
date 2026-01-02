@@ -13,6 +13,7 @@ from torch.utils._pallas import has_tpu_pallas
 from torch.utils._sympy.functions import ModularIndexing
 
 from .. import config
+from ..ir import ComputedBuffer
 from ..runtime.runtime_utils import torch_dtype_to_jax
 from ..utils import get_fused_kernel_name, get_kernel_metadata
 from ..virtualized import V
@@ -1149,10 +1150,10 @@ class PallasKernel(SIMDKernel):
         if size0 is None or size1 is None or size0 <= 1 or size1 <= 1:
             return False
 
-        # Check buffer stride - if column-major, don't transpose on load
+        # Get buffer strides
         s0 = self._safe_int(buf_stride[0])
         s1 = self._safe_int(buf_stride[1])
-        if s0 is not None and s1 is not None and s0 < s1:
+        if s0 is None or s1 is None:
             return False
 
         # Get iteration variable info
@@ -1165,40 +1166,24 @@ class PallasKernel(SIMDKernel):
         if any(entry.is_reduction for _, entry in var_items):
             return False
 
-        iter_sizes = []
-        for var, entry in var_items:
-            length = self._safe_int(entry.length)
-            if length is not None:
-                iter_sizes.append(length)
-
-        if len(iter_sizes) < 2:
-            return False
-
-        # For 2D: iter_sizes[0] is inner, iter_sizes[1] is outer
-        expected_rows = iter_sizes[1]
-        expected_cols = iter_sizes[0]
-
-        # For non-square buffers: if shape is (cols, rows) instead of (rows, cols)
-        if size0 != size1:
-            return size0 == expected_cols and size1 == expected_rows
-
-        # For square buffers: only transpose if output is also column-major
-        # This distinguishes actual transpose operations from broadcasting
-        output_is_column_major = self._has_column_major_output()
-        if not output_is_column_major:
-            return False
-
-        first_var = var_items[0][0]
-        second_var = var_items[1][0]
+        # Extract coefficients from index expression
+        inner_var = var_items[0][0]
+        outer_var = var_items[1][0]
         index = V.graph.sizevars.simplify(index)
 
-        def get_coefficient_from_term(term, var):
-            if term == var:
+        def get_coefficient(expr, var):
+            """Extract coefficient of var from expression."""
+            if expr == var:
                 return 1
-            if term.is_Mul:
+            if expr.is_Add:
+                for term in expr.args:
+                    coeff = get_coefficient(term, var)
+                    if coeff is not None:
+                        return coeff
+            if expr.is_Mul:
                 coeff = 1
                 has_var = False
-                for factor in term.args:
+                for factor in expr.args:
                     if factor == var:
                         has_var = True
                     elif factor.is_number:
@@ -1207,29 +1192,30 @@ class PallasKernel(SIMDKernel):
                     return coeff
             return None
 
-        def get_coefficient(var):
-            if index == var:
-                return 1
-            if index.is_Add:
-                for term in index.args:
-                    coeff = get_coefficient_from_term(term, var)
-                    if coeff is not None:
-                        return coeff
-            return get_coefficient_from_term(index, var)
+        inner_coeff = get_coefficient(index, inner_var)
+        outer_coeff = get_coefficient(index, outer_var)
 
-        coeff_first = get_coefficient(first_var)
-        coeff_second = get_coefficient(second_var)
+        if inner_coeff is not None and outer_coeff is not None:
+            # Only transpose for standard row-major buffers (stride[0] = size[1], stride[1] = 1)
+            is_standard_row_major = s0 == size1 and s1 == 1
+            if not is_standard_row_major:
+                return False
 
-        if coeff_first is not None and coeff_second is not None:
-            # Transposed access: first var (inner dim) has larger coefficient
-            return coeff_first > coeff_second
+            # Only transpose if output is column-major (indicates actual transpose op)
+            output_is_column_major = self._has_column_major_output()
+            if not output_is_column_major:
+                return False
+
+            # Check if coefficients indicate transposed access
+            inner_matches_s0 = abs(inner_coeff - s0) < abs(inner_coeff - s1)
+            outer_matches_s1 = abs(outer_coeff - s1) < abs(outer_coeff - s0)
+            return inner_matches_s0 and outer_matches_s1
 
         return False
 
     def _has_column_major_output(self) -> bool:
         """Check if any output buffer has column-major stride layout."""
         output_buffers = getattr(self.args, "output_buffers", {})
-        # output_buffers maps buffer_name -> param_name, we need buffer_name
         for buf_name in output_buffers:
             out_buf = V.graph.get_buffer(buf_name)
             if out_buf is None:
@@ -1244,6 +1230,23 @@ class PallasKernel(SIMDKernel):
             out_s1 = self._safe_int(out_stride[1])
             if out_s0 is not None and out_s1 is not None and out_s0 < out_s1:
                 return True
+
+        # Also check graph buffers (output_buffers may not be populated during load)
+        for buf_name in V.graph.name_to_buffer:
+            out_buf = V.graph.get_buffer(buf_name)
+            if out_buf is None or not isinstance(out_buf, ComputedBuffer):
+                continue
+            layout = getattr(out_buf, "get_layout", lambda: None)()
+            if layout is None:
+                continue
+            out_stride = getattr(layout, "stride", None)
+            if out_stride is None or len(out_stride) < 2:
+                continue
+            out_s0 = self._safe_int(out_stride[0])
+            out_s1 = self._safe_int(out_stride[1])
+            if out_s0 is not None and out_s1 is not None and out_s0 < out_s1:
+                return True
+
         return False
 
     def _get_index_expr(self, index: sympy.Expr) -> tuple[str, bool]:
