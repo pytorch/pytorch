@@ -1244,6 +1244,8 @@ class TruncToFloat(sympy.Function):
 
     @classmethod
     def eval(cls, number):
+        if number in (sympy.oo, -sympy.oo):
+            return number
         # assert number.is_integer is not True, number
         if isinstance(number, sympy.Number):
             # NB: It is safe to use truncation to integer, which is what

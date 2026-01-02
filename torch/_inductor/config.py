@@ -487,8 +487,20 @@ inductor_default_autotune_rep = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_REP", 100)
 )
 
+
 # Modifies the number of autotuning choices displayed, set to None for all
-autotune_num_choices_displayed: Optional[int] = 10
+def _autotune_num_choices_displayed_default() -> Optional[int]:
+    env_val = os.environ.get("TORCHINDUCTOR_AUTOTUNE_NUM_CHOICES_DISPLAYED")
+    if env_val is None:
+        return 10
+    if env_val.lower() in ("none", "all"):
+        return None
+    return int(env_val)
+
+
+autotune_num_choices_displayed: Optional[int] = (
+    _autotune_num_choices_displayed_default()
+)
 
 # Report the autotune choices and their benchmark results. Default is True.
 max_autotune_report_choices_stats = (
@@ -1308,15 +1320,15 @@ torchinductor_worker_logpath: str = Config(
 
 
 class auto_chunker:
-    enable = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
+    enable: bool = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
 
     # Don't chunk from a node if the output size is not large enough
-    output_size_threshold = 1024 * 1024
+    output_size_threshold: int = 1024 * 1024
 
     # Don't chunk from a node if it does not 'amplify' the inputs a lot
-    amplify_ratio_threshold = 8
+    amplify_ratio_threshold: int = 8
 
-    num_chunk = (
+    num_chunk: int | None = (
         int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS"))  # type: ignore[arg-type]
         if os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS") is not None
         else None
@@ -1715,8 +1727,11 @@ class triton:
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
     # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
+    # Disabled on ROCm by default pending performance validation.
     num_decompose_k_splits = int(
-        os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
+        os.environ.get(
+            "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "0" if torch.version.hip else "10"
+        )
     )
 
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
