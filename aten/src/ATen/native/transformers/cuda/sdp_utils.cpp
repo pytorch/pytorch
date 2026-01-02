@@ -80,7 +80,7 @@ bool check_prefer_cudnn_attention() {
   if (!prefer_cudnn) {
     return false;
   }
-// cuDNN 9.15.1 required for seq_len not divisible by 128 fix, CUDA <= 12.8 wheels
+// cuDNN 9.15.1 required for seq_len not divisible by 128 fix, CUDA <= 12.9 wheels
 // ship with older cuDNN see #169849
 #if defined(CUDNN_VERSION)
   static long cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
