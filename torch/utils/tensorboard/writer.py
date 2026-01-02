@@ -166,7 +166,7 @@ class FileWriter:
         The events will go into a new events file.
         Does nothing if the EventFileWriter was not closed.
         """
-        # pyrefly: ignore [missing-attribute]   
+        # pyrefly: ignore [missing-attribute]
         self.event_writer.reopen()
 
 
