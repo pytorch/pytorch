@@ -2097,11 +2097,13 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         local_name = root.local_name
-        weak_id = self.lookup_weakrefs(val)
-        if weak_id is None:
-            # Ensure we have a weakref recorded for this object.
-            self.id_ref(val, local_name)
-            weak_id = self.lookup_weakrefs(val)
+        # IMPORTANT: this is cache-size accounting only. Do NOT call id_ref()
+        # here, as it installs invalidation finalizers that would incorrectly
+        # invalidate cache entries when module instances are freed.
+        try:
+            weak_id: Optional[weakref.ref[object]] = weakref.ref(val)
+        except TypeError:
+            weak_id = None
 
         if weak_id is not None:
             self.id_matched_objs[local_name] = weak_id
@@ -4101,6 +4103,18 @@ class CheckFunctionManager:
             guard_filter_fn=guard_filter_fn,
             source_get_cache=source_get_cache,
         )
+
+        # Cache-size accounting: bucket cache entries by nn.Module instance for
+        # common method frames (e.g. `forward(self, ...)`). This avoids hitting
+        # global `recompile_limit` when guard provenance is lost (e.g. an
+        # attribute-derived value becomes an "unknown source"), while not
+        # changing guard semantics or installing invalidation finalizers.
+        try:
+            self_obj = output_graph.local_scope.get("self", None)
+            if isinstance(self_obj, torch.nn.Module):
+                builder.id_matched_objs["self"] = weakref.ref(self_obj)
+        except TypeError:
+            pass
 
         # Break retain cycle. See test_release_scope_memory
         def cleanup_builder(weak_b: weakref.ref[GuardBuilder]) -> None:

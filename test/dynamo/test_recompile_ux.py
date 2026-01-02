@@ -123,13 +123,11 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         x = torch.randn(16)
         keys = [1.0, 2.0, 3.0]
 
-        compile_counter = torch._dynamo.testing.CompileCounter()
-        with torch._dynamo.config.patch("recompile_limit", 2):
+        torch._dynamo.reset()
+        with torch._dynamo.config.patch(recompile_limit=2, fail_on_recompile_limit_hit=True):
             for key in keys:
-                model = torch.compile(Module(key), backend=compile_counter)
+                model = torch.compile(Module(key), backend="eager")
                 model(x)
-
-        self.assertEqual(compile_counter.frame_count, len(keys))
 
     @unittest.skipIf(
         not torch.cuda.is_available() and not torch.xpu.is_available(),
