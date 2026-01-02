@@ -6,7 +6,7 @@
 #include <c10/cuda/driver_api.h>
 #endif
 
-#if defined(CUDART_VERSION)
+#if defined(CUDART_VERSION) && CUDART_VERSION >= 12030
 #define CUDART_SUPPORTS_MULTICAST
 #endif
 
