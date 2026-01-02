@@ -44,12 +44,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import (
-    collapse_resume_frames,
-    get_stack_above_dynamo,
-    SideEffectsError,
-    unimplemented,
-)
+from .exc import SideEffectsError, unimplemented
 from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -178,13 +173,11 @@ class SideEffects:
 
     def _capture_user_stack(self, key: VariableTracker) -> None:
         """Capture the current user stack from the instruction translator."""
-        user_stack = (
-            get_stack_above_dynamo() + torch._guards.TracingContext.extract_stack()
-        )
-        user_stack_collapsed = collapse_resume_frames(user_stack)
         if key not in self.mutation_user_stacks:
             self.mutation_user_stacks[key] = []
-        self.mutation_user_stacks[key].append(user_stack_collapsed)
+        self.mutation_user_stacks[key].append(
+            torch._guards.TracingContext.extract_stack()
+        )
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
