@@ -793,7 +793,6 @@ def repro_common(
     nop_reader = NopInputReader()
     load_args(nop_reader)
 
-    # pyrefly: ignore[bad-context-manager]
     with tqdm(desc="Loading inputs", total=nop_reader.total) as pbar:
         input_reader = InputReader(save_dir=options.save_dir, pbar=pbar)
         load_args(input_reader)
@@ -884,7 +883,6 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # It is certainly faster though!  It probably makes sense to let the
     # user specify the offload strategy.
 
-    # pyrefly: ignore[bad-context-manager]
     with tqdm(desc="Compiling"):
         compiled = compile_fx_inner(mod, args)
     total = counters["inductor"]["intermediate_hooks"]
@@ -905,7 +903,6 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     new_args = clone_inputs(args)
     with (
         intermediate_hook(save_hook),
-        # pyrefly: ignore[bad-context-manager]
         tqdm(desc="Saving inductor intermediates", total=total) as pbar,
     ):
         assert not isinstance(compiled, str)
@@ -933,7 +930,6 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
         new_args = clone_inputs(args)
         with (
             intermediate_hook(check_hook),
-            # pyrefly: ignore[bad-context-manager]
             tqdm(desc="Checking inductor determinism", total=total) as pbar,
         ):
             compiled(new_args)  # type: ignore[arg-type]
@@ -956,7 +952,6 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
     # parameters/buffers on the module
     if not options.skip_saving_float64_intermediates:
         new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
-        # pyrefly: ignore[bad-context-manager]
         with tqdm(desc="Saving float64 intermediates", total=total) as pbar:
             WriterInterp(new_mod, "float64").boxed_run(new_args)
         assert not new_args
@@ -978,7 +973,6 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
 
     if not options.skip_check_deterministic:
         new_mod, new_args = cast_to_fp64(copy.deepcopy(mod), clone_inputs(args))  # type: ignore[arg-type]
-        # pyrefly: ignore[bad-context-manager]
         with tqdm(desc="Checking float64 determinism", total=total) as pbar:
             ExactReaderInterp(new_mod).boxed_run(new_args)
             assert not new_args
@@ -1011,7 +1005,6 @@ def repro_analyze(options: Any, mod: nn.Module, load_args: Any) -> None:
                 pbar.update(1)
             return r
 
-    # pyrefly: ignore[bad-context-manager]
     with tqdm(desc="Checking divergence", total=total) as pbar:
         ReaderInterp(mod).boxed_run(args)
     assert not args
