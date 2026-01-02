@@ -1182,12 +1182,7 @@ class PallasKernel(SIMDKernel):
         if size0 != size1:
             return size0 == expected_cols and size1 == expected_rows
 
-        # For square buffers: only transpose if output is also column-major
-        # This distinguishes actual transpose operations from broadcasting
-        output_is_column_major = self._has_column_major_output()
-        if not output_is_column_major:
-            return False
-
+        # For square buffers: check if index coefficients indicate transposed access
         first_var = var_items[0][0]
         second_var = var_items[1][0]
         index = V.graph.sizevars.simplify(index)
