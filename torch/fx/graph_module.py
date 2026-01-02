@@ -671,7 +671,8 @@ class {module_name}(torch.nn.Module):
                 blobified_modules.append(module_name)
                 module_repr = module.__repr__().replace("\r", " ").replace("\n", " ")
                 # weights_only=False as this is legacy code that saves the model
-                model_str += f"{tab * 2}setattr(self, '{module_name}', torch.load(r'{module_file}', weights_only=False)) # {module_repr}\n"
+                module_load_str = f"torch.load(r'{module_file}', weights_only=False)"
+                model_str += f"{tab * 2}setattr(self, '{module_name}', {module_load_str}) # {module_repr}\n"
             else:
                 model_str += f"{tab * 2}setattr(self, '{module_name}', {module_str})\n"
 
