@@ -1305,6 +1305,9 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
+    @skipCPUIf(
+        not torch.cpu._is_avx2_supported(), "CPU flex attention requires AVX2 support"
+    )
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)

@@ -1223,7 +1223,6 @@ This class does not support ``__members__`` property.)");
           py::arg("peer"),
           py::arg("sizes"),
           py::arg("dtype"))
-      .def("_get_window", &SymmetricMemory::_get_window)
       // Util functions that are often used together with symmetric memory but
       // not necessarily directly on symmetric memory.
       .def_static(

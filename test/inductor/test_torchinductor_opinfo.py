@@ -1328,8 +1328,10 @@ class TestInductorOpInfo(TestCase):
                         # Triton
                         if has_triton():
                             adjusted_kwargs.update(
-                                copy_to_gpu=False, reference_in_float=False
+                                copy_to_gpu=False,
                             )
+                            if device_type == GPU_TYPE:
+                                adjusted_kwargs["reference_in_float"] = False
 
                         # skip checking gradient on CPU for now
                         if device_type == GPU_TYPE:

@@ -1,3 +1,0 @@
-ERROR
-TypeError: broadcast_shapes got incompatible shapes for broadcasting: (2, 6), (1, 2).
-Complex number broadcast handling issue
