@@ -99,6 +99,52 @@ RANK_TYPES = Union[
 ]
 
 
+# Backend dispatch registry for functional collectives.
+# Maps backend_name -> collective_name -> implementation callable
+# Example: _BACKEND_REGISTRY["torchcomms"]["all_reduce"] = lambda tensor, op, mesh, mesh_dim: ...
+_BACKEND_REGISTRY: dict[str, dict[str, Any]] = {}
+
+
+def register_backend_collectives(
+    backend: str,
+    collectives: dict[str, Any],
+) -> None:
+    """
+    Register collective implementations for a backend.
+
+    Args:
+        backend: Backend identifier (e.g., "torchcomms").
+        collectives: Dict mapping collective names to implementation callables.
+            Each callable should have a signature appropriate for that collective.
+            For all_reduce: (tensor, reduce_op, mesh, mesh_dim) -> Tensor
+
+    Example::
+        >>> def torchcomms_all_reduce(tensor, reduce_op, mesh, mesh_dim):
+        ...     comm = mesh.get_comm("torchcomms", mesh_dim)
+        ...     torch.ops.torchcomms.torchcomm_all_reduce(comm, tensor, reduce_op, False)
+        ...     return tensor
+        >>> register_backend_collectives("torchcomms", {"all_reduce": torchcomms_all_reduce})
+    """
+    if backend not in _BACKEND_REGISTRY:
+        _BACKEND_REGISTRY[backend] = {}
+    _BACKEND_REGISTRY[backend].update(collectives)
+
+
+def _get_mesh_and_dim(
+    group: RANK_TYPES,
+) -> tuple[DeviceMesh, int] | None:
+    """Extract DeviceMesh and mesh_dim from group, or return None."""
+    if isinstance(group, DeviceMesh):
+        if len(group._layout) == 1:
+            return (group, 0)
+        return None  # Ambiguous for multi-dim mesh without explicit dim
+    elif isinstance(group, tuple) and len(group) == 2:
+        mesh, dim = group
+        if isinstance(mesh, DeviceMesh) and isinstance(dim, int):
+            return (mesh, dim)
+    return None
+
+
 """
 User facing APIs for functional collectives
 -------------------------------------------
@@ -146,6 +192,19 @@ def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
         group (ProcessGroup or List[int]): The process group to work on.
         tag (str, optional): A unique identifier for the collective. Default: empty string
     """
+
+    # Check for registered backend dispatch
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "broadcast"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    self, src, mesh, mesh_dim
+                )
+
+    # Default c10d implementation
     group_name = _resolve_group_name(group, tag)
     tensor = torch.ops._c10d_functional.broadcast(self, src, group_name)
     return _maybe_wrap_tensor(tensor)
@@ -172,6 +231,18 @@ def scatter(
         The output tensor with scattered data.
     """
 
+    # Check for registered backend dispatch
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "scatter"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    output, scatter_list, src, mesh, mesh_dim
+                )
+
+    # Default c10d implementation
     group_name = _resolve_group_name(group, tag)
     tensor = torch.ops._c10d_functional.scatter(output, scatter_list, src, group_name)
     return _maybe_wrap_tensor(tensor)
@@ -200,6 +271,18 @@ def gather(
         The list of gathered tensors (only valid on dst rank).
     """
 
+    # Check for registered backend dispatch
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "gather"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    input, gather_list, dst, mesh, mesh_dim
+                )
+
+    # Default c10d implementation
     group_name = _resolve_group_name(group, tag)
     tensors = torch.ops._c10d_functional.gather(input, gather_list, dst, group_name)
     return [_maybe_wrap_tensor(t) for t in tensors]
@@ -222,6 +305,18 @@ def all_reduce(self: torch.Tensor, reduceOp: str, group: RANK_TYPES, tag: str = 
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
+
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "all_reduce"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    self, reduceOp, mesh, mesh_dim
+                )
+
+    # Default c10d implementation
     group_name = _resolve_group_name(group, tag)
     tensor = torch.ops._c10d_functional.all_reduce(self, reduceOp.lower(), group_name)
     return _maybe_wrap_tensor(tensor)
@@ -249,6 +344,18 @@ def all_gather_tensor(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
+
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "all_gather_tensor"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    self, gather_dim, mesh, mesh_dim
+                )
+
+    # Default c10d implementation
     if not self.is_contiguous():
         raise AssertionError("Tensor must be contiguous for all_gather_tensor")
     group_name = _resolve_group_name(group, tag)
@@ -284,6 +391,16 @@ def all_gather_tensor_autograd(
 
     See all_gather_tensor for more details on usage.
     """
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "all_gather_tensor_autograd"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    self, gather_dim, mesh, mesh_dim
+                )
+
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
 
@@ -323,6 +440,17 @@ def reduce_scatter_tensor(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "reduce_scatter_tensor"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    self, reduceOp, scatter_dim, mesh, mesh_dim
+                )
+
+    # Default c10d implementation
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
 
@@ -362,6 +490,15 @@ def reduce_scatter_tensor_autograd(
 
     See reduce_scatter_tensor for more details on usage.
     """
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "reduce_scatter_tensor_autograd"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    self, reduceOp, scatter_dim, mesh, mesh_dim
+                )
 
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
@@ -403,6 +540,16 @@ def all_reduce_coalesced(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "all_reduce_coalesced"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    self, reduceOp, mesh, mesh_dim
+                )
+
     group_name = _resolve_group_name(group, tag)
     tensor_list = torch.ops._c10d_functional.all_reduce_coalesced(  # type: ignore[attr-defined]
         self,
@@ -431,6 +578,14 @@ def all_gather_into_tensor_coalesced(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "all_gather_into_tensor_coalesced"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](self, mesh, mesh_dim)
+
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
     tensor_list = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(  # type: ignore[attr-defined]
@@ -463,6 +618,16 @@ def reduce_scatter_tensor_coalesced(
     :: N.B. If you pass a PG or a 1D list to perform a MPMD collective, the compiler won't be able to recover
     that information and perform collective algebraic optimization. Use other forms of input for that.
     """
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "reduce_scatter_tensor_coalesced"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    inputs, reduceOp, scatter_dim, mesh, mesh_dim
+                )
+
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
 
@@ -541,6 +706,18 @@ def all_to_all_single(
             raise AssertionError(
                 f"All input_split_sizes must be int or SymInt, got {input_split_sizes}"
             )
+
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "all_to_all_single"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    self, output_split_sizes, input_split_sizes, mesh, mesh_dim
+                )
+
+    # Default c10d implementation
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)
     if output_split_sizes is None or input_split_sizes is None:
@@ -582,6 +759,16 @@ def all_to_all_single_autograd(
             raise AssertionError(
                 f"All input_split_sizes must be int or SymInt, got {input_split_sizes}"
             )
+
+    mesh_and_dim = _get_mesh_and_dim(group)
+    if mesh_and_dim is not None:
+        mesh, mesh_dim = mesh_and_dim
+        for registered_collectives in _BACKEND_REGISTRY.values():
+            collective_name = "all_to_all_single_autograd"
+            if collective_name in registered_collectives:
+                return registered_collectives[collective_name](
+                    self, output_split_sizes, input_split_sizes, mesh, mesh_dim
+                )
 
     group_name = _resolve_group_name(group, tag)
     group_size = c10d._get_group_size_by_name(group_name)

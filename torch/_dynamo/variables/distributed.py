@@ -32,7 +32,7 @@ from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented
 from ..external_utils import call_module_hooks_from_backward_state
 from ..guards import GuardBuilder, install_guard
-from ..source import AttrSource
+from ..source import AttrSource, DictGetItemSource
 from ..utils import istype
 from .base import VariableTracker
 from .constant import ConstantVariable, EnumVariable
@@ -335,6 +335,43 @@ class DeviceMeshVariable(DistributedVariable):
             return SourcelessBuilder.create(
                 tx, self.value._flatten(*const_args, **const_kwargs)
             )
+        if name == "get_comm_object":
+            # get_comm_object(backend: str, mesh_dim: int | str) -> comm object | None
+            backend = args[0].as_python_constant()
+            mesh_dim = args[1].as_python_constant()
+            comm = self.value.get_comm_object(backend, mesh_dim)
+            if comm is None:
+                return ConstantVariable.create(None)
+            # Build proper source for the comm object
+            source = self.source
+            if not source:
+                unimplemented(
+                    gb_type="DeviceMesh with torchcomms must be a graph input",
+                    context="Calling get_comm_object on DeviceMesh",
+                    explanation=(
+                        "When using torch.compile with torchcomms-backed DeviceMesh, "
+                        "the mesh must be passed as an argument to the compiled function. "
+                        "This allows dynamo to properly track the TorchComm objects."
+                    ),
+                    hints=[
+                        "Pass the mesh as an argument to your compiled function: "
+                        "def fn(tensor, mesh): ... ; compiled_fn = torch.compile(fn); compiled_fn(t, mesh)",
+                        "Do not capture the mesh from a closure or global variable.",
+                    ],
+                )
+            # Convert mesh_dim to index if it's a string
+            if isinstance(mesh_dim, int):
+                mesh_dim_index = self.value._mesh_dim_names[mesh_dim]
+            else:
+                mesh_dim_index = mesh_dim
+            comm_backends_source = AttrSource(base=source, member="_comm_backends")  # type: ignore[attr-defined]
+            comm_backend_source = DictGetItemSource(
+                base=comm_backends_source, index=backend
+            )
+            comm_source = DictGetItemSource(
+                base=comm_backend_source, index=mesh_dim_index
+            )
+            return VariableTracker.build(tx, comm, comm_source)
         return super().call_method(tx, name, args, kwargs)
 
 

@@ -2767,6 +2767,18 @@
       ]
     }
   ],
+  "GB8445": [
+    {
+      "Gb_type": "DeviceMesh with torchcomms must be a graph input",
+      "Context": "Calling get_comm_object on DeviceMesh",
+      "Explanation": "When using torch.compile with torchcomms-backed DeviceMesh, the mesh must be passed as an argument to the compiled function. This allows dynamo to properly track the TorchComm objects.",
+      "Hints": [
+        "Pass the mesh as an argument to your compiled function: ",
+        "def fn(tensor, mesh): ... ; compiled_fn = torch.compile(fn); compiled_fn(t, mesh)",
+        "Do not capture the mesh from a closure or global variable."
+      ]
+    }
+  ],
   "GB0255": [
     {
       "Gb_type": "attempted to call sourceless user-defined object as a method",

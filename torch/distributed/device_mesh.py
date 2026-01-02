@@ -182,6 +182,7 @@ else:
         _root_mesh: Optional["DeviceMesh"] = None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
+        _comm_backends: dict[str, dict[str, object]] = {}
 
         def __init__(
             self,
@@ -670,6 +671,87 @@ else:
             """
             return [self.get_group(i) for i in range(len(self._layout))]
 
+        def get_comm_object(self, backend: str, mesh_dim: int | str) -> object | None:
+            """
+            Returns the comm object for a given backend and mesh dimension.
+
+            This allows out-of-tree comm backends (e.g., torchcomms) to register
+            their comm objects with the DeviceMesh and retrieve them by backend name.
+
+            Similar to get_group(), this method traverses the parent mesh chain
+            to find comm objects registered on the root mesh or flattened meshes.
+
+            Args:
+                backend (str): The backend identifier (e.g., "torchcomms").
+                mesh_dim (int/str): The mesh dimension index or name.
+
+            Returns:
+                The comm object for the specified backend and dimension,
+                or None if the backend is not registered.
+
+            Example::
+                >>> # xdoctest: +SKIP("no rank")
+                >>> comm = mesh.get_comm("torchcomms", "tp")
+                >>> if comm is not None:
+                ...     comm.all_reduce(tensor, op, False)
+            """
+            # Convert int mesh_dim to string name
+            if isinstance(mesh_dim, int):
+                if self._mesh_dim_names is None:
+                    raise RuntimeError(
+                        "Cannot use integer mesh_dim without mesh_dim_names"
+                    )
+                mesh_dim = self._mesh_dim_names[mesh_dim]
+
+            # First, check if we have the comm object directly on this mesh
+            backend_comms = self._comm_backends.get(backend, None)
+            if backend_comms is not None:
+                comm = backend_comms.get(mesh_dim, None)
+                if comm is not None:
+                    return comm
+
+            # Traverse parent chain similar to get_group()
+            # Check root mesh's _flatten_mapping for flattened dimensions
+            root_mesh = self._get_root_mesh()
+            root_to_flatten_mapping = root_mesh._flatten_mapping
+            if root_to_flatten_mapping and mesh_dim in root_to_flatten_mapping:
+                flatten_mesh = root_to_flatten_mapping[mesh_dim]
+                flatten_backend_comms = flatten_mesh._comm_backends.get(backend, None)
+                if flatten_backend_comms is not None:
+                    return flatten_backend_comms.get(mesh_dim, None)
+
+            # Check the root mesh's comm backends directly
+            if root_mesh is not self:
+                root_backend_comms = root_mesh._comm_backends.get(backend, None)
+                if root_backend_comms is not None:
+                    return root_backend_comms.get(mesh_dim, None)
+
+            return None
+
+        def register_comm_backend(
+            self, backend: str, dim_comms: dict[str, object]
+        ) -> None:
+            """
+            Register a comm backend with comm objects for each mesh dimension.
+
+            This allows out-of-tree comm backends (e.g., torchcomms) to register
+            their comm objects with the DeviceMesh.
+
+            Args:
+                backend (str): The backend identifier (e.g., "torchcomms").
+                dim_comms (dict[str, object]): Dict mapping mesh dimension names to comm objects.
+
+            Example::
+                >>> # xdoctest: +SKIP("no rank")
+                >>> mesh.register_comm_backend("torchcomms", {"dp": dp_comm, "tp": tp_comm})
+                >>> comm = mesh.get_comm("torchcomms", "tp")
+            """
+            # Merge with existing comms for this backend instead of overwriting
+            if backend in self._comm_backends:
+                self._comm_backends[backend].update(dim_comms)
+            else:
+                self._comm_backends[backend] = dim_comms
+
         def _create_sub_mesh(
             self,
             layout: _MeshLayout,
@@ -760,6 +842,15 @@ else:
                 backend_override=(backend_override,),
             )
             root_mesh._flatten_mapping[mesh_dim_name] = res_flattened_mesh
+
+            # Propagate comm backends from root mesh to flattened mesh
+            # This allows out-of-tree backends (e.g., torchcomms) to register
+            # flattened comms on root mesh before _flatten is called
+            for backend_name, backend_comms in root_mesh._comm_backends.items():
+                if mesh_dim_name in backend_comms:
+                    res_flattened_mesh.register_comm_backend(
+                        backend_name, {mesh_dim_name: backend_comms[mesh_dim_name]}
+                    )
 
             return res_flattened_mesh
 
@@ -1053,7 +1144,11 @@ else:
             elif mesh_dim is None:
                 mesh_dim = 0
 
-            mesh_dim_group = not_none(self.get_group(mesh_dim))
+            try:
+                mesh_dim_group = not_none(self.get_group(mesh_dim))
+            except (RuntimeError, TypeError):
+                return not_none(self.get_comm_object("torchcomms", mesh_dim)).get_rank()  # type: ignore[union-attr]
+
             if not isinstance(mesh_dim_group, ProcessGroup):
                 raise AssertionError(
                     "We expect ProcessGroup before calling `get_rank`!"
