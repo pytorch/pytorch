@@ -459,7 +459,7 @@ class LSTM(torch.nn.Module):
 
         if (
             not isinstance(dropout, numbers.Number)
-            # pyrefly: ignore [unsupported-operation]
+
             or not 0 <= dropout <= 1
             or isinstance(dropout, bool)
         ):
@@ -468,7 +468,7 @@ class LSTM(torch.nn.Module):
                 "representing the probability of an element being "
                 "zeroed"
             )
-        # pyrefly: ignore [unsupported-operation]
+
         if dropout > 0:
             warnings.warn(
                 "dropout option for quantizable LSTM is ignored. "
