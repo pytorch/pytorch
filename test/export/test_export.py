@@ -16687,8 +16687,6 @@ def forward(self, x):
             ref_res = module(*dyn_inp)
             self.assertEqual(export_res, ref_res)
 
-    @testing.expectedFailureSerDer
-    @testing.expectedFailureSerDerNonStrict
     def test_dynamic_lr_shift(self):
         class Module(torch.nn.Module):
             def forward(self, x):

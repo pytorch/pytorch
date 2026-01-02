@@ -1117,7 +1117,68 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    @unittest.expectedFailure  # Currently ops that call other ops does not properly invalidate cache
+    def test_triton_op_recursive_function_kernel_detection(self):
+        """
+        Test that triton kernels hidden behind helper function calls are detected.
+
+        This tests the recursive function analysis capability where:
+            def helper():
+                capture_triton(my_kernel)[grid](...)
+
+            @triton_op(...)
+            def my_op(x):
+                helper()  # kernel is inside helper, not directly in my_op
+
+        The recursive analysis in get_inner_triton_kernels should trace
+        into helper functions to find the triton kernels.
+        """
+        from torch._library import capture_triton
+        from torch._library.triton import triton_ops_to_kernels
+
+        @triton.jit
+        def nested_kernel(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(x_ptr + offsets, x + 100, mask=mask)
+
+        def helper_that_calls_kernel(y, n_elements):
+            """Helper function that contains the triton kernel call."""
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            capture_triton(nested_kernel)[grid](y, n_elements, BLOCK_SIZE=256)
+
+        @torch._library.triton_op("test::recursive_func_triton_op", mutates_args=())
+        def recursive_func_triton_op(x: torch.Tensor) -> torch.Tensor:
+            y = x.clone()
+            n_elements = y.numel()
+            # The kernel is hidden inside helper_that_calls_kernel
+            helper_that_calls_kernel(y, n_elements)
+            return y
+
+        kernels = triton_ops_to_kernels.get("test::recursive_func_triton_op", [])
+        self.assertGreater(
+            len(kernels),
+            0,
+            "Recursive function analysis should detect the kernel in helper function",
+        )
+
+        kernel_names = [getattr(k, "__name__", str(k)) for k in kernels]
+        self.assertIn(
+            "nested_kernel",
+            kernel_names,
+            f"nested_kernel should be detected, got: {kernel_names}",
+        )
+
+        a = torch.randn(5, device=GPU_TYPE)
+        expected = a.clone() + 100
+        result = torch.ops.test.recursive_func_triton_op(a)
+        self.assertEqual(result, expected)
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_triton_op_cache_multiple_ops_invalidation(self):
         @triton.jit
         def my_jit(x):

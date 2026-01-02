@@ -263,7 +263,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstantVariable.create(self.value.__qualname__)
         elif name == "__dict__":
             options = {"source": source}
-            return variables.GetAttrVariable(self, name, **options)
+            return variables.GetAttrVariable(self, name, None, **options)
         elif name == "__mro__":
             attr_source = self.source and TypeMROSource(self.source)
             return VariableTracker.build(tx, self.value.__mro__, attr_source)
@@ -296,7 +296,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return super().var_getattr(tx, name)
 
         if name in cmp_name_to_op_mapping and not isinstance(obj, types.FunctionType):
-            return variables.GetAttrVariable(self, name, source=source)
+            return variables.GetAttrVariable(self, name, None, source=source)
 
         if isinstance(obj, staticmethod):
             return VariableTracker.build(tx, obj.__get__(self.value), source)
@@ -1535,7 +1535,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
 
         if name == "__dict__":
             options_dict = {"source": source}
-            return variables.GetAttrVariable(self, name, **options_dict)
+            return variables.GetAttrVariable(self, name, None, **options_dict)
 
         # TODO(anijain2305) - Investigate if we need specialization for more
         # dunder attrs. inspect.getattr_static does not return correct value for
@@ -1792,7 +1792,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 or is_cython_function(subobj)
             ):
                 options = {"source": source}
-                return variables.GetAttrVariable(self, name, **options)
+                return variables.GetAttrVariable(self, name, None, **options)
             if source:
                 if is_accessible_from_type_mro:
                     source = self.get_source_by_walking_mro(name)
@@ -2168,7 +2168,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
             and inspect.ismethoddescriptor(method)
             and len(kwargs) == 0
         ):
-            self.exc_vt.args = args
+            self.exc_vt.args = tuple(args)
             # pyrefly: ignore[missing-attribute]
             self.value.args = args
             return variables.ConstantVariable(None)
@@ -2186,6 +2186,7 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
 
     @property
     def __context__(self) -> "ConstantVariable":
+        # type: ignore[return-value]
         return self.exc_vt.__context__
 
     @property
@@ -2384,6 +2385,7 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     def __init__(
         self, value: object, set_vt: SetVariable | None = None, **kwargs: Any
     ) -> None:
+        tx = kwargs.pop("tx", None)
         super().__init__(value, **kwargs)
 
         python_type = set if isinstance(value, set) else frozenset
@@ -2401,7 +2403,8 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
                 )
             else:
                 init_args = kwargs.get("init_args", {})
-                tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+                if tx is None:
+                    tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
                 self._set_vt = variables.BuiltinVariable(python_type).call_function(  # type: ignore[assignment]
                     tx, init_args, {}
                 )
@@ -2527,6 +2530,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
         init_args: list[VariableTracker] | None = None,
         **kwargs: Any,
     ) -> None:
+        tx = kwargs.pop("tx", None)
         super().__init__(value, init_args=init_args, **kwargs)
         if tuple_vt is None:
             assert self.source is None, (
@@ -2537,9 +2541,10 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             # https://github.com/python/cpython/blob/3.11/Objects/tupleobject.c#L697-L710
             #
             # TODO this duplicates the logic in `BuiltinVariable(tuple)`
-            from torch._dynamo.symbolic_convert import InstructionTranslator
+            if tx is None:
+                from torch._dynamo.symbolic_convert import InstructionTranslator
 
-            tx = InstructionTranslator.current_tx()
+                tx = InstructionTranslator.current_tx()
             elems = init_args[0].force_unpack_var_sequence(tx)
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
