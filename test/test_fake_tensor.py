@@ -1662,6 +1662,72 @@ class FakeTensorOperatorInvariants(TestCase):
         with torch._subclasses.CrossRefFakeMode():
             Repro()(*args)
 
+    def test_convolution_backward_channels_last_memory_format(self):
+        # Test that convolution_backward meta kernel correctly predicts
+        # channels_last memory format when inputs are channels_last.
+        # See: https://github.com/pytorch/pytorch/issues/171622
+
+        with FakeTensorMode():
+            # Create channels_last tensors for conv2d backward
+            grad_output = torch.randn(2, 3, 4, 4).to(memory_format=torch.channels_last)
+            inp = torch.randn(2, 3, 4, 4).to(memory_format=torch.channels_last)
+            weight = torch.randn(3, 3, 3, 3).to(memory_format=torch.channels_last)
+
+            # Call convolution_backward with channels_last inputs
+            result = torch.ops.aten.convolution_backward(
+                grad_output,
+                inp,
+                weight,
+                [3],
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+
+            # grad_input should be channels_last (check grad_output and weight)
+            self.assertTrue(
+                result[0].is_contiguous(memory_format=torch.channels_last),
+                f"Expected grad_input to be channels_last, got strides {result[0].stride()}",
+            )
+            # grad_weight should be channels_last (check input and grad_output)
+            self.assertTrue(
+                result[1].is_contiguous(memory_format=torch.channels_last),
+                f"Expected grad_weight to be channels_last, got strides {result[1].stride()}",
+            )
+
+            # Now test with contiguous inputs - outputs should be contiguous
+            grad_output_c = torch.randn(2, 3, 4, 4)
+            inp_c = torch.randn(2, 3, 4, 4)
+            weight_c = torch.randn(3, 3, 3, 3)
+
+            result_c = torch.ops.aten.convolution_backward(
+                grad_output_c,
+                inp_c,
+                weight_c,
+                [3],
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+
+            # Outputs should be contiguous (NCHW)
+            self.assertTrue(
+                result_c[0].is_contiguous(),
+                f"Expected grad_input to be contiguous, got strides {result_c[0].stride()}",
+            )
+            self.assertTrue(
+                result_c[1].is_contiguous(),
+                f"Expected grad_weight to be contiguous, got strides {result_c[1].stride()}",
+            )
+
     def test_no_dispatch_with_like_function(self):
         class CountingMode(TorchDispatchMode):
             def __init__(self) -> None:
