@@ -89,7 +89,28 @@ class CacheEntry:
 
 
 @dataclass
-class DeferredRecording(Generic[_EncodedR]):
+class InterimResult(Generic[_R]):
+    """Wrapper for an available interim result from a DeferredRecording.
+
+    When get_interim_result() returns an InterimResult, it means the
+    make_interim_result callable was provided and has been invoked.
+    The wrapped value is the result of that invocation.
+
+    This allows distinguishing between:
+    - No interim result configured: get_interim_result() returns None
+    - Interim result available: get_interim_result() returns InterimResult(value)
+      where value may itself be None if the callable returns None.
+
+    Attributes:
+        value: The value returned by calling make_interim_result().
+               May legitimately be None if the callable returns None.
+    """
+
+    value: _R
+
+
+@dataclass
+class DeferredRecording(Generic[_R, _EncodedR]):
     """Signals that recording should happen at a later time.
 
     When returned from a custom_result_encoder, the memoizer will:
@@ -110,6 +131,14 @@ class DeferredRecording(Generic[_EncodedR]):
     finalize() is called (or immediately if already completed). Callbacks are
     guaranteed to be invoked in registration order.
 
+    Optionally, a `make_interim_result` callable can be provided to handle
+    subsequent calls while the deferred recording is pending. When a memoized
+    function is called again with the same parameters while a deferred recording
+    is still pending, the memoizer can use this callable to construct an
+    appropriate return value instead of re-executing the function. The callable
+    does not necessarily return the same object - it provides a way to derive
+    a suitable response based on the pending deferred recording's context.
+
     This class is thread-safe: concurrent calls to finalize() and
     register_callback() are properly synchronized.
 
@@ -120,8 +149,11 @@ class DeferredRecording(Generic[_EncodedR]):
 
     Example usage in an encoder:
         def my_encoder(*args, **kwargs):
-            def encode(result: _R) -> DeferredRecording[_EncodedR]:
-                deferred: DeferredRecording[_EncodedR] = DeferredRecording()
+            def encode(result: _R) -> DeferredRecording[_R, _EncodedR]:
+                deferred: DeferredRecording[_R, _EncodedR] = DeferredRecording(
+                        # Construct an appropriate return for subsequent calls while pending
+                        make_interim_result=lambda: result
+                    )
 
                 def on_complete():
                     encoded_result: _EncodedR = _encode_result(result)
@@ -137,6 +169,10 @@ class DeferredRecording(Generic[_EncodedR]):
                    Set to None after finalize() is called to indicate completion.
         _encoded_result: The encoded result passed to finalize().
         _lock: Lock for thread-safe access to mutable state.
+        make_interim_result: Optional callable that constructs a return value for subsequent
+                           calls while the deferred recording is pending. If set, the memoizer
+                           calls this instead of re-executing the function. The callable may
+                           return the same object or construct a new appropriate response.
     """
 
     _callbacks: list[Callable[[_EncodedR], None]] | None = field(
@@ -144,6 +180,7 @@ class DeferredRecording(Generic[_EncodedR]):
     )
     _encoded_result: _EncodedR | None = field(default=None, repr=False)
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    make_interim_result: Callable[[], _R] | None = field(default=None, repr=False)
 
     def finalize(self, encoded_result: _EncodedR) -> None:
         """Finalize the deferred recording with the encoded result.
@@ -208,6 +245,35 @@ class DeferredRecording(Generic[_EncodedR]):
                 callback(cast(_EncodedR, self._encoded_result))
             else:
                 self._callbacks.append(callback)
+
+    def get_interim_result(self) -> InterimResult[_R] | None:
+        """Try to get an interim result for use while deferred recording is pending.
+
+        When a memoized function is called again with the same parameters while
+        a deferred recording is still pending, the memoizer uses this method to
+        check if an interim result can be returned instead of re-executing the
+        function.
+
+        This method provides thread-safe access to the make_interim_result
+        callable. It atomically checks if the callable was provided and invokes
+        it if so.
+
+        This method is thread-safe.
+
+        Returns:
+            InterimResult wrapping the value if make_interim_result was provided,
+            or None if no interim result is available.
+
+        Note:
+            The callable is invoked each time this method is called, so if
+            make_interim_result returns a new object each time, callers will
+            receive different objects. To return the same object, the callable
+            should capture and return a reference to a single object.
+        """
+        with self._lock:
+            if self.make_interim_result is not None:
+                return InterimResult(self.make_interim_result())
+            return None
 
 
 class _BaseMemoizer:
@@ -851,18 +917,26 @@ class Memoizer(_BaseMemoizer):
 
                 # Check if result is cached
                 cached_hit = self._cache.get(cache_key)
-                if cached_hit is None:
-                    raise KeyError(f"No cached result found for key: {cache_key}")
+                if cached_hit is not None:
+                    # Extract the cached value
+                    cache_entry = cast(CacheEntry, cached_hit.value)
 
-                # Extract the cached value
-                cache_entry = cast(CacheEntry, cached_hit.value)
+                    # Decode and return the cached result
+                    if custom_result_decoder is not None:
+                        # Get the decoder function by calling the factory with params
+                        decoder_fn = custom_result_decoder(*args, **kwargs)
+                        return decoder_fn(cast(_EncodedR, cache_entry.encoded_result))
+                    return cast(_R, cache_entry.encoded_result)
 
-                # Decode and return the cached result
-                if custom_result_decoder is not None:
-                    # Get the decoder function by calling the factory with params
-                    decoder_fn = custom_result_decoder(*args, **kwargs)
-                    return decoder_fn(cast(_EncodedR, cache_entry.encoded_result))
-                return cast(_R, cache_entry.encoded_result)
+                # Check for pending deferred recording with interim result
+                pending = self._pending_deferred.get(cache_key)
+                if pending is not None:
+                    pending = cast(DeferredRecording[_R, _EncodedR], pending)
+                    interim = pending.get_interim_result()
+                    if interim is not None:
+                        return interim.value
+
+                raise KeyError(f"No cached result found for key: {cache_key}")
 
             return inner
 
@@ -994,7 +1068,7 @@ class PersistentMemoizer(_BaseMemoizer):
                 # Check if this was a deferred recording
                 pending = self._memoizer._pending_deferred.get(cache_key)
                 if pending is not None:
-                    pending = cast(DeferredRecording[_EncodedR], pending)
+                    pending = cast(DeferredRecording[_R, _EncodedR], pending)
                     # Deferred recording - register our own callback for disk persistence
                     # By the time our callback runs, Memoizer's callback will have
                     # already inserted the cache entry, so we just read and persist it
