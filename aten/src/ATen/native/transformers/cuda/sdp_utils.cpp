@@ -82,12 +82,13 @@ bool check_prefer_cudnn_attention() {
   }
 // cuDNN 9.15.1 required for seq_len not divisible by 128 fix, CUDA <= 12.8 wheels
 // ship with older cuDNN see #169849
-#if (defined(CUDNN_VERSION) && (CUDNN_VERSION > 91500))
+#if defined(CUDNN_VERSION)
+  long cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
   try {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     auto major = dprops->major;
     auto minor = dprops->minor;
-    return (major == 9 || major == 10) && (!minor || minor == 3);
+    return cudnn_version > 91500 && (major == 9 || major == 10) && (!minor || minor == 3);
   } catch ([[maybe_unused]] c10::Error const& e) {
 #ifdef DEBUG
     TORCH_WARN("check_prefer_cudnn_attention() caught exception ", e.what());
