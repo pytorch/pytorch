@@ -3109,6 +3109,514 @@ class DeferredRecordingTest(TestMixin, TestCase):
         # Assert: no errors occurred
         self.assertEqual(errors, [])
 
+    # ============= Interim Result Tests =============
+
+    @set_caching_module_enabled(True)
+    def test_interim_result_prevents_function_reexecution(self) -> None:
+        """Test that make_interim_result prevents function re-execution.
+
+        Verifies that when a DeferredRecording has make_interim_result set,
+        subsequent calls return the interim result without re-executing the function.
+        """
+        # Setup
+        memoizer = Memoizer()
+        call_count = 0
+        original_result: list[int] = []
+        deferred_obj: interfaces.DeferredRecording | None = None
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: int) -> interfaces.DeferredRecording:
+                nonlocal deferred_obj
+                original_result.append(result)
+                deferred = interfaces.DeferredRecording(
+                    make_interim_result=lambda: result
+                )
+                deferred_obj = deferred
+                return deferred
+
+            return encode
+
+        @memoizer.memoize(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # First call: should execute function
+        result1 = compute(5)
+        self.assertEqual(result1, 10)
+        self.assertEqual(call_count, 1)
+
+        # Second call: should return interim result without re-execution
+        result2 = compute(5)
+        self.assertEqual(result2, 10)
+        self.assertEqual(call_count, 1)  # No additional call!
+
+        # Third call: same behavior
+        result3 = compute(5)
+        self.assertEqual(result3, 10)
+        self.assertEqual(call_count, 1)  # Still no additional call
+
+        # Finalize to mimic actual behavior
+        self.assertIsNotNone(deferred_obj)
+        deferred_obj.finalize(10)
+
+    @set_caching_module_enabled(True)
+    def test_interim_result_returns_same_object(self) -> None:
+        """Test that make_interim_result returns the same object.
+
+        Verifies that all callers get the exact same object (e.g., same Future),
+        not copies.
+        """
+        # Setup
+        memoizer = Memoizer()
+        shared_object = {"value": "shared"}
+        deferred_obj: interfaces.DeferredRecording | None = None
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: object) -> interfaces.DeferredRecording:
+                nonlocal deferred_obj
+                deferred = interfaces.DeferredRecording(
+                    make_interim_result=lambda: shared_object
+                )
+                deferred_obj = deferred
+                return deferred
+
+            return encode
+
+        @memoizer.memoize(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> object:
+            return shared_object
+
+        # Multiple calls should return the same object
+        result1 = compute(5)
+        result2 = compute(5)
+        result3 = compute(5)
+
+        self.assertIs(result1, result2)
+        self.assertIs(result2, result3)
+        self.assertIs(result1, shared_object)
+
+        # Finalize to mimic actual behavior
+        self.assertIsNotNone(deferred_obj)
+        deferred_obj.finalize(shared_object)
+
+    @set_caching_module_enabled(True)
+    def test_interim_result_with_future_pattern(self) -> None:
+        """Test make_interim_result with a Future-like pattern.
+
+        Verifies that multiple callers get the same Future object while
+        the deferred recording is pending.
+        """
+        # Setup
+        memoizer = Memoizer()
+        call_count = 0
+        deferred_obj: interfaces.DeferredRecording | None = None
+
+        def future_encoder(*args: object, **kwargs: object) -> object:
+            def encode(future_result: Future[int]) -> interfaces.DeferredRecording:
+                nonlocal deferred_obj
+                deferred = interfaces.DeferredRecording(
+                    make_interim_result=lambda: future_result
+                )
+
+                def on_complete(completed_future: Future[int]) -> None:
+                    actual_result = completed_future.result()
+                    deferred.finalize(actual_result)
+
+                future_result.add_done_callback(on_complete)
+                deferred_obj = deferred
+                return deferred
+
+            return encode
+
+        with ThreadPoolExecutor() as executor:
+            barrier = Event()
+
+            @memoizer.memoize(custom_result_encoder=future_encoder)
+            def compute_async(x: int) -> Future[int]:
+                nonlocal call_count
+                call_count += 1
+
+                def work() -> int:
+                    barrier.wait()  # Wait for signal
+                    return x * 2
+
+                return executor.submit(work)
+
+            # First call: executes function, returns Future
+            future1 = compute_async(5)
+            self.assertEqual(call_count, 1)
+
+            # Second call: should return same Future without re-execution
+            future2 = compute_async(5)
+            self.assertEqual(call_count, 1)  # No additional call
+            self.assertIs(future1, future2)  # Same Future object
+
+            # Release the barrier
+            barrier.set()
+
+            # Wait for Future to complete
+            result = future1.result(timeout=5)
+            self.assertEqual(result, 10)
+
+            # Verify deferred recording completed
+            self.assertIsNotNone(deferred_obj)
+            self.assertIsNone(deferred_obj._callbacks)
+
+    @set_caching_module_enabled(True)
+    def test_interim_result_transitions_to_cached_result(self) -> None:
+        """Test that after complete(), cached result is used instead of interim.
+
+        Verifies the transition from interim result to final cached result.
+        """
+        # Setup
+        memoizer = Memoizer()
+        deferred_obj: interfaces.DeferredRecording | None = None
+        call_count = 0
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: int) -> interfaces.DeferredRecording:
+                nonlocal deferred_obj
+                deferred = interfaces.DeferredRecording(
+                    make_interim_result=lambda: result
+                )
+                deferred_obj = deferred
+                return deferred
+
+            return encode
+
+        @memoizer.memoize(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # First call: executes function
+        result1 = compute(5)
+        self.assertEqual(result1, 10)
+        self.assertEqual(call_count, 1)
+
+        # Second call before complete: uses interim result
+        result2 = compute(5)
+        self.assertEqual(result2, 10)
+        self.assertEqual(call_count, 1)
+
+        # Finalize the deferred recording
+        self.assertIsNotNone(deferred_obj)
+        deferred_obj.finalize(100)
+
+        # After finalize, memoize returns the cached result
+        result3 = compute(5)
+        self.assertEqual(result3, 100)
+        self.assertEqual(call_count, 1)  # Still no additional call
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_interim_result(self) -> None:
+        """Test that PersistentMemoizer handles make_interim_result correctly.
+
+        Verifies that make_interim_result works with PersistentMemoizer and
+        doesn't register duplicate disk callbacks.
+        """
+        # Setup
+        persistent = PersistentMemoizer(sub_dir=self.sub_dir())
+        call_count = 0
+        deferred_obj: interfaces.DeferredRecording | None = None
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: int) -> interfaces.DeferredRecording:
+                nonlocal deferred_obj
+                deferred = interfaces.DeferredRecording(
+                    make_interim_result=lambda: result
+                )
+                deferred_obj = deferred
+                return deferred
+
+            return encode
+
+        @persistent.memoize(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # First call: executes function
+        result1 = compute(5)
+        self.assertEqual(result1, 10)
+        self.assertEqual(call_count, 1)
+
+        # Second call: uses interim result, no re-execution
+        result2 = compute(5)
+        self.assertEqual(result2, 10)
+        self.assertEqual(call_count, 1)
+
+        # Third call: still uses interim result
+        result3 = compute(5)
+        self.assertEqual(result3, 10)
+        self.assertEqual(call_count, 1)
+
+        # Complete the deferred recording
+        self.assertIsNotNone(deferred_obj)
+        # Check that only 2 callbacks are registered (one for memory, one for disk)
+        self.assertEqual(len(deferred_obj._callbacks), 2)
+        deferred_obj.finalize(100)
+
+        # Verify disk persistence
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+        disk_hit = persistent._disk_cache.get(cache_key)
+        self.assertIsNotNone(disk_hit)
+
+    @set_caching_module_enabled(True)
+    def test_interim_result_different_params_independent(self) -> None:
+        """Test that interim results for different params are independent.
+
+        Verifies that each unique parameter set has its own interim result.
+        """
+        # Setup
+        memoizer = Memoizer()
+        call_count = 0
+        # Keep strong references to deferred recordings to prevent GC
+        deferred_objs: list[interfaces.DeferredRecording] = []
+
+        def deferred_encoder(*args: object, **kwargs: object) -> object:
+            def encode(result: int) -> interfaces.DeferredRecording:
+                deferred = interfaces.DeferredRecording(
+                    make_interim_result=lambda: result
+                )
+                deferred_objs.append(deferred)
+                return deferred
+
+            return encode
+
+        @memoizer.memoize(custom_result_encoder=deferred_encoder)
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # Call with different params
+        result_5 = compute(5)
+        self.assertEqual(result_5, 10)
+        self.assertEqual(call_count, 1)
+
+        result_10 = compute(10)
+        self.assertEqual(result_10, 20)
+        self.assertEqual(call_count, 2)
+
+        # Subsequent calls with same params use interim result
+        result_5_again = compute(5)
+        self.assertEqual(result_5_again, 10)
+        self.assertEqual(call_count, 2)  # No additional call
+
+        result_10_again = compute(10)
+        self.assertEqual(result_10_again, 20)
+        self.assertEqual(call_count, 2)  # No additional call
+
+        # Finalize all deferred recordings
+        for deferred in deferred_objs:
+            deferred.finalize(0)
+
+    @set_caching_module_enabled(True)
+    def test_get_interim_result_when_not_set(self) -> None:
+        """Test that get_interim_result returns None when not configured.
+
+        Verifies that when a DeferredRecording is created without make_interim_result,
+        get_interim_result returns None indicating no interim result.
+        """
+        # Setup: create a DeferredRecording without make_interim_result
+        deferred: interfaces.DeferredRecording[int, int] = (
+            interfaces.DeferredRecording()
+        )
+
+        # Execute: get the interim result
+        interim = deferred.get_interim_result()
+
+        # Assert: should indicate no interim result available
+        self.assertIsNone(interim)
+
+    @set_caching_module_enabled(True)
+    def test_get_interim_result_when_callable_returns_none(self) -> None:
+        """Test get_interim_result when make_interim_result returns None.
+
+        Verifies the distinction between:
+        - None: no make_interim_result configured
+        - InterimResult(None): make_interim_result configured but returns None
+
+        This is an important edge case for type safety.
+        """
+        # Setup: create a DeferredRecording where make_interim_result returns None
+        deferred: interfaces.DeferredRecording[None, int] = (
+            interfaces.DeferredRecording(make_interim_result=lambda: None)
+        )
+
+        # Execute: get the interim result
+        interim = deferred.get_interim_result()
+
+        # Assert: should indicate interim result is available (even though value is None)
+        self.assertIsNotNone(interim)
+        self.assertIsNone(interim.value)
+
+    @set_caching_module_enabled(True)
+    def test_get_interim_result_callable_invoked_each_time(self) -> None:
+        """Test that make_interim_result is invoked on each get_interim_result call.
+
+        Verifies the documented behavior that the callable is invoked each time,
+        which allows for returning new objects if desired.
+        """
+        # Setup: create a DeferredRecording with a callable that tracks invocations
+        invocation_count = 0
+
+        def make_result() -> int:
+            nonlocal invocation_count
+            invocation_count += 1
+            return invocation_count
+
+        deferred: interfaces.DeferredRecording[int, int] = interfaces.DeferredRecording(
+            make_interim_result=make_result
+        )
+
+        # Execute: call get_interim_result multiple times
+        interim1 = deferred.get_interim_result()
+        interim2 = deferred.get_interim_result()
+        interim3 = deferred.get_interim_result()
+
+        # Assert: callable was invoked each time with incrementing results
+        self.assertIsNotNone(interim1)
+        self.assertIsNotNone(interim2)
+        self.assertIsNotNone(interim3)
+        self.assertEqual(interim1.value, 1)
+        self.assertEqual(interim2.value, 2)
+        self.assertEqual(interim3.value, 3)
+        self.assertEqual(invocation_count, 3)
+
+    @set_caching_module_enabled(True)
+    def test_get_interim_result_exception_propagates(self) -> None:
+        """Test that exceptions from make_interim_result propagate correctly.
+
+        Verifies that if make_interim_result raises an exception, it propagates
+        to the caller and does not corrupt the DeferredRecording state.
+        """
+        # Setup: create a DeferredRecording with a failing callable
+        call_count = 0
+
+        def failing_callable() -> int:
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise ValueError("First call fails")
+            return 42
+
+        deferred: interfaces.DeferredRecording[int, int] = interfaces.DeferredRecording(
+            make_interim_result=failing_callable
+        )
+
+        # Execute & Assert: first call raises exception
+        with self.assertRaises(ValueError) as ctx:
+            deferred.get_interim_result()
+        self.assertIn("First call fails", str(ctx.exception))
+
+        # Execute: second call should work (state not corrupted)
+        interim = deferred.get_interim_result()
+
+        # Assert: should work normally after exception
+        self.assertIsNotNone(interim)
+        self.assertEqual(interim.value, 42)
+
+    @set_caching_module_enabled(True)
+    def test_get_interim_result_thread_safety_with_finalize(self) -> None:
+        """Test that get_interim_result and finalize are thread-safe together.
+
+        Verifies that concurrent calls to get_interim_result and finalize
+        don't cause race conditions. The interim result should still be
+        accessible until the DeferredRecording is finalized.
+        """
+        num_iterations = 50
+        errors: list[Exception] = []
+
+        def run_concurrent_test() -> None:
+            deferred: interfaces.DeferredRecording[int, int] = (
+                interfaces.DeferredRecording(make_interim_result=lambda: 42)
+            )
+            barrier = Event()
+            interim_results: list[interfaces.InterimResult[int] | None] = []
+
+            def get_interim_thread() -> None:
+                barrier.wait()
+                for _ in range(10):
+                    try:
+                        interim_results.append(deferred.get_interim_result())
+                    except Exception as e:
+                        errors.append(e)
+
+            def finalize_thread() -> None:
+                barrier.wait()
+                try:
+                    deferred.finalize(100)
+                except RuntimeError:
+                    pass
+
+            with ThreadPoolExecutor(max_workers=2) as executor:
+                f1 = executor.submit(get_interim_thread)
+                f2 = executor.submit(finalize_thread)
+                barrier.set()
+                wait([f1, f2], timeout=5)
+
+            # All interim results should be valid (either 42 or from make_interim_result)
+            for interim in interim_results:
+                if interim is not None and interim.value != 42:
+                    errors.append(AssertionError(f"Expected 42, got {interim.value}"))
+
+        # Execute: run many iterations to catch race conditions
+        for _ in range(num_iterations):
+            run_concurrent_test()
+
+        # Assert: no errors occurred
+        self.assertEqual(errors, [])
+
+    @set_caching_module_enabled(True)
+    def test_interim_result_no_make_interim_causes_reexecution(self) -> None:
+        """Test that without make_interim_result, function is re-executed.
+
+        Verifies that when a DeferredRecording does NOT have make_interim_result,
+        subsequent calls while pending cause the function to be re-executed
+        (the original behavior before interim results were added).
+        """
+        # Setup
+        memoizer = Memoizer()
+        call_count = 0
+        # Keep strong references to deferred recordings to prevent GC
+        deferred_objs: list[interfaces.DeferredRecording] = []
+
+        def deferred_encoder_no_interim(*args: object, **kwargs: object) -> object:
+            def encode(result: int) -> interfaces.DeferredRecording:
+                # Explicitly not setting make_interim_result
+                deferred = interfaces.DeferredRecording()
+                deferred_objs.append(deferred)
+                return deferred
+
+            return encode
+
+        @memoizer.memoize(custom_result_encoder=deferred_encoder_no_interim)
+        def compute(x: int) -> int:
+            nonlocal call_count
+            call_count += 1
+            return x * 2
+
+        # First call: should execute function
+        result1 = compute(5)
+        self.assertEqual(result1, 10)
+        self.assertEqual(call_count, 1)
+
+        # Second call: should re-execute (no interim result available)
+        result2 = compute(5)
+        self.assertEqual(result2, 10)
+        self.assertEqual(call_count, 2)
+
+        # Finalize all deferred recordings
+        for deferred in deferred_objs:
+            deferred.finalize(10)
+
 
 if __name__ == "__main__":
     run_tests()
