@@ -64,6 +64,9 @@ class NoEnterTorchFunctionMode(BaseTorchFunctionMode):
 
 def index(
     iterator: Iterator[T], item: T, start: int = 0, end: int | None = None
+) -> int:
+    from itertools import islice
+
     for i, elem in islice(enumerate(iterator), start, end):
         if item == elem:
             return i
@@ -74,6 +77,11 @@ def index(
 def repeat(item: T, count: int) -> Iterator[T]:
     for _ in range(count):
         yield item
+
+
+def radians(x: float) -> float:
+    import math
+
     return math.pi / 180.0 * x
 
 
@@ -85,6 +93,11 @@ def impl_CONTAINS_OP_fallback(a: T, b: Iterable[T]) -> bool:
             if x == a:
                 return True
         return False
+    raise TypeError(f"argument of type {type(b)} is not iterable")
+
+
+def accumulate_grad(x: torch.Tensor, new_grad: torch.Tensor | None) -> None:
+    # polyfills according to the Gradient Layout Contract
     if new_grad is None:
         return
     new_grad_strided = torch.empty_like(x)
