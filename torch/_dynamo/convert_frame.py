@@ -49,7 +49,7 @@ import weakref
 from dataclasses import dataclass
 from pathlib import Path
 from types import CellType, CodeType, FunctionType, ModuleType
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, NoReturn, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 from weakref import ReferenceType
 
@@ -63,7 +63,6 @@ from torch._guards import compile_context, CompileContext, CompileId, tracing
 from torch._logging import structured
 from torch._utils_internal import (
     compile_time_strobelight_meta,
-    justknobs_check,
     maybe_upload_prof_stats_to_manifold,
     signpost_event,
 )
@@ -113,10 +112,8 @@ from .exc import (
     format_error_msg,
     InternalTorchDynamoError,
     PackageError,
-    RecompileLimitExceeded,
     ResumePrologueTracingError,
     ShortenTraceback,
-    SkipCodeRecursiveException,
     TorchRuntimeError,
     UncapturedHigherOrderOpError,
     unimplemented,
@@ -1694,32 +1691,40 @@ def _compile(
                 recompile_reason,
                 troubleshooting_url,
             )
-            if config.fail_on_recompile_limit_hit:
-                raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached, because fail_on_recompile_limit_hit = True this is a HARD failure"
-                )
-            elif one_graph:
-                raise FailOnRecompileLimitHit(
-                    f"{limit_type} reached with fullgraph=True. Excessive recompilations can degrade "
-                    "performance due to the compilation overhead of each recompilation. To monitor "
-                    "recompilations, enable TORCH_LOGS=recompiles. If recompilations are expected, consider "
-                    "increasing torch._dynamo.config.cache_size_limit to an appropriate value."
-                )
-            elif justknobs_check(
-                "pytorch/compiler:skip_code_recursive_on_recompile_limit_hit"
-            ):
-                raise RecompileLimitExceeded(f"{limit_type} reached")
-            else:
-                # do not recursively skip frames
+
+            def raise_unimplemented_cache_limit_exceeded() -> NoReturn:
                 unimplemented(
-                    gb_type="Dynamo cache limit exceeded",
+                    gb_type="Dynamo recompile limit exceeded",
                     context=f"Limit type: {limit_type}",
                     explanation="Dynamo attempted to recompile the code object too many times, "
-                    f"exceeding the {limit_type} cache size limit."
-                    "Giving up on compiling as the compile time tradeoff is likely not "
-                    "worth the performance gain.",
-                    hints=[],
+                    f"exceeding the {limit_type} cache size limit (currently set to {getattr(config, limit_type)}). "
+                    "Excessive recompilations can degrade "
+                    "performance due to the compilation overhead of each recompilation.",
+                    hints=[
+                        "To monitor recompilations, enable TORCH_LOGS=recompiles. "
+                        "If recompilations are expected, consider "
+                        f"increasing torch._dynamo.config.{limit_type} to an appropriate value.",
+                        f"See {troubleshooting_url} for tips on dealing with recompilations.",
+                    ],
                 )
+
+            try:
+                raise_unimplemented_cache_limit_exceeded()
+            except Unsupported as e:
+                if config.fail_on_recompile_limit_hit:
+                    raise FailOnRecompileLimitHit(
+                        "Hard failure due to fail_on_recompile_limit_hit"
+                    ) from e
+                elif one_graph:
+                    raise FailOnRecompileLimitHit(
+                        "Hard failure due to fullgraph=True"
+                    ) from e
+                else:
+                    # Set frame execution strategy to RUN_ONLY for this recompile limit case
+                    e.frame_exec_strategy = FrameExecStrategy(
+                        FrameAction.RUN_ONLY, FrameAction.RUN_ONLY
+                    )
+                    raise
 
         log.debug(
             "torchdynamo start compiling %s %s:%s, stack (elided %s frames):\n%s",
@@ -2058,18 +2063,12 @@ class ConvertFrame:
             else:
                 log.warning(error_msg, exc_info=True)
 
-            if isinstance(e, SkipCodeRecursiveException):
-                return ConvertFrameReturn(
-                    frame_exec_strategy=FrameExecStrategy(
-                        FrameAction.SKIP, FrameAction.SKIP
-                    )
-                )
-            elif isinstance(e, RecompileLimitExceeded):
-                return ConvertFrameReturn(
-                    frame_exec_strategy=FrameExecStrategy(
-                        FrameAction.RUN_ONLY, FrameAction.RUN_ONLY
-                    )
-                )
+            # Check if the exception has a specific frame execution strategy
+            if (
+                isinstance(e, exc.TorchDynamoException)
+                and e.frame_exec_strategy is not None
+            ):
+                return ConvertFrameReturn(frame_exec_strategy=e.frame_exec_strategy)
 
         return ConvertFrameReturn()
 
