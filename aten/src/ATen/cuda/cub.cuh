@@ -13,11 +13,7 @@
 #include <ATen/cuda/cub_definitions.cuh>
 #include <ATen/cuda/CUDAContextLight.h>
 
-#if USE_GLOBAL_CUB_WRAPPED_NAMESPACE()
-
 #include <cub/cub.cuh>
-
-#else
 
 // include cub in a safe manner, see:
 // https://github.com/pytorch/pytorch/pull/55292
