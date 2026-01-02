@@ -1297,6 +1297,11 @@ c10::intrusive_ptr<Backend> ProcessGroupNCCL::split(
   ncclOpts->split_color = color;
   auto pg = c10::make_intrusive<ProcessGroupNCCL>(
       store->clone(), groupRank, ranks.size(), ncclOpts);
+#ifdef NCCL_COMM_DESCRIPTION
+  // We need to set the desc here so that when eager init the nccl, we can
+  // propagate desc to the nccl comm.
+  pg->setGroupDesc(ncclOpts->group_desc);
+#endif // NCCL_COMM_DESCRIPTION
   pg->eagerConnectSingleDevice(device);
   return c10::static_intrusive_pointer_cast<Backend>(pg);
 }

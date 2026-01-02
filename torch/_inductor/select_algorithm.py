@@ -89,6 +89,7 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
+    tlx_only_cuda_options,
     triton_type,
     triton_type_to_torch,
     unique,
@@ -661,6 +662,10 @@ class TritonTemplateKernel(TritonKernel):
         if kpack:
             triton_meta["kpack"] = kpack
 
+        for k in tlx_only_cuda_options():
+            if v := self.meta.get(k, None):
+                triton_meta[k] = v
+
         self.triton_meta = triton_meta
 
         inductor_meta = {
@@ -689,6 +694,13 @@ class TritonTemplateKernel(TritonKernel):
             num_consumer_groups={self.num_consumer_groups},
             num_buffers_warp_spec={self.num_buffers_warp_spec},
         """
+
+        for k in tlx_only_cuda_options():
+            if v := self.meta.get(k, None):
+                template_args += f"""
+                    {k}={v},
+                """
+                self.triton_meta[k] = v
 
         return f"""
             @triton_heuristics.template(
