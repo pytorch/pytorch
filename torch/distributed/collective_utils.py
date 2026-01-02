@@ -117,7 +117,7 @@ def broadcast(
             error_msg += f": stage {sync_obj.stage_name}"
         if sync_obj.exception is not None:
             error_msg += f": exception {sync_obj.exception}"
-        # pyrefly: ignore [invalid-inheritance]
+
         raise RuntimeError(error_msg) from sync_obj.exception
 
     return cast(T, sync_obj.payload)
@@ -195,7 +195,7 @@ def all_gather(
         if not sync_obj.success:
             raise RuntimeError(
                 f"all_gather failed with exception {sync_obj.exception}",
-                # pyrefly: ignore [invalid-inheritance]
+
             ) from sync_obj.exception
         return [sync_obj.payload]  # type: ignore[list-item]
 
