@@ -13525,6 +13525,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             elements = torch.tensor([1, 2, 3, 4])
             test_elements = 1
             self.common(torch.isin, (elements, test_elements), {"invert": invert})
+            
+        elements = torch.tensor(3.0)
+        test_elements = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
+        self.common(torch.isin, (elements, test_elements), {"assume_unique": True})
 
     def test_mul_index_expr(self):
         # Minified repro from https://github.com/pytorch/pytorch/issues/111884
@@ -16603,24 +16607,6 @@ def _run_and_get_stripped_kernels(
     result, codes = run_and_get_kernels(fn, *args, **kwargs)
     return result, [_strip_tmp_path(code) for code in codes]
 
-
-class TestIsinScalar(TestCase):
-    def test_isin_scalar_output_shape(self):
-        def fn(elements, test_elements):
-            return torch.isin(elements, test_elements, assume_unique=True)
-
-        elements = torch.tensor(3.0)
-        test_elements = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
-
-        eager_res = fn(elements, test_elements)
-        self.assertEqual(eager_res.shape, ())
-
-        torch._dynamo.reset()
-        compiled_fn = torch.compile(fn, backend="inductor")
-        inductor_res = compiled_fn(elements, test_elements)
-
-        self.assertEqual(inductor_res.shape, ())
-        self.assertEqual(inductor_res, eager_res)
 
 
 if __name__ == "__main__":
