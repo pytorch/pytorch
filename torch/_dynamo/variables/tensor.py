@@ -1080,7 +1080,8 @@ class TensorVariable(VariableTracker):
 
         Only collects leaf tensors (no grad_fn). Non-leaf tensors are skipped
         (or error if error_on_non_leaf=True) since the accumulate_grad polyfill
-        cannot handle .grad access on non-leaf tensors.
+        cannot handle .grad access on non-leaf tensors as Dynamo creates generic
+        GetAttrVariable (https://github.com/pytorch/pytorch/issues/171204).
 
         Deduplicates by proxy.node.
         Returns list of unique leaf tensor variables.
@@ -1091,6 +1092,16 @@ class TensorVariable(VariableTracker):
         seen_nodes: set = set()
         for var in vars_iter:
             if isinstance(var, TensorVariable) and var.requires_grad:
+                # We need to filter out tensors where accumulate_grad polyfill won't work.
+                # The polyfill accesses tensor.grad (see torch/_dynamo/polyfills/__init__.py).
+                # For these cases, .grad becomes a GetAttrVariable instead of TensorVariable,
+                # and tensor operations on it fail. This is a Dynamo coverage gap that could
+                # be fixed by properly tracking .grad as TensorVariable:
+                #
+                # 1. Non-leaf tensors (has_grad_fn=True): .grad is GetAttrVariable.
+                #
+                # 2. In-graph created tensors (SyntheticLocalSource): subguards_allowed()
+                #    returns False, so dynamic_getattr fails.
                 if var.has_grad_fn:
                     if error_on_non_leaf:
                         unimplemented(
@@ -1102,9 +1113,6 @@ class TensorVariable(VariableTracker):
                             ],
                         )
                 elif not var.source or isinstance(var.source, SyntheticLocalSource):
-                    # Tensor created in-graph (no source or synthetic source).
-                    # Dynamo creates a generic GetAttrVariable for .grad which
-                    # cannot be used in tensor operations.
                     if error_on_non_leaf:
                         unimplemented(
                             gb_type="backward() with in-graph created tensor",
@@ -1199,11 +1207,8 @@ class TensorVariable(VariableTracker):
         autograd_grad_fn = VariableTracker.build(tx, torch.autograd.grad)
         grads_var = autograd_grad_fn.call_function(tx, grad_args, grad_kwargs)
 
-        # Accumulate gradients for unique leaf tensors under no_grad context.
-        # This is needed because the accumulate_grad polyfill does:
-        #   x.grad = x.grad + new_grad  (when grad_enabled and x.grad is not None)
-        # which creates a NEW tensor. We need in-place update to preserve tensor identity
-        # so that x.grad remains the same tensor object across multiple backward calls.
+        # Accumulate gradients for unique leaf tensors under no_grad context
+        # to replicate eager autograd engine.
         from .ctx_manager import GradModeVariable
 
         grad_mode_var = GradModeVariable.create(tx, False, initialized=True)

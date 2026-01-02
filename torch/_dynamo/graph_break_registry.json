@@ -256,7 +256,7 @@
   "GB7054": [
     {
       "Gb_type": "backward() with non-leaf tensor",
-      "Context": "backward(inputs=[...]) with non-leaf tensor",
+      "Context": "backward(inputs=[...]) with non-leaf tensor: {var}",
       "Explanation": "backward(inputs=[...]) with non-leaf tensors is not yet supported.",
       "Hints": [
         "Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"
@@ -264,10 +264,10 @@
     },
     {
       "Gb_type": "backward() with non-leaf tensor",
-      "Context": "backward() with non-leaf tensor in inputs",
-      "Explanation": "Dynamo cannot trace backward() with non-leaf tensors. Non-leaf tensors require retain_grad() which is not yet supported.",
+      "Context": "backward(inputs=[...]) with non-leaf tensor",
+      "Explanation": "backward(inputs=[...]) with non-leaf tensors is not yet supported.",
       "Hints": [
-        "Only use leaf tensors (parameters, inputs without grad_fn) for backward"
+        "Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"
       ]
     }
   ],
@@ -381,17 +381,6 @@
       "Hints": [
         "Enable tracing of dynamic shape operators with ",
         "`torch._dynamo.config.capture_dynamic_output_shape_ops = True`"
-      ]
-    }
-  ],
-  "GB2863": [
-    {
-      "Gb_type": "backward() with non-leaf tensor inputs",
-      "Context": "backward(inputs=[...]) with non-leaf tensor",
-      "Explanation": "Dynamo cannot trace backward() with non-leaf tensor inputs. Non-leaf tensors require retain_grad() which is not yet supported.",
-      "Hints": [
-        "Only pass leaf tensors (parameters, inputs) to backward(inputs=...)",
-        "Or call backward() without the inputs argument to auto-detect leaves"
       ]
     }
   ],
@@ -2232,6 +2221,16 @@
         "Supported args are Tensors, and functions/nn.Modules/user-defined objects ",
         "from outside the compiled region.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1042": [
+    {
+      "Gb_type": "backward() with in-graph created tensor",
+      "Context": "backward(inputs=[...]) with in-graph created tensor: {var}",
+      "Explanation": "backward(inputs=[...]) with tensors created inside the compiled function is not yet supported.",
+      "Hints": [
+        "Only pass tensors that are inputs to the compiled function or captured from outside"
       ]
     }
   ],
