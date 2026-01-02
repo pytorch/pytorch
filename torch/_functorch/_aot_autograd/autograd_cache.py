@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import pickle
+import random
 import shutil
 import time
 import traceback
@@ -279,6 +280,55 @@ def check_cacheable(gm: torch.fx.GraphModule):
         check_cacheable(gm.saved_tensors_hooks_unpack_0)  # type: ignore[arg-type]
 
 
+def _get_context_fn_cache_hash(context_fn):
+    """
+    Extract a cache hash from a context_fn used for selective activation checkpointing (SAC).
+
+    The context_fn determines which ops are saved vs recomputed in the SAC region.
+    Since context_fn can be an arbitrary Python function, we cannot reliably pickle
+    it for cache key generation (pickle only captures the function name, not the code).
+
+    Users must provide a stable hash by setting a `cache_hash` attribute on the context_fn.
+    For functools.partial objects, set the cache_hash on the partial object itself, not on
+    the underlying function.
+
+    Returns:
+        The cache hash if found
+        None: If no hash is provided (caller should bypass caching)
+    """
+    if hasattr(context_fn, "cache_hash"):
+        return context_fn.cache_hash
+
+    return None
+
+
+def _collect_context_fn_hashes(gm: torch.fx.GraphModule) -> list:
+    """
+    Collect cache hashes from all context_fn used in SAC HOPs within the graph module.
+
+    Returns a list of hashes. Raises BypassAOTAutogradCache if any context_fn
+    lacks a cache_hash attribute.
+    """
+    hashes = []
+    for module in gm.modules():
+        if not isinstance(module, torch.fx.GraphModule):
+            continue
+        context_fn = module.meta.get("_checkpoint_context_fn")
+        if context_fn is not None:
+            cache_hash = _get_context_fn_cache_hash(context_fn)
+            if cache_hash is None:
+                raise BypassAOTAutogradCache(
+                    "SAC context_fn does not have a cache_hash attribute. "
+                    "To enable caching with selective activation checkpointing, "
+                    "add a 'cache_hash' attribute to your context_fn. This can be "
+                    "a string or any hashable value that uniquely identifies the checkpointing "
+                    "behavior (e.g., based on source code hash and closed-over globals). "
+                    "For functools.partial objects, set cache_hash on the partial itself."
+                )
+            hashes.append(cache_hash)
+    return hashes
+
+
 class AOTAutogradCacheDetails(FxGraphHashDetails):
     """
     Object to capture all the details for a dynamo graph module relevant to computing
@@ -363,6 +413,8 @@ class AOTAutogradCacheDetails(FxGraphHashDetails):
                 gm.saved_tensors_hooks_unpack_0,
                 self.saved_tensors_hooks_fx_wrap_cache_hashes[1],
             )
+
+        self.sac_context_fn_hashes: list = _collect_context_fn_hashes(gm)
 
         try:
             # FXGraphCache has constraints on what can be pickled in its inductor
@@ -474,30 +526,45 @@ def autograd_cache_key(
     """
     Generate a unique hash of the FX graph for caching.
     """
-    check_cacheable(gm)
-    if has_triton_package():
-        # Due to https://github.com/triton-lang/triton/issues/3729,
-        # if triton is < 3.2.0, AOTAutogradCache may cause us to
-        # attempt to load a cache entry without initializing
-        # the CUDA context on the autograd thread.
 
-        # Without caching, we naturally do this initialization when
-        # tracing through the graph with the autograd engine.
-        import triton
+    try:
+        check_cacheable(gm)
+        if has_triton_package():
+            # Due to https://github.com/triton-lang/triton/issues/3729,
+            # if triton is < 3.2.0, AOTAutogradCache may cause us to
+            # attempt to load a cache entry without initializing
+            # the CUDA context on the autograd thread.
 
-        if triton.__version__ < "3.2.0":
-            raise BypassAOTAutogradCache("AOTAutogradCache requires triton 3.2.0")
-    details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
-    pickler = AOTAutogradCachePickler(gm)
-    # The prefix distinguishes among the other kinds of objects we cache
-    key = "a" + pickler.get_hash(details)
-    debug_lines = pickler.debug_lines(details)
-    log.debug(
-        "Autograd graph cache hash details for key %s:\n%s",
-        key,
-        LazyString(lambda: "\n".join(debug_lines)),
-    )
-    return key, debug_lines
+            # Without caching, we naturally do this initialization when
+            # tracing through the graph with the autograd engine.
+            import triton
+
+            if triton.__version__ < "3.2.0":
+                raise BypassAOTAutogradCache("AOTAutogradCache requires triton 3.2.0")
+        details = AOTAutogradCacheDetails(gm, example_inputs, config, fx_config)
+        pickler = AOTAutogradCachePickler(gm)
+        # The prefix distinguishes among the other kinds of objects we cache
+        key = "a" + pickler.get_hash(details)
+        debug_lines = pickler.debug_lines(details)
+        log.debug(
+            "Autograd graph cache hash details for key %s:\n%s",
+            key,
+            LazyString(lambda: "\n".join(debug_lines)),
+        )
+        return key, debug_lines
+    except Exception:
+        # If enable_aot_compile is set, we're in AOT precompile mode where we always
+        # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
+        # a proper key because we are guaranteed in an AOT precompile world users are in
+        # complete control of distributing and loading artifacts.
+        if torch._functorch.config.bypass_autograd_cache_key:
+            log.info(
+                "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
+                exc_info=True,
+            )
+            return str(random.random()), []
+        else:
+            raise
 
 
 @contextlib.contextmanager

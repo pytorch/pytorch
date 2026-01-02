@@ -8,7 +8,7 @@ from collections import OrderedDict
 from collections.abc import Callable
 from copy import deepcopy
 from numbers import Number
-from typing import Any, cast, Concatenate, Optional, TypeVar, Union
+from typing import Any, cast, Concatenate, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -109,6 +109,8 @@ def _dtype_to_typestr(dtype):
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
     _is_param: bool
+    # pyrefly: ignore [missing-attribute]
+    __dlpack_c_exchange_api__: object = torch._C._dlpack_exchange_api()
 
     def _clear_non_serializable_cached_data(self):
         r"""Clears any data cached in the tensor's ``__dict__`` that would prevent the tensor
@@ -180,10 +182,10 @@ class Tensor(torch._C.TensorBase):
                 new_storage = self._typed_storage()._deepcopy(memo)
                 if self.is_quantized:
                     # quantizer_params can be different type based on torch attribute
-                    quantizer_params: Union[
-                        tuple[torch.qscheme, float, int],
-                        tuple[torch.qscheme, Tensor, Tensor, int],
-                    ]
+                    quantizer_params: (
+                        tuple[torch.qscheme, float, int]
+                        | tuple[torch.qscheme, Tensor, Tensor, int]
+                    )
                     if self.qscheme() == torch.per_tensor_affine:
                         quantizer_params = (
                             self.qscheme(),
@@ -366,9 +368,9 @@ class Tensor(torch._C.TensorBase):
                     "Cannot serialize qtensor under skip_data context manager, file an issue if you need this feature"
                 )
             # quantizer_params can be different type based on torch attribute
-            quantizer_params: Union[
-                tuple[torch.qscheme, float, int], tuple[Any, Tensor, Tensor, int]
-            ]
+            quantizer_params: (
+                tuple[torch.qscheme, float, int] | tuple[Any, Tensor, Tensor, int]
+            )
             if self.qscheme() == torch.per_tensor_affine:
                 quantizer_params = (
                     torch.per_tensor_affine,
@@ -893,7 +895,7 @@ class Tensor(torch._C.TensorBase):
 
     def norm(
         self,
-        p: Optional[Union[float, str]] = "fro",
+        p: float | str | None = "fro",
         dim=None,
         keepdim=False,
         dtype=None,
@@ -944,15 +946,15 @@ class Tensor(torch._C.TensorBase):
     def stft(
         self,
         n_fft: int,
-        hop_length: Optional[int] = None,
-        win_length: Optional[int] = None,
-        window: "Optional[Tensor]" = None,
+        hop_length: int | None = None,
+        win_length: int | None = None,
+        window: "Tensor | None" = None,
         center: bool = True,
         pad_mode: str = "reflect",
         normalized: bool = False,
-        onesided: Optional[bool] = None,
-        return_complex: Optional[bool] = None,
-        align_to_window: Optional[bool] = None,
+        onesided: bool | None = None,
+        return_complex: bool | None = None,
+        align_to_window: bool | None = None,
     ):
         r"""See :func:`torch.stft`
 
@@ -993,13 +995,13 @@ class Tensor(torch._C.TensorBase):
     def istft(
         self,
         n_fft: int,
-        hop_length: Optional[int] = None,
-        win_length: Optional[int] = None,
-        window: "Optional[Tensor]" = None,
+        hop_length: int | None = None,
+        win_length: int | None = None,
+        window: "Tensor | None" = None,
         center: bool = True,
         normalized: bool = False,
-        onesided: Optional[bool] = None,
-        length: Optional[int] = None,
+        onesided: bool | None = None,
+        length: int | None = None,
         return_complex: bool = False,
     ):
         r"""See :func:`torch.istft`"""
@@ -1528,9 +1530,7 @@ class Tensor(torch._C.TensorBase):
         """
         return self.to_sparse()
 
-    def dim_order(
-        self, *, ambiguity_check: Union[bool, list[torch.memory_format]] = False
-    ):
+    def dim_order(self, *, ambiguity_check: bool | list[torch.memory_format] = False):
         """
         dim_order(ambiguity_check=False) -> tuple
 
@@ -1712,10 +1712,10 @@ class Tensor(torch._C.TensorBase):
     def __dlpack__(
         self,
         *,
-        stream: Optional[Any] = -1,
-        max_version: Optional[tuple[int, int]] = None,
-        dl_device: Optional[tuple[enum.IntEnum, int]] = None,
-        copy: Optional[bool] = None,
+        stream: Any | None = -1,
+        max_version: tuple[int, int] | None = None,
+        dl_device: tuple[enum.IntEnum, int] | None = None,
+        copy: bool | None = None,
     ):
         """
         Creates a DLpack `capsule https://data-apis.org/array-api/latest/design_topics/data_interchange.html#data-interchange`_
@@ -1800,9 +1800,12 @@ class Tensor(torch._C.TensorBase):
                     raise BufferError("per-thread default stream is not supported.")
 
                 device_str = "CUDA" if is_cuda else "ROCm"
-                assert (is_cuda and stream != 0) or (
-                    is_rocm and stream not in (1, 2)
-                ), f"unsupported stream on {device_str}: {stream}."
+                if not (
+                    (is_cuda and stream != 0) or (is_rocm and stream not in (1, 2))
+                ):
+                    raise AssertionError(
+                        f"unsupported stream on {device_str}: {stream}."
+                    )
 
                 stream = torch.cuda.ExternalStream(stream)
 
@@ -1813,7 +1816,8 @@ class Tensor(torch._C.TensorBase):
                 event.record(current_stream)
                 stream.wait_event(event)
         elif self.device.type == "cpu":
-            assert stream is None or stream == -1, "stream should be None on cpu."
+            if stream is not None and stream != -1:
+                raise AssertionError("stream should be None on cpu.")
 
         if self.device.type == "xla":
             import torch_xla

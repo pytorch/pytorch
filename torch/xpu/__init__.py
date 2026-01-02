@@ -11,12 +11,12 @@ import threading
 import traceback
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Optional, Union
+from typing import Any, Optional
 
 import torch
 import torch._C
-from torch import device as _device
 from torch._utils import _dummy_type, _LazySeedTracker
+from torch.types import Device
 
 from ._utils import _get_device_index
 from .streams import Event, Stream
@@ -29,7 +29,6 @@ _queued_calls: list[
     tuple[Callable[[], None], list[str]]
 ] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
-_device_t = Union[_device, str, int, None]
 _lazy_seed_tracker = _LazySeedTracker()
 default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
@@ -205,7 +204,7 @@ class device_of(device):
         super().__init__(idx)
 
 
-def set_device(device: _device_t) -> None:
+def set_device(device: Device) -> None:
     r"""Set the current device.
 
     Args:
@@ -218,7 +217,7 @@ def set_device(device: _device_t) -> None:
         torch._C._xpu_setDevice(device)
 
 
-def get_device_name(device: Optional[_device_t] = None) -> str:
+def get_device_name(device: Device = None) -> str:
     r"""Get the name of a device.
 
     Args:
@@ -234,7 +233,7 @@ def get_device_name(device: Optional[_device_t] = None) -> str:
 
 
 @lru_cache(None)
-def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
+def get_device_capability(device: Device = None) -> dict[str, Any]:
     r"""Get the xpu capability of a device.
 
     Args:
@@ -259,7 +258,7 @@ def get_device_capability(device: Optional[_device_t] = None) -> dict[str, Any]:
 
 
 def get_device_properties(
-    device: Optional[_device_t] = None,
+    device: Device = None,
 ) -> _XpuDeviceProperties:  # pyrefly: ignore  # not-a-type
     r"""Get the properties of a device.
 
@@ -281,7 +280,7 @@ def current_device() -> int:
     return torch._C._xpu_getDevice()
 
 
-def _get_device(device: Union[int, str, torch.device]) -> torch.device:
+def _get_device(device: int | str | torch.device) -> torch.device:
     r"""Return the torch.device type object from the passed in device.
 
     Args:
@@ -294,7 +293,7 @@ def _get_device(device: Union[int, str, torch.device]) -> torch.device:
     return device
 
 
-def can_device_access_peer(device: _device_t, peer: _device_t) -> bool:
+def can_device_access_peer(device: Device, peer: Device) -> bool:
     r"""Query whether a device can access a peer device's memory.
 
     Args:
@@ -395,7 +394,7 @@ def set_stream(stream: Stream) -> None:
     )
 
 
-def current_stream(device: Optional[_device_t] = None) -> Stream:
+def current_stream(device: Device = None) -> Stream:
     r"""Return the currently selected :class:`Stream` for a given device.
 
     Args:
@@ -413,9 +412,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     )
 
 
-def get_stream_from_external(
-    data_ptr: int, device: Optional[_device_t] = None
-) -> Stream:
+def get_stream_from_external(data_ptr: int, device: Device = None) -> Stream:
     r"""Return a :class:`Stream` from an external SYCL queue.
 
     This function is used to wrap SYCL queue created in other libraries in order
@@ -440,7 +437,7 @@ def get_stream_from_external(
     )
 
 
-def synchronize(device: _device_t = None) -> None:
+def synchronize(device: Device = None) -> None:
     r"""Wait for all kernels in all streams on a XPU device to complete.
 
     Args:
@@ -484,7 +481,7 @@ def _get_generator(device: torch.device) -> torch._C.Generator:
 
 
 def _set_rng_state_offset(
-    offset: int, device: Union[int, str, torch.device] = "xpu"
+    offset: int, device: int | str | torch.device = "xpu"
 ) -> None:
     r"""Set the random number generator state offset of the specified GPU.
 
@@ -502,7 +499,7 @@ def _set_rng_state_offset(
     _lazy_call(cb)
 
 
-def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
+def _get_rng_state_offset(device: int | str | torch.device = "xpu") -> int:
     r"""Return the random number generator state offset of the specified GPU.
 
     Args:
@@ -520,6 +517,7 @@ def _get_rng_state_offset(device: Union[int, str, torch.device] = "xpu") -> int:
 
 # import here to avoid circular import
 from .memory import (
+    change_current_allocator,
     empty_cache,
     get_per_process_memory_fraction,
     max_memory_allocated,
@@ -532,6 +530,7 @@ from .memory import (
     reset_accumulated_memory_stats,
     reset_peak_memory_stats,
     set_per_process_memory_fraction,
+    XPUPluggableAllocator,
 )
 from .random import (
     get_rng_state,
@@ -550,7 +549,9 @@ __all__ = [
     "Event",
     "Stream",
     "StreamContext",
+    "XPUPluggableAllocator",
     "can_device_access_peer",
+    "change_current_allocator",
     "current_device",
     "current_stream",
     "default_generators",

@@ -11,6 +11,10 @@ The MTIA backend is implemented out of the tree, only interfaces are defined her
 ```
 
 ```{eval-rst}
+.. autofunction:: graph_pool_handle
+```
+
+```{eval-rst}
 .. autoclass:: MTIAGraph
     :members:
 ```

@@ -17,7 +17,7 @@ import warnings
 from collections import namedtuple
 from collections.abc import Callable
 from datetime import timedelta
-from typing import Any, TYPE_CHECKING
+from typing import Any, NewType, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -112,6 +112,7 @@ __all__ = [
     "BarrierOptions",
     "BroadcastOptions",
     "GatherOptions",
+    "GroupName",
     "PrefixStore",
     "ProcessGroup",
     "ReduceOp",
@@ -142,6 +143,8 @@ _XCCL_AVAILABLE = True
 
 _pickler = pickle.Pickler
 _unpickler = pickle.Unpickler
+
+GroupName = NewType("GroupName", str)
 
 
 # Change __module__ of all imported types from torch._C._distributed_c10d that are public
@@ -308,7 +311,7 @@ class Backend(str):  # noqa: SLOT000
         cls,
         name,
         func,
-        extended_api=False,
+        extended_api: bool = False,
         devices: str | list[str] | None = None,
     ) -> None:
         """
@@ -580,7 +583,7 @@ class _CollOp:
 # DO NOT USE THESE FIELDS DIRECTLY.
 # Use them through the _world object to make sure the _world override mechanism
 _pg_map: dict[ProcessGroup, tuple[str, Store]] = {}
-_pg_names: dict[ProcessGroup, str] = {}
+_pg_names: dict[ProcessGroup, GroupName] = {}
 _pg_group_ranks: dict[ProcessGroup, dict[int, int]] = {}
 # For a pg, it is a map from ProcessGroup to BackendConfig
 _pg_backend_config: dict[ProcessGroup, str] = {}
@@ -632,7 +635,7 @@ class _World:
         return _pg_map
 
     @property
-    def pg_names(self) -> dict[ProcessGroup, str]:
+    def pg_names(self) -> dict[ProcessGroup, GroupName]:
         """
         Process group's names, map from ProcessGroup to str.
 
@@ -942,7 +945,7 @@ def _device_capability(group: ProcessGroup | None = None) -> list[str]:
 def _store_based_barrier(
     rank,
     store,
-    group_name,
+    group_name: GroupName,
     rendezvous_count,
     timeout,
     logging_interval=timedelta(seconds=10),
@@ -1103,7 +1106,7 @@ def get_process_group_ranks(group: ProcessGroup | None) -> list[int]:
     return list(_world.pg_group_ranks[group or _get_default_group()].keys())
 
 
-def _get_group_size(group) -> int:
+def _get_group_size(group: ProcessGroup | None) -> int:
     """Get a given group's world size."""
     if group is GroupMember.WORLD or group is None:
         default_pg = _get_default_group()
@@ -1111,12 +1114,12 @@ def _get_group_size(group) -> int:
     return group.size()
 
 
-def _get_group_size_by_name(group_name: str) -> int:
+def _get_group_size_by_name(group_name: GroupName) -> int:
     group = _resolve_process_group(group_name)
     return group.size()
 
 
-def _resolve_group_name_by_ranks_and_tag(ranks: list[int], tag: str) -> str:
+def _resolve_group_name_by_ranks_and_tag(ranks: list[int], tag: str) -> GroupName:
     # TODO(yifu): remove this function once ranks + tag is not a supported
     # identifier for process group for functional collectives.
     group = _find_pg_by_ranks_and_tag(tag, ranks)
@@ -1125,7 +1128,7 @@ def _resolve_group_name_by_ranks_and_tag(ranks: list[int], tag: str) -> str:
     return group.group_name
 
 
-def _check_single_tensor(param, param_name) -> None:
+def _check_single_tensor(param, param_name: str) -> None:
     """Check that the parameter ``param_name`` is a single tensor."""
     if not isinstance(param, torch.Tensor):
         raise TypeError(
@@ -1134,7 +1137,7 @@ def _check_single_tensor(param, param_name) -> None:
         )
 
 
-def _check_tensor_list(param, param_name) -> None:
+def _check_tensor_list(param, param_name: str) -> None:
     """Check that the parameter ``param_name`` is a list of tensors."""
     if not isinstance(param, list):
         raise TypeError(
@@ -1355,7 +1358,7 @@ def _get_default_store() -> Store:
     return default_store
 
 
-def _update_default_pg(pg) -> None:
+def _update_default_pg(pg: ProcessGroup | None) -> None:
     _world.default_pg = pg
     rank = pg.rank() if pg is not None and pg != GroupMember.NON_GROUP_MEMBER else -1
     torch._C._distributed_c10d._set_global_rank(rank)
@@ -1870,7 +1873,7 @@ def init_process_group(
             _store_based_barrier(rank, store, group_name, world_size, timeout)
 
 
-def _get_split_source(pg):
+def _get_split_source(pg: ProcessGroup):
     split_from = None
     if pg.bound_device_id:
         split_from = pg._get_backend(pg.bound_device_id)
@@ -1899,7 +1902,7 @@ def _new_process_group_helper(
     global_ranks_in_group,
     backend,
     store,
-    group_name,
+    group_name: GroupName,
     backend_options=None,
     timeout=None,
     pg_tag=None,
@@ -2912,7 +2915,7 @@ def broadcast(
 
 
 @_exception_logger
-def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
+def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op: bool = False):
     """
     Reduces the tensor data across all machines in a way that all get the final result.
 
@@ -3019,7 +3022,7 @@ def all_reduce(tensor, op=ReduceOp.SUM, group=None, async_op=False):
     "https://pytorch.org/docs/main/distributed.html#collective-functions",
     category=FutureWarning,
 )
-def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op=False):
+def all_reduce_coalesced(tensors, op=ReduceOp.SUM, group=None, async_op: bool = False):
     """
     WARNING: at this time individual shape checking is not implemented across nodes.
 
@@ -3389,7 +3392,7 @@ def gather_object(
 
     if object_gather_list is None:
         raise AssertionError("Must provide object_gather_list on dst rank")
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]
@@ -4136,7 +4139,7 @@ def all_gather_into_tensor(output_tensor, input_tensor, group=None, async_op=Fal
     "Please use `torch.distributed.all_gather_into_tensor` instead.",
     category=FutureWarning,
 )
-def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
+def _all_gather_base(output_tensor, input_tensor, group=None, async_op: bool = False):
     """
     Single tensor all gather. Gathers a single tensor from all ranks, and puts them in a single output tensor.
 
@@ -4168,7 +4171,7 @@ def _all_gather_base(output_tensor, input_tensor, group=None, async_op=False):
     category=FutureWarning,
 )
 def all_gather_coalesced(
-    output_tensor_lists, input_tensor_list, group=None, async_op=False
+    output_tensor_lists, input_tensor_list, group=None, async_op: bool = False
 ):
     """
     Gathers input tensors from the whole group in a list in a coalesced manner.
@@ -4250,7 +4253,7 @@ def all_gather_coalesced(
     # Otherwise, the backend has sync'ed at CPP level
 
 
-def _validate_output_list_for_rank(my_rank, dst, gather_list):
+def _validate_output_list_for_rank(my_rank: int, dst: int, gather_list):
     if dst == my_rank:
         if not gather_list:
             raise ValueError(
@@ -4451,7 +4454,9 @@ def scatter(
 
 
 @_exception_logger
-def reduce_scatter(output, input_list, op=ReduceOp.SUM, group=None, async_op=False):
+def reduce_scatter(
+    output, input_list, op=ReduceOp.SUM, group=None, async_op: bool = False
+):
     """
     Reduces, then scatters a list of tensors to all processes in a group.
 
@@ -4599,7 +4604,9 @@ def reduce_scatter_tensor(output, input, op=ReduceOp.SUM, group=None, async_op=F
     "Please use `torch.distributed.reduce_scatter_tensor` instead.",
     category=FutureWarning,
 )
-def _reduce_scatter_base(output, input, op=ReduceOp.SUM, group=None, async_op=False):
+def _reduce_scatter_base(
+    output, input, op=ReduceOp.SUM, group=None, async_op: bool = False
+):
     """
     Reduces, then scatters a flattened tensor to all processes in a group.
 
@@ -4629,7 +4636,7 @@ def all_to_all_single(
     output_split_sizes=None,
     input_split_sizes=None,
     group=None,
-    async_op=False,
+    async_op: bool = False,
 ):
     """
     Split input tensor and then scatter the split list to all processes in a group.
@@ -4772,7 +4779,9 @@ def all_to_all_single(
 
 
 @_exception_logger
-def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False):
+def all_to_all(
+    output_tensor_list, input_tensor_list, group=None, async_op: bool = False
+):
     """
     Scatters list of input tensors to all processes in a group and return gathered list of tensors in output list.
 
@@ -4895,7 +4904,9 @@ def all_to_all(output_tensor_list, input_tensor_list, group=None, async_op=False
 
 @_exception_logger
 def barrier(
-    group: ProcessGroup | None = GroupMember.WORLD, async_op=False, device_ids=None
+    group: ProcessGroup | None = GroupMember.WORLD,
+    async_op: bool = False,
+    device_ids=None,
 ):
     """
     Synchronize all processes.
@@ -4969,7 +4980,7 @@ def barrier(
 def monitored_barrier(
     group: ProcessGroup | None = GroupMember.WORLD,
     timeout=None,
-    wait_all_ranks=False,
+    wait_all_ranks: bool = False,
 ):
     """
     Synchronize processes similar to ``torch.distributed.barrier``, but consider a configurable timeout.
@@ -5092,13 +5103,13 @@ def _process_group_color(ranks: list[int]) -> int:
     return color
 
 
-def _process_group_name(ranks, use_hashed_name):
+def _process_group_name(ranks, use_hashed_name) -> GroupName:
     # Create name for a process group.
     global _world
     if use_hashed_name:
-        pg_name = _hash_ranks_to_str(ranks)
+        pg_name = GroupName(_hash_ranks_to_str(ranks))
     else:
-        pg_name = str(_world.group_count)
+        pg_name = GroupName(str(_world.group_count))
         _world.group_count += 1
     # TODO: why is group count incremented only in the else path?
     return pg_name
@@ -5288,7 +5299,7 @@ def new_group(
     timeout=None,
     backend=None,
     pg_options=None,
-    use_local_synchronization=False,
+    use_local_synchronization: bool = False,
     group_desc=None,
     device_id: torch.device | None = None,
 ):
@@ -6221,7 +6232,7 @@ def _update_process_group_global_state(
     pg: ProcessGroup,
     backend_name: str,
     store: Store,
-    group_name: str,
+    group_name: GroupName,
     backend_config: str,
     rank_mapping: dict[int, int] | None = None,
     pg_tag: str | None = None,

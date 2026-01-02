@@ -615,22 +615,21 @@ def _register_quantized_linear_binary_lowering(
         o_zero_point = kwargs["output_zero_point"]
 
         x2.realize()
-        from .mkldnn_fusion import _can_be_inplace
+        from .mkldnn_fusion import _qlinear_binary_can_be_inplace
 
         binary_op_name = kwargs["binary_op_name"]
         alpha = kwargs["alpha"]
         unary_op_name = kwargs["unary_op_name"]
         unary_op_args = kwargs["unary_op_args"]
         unary_op_algorithm = kwargs["unary_op_algorithm"]
-
-        if binary_op_name == "sum" and not _can_be_inplace(x2):
-            # When we enable the GEMM Template, the output of QLinear
-            # will be reshaped from 2D back to 3D if the input is 3D.
-            # This causes _can_be_inplace(x2) to return False if x2 happens
-            # to be the output of QLinear in this scenario.
-            # Change the post op from sum to binary add for this case.
-            # Refer to test case:
-            #   test_mkldnn_pattern_matcher.py::test_qlinear_dequant_promotion_cpu_input_dim_exceeds_2
+        if (
+            # TODO Ensure sum is safe and remove such check, i.e.,
+            # x2 is not used by other operations
+            # or current qlinear sum is the last user of x2.
+            # This needs to be ensured when registering
+            # the lowering pattern of quantized_linear_binary.
+            binary_op_name == "sum" and (not _qlinear_binary_can_be_inplace(x2))
+        ):
             binary_op_name = "add"
 
         computation_args = (
@@ -1166,7 +1165,7 @@ def _is_valid_woq_optimization_pattern():
             x.dtype == torch.bfloat16
             and weight.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            and x.device.type in ("cpu", "cuda")
+            and x.device.type in ("cpu", "cuda", "xpu")
             and x.device == weight.device
             and x.device == scales.device
         )
@@ -1540,6 +1539,7 @@ def _register_dequant_promotion_pass(pattern, pass_number, dtype=torch.float32):
         for user_node in user_node_list[1:]:
             _source_node = dequant_pattern_end_node
             _user_node = user_node
+            # pyrefly: ignore [bad-assignment]
             while _source_node != dequant_pattern_start_node.args[0]:
                 _user_node = clone_to_new_node(graph, _source_node, _user_node)
                 _source_node = _source_node.args[0]  # type: ignore[assignment]

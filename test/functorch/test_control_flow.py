@@ -945,7 +945,7 @@ def forward(self, pred_1):
         for pred in [torch.tensor(False), torch.tensor(True)]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile",
+                r"Higher Order Operator: torch\.cond",
             ):
                 cond(pred, true_fn, false_fn, ({"t": [a, {"b": b}, (c,)]},))
 
@@ -1411,7 +1411,8 @@ def forward(self, pred_1, x_1):
         x = torch.ones([3])
         y = torch.ones([1, 2, 3])
         with self.assertRaisesRegex(
-            RuntimeError, "map doesn't work unless it is captured completely"
+            RuntimeError,
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             control_flow.map(f, x, y)
 
@@ -1420,7 +1421,7 @@ def forward(self, pred_1, x_1):
             # torch._dynamo.exc.UncapturedHigherOrderOpError,
             # "Expected all leaves to be of torch.Tensor type.*",
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             control_flow.map(f1, x, y)
 
@@ -1959,7 +1960,7 @@ def forward(self, pred_1, x_1):
             # torch._dynamo.exc.Unsupported,
             # "HigherOrderOperator body's output must consist of tensors or ints only"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_float_output, init, x, dim=0)
 
@@ -2416,7 +2417,7 @@ def forward(self, pred_1, x_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan_fct(wrong_carry_shape, init, x, dim=dim)
 
@@ -2439,7 +2440,7 @@ def forward(self, pred_1, x_1):
             # torch._dynamo.exc.Unsupported,
             # combine_fn needs to produce two pytrees, one for the carries and one for the outputs.
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan_fct(no_carry, init, x, dim=dim)
 
@@ -3494,7 +3495,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_input_mutation, init, x, dim=0)
 
@@ -3515,7 +3516,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
@@ -3536,7 +3537,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_input_output_alias, init, inp, dim=0)
 
@@ -3559,7 +3560,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_carry_carry_alias, init, inp, dim=0)
 
@@ -3582,7 +3583,7 @@ def forward(self, L_init_ : torch.Tensor, L_xs_ : torch.Tensor):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.scan",
         ):
             scan(fct_carry_output_alias, init, inp, dim=0)
 
@@ -5259,7 +5260,7 @@ class GraphModule(torch.nn.Module):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "associative_scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.associative_scan",
         ):
             associative_scan(fct_input_mutation, x, 0)
 
@@ -5279,7 +5280,7 @@ class GraphModule(torch.nn.Module):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "associative_scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.associative_scan",
         ):
             associative_scan(fct_input_output_alias, inp, 0)
 
@@ -5301,7 +5302,7 @@ class GraphModule(torch.nn.Module):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "associative_scan must be captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.associative_scan",
         ):
             associative_scan(fct_output_output_alias, inp, 0)
 
@@ -6179,7 +6180,7 @@ def forward(self, x_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.cond",
         ):
             make_fx(torch.func.functionalize(f), tracing_mode="symbolic")(
                 *example_inputs
@@ -6243,7 +6244,7 @@ def forward(self, x_1):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 make_fx(f, tracing_mode="symbolic")(example_input_func)
         finally:
@@ -6265,7 +6266,7 @@ def forward(self, x_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.cond",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input_func)
 
@@ -6290,7 +6291,7 @@ def forward(self, x_1):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 f(example_input_func)
         finally:
@@ -6324,7 +6325,7 @@ def forward(self, x_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.cond",
         ):
             make_fx(f_wrapper(f), tracing_mode="symbolic")(example_input)
 
@@ -6463,7 +6464,7 @@ def forward(self, arg0_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.cond",
         ):
             make_fx(f)(x, torch.tensor(False))
 
@@ -6639,7 +6640,7 @@ def forward(self, arg0_1):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing for HOP.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.cond",
         ):
             make_fx(f, tracing_mode="fake")(x, torch.tensor(False))
 
@@ -7080,7 +7081,7 @@ class GraphModule(torch.nn.Module):
             # torch._dynamo.exc.Unsupported,
             # "Encountered aliasing during higher order op tracing.*"
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile.*",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             functional_f(*example_inputs)
 
@@ -7809,7 +7810,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         # due to set_
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             torch.cond(inp.sum() > 0, f, f, (inp, tmp))
 
@@ -8020,7 +8021,7 @@ def forward(self, s97 : torch.SymInt, L_a_ : torch.Tensor, L_b_ : torch.Tensor):
             # "Encountered aliasing during higher order op tracing for HOP.*"
             # This is the Exception with PYTORCH_TEST_WITH_DYNAMO=1
             # torch._dynamo.exc.UncapturedHigherOrderOpError,
-            # "scan must be captured completely with torch.compile.*",
+            # r"Higher Order Operator: torch\.ops\.higher_order\.scan",
             Exception,
             ".*",
         ):
@@ -8955,7 +8956,7 @@ class GraphModule(torch.nn.Module):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 torch.compile(fn)(f, x)
 
@@ -8975,7 +8976,7 @@ class GraphModule(torch.nn.Module):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 torch.compile(fn)(view_f, x)
 
@@ -8996,7 +8997,7 @@ class GraphModule(torch.nn.Module):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 torch.compile(fn)(f, x)
 
@@ -9005,7 +9006,7 @@ class GraphModule(torch.nn.Module):
                 # torch._dynamo.exc.Unsupported,
                 # "Encountered aliasing during higher order op tracing for HOP.*"
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                "Cond doesn't work unless it is captured completely with torch.compile.*",
+                r"Higher Order Operator: torch\.cond",
             ):
                 with torch.inference_mode(inference_mode):
                     torch.compile(fn)(f, x)

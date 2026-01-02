@@ -525,7 +525,11 @@ class GraphModule(torch.nn.Module):
         mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
 
         # Annotation: {'stream': 0}
-        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = None
+
+        # No stacktrace found for following nodes
+        record_event_default = torch.ops.streams.record_event.default(2, 0);  record_event_default = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(2, 1, mul_3);  mul_3 = sync_dealloc_default = None
         return (add_3, add_2)
 """,
         )
@@ -590,7 +594,11 @@ class GraphModule(torch.nn.Module):
         wait_event_default = torch.ops.streams.wait_event.default(2, 0);  wait_event_default = None
 
         # Annotation: {'stream': 0}
-        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = mul_3 = None
+        add_3: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_2, mul_3);  mul_2 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_1 = torch.ops.streams.record_event.default(3, 0);  record_event_default_1 = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(3, 1, mul_3);  mul_3 = sync_dealloc_default = None
         return (add_3, add_2)
 """,
         )
@@ -677,17 +685,276 @@ class <lambda>(torch.nn.Module):
         from torch._dynamo.variables.streams import wait_stream
         from torch.library import opcheck
 
-        s0 = torch.Stream()
-        s1 = torch.Stream()
-        s2 = torch.Stream()
-        store_user_object_weakrefs(s0, s1, s2)
+        try:
+            s0 = torch.Stream()
+            s1 = torch.Stream()
+            s2 = torch.Stream()
+            store_user_object_weakrefs(s0, s1, s2)
 
-        sample_inputs = [
-            (0, 1),
-            (2, 0),
-        ]
-        for args in sample_inputs:
-            opcheck(wait_stream, args)
+            sample_inputs = [
+                (0, 1),
+                (2, 0),
+            ]
+            for args in sample_inputs:
+                opcheck(wait_stream, args)
+        finally:
+            reset_user_object_tracking()
+
+    @requires_cuda
+    def test_record_stream_problem_basic(self):
+        # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
+        # for what this tests/solves for
+        # We expect there to be a sync_dealloc op added to the graph for y
+        # synchronizing the first stream w/ the second stream after the second stream is finished
+        def fn(x):
+            e = torch.Event()
+            with torch.Stream(device="cuda:0"):
+                y = torch.ones(2, 2, device="cuda:0")
+                e.record()
+                z = y * x
+
+            with torch.Stream(device="cuda:0"):
+                e.wait()
+                z0 = y * 2 * x
+
+            return z0, z
+
+        inp = (torch.ones(2, 2, device="cuda", requires_grad=True),)
+        (
+            actual,
+            _,
+            fw_graphs,
+            bw_graphs,
+        ) = extract_graph(fn, *inp)
+
+        actual[1].sum().backward()
+
+        self.assertExpectedInline(
+            print_graph(bw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        ones: "f32[2, 2]" = torch.ops.aten.ones.default([2, 2], device = device(type='cuda', index=0), pin_memory = False)
+
+        # Annotation: {'stream': 2}
+        mul_1: "f32[2, 2]" = torch.ops.aten.mul.Tensor(ones, 2)
+        mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, mul_1);  tangents_1 = mul_1 = None
+
+        # Annotation: {'stream': 1}
+        mul_4: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, ones);  tangents_2 = ones = None
+
+        # No stacktrace found for following nodes
+        record_event_default = torch.ops.streams.record_event.default(3, 1);  record_event_default = None
+        wait_event_default = torch.ops.streams.wait_event.default(3, 2);  wait_event_default = None
+
+        # Annotation: {'stream': 2}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_3, mul_4);  mul_3 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_1 = torch.ops.streams.record_event.default(4, 2);  record_event_default_1 = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(4, 1, mul_4);  mul_4 = sync_dealloc_default = None
+        return (add,)
+""",
+        )
+
+    @requires_cuda
+    def test_record_stream_problem_interleaved(self):
+        # see https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
+        # for what this tests/solves for
+        # This will have interleaved computation where y is
+        # first allocated on the first stream used on the second stream
+        # used on the first stream again then finally used on the last stream
+        def fn(x):
+            e = torch.Event()
+            with torch.Stream(device="cuda:0"):
+                y = torch.ones(2, 2, device="cuda:0")
+                z = y * x
+                e.record()
+
+            with torch.Stream(device="cuda:0"):
+                e.wait()
+                z0 = y * 2 * z
+                e.record()
+
+            with torch.Stream(device="cuda:0"):
+                e.wait()
+                z1 = y * x * z0
+                e.record()
+
+            with torch.Stream(device="cuda:0"):
+                e.wait()
+                z2 = y * 4 * z1
+                e.record()
+
+            e.wait()
+            return z, z1, z2
+
+        inp = (torch.ones(2, 2, device="cuda", requires_grad=True),)
+        (
+            actual,
+            _,
+            fw_graphs,
+            bw_graphs,
+        ) = extract_graph(fn, *inp)
+
+        actual[1].sum().backward()
+
+        self.assertExpectedInline(
+            print_graph(bw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[2, 2]", mul: "f32[2, 2]", tangents_1: "f32[2, 2]", \
+tangents_2: "f32[2, 2]", tangents_3: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        ones: "f32[2, 2]" = torch.ops.aten.ones.default([2, 2], device = device(type='cuda', index=0), pin_memory = False)
+
+        # Annotation: {'stream': 4}
+        mul_5: "f32[2, 2]" = torch.ops.aten.mul.Tensor(ones, 4)
+        mul_7: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_3, mul_5);  tangents_3 = mul_5 = None
+
+        # No stacktrace found for following nodes
+        record_event_default = torch.ops.streams.record_event.default(6, 4);  record_event_default = None
+        wait_event_default = torch.ops.streams.wait_event.default(6, 3);  wait_event_default = None
+
+        # Annotation: {'stream': 3}
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_2, mul_7);  tangents_2 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_4 = torch.ops.streams.record_event.default(10, 3);  record_event_default_4 = None
+        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(10, 4, mul_7);  mul_7 = sync_dealloc_default = None
+
+        # Annotation: {'stream': 3}
+        mul_3: "f32[2, 2]" = torch.ops.aten.mul.Tensor(ones, primals_1);  primals_1 = None
+        mul_8: "f32[2, 2]" = torch.ops.aten.mul.Tensor(add, mul_3);  mul_3 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_1 = torch.ops.streams.record_event.default(7, 3);  record_event_default_1 = None
+
+        # Annotation: {'stream': 2}
+        mul_1: "f32[2, 2]" = torch.ops.aten.mul.Tensor(ones, 2)
+        mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(mul_1, mul);  mul = None
+
+        # Annotation: {'stream': 3}
+        mul_9: "f32[2, 2]" = torch.ops.aten.mul.Tensor(add, mul_2);  add = mul_2 = None
+        mul_10: "f32[2, 2]" = torch.ops.aten.mul.Tensor(mul_9, ones);  mul_9 = None
+
+        # No stacktrace found for following nodes
+        wait_event_default_1 = torch.ops.streams.wait_event.default(7, 2);  wait_event_default_1 = None
+
+        # Annotation: {'stream': 2}
+        mul_11: "f32[2, 2]" = torch.ops.aten.mul.Tensor(mul_8, mul_1);  mul_1 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_5 = torch.ops.streams.record_event.default(11, 2);  record_event_default_5 = None
+        sync_dealloc_default_1 = torch.ops.streams.sync_dealloc.default(11, 3, mul_8);  mul_8 = sync_dealloc_default_1 = None
+        record_event_default_2 = torch.ops.streams.record_event.default(8, 2);  record_event_default_2 = None
+        wait_event_default_2 = torch.ops.streams.wait_event.default(8, 1);  wait_event_default_2 = None
+
+        # Annotation: {'stream': 1}
+        add_1: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_1, mul_11);  tangents_1 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_6 = torch.ops.streams.record_event.default(12, 1);  record_event_default_6 = None
+        sync_dealloc_default_2 = torch.ops.streams.sync_dealloc.default(12, 2, mul_11);  mul_11 = sync_dealloc_default_2 = None
+
+        # Annotation: {'stream': 1}
+        mul_12: "f32[2, 2]" = torch.ops.aten.mul.Tensor(add_1, ones);  add_1 = ones = None
+
+        # No stacktrace found for following nodes
+        record_event_default_3 = torch.ops.streams.record_event.default(9, 1);  record_event_default_3 = None
+        wait_event_default_3 = torch.ops.streams.wait_event.default(9, 3);  wait_event_default_3 = None
+
+        # Annotation: {'stream': 3}
+        add_2: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul_10, mul_12);  mul_10 = None
+
+        # No stacktrace found for following nodes
+        record_event_default_7 = torch.ops.streams.record_event.default(13, 3);  record_event_default_7 = None
+        sync_dealloc_default_3 = torch.ops.streams.sync_dealloc.default(13, 1, mul_12);  mul_12 = sync_dealloc_default_3 = None
+        return (add_2,)
+""",
+        )
+
+    @requires_cuda
+    def test_epilogue_copy_stream_tracking(self):
+        """
+        Test that epilogue copies for mutated inputs use the correct stream.
+        This verifies that ViewAndMutationMeta.mutated_inp_stream_indices is
+        properly populated and used at runtime.
+        Uses a custom autograd.Function where the backward mutates a saved
+        tensor on a specific stream.
+        """
+
+        class BwMutationWithStream(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x, y):
+                ctx.save_for_backward(x)
+                ctx.s1 = torch.Stream(device="cuda:0")
+                ctx.s2 = torch.Stream(device="cuda:0")
+                # Do computation on stream s2
+                with ctx.s2:
+                    result = x * 2 + y
+                return result
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                # Mutate saved tensor x on stream s1 in backward
+                with ctx.s1:
+                    x.mul_(2)
+                # Compute gradients on stream s2
+                with ctx.s2:
+                    grad_x = grad_output * 2
+                    grad_y = grad_output.clone()
+                return grad_x, grad_y, None, None
+
+        def fn(x, y):
+            result = BwMutationWithStream.apply(x, y)
+            return result
+
+        x = torch.ones(2, 2, requires_grad=True, device="cuda:0")
+        y = torch.ones(2, 2, requires_grad=True, device="cuda:0")
+        (
+            actual,
+            _,
+            fw_graphs,
+            bw_graphs,
+        ) = extract_graph(fn, x.clone(), y.clone())
+        self.assertEqual(len(fw_graphs), 1)
+        # Forward graph should show computation on stream 1 (s2)
+        self.assertExpectedInline(
+            print_graph(fw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[2, 2]", primals_2: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(primals_1, 2)
+        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(mul, primals_2);  primals_2 = None
+        return (add, primals_1, mul)
+""",
+        )
+        # Run backward and check that the epilogue copy uses stream 0 (s1)
+        actual.sum().backward()
+        # The backward graph should show:
+        # 1. Mutation happening on stream 0 (s1)
+        # 2. Gradient computation on stream 1 (s2)
+        # 3. Epilogue copy for the mutated tensor on stream 0 (s1)
+        self.assertExpectedInline(
+            print_graph(bw_graphs[0]),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[2, 2]", mul: "f32[2, 2]", tangents_1: "f32[2, 2]"):
+        # Annotation: {'stream': 1}
+        mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_1, 2)
+
+        # Annotation: {'stream': 1}
+        clone: "f32[2, 2]" = torch.ops.aten.clone.default(tangents_1);  tangents_1 = None
+
+        # No stacktrace found for following nodes
+        copy_: "f32[2, 2]" = torch.ops.aten.copy_.default(primals_1, mul);  primals_1 = mul = copy_ = None
+        return (mul_2, clone)
+""",
+        )
 
     @requires_cuda
     def test_inductor_lowering(self):

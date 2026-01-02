@@ -33,7 +33,7 @@ from .graph_capture_wrappers import (
     handle_effect_tokens_fn,
 )
 from .schemas import AOTConfig, FxValue, SubclassMeta, TraceFn, ViewAndMutationMeta
-from .streams import assign_backward_streams, insert_backward_syncs
+from .streams import assign_backward_streams, insert_backward_syncs, sync_deallocations
 from .utils import (
     call_and_expect_output_descs,
     copy_fwd_metadata_to_bw_nodes,
@@ -312,6 +312,9 @@ def aot_dispatch_base_graph(
                 include_stride=True,
                 include_device=True,
                 colored=True,
+                # For more expanded output (but can't default to this because it
+                # affects tests):
+                # expanded_def=True
             ),
         )
 
@@ -477,7 +480,12 @@ def aot_dispatch_autograd_graph(
     # After copying metadata, assign streams to gradient accumulation nodes
     assign_backward_streams(fx_g)
 
+    # Insert syncs for newly assigned backward streams
     insert_backward_syncs(fx_g)
+
+    # Sync deallocations for tensors where the stream w/ their last usage
+    # is distinct from their allocation strea
+    sync_deallocations(fx_g)
 
     fx_g.graph.eliminate_dead_code()
     if not aot_config.disable_functionalization:

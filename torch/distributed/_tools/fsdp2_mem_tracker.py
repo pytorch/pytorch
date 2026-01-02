@@ -2,7 +2,7 @@ from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, NamedTuple, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
@@ -162,7 +162,7 @@ class FSDPMemTracker(MemTracker):
     def __init__(
         self,
         mod: torch.nn.Module,
-        optm: Optional[torch.optim.Optimizer] = None,
+        optm: torch.optim.Optimizer | None = None,
     ) -> None:
         super().__init__()
         assert isinstance(mod, FSDPModule), "FSDPMemTracker only supports FSDP modules"
@@ -495,7 +495,7 @@ class FSDPMemTracker(MemTracker):
         tree_map_only(torch.Tensor, _track_inputs, inputs)
 
     def track_external(
-        self, *external: Union[nn.Module, optim.Optimizer, torch.Tensor]
+        self, *external: nn.Module | optim.Optimizer | torch.Tensor
     ) -> None:
         """This is no-op for ``FSDPMemTracker``"""
 

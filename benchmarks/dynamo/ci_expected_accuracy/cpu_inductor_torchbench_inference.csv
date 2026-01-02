@@ -74,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,pass,46
 
 
 
-detectron2_fcos_r_50_fpn,pass,24
+detectron2_fcos_r_50_fpn,pass,26
 
 
 
@@ -123,10 +123,6 @@ functorch_maml_omniglot,pass,0
 
 
 lennard_jones,pass,0
-
-
-
-llama,pass,0
 
 
 
@@ -235,10 +231,6 @@ speech_transformer,pass,10
 
 
 squeezenet1_1,pass,0
-
-
-
-stable_diffusion_unet,pass_due_to_skip,0
 
 
 

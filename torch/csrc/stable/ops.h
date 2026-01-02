@@ -64,8 +64,11 @@ inline torch::stable::Tensor narrow(
   return torch::stable::Tensor(ret0);
 }
 
+#if TORCH_FEATURE_VERSION < TORCH_VERSION_2_10_0
 // We expect this to be a stable version of the new_empty op that takes in
 // only dtype information.
+// This is gated to < 2.10 to avoid ambiguity with the full new_empty overload
+// in the 2.10+ block, which has the same first three parameters with defaults.
 inline torch::stable::Tensor new_empty(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef size,
@@ -105,6 +108,8 @@ inline torch::stable::Tensor new_empty(
 
 // We expect this to be a stable version of the new_zeros op that takes in
 // only dtype information.
+// This is gated to < 2.10 to avoid ambiguity with the full new_zeros overload
+// in the 2.10+ block, which has the same first three parameters with defaults.
 inline torch::stable::Tensor new_zeros(
     const torch::stable::Tensor& self,
     torch::headeronly::IntHeaderOnlyArrayRef size,
@@ -141,6 +146,7 @@ inline torch::stable::Tensor new_zeros(
 
   return torch::stable::Tensor(ath);
 }
+#endif // TORCH_FEATURE_VERSION < TORCH_VERSION_2_10_0
 
 // We expect this to be the stable version of the pad.default op.
 // pad.default takes in a SymInt[] as the pad argument however pad is typed as
@@ -289,6 +295,82 @@ inline torch::stable::Tensor flatten(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
+// We expect this to be the stable version of the unsqueeze op with identical
+// semantics to the existing unsqueeze op.
+inline torch::stable::Tensor unsqueeze(
+    const torch::stable::Tensor& self,
+    int64_t dim) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(dim)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::unsqueeze", "", stack.data(), TORCH_ABI_VERSION));
+#else
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::unsqueeze", "", stack.data()));
+#endif
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the squeeze.dim op with identical
+// semantics to the existing squeeze.dim op.
+inline torch::stable::Tensor squeeze(
+    const torch::stable::Tensor& self,
+    int64_t dim) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(dim)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::squeeze", "dim", stack.data(), TORCH_ABI_VERSION));
+#else
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::squeeze", "dim", stack.data()));
+#endif
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the select.int op with identical
+// semantics to the existing select.int op.
+// Note: index is typed as int64_t because SymInt is not yet header-only.
+inline torch::stable::Tensor select(
+    const torch::stable::Tensor& self,
+    int64_t dim,
+    int64_t index) {
+  const auto num_args = 3;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(index)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::select", "int", stack.data(), TORCH_ABI_VERSION));
+#else
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::select", "int", stack.data()));
+#endif
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the matmul op with identical
+// semantics to the existing matmul op.
+inline torch::stable::Tensor matmul(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self), torch::stable::detail::from(other)};
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::matmul", "", stack.data(), TORCH_ABI_VERSION));
+#else
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_call_dispatcher("aten::matmul", "", stack.data()));
+#endif
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 // New ops should be added here if they use a brand new shim API
@@ -379,6 +461,274 @@ inline torch::stable::Tensor view(
   return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
 }
 
-#endif
+inline torch::stable::Tensor from_blob(
+    void* data,
+    torch::headeronly::IntHeaderOnlyArrayRef sizes,
+    torch::headeronly::IntHeaderOnlyArrayRef strides,
+    torch::stable::Device device,
+    torch::headeronly::ScalarType dtype,
+    int64_t storage_offset = 0,
+    torch::headeronly::Layout layout = torch::headeronly::Layout::Strided) {
+  auto shim_dtype =
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(dtype));
+  auto shim_device_type = torch::stable::detail::to<int32_t>(
+      torch::stable::detail::from(device.type()));
+  auto shim_layout =
+      torch::stable::detail::to<int32_t>(torch::stable::detail::from(layout));
+  AtenTensorHandle ath;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_create_tensor_from_blob_v2(
+      data,
+      sizes.size(),
+      sizes.data(),
+      strides.data(),
+      storage_offset,
+      shim_dtype,
+      shim_device_type,
+      device.index(),
+      &ath,
+      shim_layout,
+      nullptr,
+      0));
+  return torch::stable::Tensor(ath);
+}
+
+// We expect this to be the stable version of the to.dtype_layout op.
+// This function is only available in 2.10 because it uses the stableivalue
+// conversion for torch::stable::Device, which is only available in 2.10.
+inline torch::stable::Tensor to(
+    const torch::stable::Tensor& self,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt,
+    bool non_blocking = false,
+    bool copy = false,
+    std::optional<torch::headeronly::MemoryFormat> memory_format =
+        std::nullopt) {
+  const auto num_args = 8;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(layout),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory),
+      torch::stable::detail::from(non_blocking),
+      torch::stable::detail::from(copy),
+      torch::stable::detail::from(memory_format)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::to", "dtype_layout", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// Convenience overload for to(device)
+// We add this for convenience since stable does not support .to(TensorOptions)
+inline torch::stable::Tensor to(
+    const torch::stable::Tensor& self,
+    torch::stable::Device device,
+    bool non_blocking = false,
+    bool copy = false) {
+  return to(
+      self,
+      std::nullopt,
+      std::nullopt,
+      device,
+      std::nullopt,
+      non_blocking,
+      copy,
+      std::nullopt);
+}
+
+// We expect this to be the stable version of the contiguous op.
+// This function is only available in 2.10 because it uses the stableivalue
+// conversion for MemoryFormat, which is only available in 2.10.
+// Contiguous is also a method on (non-stable Tensor), for now we only
+// support the function version.
+inline torch::stable::Tensor contiguous(
+    const torch::stable::Tensor& self,
+    torch::headeronly::MemoryFormat memory_format =
+        torch::headeronly::MemoryFormat::Contiguous) {
+  const auto num_args = 2;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(memory_format)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::contiguous", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the new_empty op with all kwargs.
+// This function is only available in 2.10 because it uses the stableivalue
+// conversion for Device, HeaderOnlyArrayRef, Layout which are only available
+// in 2.10. In versions < 2.10, a simpler new_empty overload that only takes
+// dtype is available instead.
+inline torch::stable::Tensor new_empty(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+  const auto num_args = 6;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(layout),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::new_empty", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the new_zeros op with all kwargs.
+// This function is only available in 2.10 because it uses the stableivalue
+// conversion for Device, HeaderOnlyArrayRef, Layout which are only available
+// in 2.10. In versions < 2.10, a simpler new_zeros overload that only takes
+// dtype is available instead.
+inline torch::stable::Tensor new_zeros(
+    const torch::stable::Tensor& self,
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+  const auto num_args = 6;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(size),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(layout),
+      torch::stable::detail::from(device),
+      torch::stable::detail::from(pin_memory)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::new_zeros", "", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the sum.dim_IntList op.
+// This function computes the sum of the input tensor along the specified
+// dimensions and returns a new tensor containing the result. This function is
+// only available in 2.10 because it uses the stableivalue conversion for
+// HeaderOnlyArrayRef<T>, which is only available in 2.10. The dim parameter is
+// optional - if not provided, sums over all dimensions.
+inline torch::stable::Tensor sum(
+    const torch::stable::Tensor& self,
+    std::optional<torch::headeronly::IntHeaderOnlyArrayRef> dim = std::nullopt,
+    bool keepdim = false,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt) {
+  const auto num_args = 4;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(keepdim),
+      torch::stable::detail::from(dtype)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::sum", "dim_IntList", stack.data(), TORCH_ABI_VERSION));
+  return torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+}
+
+// We expect this to be the stable version of the sum.IntList_out op.
+// This function takes an output tensor and computes the sum of the input tensor
+// along the specified dimensions. The output tensor is modified in-place and
+// returned. Following C++ convention, the out parameter comes first. This
+// function is only available in 2.10 because it uses the stableivalue
+// conversion for HeaderOnlyArrayRef<T>, which is only available in 2.10.
+inline torch::stable::Tensor& sum_out(
+    torch::stable::Tensor& out,
+    const torch::stable::Tensor& self,
+    std::optional<torch::headeronly::IntHeaderOnlyArrayRef> dim = std::nullopt,
+    bool keepdim = false,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt) {
+  const auto num_args = 5;
+  std::array<StableIValue, num_args> stack{
+      torch::stable::detail::from(self),
+      torch::stable::detail::from(dim),
+      torch::stable::detail::from(keepdim),
+      torch::stable::detail::from(dtype),
+      torch::stable::detail::from(out)};
+  TORCH_ERROR_CODE_CHECK(torch_call_dispatcher(
+      "aten::sum", "IntList_out", stack.data(), TORCH_ABI_VERSION));
+  // Clean up the handle in stack[0], discard the temporary
+  (void)torch::stable::detail::to<torch::stable::Tensor>(stack[0]);
+  return out;
+}
+
+// We expect this to be the stable version of the subtract.Tensor op.
+// Note: alpha is typed as double because the underlying C shim API
+// uses double for the Scalar parameter. We don't use torch_call_dispatcher
+// as the stableivalue conversion for Scalar is not yet available as of
+// 2.10
+inline torch::stable::Tensor subtract(
+    const torch::stable::Tensor& self,
+    const torch::stable::Tensor& other,
+    double alpha = 1.0) {
+  AtenTensorHandle ret0;
+  TORCH_ERROR_CODE_CHECK(
+      aoti_torch_aten_subtract_Tensor(self.get(), other.get(), alpha, &ret0));
+  return torch::stable::Tensor(ret0);
+}
+
+// We expect this to be the stable version of the full.default op.
+// Note: fill_value is typed as double because the underlying C shim API
+// uses double for the Scalar parameter. We don't use torch_call_dispatcher
+// as the stableivalue conversion for Scalar is not yet available as of
+// 2.10
+inline torch::stable::Tensor full(
+    torch::headeronly::IntHeaderOnlyArrayRef size,
+    double fill_value,
+    std::optional<torch::headeronly::ScalarType> dtype = std::nullopt,
+    std::optional<torch::headeronly::Layout> layout = std::nullopt,
+    std::optional<torch::stable::Device> device = std::nullopt,
+    std::optional<bool> pin_memory = std::nullopt) {
+  int32_t* dtype_ptr = nullptr;
+  int32_t dtype_val;
+  if (dtype.has_value()) {
+    dtype_val = torch::stable::detail::to<int32_t>(
+        torch::stable::detail::from(dtype.value()));
+    dtype_ptr = &dtype_val;
+  }
+
+  int32_t* layout_ptr = nullptr;
+  int32_t layout_val;
+  if (layout.has_value()) {
+    layout_val = torch::stable::detail::to<int32_t>(
+        torch::stable::detail::from(layout.value()));
+    layout_ptr = &layout_val;
+  }
+
+  int32_t* device_type_ptr = nullptr;
+  int32_t device_type_val;
+  int32_t device_index = 0;
+  if (device.has_value()) {
+    device_type_val = torch::stable::detail::to<int32_t>(
+        torch::stable::detail::from(device.value().type()));
+    device_type_ptr = &device_type_val;
+    device_index = device.value().index();
+  }
+
+  int32_t* pin_memory_ptr = nullptr;
+  int32_t pin_memory_val;
+  if (pin_memory.has_value()) {
+    pin_memory_val = pin_memory.value() ? 1 : 0;
+    pin_memory_ptr = &pin_memory_val;
+  }
+
+  AtenTensorHandle ret0;
+  TORCH_ERROR_CODE_CHECK(aoti_torch_aten_full(
+      size.data(),
+      static_cast<int64_t>(size.size()),
+      fill_value,
+      dtype_ptr,
+      layout_ptr,
+      device_type_ptr,
+      device_index,
+      pin_memory_ptr,
+      &ret0));
+
+  return torch::stable::Tensor(ret0);
+}
+
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
 HIDDEN_NAMESPACE_END(torch, stable)
