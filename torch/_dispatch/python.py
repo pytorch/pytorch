@@ -2,7 +2,7 @@ import itertools
 import unittest.mock
 from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
-from typing import TypeVar, Union
+from typing import Any, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
