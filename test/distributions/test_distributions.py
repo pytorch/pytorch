@@ -84,6 +84,7 @@ from torch.distributions import (
     RelaxedOneHotCategorical,
     StudentT,
     TransformedDistribution,
+    Tweedie,
     Uniform,
     VonMises,
     Weibull,
@@ -682,6 +683,26 @@ def _get_examples():
             ],
         ),
         Example(
+            Tweedie,
+            [
+                {
+                    "mu": torch.randn(2, 3).exp().requires_grad_(),
+                    "dispersion": torch.randn(2, 3).exp().requires_grad_(),
+                    "power": torch.tensor(1.5).expand(2, 3).requires_grad_(),
+                },
+                {
+                    "mu": torch.randn(1).exp().requires_grad_(),
+                    "dispersion": torch.randn(1).exp().requires_grad_(),
+                    "power": torch.tensor(1.5).requires_grad_(),
+                },
+                {
+                    "mu": torch.tensor(2.0),
+                    "dispersion": torch.tensor(1.0),
+                    "power": torch.tensor(1.5),
+                },
+            ],
+        ),
+        Example(
             Uniform,
             [
                 {
@@ -1137,6 +1158,31 @@ def _get_bad_examples():
                 {
                     "base_distribution": Normal(0, 1),
                     "transforms": [lambda x: x],
+                },
+            ],
+        ),
+        Example(
+            Tweedie,
+            [
+                {
+                    "mu": torch.tensor([-1.0], requires_grad=True),
+                    "dispersion": torch.tensor([1.0], requires_grad=True),
+                    "power": torch.tensor([1.5], requires_grad=True),
+                },
+                {
+                    "mu": torch.tensor([1.0], requires_grad=True),
+                    "dispersion": torch.tensor([0.0], requires_grad=True),
+                    "power": torch.tensor([1.5], requires_grad=True),
+                },
+                {
+                    "mu": torch.tensor([1.0], requires_grad=True),
+                    "dispersion": torch.tensor([1.0], requires_grad=True),
+                    "power": torch.tensor([0.5], requires_grad=True),
+                },
+                {
+                    "mu": torch.tensor([1.0], requires_grad=True),
+                    "dispersion": torch.tensor([1.0], requires_grad=True),
+                    "power": torch.tensor([2.5], requires_grad=True),
                 },
             ],
         ),
@@ -4536,6 +4582,7 @@ class TestDistributions(DistributionsTestCase):
             Multinomial,
             RelaxedBernoulli,
             RelaxedOneHotCategorical,
+            Tweedie,
         )
 
         for dist_cls, params in _get_examples():
@@ -5274,6 +5321,37 @@ class TestDistributionShapes(DistributionsTestCase):
         self.assertEqual(
             kumaraswamy.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3))
         )
+
+    def test_tweedie_shape_scalar_params(self):
+        tweedie = Tweedie(2.0, 1.0, 1.5)
+        self.assertEqual(tweedie._batch_shape, torch.Size())
+        self.assertEqual(tweedie._event_shape, torch.Size())
+        self.assertEqual(tweedie.sample().size(), torch.Size())
+        self.assertEqual(tweedie.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertEqual(tweedie.log_prob(self.scalar_sample).size(), torch.Size())
+        self.assertEqual(
+            tweedie.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2))
+        )
+        self.assertEqual(
+            tweedie.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3))
+        )
+
+
+    def test_tweedie_shape_tensor_params(self):
+        tweedie = Tweedie(
+            torch.tensor([2.0, 3.0]),
+            torch.tensor([1.0, 1.5]),
+            torch.tensor([1.5, 1.6])
+        )
+        self.assertEqual(tweedie._batch_shape, torch.Size((2,)))
+        self.assertEqual(tweedie._event_shape, torch.Size(()))
+        self.assertEqual(tweedie.sample().size(), torch.Size((2,)))
+        self.assertEqual(tweedie.sample((3, 2)).size(), torch.Size((3, 2, 2)))
+        self.assertEqual(
+            tweedie.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2))
+        )
+        self.assertRaises(ValueError, tweedie.log_prob, self.tensor_sample_2)
+        self.assertEqual(tweedie.log_prob(torch.ones(2, 1)).size(), torch.Size((2, 2)))
 
     def test_vonmises_shape_tensor_params(self):
         von_mises = VonMises(torch.tensor([0.0, 0.0]), torch.tensor([1.0, 1.0]))
