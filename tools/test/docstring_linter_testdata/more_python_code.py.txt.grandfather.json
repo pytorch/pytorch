@@ -1,12 +1,13 @@
 {
   "tools/test/docstring_linter_testdata/more_python_code.py.txt": {
-    "class LintInit": 6,
-    "def a_very_very_long()": 8
+    "class LintInit": 5,
+    "def a_very_very_long()": 6
   },
   "tools/test/docstring_linter_testdata/python_code.py.txt": {
-    "class LongWithShortDocstring": 6,
-    "class LongWithoutDocstring": 6,
-    "def ImpossibleCombo.needs_docs()": 12,
-    "def long_without_docstring()": 7
+    "class LongWithShortDocstring": 5,
+    "class LongWithoutDocstring": 5,
+    "class NotDocstring": 19,
+    "def ImpossibleCombo.needs_docs()": 11,
+    "def long_without_docstring()": 6
   }
 }

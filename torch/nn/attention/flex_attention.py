@@ -12,21 +12,10 @@ import warnings
 from collections.abc import Callable
 from enum import Enum
 from typing import Literal, NamedTuple, TypeAlias
+from typing_extensions import NotRequired, TypedDict
 
 import torch
 from torch import Tensor
-
-
-try:
-    from typing import TypedDict
-except ImportError:
-    from typing_extensions import TypedDict
-
-try:
-    from typing import NotRequired
-except ImportError:
-    from typing_extensions import NotRequired
-
 from torch._higher_order_ops.flex_attention import flex_attention as flex_attention_hop
 from torch._higher_order_ops.utils import setup_compilation_env
 from torch._prims_common import DeviceLikeType
@@ -1431,7 +1420,9 @@ def flex_attention(
     *,
     return_aux: AuxRequest | None = None,
 ) -> Tensor | tuple[Tensor, Tensor] | tuple[Tensor, AuxOutput]:
-    r"""This function implements scaled dot product attention with an arbitrary attention score modification function.
+    r"""This function implements scaled dot product attention with an arbitrary attention score modification function
+    described in the `Flex Attention <https://arxiv.org/abs/2412.05496>`_ paper. See also the
+    `blog post <https://pytorch.org/blog/flexattention/>`_.
 
     This function computes the scaled dot product attention between query, key, and value tensors with a user-defined
     attention score modification function. The attention score modification function will be applied after the attention
