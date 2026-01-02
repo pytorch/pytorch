@@ -1398,30 +1398,14 @@
     {
       "Gb_type": "Unsupported Tensor.backward() call",
       "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
-      "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
+      "Explanation": "Dynamo currently does not support tracing `Tensor.backward()` when trace_autograd_ops is off.",
       "Hints": [
-        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
-      ]
-    },
-    {
-      "Gb_type": "Unsupported Tensor.backward() call",
-      "Context": "call_method {self} backward {args} {kwargs}",
-      "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
-      "Hints": [
-        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+        "Set torch._dynamo.trace_autograd_ops=True"
       ]
     },
     {
       "Gb_type": "Unsupported Tensor.backward() call",
       "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
-      "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
-      "Hints": [
-        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
-      ]
-    },
-    {
-      "Gb_type": "Unsupported Tensor.backward() call",
-      "Context": "call_method {self} backward {args} {kwargs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
       "Hints": [
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."

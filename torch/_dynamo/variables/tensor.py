@@ -1161,8 +1161,8 @@ class TensorVariable(VariableTracker):
             unimplemented(
                 gb_type="Unsupported Tensor.backward() call",
                 context=f"call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
-                explanation="Dynamo currently does not support tracing `Tensor.backward()`.",
-                hints=[*graph_break_hints.FUNDAMENTAL],
+                explanation="Dynamo currently does not support tracing `Tensor.backward()` when trace_autograd_ops is off.",
+                hints=["Set torch._dynamo.trace_autograd_ops=True"],
             )
 
         if not self.requires_grad and not self.has_grad_fn:
