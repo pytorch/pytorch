@@ -24,24 +24,12 @@
 #if defined(__CUDACC__) || defined(__HIPCC__)
 template <typename scalar_t>
 inline C10_DEVICE scalar_t max_propagate_nan(scalar_t a, scalar_t b) {
-#if defined(__HIPCC__) && ROCM_VERSION < 60002
-  // Workaround for ROCm < 6.0.2 where std::max doesn't propagate NaN correctly
-  // See: https://github.com/ROCm/hip/issues/2209 (fixed in ROCm 6.0.2)
-  scalar_t max = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::max(a, b));
-#else
   scalar_t max = at::_isnan(b) ? b : std::max(a, b);
-#endif
   return max;
 }
 template <typename scalar_t>
 inline C10_DEVICE scalar_t min_propagate_nan(scalar_t a, scalar_t b) {
-#if defined(__HIPCC__) && ROCM_VERSION < 60002
-  // Workaround for ROCm < 6.0.2 where std::min doesn't propagate NaN correctly
-  // See: https://github.com/ROCm/hip/issues/2209 (fixed in ROCm 6.0.2)
-  scalar_t min = at::_isnan(a) ? a : (at::_isnan(b) ? b : std::min(a, b));
-#else
   scalar_t min = at::_isnan(b) ? b : std::min(a, b);
-#endif
   return min;
 }
 #define MAX(X, Y) max_propagate_nan(X,Y)
