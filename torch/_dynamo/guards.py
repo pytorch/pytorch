@@ -2079,11 +2079,8 @@ class GuardBuilder(GuardBuilderBase):
         """
 
         root: Source = source
-        while True:
-            base = getattr(root, "base", None)
-            if base is None:
-                break
-            root = base
+        while isinstance(root, ChainedSource) and root.base is not None:
+            root = root.base
 
         if not isinstance(root, LocalSource):
             return
@@ -2097,11 +2094,14 @@ class GuardBuilder(GuardBuilderBase):
             return
 
         local_name = root.local_name
+        if local_name in self.id_matched_objs:
+            # Already tracked for this builder; avoid allocating extra weakrefs.
+            return
         # IMPORTANT: this is cache-size accounting only. Do NOT call id_ref()
         # here, as it installs invalidation finalizers that would incorrectly
         # invalidate cache entries when module instances are freed.
         try:
-            weak_id: Optional[weakref.ref[object]] = weakref.ref(val)
+            weak_id: weakref.ref[object] | None = weakref.ref(val)
         except TypeError:
             weak_id = None
 
@@ -4111,7 +4111,10 @@ class CheckFunctionManager:
         # changing guard semantics or installing invalidation finalizers.
         try:
             self_obj = output_graph.local_scope.get("self", None)
-            if isinstance(self_obj, torch.nn.Module):
+            if (
+                isinstance(self_obj, torch.nn.Module)
+                and "self" not in builder.id_matched_objs
+            ):
                 builder.id_matched_objs["self"] = weakref.ref(self_obj)
         except TypeError:
             pass

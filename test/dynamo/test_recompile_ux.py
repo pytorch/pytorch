@@ -124,7 +124,15 @@ class RecompileUxTests(torch._dynamo.test_case.TestCase):
         keys = [1.0, 2.0, 3.0]
 
         torch._dynamo.reset()
-        with torch._dynamo.config.patch(recompile_limit=2, fail_on_recompile_limit_hit=True):
+        # Historically this pattern could hit `torch._dynamo.config.recompile_limit`:
+        # each `torch.compile(Module(key))` produces a distinct `nn.Module` instance,
+        # but guards may only reference module *attributes* (e.g. `self.key`) and lose
+        # provenance for per-module cache bucketing. That caused Dynamo to count cache
+        # entries against the global `recompile_limit` and eventually fall back.
+        with torch._dynamo.config.patch(
+            recompile_limit=2,
+            fail_on_recompile_limit_hit=True,
+        ):
             for key in keys:
                 model = torch.compile(Module(key), backend="eager")
                 model(x)
