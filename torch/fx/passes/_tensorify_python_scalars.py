@@ -267,14 +267,12 @@ def tensorify_python_scalars(
             # Look for functions to convert
 
             if node.op == "call_function" and (
-
                 replacement_op := SUPPORTED_OPS.get(node.target)
             ):
                 args: list[Any] = []
                 transform = False
 
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
-
 
                 for a in node.args:
                     if (
@@ -312,7 +310,6 @@ def tensorify_python_scalars(
                 if transform:
                     replacement_proxy = replacement_op(*args)
 
-
                     if compute_dtype != node.meta["val"].dtype:
                         replacement_proxy = (
                             torch.ops.prims.convert_element_type.default(
@@ -320,7 +317,6 @@ def tensorify_python_scalars(
                                 node.meta["val"].dtype,
                             )
                         )
-
 
                     node.replace_all_uses_with(replacement_proxy.node)
 
@@ -332,14 +328,12 @@ def tensorify_python_scalars(
                             "tensorify_float_success", True, overwrite=True
                         )
             else:
-
                 for a in node.args:
                     if (
                         isinstance(a, fx.Node)
                         and "val" in a.meta
                         and isinstance(zf := a.meta["val"], torch.SymFloat)
                     ):
-
                         failed_tensorify_ops.update(str(node.target))
 
                         log.info("Failed to tensorify %s", str(node.target))

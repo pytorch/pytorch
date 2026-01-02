@@ -842,7 +842,6 @@ class Node(_NodeBase):
             for replace_hook in m._replace_hooks:
                 replace_hook(old=old_input, new=new_input.name, user=self)
 
-
         self._replace_input_with(old_input, new_input)
 
     def _rename(self, candidate: str) -> None:

@@ -167,7 +167,6 @@ class CodeId:
 @dataclasses.dataclass
 class CodeState:
     automatic_dynamic: defaultdict[str, FrameStateSizeEntry] = dataclasses.field(
-
         default_factory=lambda: defaultdict(FrameStateSizeEntry)
     )
 

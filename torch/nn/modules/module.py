@@ -992,7 +992,6 @@ class Module:
                     ) from e
                 out_param = param
             elif p_should_use_set_data:
-
                 param.data = param_applied
                 out_param = param
             else:
@@ -1339,7 +1338,6 @@ class Module:
 
         """
         device, dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(
-
             *args,
             **kwargs,
         )

@@ -3839,7 +3839,6 @@ class InstructionTranslatorBase(
                 args = [contents[1]]
 
         if kw_names:
-
             args = args + contents[2 : -len(kw_names)]
 
             kwargs_list = contents[-len(kw_names) :]
@@ -4839,7 +4838,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # trace through.
             if (
                 hasattr(getattr(func, "fn", None), "_origin")
-
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4915,7 +4913,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         sub_locals = None
         try:
-
             sub_locals = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             unimplemented(

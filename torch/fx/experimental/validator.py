@@ -181,7 +181,6 @@ try:
             return x if x.is_int() else z3.ToInt(x)
 
         def sym_sum(self, args: z3.ArithRef) -> z3.ArithRef:
-
             return sum(args)
 
         # Implements Python division semantics.

@@ -96,7 +96,6 @@ class GroupNormPerSampleGrad(torch.autograd.Function):
                 weight,
                 lambda _: torch.einsum(
                     "ni...->ni",
-
                     F.group_norm(input, num_groups, eps=eps) * grad_output,
                 ),
             )

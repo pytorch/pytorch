@@ -12,7 +12,6 @@ from ..decorators import substitute_in_graph
 __all__ = ["extract_tb", "clear_frames"]
 
 
-
 @substitute_in_graph(traceback.extract_tb, can_constant_fold_through=True)
 def extract_tb(tb, limit=None):
     if tb is None:
@@ -31,7 +30,6 @@ def extract_tb(tb, limit=None):
             frame_summary.append(tb.frame_summary)  # pyrefly: ignore[missing-attribute]
         tb = tb.tb_next
     return frame_summary
-
 
 
 @substitute_in_graph(traceback.clear_frames, can_constant_fold_through=True)
