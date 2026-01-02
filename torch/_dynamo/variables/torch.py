@@ -1629,10 +1629,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             3. If consumed: raise AutogradGradRestartAnalysis, set speculation flag
             4. Retry: speculation flag causes graph break AT autograd.grad
             """
-            from .. import compiled_autograd
+            from .. import compiled_autograd, config
             from .builder import wrap_fx_proxy
             from .constant import ConstantVariable
             from .tensor import TensorVariable
+
+            if not config.trace_autograd_ops:
+                unimplemented(
+                    gb_type="using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
+                    context=f"trace_autograd_ops={config.trace_autograd_ops}",
+                    explanation=(
+                        "Attempted to call `torch.autograd.grad` with config "
+                        "`torch._dynamo.config.trace_autograd_ops` set to `False`."
+                    ),
+                    hints=[
+                        "Change `torch._dynamo.config.trace_autograd_ops` to `True`.",
+                    ],
+                )
 
             # Graph break if we detected on a previous attempt that autograd.grad
             # consumed grad_fns of returned tensors. This gives better compile

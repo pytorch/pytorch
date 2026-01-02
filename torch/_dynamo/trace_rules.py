@@ -3966,9 +3966,6 @@ def _lookup_inner(
     if obj is not None:
         if is_aten_op_or_tensor_method(obj):
             return TorchInGraphFunctionVariable
-        # Check config at runtime for torch.autograd.grad and torch.autograd.backward
-        if not config.trace_autograd_ops and obj in (torch.autograd.grad,):
-            return SkipFunctionVariable
         rule = get_torch_obj_rule_map().get(obj, None)
         if rule is not None:
             if reasons is not None:
