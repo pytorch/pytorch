@@ -851,6 +851,10 @@ combo_kernel_max_num_args = 250
 # This prevents grid waste when sub-kernels have vastly different y dim.
 combo_kernel_max_ynumel_ratio = 16
 
+# Maximum allowed ratio between largest and smallest xnumel in a combo kernel.
+# Prevents fusing kernels with vastly different X dimensions.
+combo_kernel_max_xnumel_ratio = 256
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
