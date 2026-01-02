@@ -273,6 +273,24 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
 
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch("combo_kernel_reduction_saturation_threshold", 64)
+    def test_combo_kernel_reduction_saturation(self):
+        def fn(a, b):
+            r1 = a.sum(dim=2)
+            r2 = b.sum(dim=2)
+            return r1, r2
+
+        inps = [
+            torch.randn(96, 1024, 128, device="cuda", dtype=torch.float16),
+            torch.randn(96, 1024, 128, device="cuda", dtype=torch.float16),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+
 
 @instantiate_parametrized_tests
 class ComboKernelBenchmarkTests(TestCase):
