@@ -13,6 +13,7 @@ from torch.utils._pallas import has_tpu_pallas
 from torch.utils._sympy.functions import ModularIndexing
 
 from .. import config
+from ..ir import ComputedBuffer
 from ..runtime.runtime_utils import torch_dtype_to_jax
 from ..utils import get_fused_kernel_name, get_kernel_metadata
 from ..virtualized import V
@@ -1182,7 +1183,12 @@ class PallasKernel(SIMDKernel):
         if size0 != size1:
             return size0 == expected_cols and size1 == expected_rows
 
-        # For square buffers: check if index coefficients indicate transposed access
+        # For square buffers: only transpose if output is also column-major
+        # This distinguishes actual transpose operations from broadcasting
+        output_is_column_major = self._has_column_major_output()
+        if not output_is_column_major:
+            return False
+
         first_var = var_items[0][0]
         second_var = var_items[1][0]
         index = V.graph.sizevars.simplify(index)
@@ -1224,7 +1230,6 @@ class PallasKernel(SIMDKernel):
     def _has_column_major_output(self) -> bool:
         """Check if any output buffer has column-major stride layout."""
         output_buffers = getattr(self.args, "output_buffers", {})
-        # output_buffers maps buffer_name -> param_name, we need buffer_name
         for buf_name in output_buffers:
             out_buf = V.graph.get_buffer(buf_name)
             if out_buf is None:
@@ -1239,6 +1244,23 @@ class PallasKernel(SIMDKernel):
             out_s1 = self._safe_int(out_stride[1])
             if out_s0 is not None and out_s1 is not None and out_s0 < out_s1:
                 return True
+
+        # Also check graph buffers (output_buffers may not be populated during load)
+        for buf_name in V.graph.name_to_buffer:
+            out_buf = V.graph.get_buffer(buf_name)
+            if out_buf is None or not isinstance(out_buf, ComputedBuffer):
+                continue
+            layout = getattr(out_buf, "get_layout", lambda: None)()
+            if layout is None:
+                continue
+            out_stride = getattr(layout, "stride", None)
+            if out_stride is None or len(out_stride) < 2:
+                continue
+            out_s0 = self._safe_int(out_stride[0])
+            out_s1 = self._safe_int(out_stride[1])
+            if out_s0 is not None and out_s1 is not None and out_s0 < out_s1:
+                return True
+
         return False
 
     def _get_index_expr(self, index: sympy.Expr) -> tuple[str, bool]:
