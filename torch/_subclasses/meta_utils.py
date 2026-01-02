@@ -971,7 +971,7 @@ class MetaConverter(Generic[_TensorT]):
 
                     # NB: Currently we only allocate new symbols at the same places
                     # as the old shape environment, but we do not preserve all the
-                    # axioms/replacements/etc in the old shape enviornment. This is fine
+                    # axioms/replacements/etc in the old shape environment. This is fine
                     # in the cross compilation use case since we use the fake mode to
                     # construct native tensors (eg. cuda) on a box without devices.
                     t_size = tuple(
@@ -1932,6 +1932,7 @@ class MetaConverter(Generic[_TensorT]):
         # when source is not None.  Because we refakify after Dynamo is done,
         # we don't want to dump info again from AOTAutograd, it is redundant.
         trace: bool = True,
+        fake_mode: Optional[FakeTensorMode] = None,
     ) -> _TensorT:
         callback_: _MetaTensorCallback[_TensorT]
         if callback is None:
@@ -1999,6 +2000,10 @@ class MetaConverter(Generic[_TensorT]):
                 exit_stack.enter_context(
                     torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack()
                 )
+            # Enter the fake mode if provided. This ensures the correct fake mode
+            # is active when creating symbolic shapes during cross-compilation.
+            if fake_mode is not None:
+                exit_stack.enter_context(fake_mode)
 
             r = self.meta_tensor(
                 t_desc,

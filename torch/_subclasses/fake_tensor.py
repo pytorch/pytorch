@@ -412,18 +412,15 @@ class FakeTensorConverter:
                     constant=constant,
                 )
 
-        # Ensure the correct fake_mode is active during meta_converter processing.
-        # Without this we can sometimes end up using a different fake mode than the
-        # one that contains this instance of FakeTensorConverter.
-        with fake_mode:
-            out = self.meta_converter(
-                t,
-                shape_env=shape_env,
-                callback=mk_fake_tensor,
-                source=source,
-                symbolic_context=symbolic_context,
-                trace=trace,
-            )
+        out = self.meta_converter(
+            t,
+            shape_env=shape_env,
+            callback=mk_fake_tensor,
+            source=source,
+            symbolic_context=symbolic_context,
+            trace=trace,
+            fake_mode=fake_mode,
+        )
         if out is NotImplemented:
             raise UnsupportedFakeTensorException("meta converter nyi")
 
