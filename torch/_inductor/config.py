@@ -867,6 +867,10 @@ combo_kernel_max_ynumel_ratio = 16
 # Prevents fusing kernels with vastly different X dimensions.
 combo_kernel_max_xnumel_ratio = 256
 
+# Reductions with estimated grid (xnumel // 64) > this threshold are
+# excluded from combo kernels to allow optimal individual autotuning.
+combo_kernel_reduction_saturation_threshold = 64
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
