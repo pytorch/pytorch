@@ -659,7 +659,7 @@ class Partitioner:
                 find_combination, partitions = find_partition_to_combine_based_on_size(
                     sorted_partitions,
                     available_mem_bytes,
-                    # pyrefly: ignore [bad-argument-type]
+
                     partitions,
                 )
             return

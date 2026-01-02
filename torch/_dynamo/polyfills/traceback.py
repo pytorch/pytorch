@@ -12,7 +12,7 @@ from ..decorators import substitute_in_graph
 __all__ = ["extract_tb", "clear_frames"]
 
 
-# pyrefly: ignore [bad-argument-type]
+
 @substitute_in_graph(traceback.extract_tb, can_constant_fold_through=True)
 def extract_tb(tb, limit=None):
     if tb is None:
@@ -33,7 +33,7 @@ def extract_tb(tb, limit=None):
     return frame_summary
 
 
-# pyrefly: ignore [bad-argument-type]
+
 @substitute_in_graph(traceback.clear_frames, can_constant_fold_through=True)
 def clear_frames(tb):
     # no-op

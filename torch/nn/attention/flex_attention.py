@@ -71,7 +71,7 @@ _mask_mod_signature = Callable[[Tensor, Tensor, Tensor, Tensor], Tensor]
 _Backend: TypeAlias = Literal["AUTO", "TRITON", "FLASH", "TRITON_DECODE"]
 
 
-# pyrefly: ignore [invalid-inheritance]
+
 class FlexKernelOptions(TypedDict, total=False):
     """Options for controlling the behavior of FlexAttention kernels.
 
@@ -115,97 +115,97 @@ class FlexKernelOptions(TypedDict, total=False):
     """
 
     # Performance tuning options
-    # pyrefly: ignore [invalid-annotation]
+
     num_warps: NotRequired[int]
     """Number of warps to use in the CUDA kernel. Higher values may improve performance
     but increase register pressure. Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     num_stages: NotRequired[int]
     """Number of pipeline stages in the CUDA kernel. Higher values may improve performance
     but increase shared memory usage. Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     BLOCK_M: NotRequired[int]
     """Thread block size for the sequence length dimension of Q in forward pass.
     Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     BLOCK_N: NotRequired[int]
     """Thread block size for the sequence length dimension of K/V in forward pass.
     Must be a power of 2. Common values: 16, 32, 64, 128. Default is determined by autotuning."""
 
     # Backward-specific block sizes (when prefixed with 'bwd_')
-    # pyrefly: ignore [invalid-annotation]
+
     BLOCK_M1: NotRequired[int]
     """Thread block size for Q dimension in backward pass. Use as 'bwd_BLOCK_M1'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     BLOCK_N1: NotRequired[int]
     """Thread block size for K/V dimension in backward pass. Use as 'bwd_BLOCK_N1'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     BLOCK_M2: NotRequired[int]
     """Thread block size for second Q dimension in backward pass. Use as 'bwd_BLOCK_M2'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     BLOCK_N2: NotRequired[int]
     """Thread block size for second K/V dimension in backward pass. Use as 'bwd_BLOCK_N2'.
     Default is determined by autotuning."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     PRESCALE_QK: NotRequired[bool]
     """Whether to pre-scale QK by 1/sqrt(d) and change of base. This is slightly faster but
     may have more numerical error. Default: False."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     ROWS_GUARANTEED_SAFE: NotRequired[bool]
     """If True, guarantees that at least one value in each row is not masked out.
     Allows skipping safety checks for better performance. Only set this if you are certain
     your mask guarantees this property. For example, causal attention is guaranteed safe
     because each query has at least 1 key-value to attend to. Default: False."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     BLOCKS_ARE_CONTIGUOUS: NotRequired[bool]
     """If True, guarantees that all blocks in the mask are contiguous.
     Allows optimizing block traversal. For example, causal masks would satisfy this,
     but prefix_lm + sliding window would not. Default: False."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     WRITE_DQ: NotRequired[bool]
     """Controls whether gradient scatters are done in the DQ iteration loop of the backward pass.
     Setting this to False will force this to happen in the DK loop which depending on your
     specific score_mod and mask_mod might be faster. Default: True."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     FORCE_USE_FLEX_ATTENTION: NotRequired[bool]
     """If True, forces the use of the flex attention kernel instead of potentially using
     the more optimized flex-decoding kernel for short sequences. This can be a helpful
     option for debugging. Default: False."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     USE_TMA: NotRequired[bool]
     """Whether to use Tensor Memory Accelerator (TMA) on supported hardware.
     This is experimental and may not work on all hardware, currently specific
     to NVIDIA GPUs Hopper+. Default: False."""
 
     # ROCm-specific options
-    # pyrefly: ignore [invalid-annotation]
+
     kpack: NotRequired[int]
     """ROCm-specific kernel packing parameter."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     matrix_instr_nonkdim: NotRequired[int]
     """ROCm-specific matrix instruction non-K dimension."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     waves_per_eu: NotRequired[int]
     """ROCm-specific waves per execution unit."""
 
-    # pyrefly: ignore [invalid-annotation]
+
     BACKEND: NotRequired[_Backend]
     """Selects a specific kernel backend.
 

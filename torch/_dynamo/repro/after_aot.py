@@ -419,7 +419,7 @@ if "__compile_source__" in globals():
                 # pyrefly: ignore [missing-attribute]
                 kernel._fn_name
                 if isinstance(kernel, JITFunction)
-                # pyrefly: ignore [missing-attribute]
+
                 else kernel.fn._fn_name
             )
             fn_name = fn_name.split(".")[-1]
@@ -457,7 +457,7 @@ if "__compile_source__" in globals():
             writer.unsupported(placeholder, arg)
 
         # Extract symbolic variables from the same arguments
-        # pyrefly: ignore [unbound-name]
+
         if (
             # pyrefly: ignore [unbound-name]
             isinstance(arg, torch.SymInt)
@@ -471,7 +471,7 @@ if "__compile_source__" in globals():
         elif isinstance(arg, torch.Tensor):
             # Extract symbolic variables from tensor shapes and strides
             for dim in arg.shape:
-                # pyrefly: ignore [unbound-name]
+
                 if (
                     # pyrefly: ignore [unbound-name]
                     isinstance(dim, torch.SymInt)
@@ -480,7 +480,7 @@ if "__compile_source__" in globals():
                 ):
                     used_syms[str(dim.node)] = dim.node.hint
             for stride in arg.stride():
-                # pyrefly: ignore [unbound-name]
+
                 if (
                     # pyrefly: ignore [unbound-name]
                     isinstance(stride, torch.SymInt)
