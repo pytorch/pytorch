@@ -392,7 +392,6 @@ class FSDPMemTracker(MemTracker):
                 if fsdp_param_group := fsdp_state._fsdp_param_group:
                     self._instrument_fsdp_sharded_params_grads(fsdp_param_group)
                     fsdp_state._pre_forward_hook_handle = (
-
                         module.register_forward_pre_hook(
                             self._fsdp_state_pre_forward(
                                 module, fsdp_state._pre_forward
@@ -419,7 +418,6 @@ class FSDPMemTracker(MemTracker):
                             module, fsdp_param_group.post_backward
                         )
                     )
-
 
         for buffer in self._root_mod.buffers():
             self._update_and_maybe_create_winfos(

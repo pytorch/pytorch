@@ -425,9 +425,7 @@ def _handle_row_wise_sharding(
         else:
             split_sizes = torch.cat(
                 (
-
                     offsets[1 : offsets.size(0)] - offsets[0:-1],
-
                     (input.size(0) - offsets[-1]).unsqueeze(0),
                 ),
                 dim=-1,

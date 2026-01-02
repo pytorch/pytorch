@@ -232,9 +232,7 @@ class MemoryTracker:
         def _pre_forward_hook(module: nn.Module, inputs: Any) -> None:
             self._cur_module_name = f"{name}.forward"
             if (
-
                 hasattr(module, "_memory_tracker_is_root")
-
                 and module._memory_tracker_is_root
             ):
                 self._add_marker("fw_start")
@@ -250,9 +248,7 @@ class MemoryTracker:
             outputs: Sequence[torch.Tensor],
         ) -> None:
             if (
-
                 hasattr(module, "_memory_tracker_is_root")
-
                 and module._memory_tracker_is_root
             ):
                 self._add_marker("fw_bw_boundary")

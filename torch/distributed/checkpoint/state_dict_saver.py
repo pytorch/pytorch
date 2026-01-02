@@ -330,7 +330,6 @@ def async_save(
     upload_future: Future = upload_executor.execute_save(
         staging_future_or_state_dict,
         checkpoint_id=checkpoint_id,
-
         storage_writer=storage_writer,
         planner=planner,
         process_group=process_group,
