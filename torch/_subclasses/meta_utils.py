@@ -965,8 +965,7 @@ class MetaConverter(Generic[_TensorT]):
                         or is_symbolic(t.storage_offset)
                     )
 
-                    if not has_symbolic:
-                        # The tensor is static, preserve it as static
+                    if not has_symbolic and symbolic_context is None:
                         return (t.size, t.stride, t.storage_offset)
 
                     # NB: Currently we only allocate new symbols at the same places
