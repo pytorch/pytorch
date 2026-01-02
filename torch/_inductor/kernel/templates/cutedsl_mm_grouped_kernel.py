@@ -2225,3 +2225,10 @@ class Sm100GroupedBlockScaledGemmKernel:
                     )
             if bidx == 0:
                 output_total_num_clusters[0] = total_num_clusters
+
+    # Size of smem we reserved for mbarrier, tensor memory management and tensormap update
+    reserved_smem_bytes = 1024
+    bytes_per_tensormap = 128
+    num_tensormaps = 5
+    # size of smem used for tensor memory management
+    tensor_memory_management_bytes = 12
