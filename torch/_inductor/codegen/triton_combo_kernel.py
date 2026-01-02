@@ -98,6 +98,47 @@ def _partition_by_ynumel_ratio(
     return partitions
 
 
+def _partition_by_xnumel_ratio(
+    nodes: list[BaseSchedulerNode],
+    node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
+    max_ratio: float,
+) -> list[list[BaseSchedulerNode]]:
+    """
+    Partition nodes so that xnumel ratio within each group <= max_ratio.
+    Prevents fusing kernels with vastly different X dimensions / total work.
+    """
+    if len(nodes) <= 1 or max_ratio <= 0:
+        return [nodes] if nodes else []
+
+    def get_xnumel(node: BaseSchedulerNode) -> int:
+        _, tiled_groups, _, _ = node_info_map[node]
+        if "x" in tiled_groups:
+            x_elem = tiled_groups["x"]
+            if V.graph.sizevars.shape_env.has_hint(x_elem):
+                return V.graph.sizevars.size_hint(x_elem)
+        return 1
+
+    sorted_nodes = sorted(nodes, key=get_xnumel)
+
+    partitions: list[list[BaseSchedulerNode]] = []
+    current_partition: list[BaseSchedulerNode] = [sorted_nodes[0]]
+    current_min = get_xnumel(sorted_nodes[0])
+
+    for node in sorted_nodes[1:]:
+        node_xnumel = get_xnumel(node)
+        if node_xnumel / max(current_min, 1) > max_ratio:
+            partitions.append(current_partition)
+            current_partition = [node]
+            current_min = node_xnumel
+        else:
+            current_partition.append(node)
+
+    if current_partition:
+        partitions.append(current_partition)
+
+    return partitions
+
+
 def _default_custom_combo_kernel_horizontal_partition(
     nodes: list[BaseSchedulerNode],
     triton_scheduling: SIMDScheduling,
@@ -172,14 +213,35 @@ def _default_custom_combo_kernel_horizontal_partition(
             not_reduction = [n for n in not_reduction if n not in large_pointwise]
             nodes_per_ndim.extend([node] for node in large_pointwise)
 
-        # Partition not_reduction by Y-numel ratio to prevent grid waste
-        if config.combo_kernel_max_ynumel_ratio > 0 and not_reduction:
-            not_reduction_partitions = _partition_by_ynumel_ratio(
-                not_reduction, node_info_map, config.combo_kernel_max_ynumel_ratio
-            )
-            nodes_per_ndim.extend(not_reduction_partitions)
-        elif not_reduction:
-            nodes_per_ndim.append(not_reduction)
+        # Partition not_reduction by ynumel and xnumel ratio
+        if not_reduction:
+            partitions = [not_reduction]
+
+            if config.combo_kernel_max_ynumel_ratio > 0:
+                new_partitions = []
+                for partition in partitions:
+                    new_partitions.extend(
+                        _partition_by_ynumel_ratio(
+                            partition,
+                            node_info_map,
+                            config.combo_kernel_max_ynumel_ratio,
+                        )
+                    )
+                partitions = new_partitions
+
+            if config.combo_kernel_max_xnumel_ratio > 0:
+                new_partitions = []
+                for partition in partitions:
+                    new_partitions.extend(
+                        _partition_by_xnumel_ratio(
+                            partition,
+                            node_info_map,
+                            config.combo_kernel_max_xnumel_ratio,
+                        )
+                    )
+                partitions = new_partitions
+
+            nodes_per_ndim.extend(partitions)
 
         # Add reduction partitions as before
         nodes_per_ndim.extend(g for g in (short_reduction, long_reduction) if g)
