@@ -1370,6 +1370,16 @@
       "Hints": []
     }
   ],
+  "GB9186": [
+    {
+      "Gb_type": "using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
+      "Context": "trace_autograd_ops={config.trace_autograd_ops}",
+      "Explanation": "Attempted to call `torch.autograd.grad` with config `torch._dynamo.config.trace_autograd_ops` set to `False`.",
+      "Hints": [
+        "Change `torch._dynamo.config.trace_autograd_ops` to `True`."
+      ]
+    }
+  ],
   "GB0128": [
     {
       "Gb_type": "Unsupported Tensor.set_() call",

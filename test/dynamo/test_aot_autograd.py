@@ -337,7 +337,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         self.assertTrue(failure_reason is None)
 
     @torch._dynamo.config.patch(trace_autograd_ops=True)
-    def test_double_backward_errors(self):
+    def test_double_backward_with_compile(self):
         # Remove this test after we get double backward to actually work
         for grad_output in (torch.tensor(1.0, requires_grad=True), None):
             x = torch.tensor(1.0, requires_grad=True)
