@@ -1306,7 +1306,13 @@ void triangular_solve_out_sparse_csr(
               descX.descriptor(),
               compute_type,
               CUSPARSE_SPSM_ALG_DEFAULT,
-              desc_spsm.descriptor()));
+#ifdef USE_ROCM
+              desc_spsm.descriptor(),
+              nullptr
+#else
+              desc_spsm.descriptor()
+#endif
+            ));
         });
   }
   if (!X.is_same(*X_)) {
