@@ -153,9 +153,8 @@ def dict___eq__(d: dict[T, U], other: dict[T, U]) -> bool:
 def set_symmetric_difference(
     set1: Iterable[T],
     set2: Iterable[T],
-    # pyrefly: ignore[bad-function-definition]
-    cls: type[C] = set,
-) -> C:
+    cls: type[Any] = set,
+) -> Any:
     symmetric_difference_set: set[T] = set()
     for x in set1:
         if x not in set2:
@@ -188,9 +187,9 @@ def set_isdisjoint(set1: set[T], set2: set[T]) -> bool:
 def set_intersection(
     set1: set[T],
     *others: Iterable[T],
-    # pyrefly: ignore[bad-function-definition]
-    cls: type[C] = set,
-) -> C | set[T]:
+    # See facebook/pyrefly#1496 - leave generic
+    cls: type[Any] = set,
+) -> Any:
     if len(others) == 0:
         return set1.copy()
 
@@ -258,9 +257,8 @@ def set_update(set1: set[T], *others: Iterable[T]) -> set[T]:
 def set_difference(
     set1: set[T],
     *others: Iterable[T],
-    # pyrefly: ignore[bad-function-definition]
-    cls: type[C] = set,
-) -> C | set[T]:
+    cls: type[Any] = set,
+) -> Any:
     if len(others) == 0:
         return set1.copy()
 
@@ -305,7 +303,7 @@ def assert_sequence_equal(
     seq1: Sequence[T],
     seq2: Sequence[T],
     msg: str | None = None,
-    seq_type: type | None = None,
+    seq_type: type[Any] | None = None,
 ) -> None:
     return self_.assertTrue(seq1 == seq2, msg)
 

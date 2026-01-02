@@ -4593,8 +4593,6 @@ class InstructionTranslator(InstructionTranslatorBase):
                         local_dynamism = frozenset(dynamism.get(name, {}).items())
                     var = LazyVariableTracker.create(
                         value,
-                        # NOTE: pyrefly currently has issue with init for frozen
-                        # dataclass, so ignore these errors
                         LocalSource(
                             name,
                             is_input=True,

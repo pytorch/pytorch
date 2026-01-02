@@ -83,7 +83,7 @@ class DistributedVariable(VariableTracker):
 
     def is_python_equal(self, other: object) -> bool:
         return (
-            isinstance(other, DistributedVariable)
+            isinstance(other, VariableTracker)
             and self.as_python_constant() == other.as_python_constant()
         )
 
