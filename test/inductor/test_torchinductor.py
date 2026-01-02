@@ -4799,6 +4799,20 @@ class CommonTemplate:
 
         self.common(ConvModel(), (torch.randn([32, 100, 1]),), check_lowp=False)
 
+    def test_conv1d_grouped_with_transpose(self):
+        # fix https://github.com/pytorch/pytorch/issues/158930
+        class TransposeConv(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = nn.Conv1d(1024, 1024, kernel_size=3, groups=1024, padding=2)
+
+            def forward(self, x):
+                x = x.transpose(1, 2)
+                x = self.conv(x)[..., :1]
+                return x
+
+        self.common(TransposeConv(), (torch.randn([32, 1, 1024]),), check_lowp=False)
+
     def test_conv1d_depthwise(self):
         class ConvModel(nn.Module):
             def __init__(self):
