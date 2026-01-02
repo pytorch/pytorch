@@ -253,6 +253,24 @@
       ]
     }
   ],
+  "GB7054": [
+    {
+      "Gb_type": "backward() with non-leaf tensor",
+      "Context": "backward(inputs=[...]) with non-leaf tensor",
+      "Explanation": "backward(inputs=[...]) with non-leaf tensors is not yet supported.",
+      "Hints": [
+        "Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"
+      ]
+    },
+    {
+      "Gb_type": "backward() with non-leaf tensor",
+      "Context": "backward() with non-leaf tensor in inputs",
+      "Explanation": "Dynamo cannot trace backward() with non-leaf tensors. Non-leaf tensors require retain_grad() which is not yet supported.",
+      "Hints": [
+        "Only use leaf tensors (parameters, inputs without grad_fn) for backward"
+      ]
+    }
+  ],
   "GB0026": [
     {
       "Gb_type": "Calling subclass default constructor with more than tensor argument",

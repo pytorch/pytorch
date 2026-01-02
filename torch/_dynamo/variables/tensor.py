@@ -1074,58 +1074,80 @@ class TensorVariable(VariableTracker):
         out = tolist(tensor, self.as_proxy())
         return VariableTracker.build(tx, out)
 
-    def _collect_backward_inputs(self, vars_iter, error_on_non_leaf):
+    def _collect_backward_inputs(self, vars_iter, error_on_non_leaf=False):
         """
-        Collect unique leaf tensors from an iterable of variables for backward.
+        Collect unique leaf tensors from vars_iter for backward.
 
-        Only collects leaf tensors (no grad_fn) since non-leaf tensors require
-        retain_grad() support which is not yet implemented.
-
-        Args:
-            vars_iter: Iterable of variables to collect from
-            error_on_non_leaf: If True, graph break when non-leaf tensor is found
+        Only collects leaf tensors (no grad_fn). Non-leaf tensors are skipped
+        (or error if error_on_non_leaf=True) since the accumulate_grad polyfill
+        cannot handle .grad access on non-leaf tensors.
 
         Deduplicates by proxy.node.
-        Returns list of (original_index, var) tuples.
+        Returns list of unique leaf tensor variables.
         """
+        from ..source import SyntheticLocalSource
+
         result = []
         seen_nodes: set = set()
-        for i, var in enumerate(vars_iter):
+        for var in vars_iter:
             if isinstance(var, TensorVariable) and var.requires_grad:
                 if var.has_grad_fn:
                     if error_on_non_leaf:
                         unimplemented(
-                            gb_type="backward() with non-leaf tensor inputs",
-                            context="backward(inputs=[...]) with non-leaf tensor",
-                            explanation="Dynamo cannot trace backward() with non-leaf tensor inputs. "
-                            "Non-leaf tensors require retain_grad() which is not yet supported.",
+                            gb_type="backward() with non-leaf tensor",
+                            context=f"backward(inputs=[...]) with non-leaf tensor: {var}",
+                            explanation="backward(inputs=[...]) with non-leaf tensors is not yet supported.",
                             hints=[
-                                "Only pass leaf tensors (parameters, inputs) to backward(inputs=...)",
-                                "Or call backward() without the inputs argument to auto-detect leaves",
+                                "Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)",
+                            ],
+                        )
+                elif not var.source or isinstance(var.source, SyntheticLocalSource):
+                    # Tensor created in-graph (no source or synthetic source).
+                    # Dynamo creates a generic GetAttrVariable for .grad which
+                    # cannot be used in tensor operations.
+                    if error_on_non_leaf:
+                        unimplemented(
+                            gb_type="backward() with in-graph created tensor",
+                            context=f"backward(inputs=[...]) with in-graph created tensor: {var}",
+                            explanation="backward(inputs=[...]) with tensors created inside the "
+                            "compiled function is not yet supported.",
+                            hints=[
+                                "Only pass tensors that are inputs to the compiled function or captured from outside",
                             ],
                         )
                 else:
                     node = var.proxy.node
                     if node not in seen_nodes:
                         seen_nodes.add(node)
-                        result.append((i, var))
+                        result.append(var)
         return result
 
     def method_backward(
-        self, gradient=None, retain_graph=None, create_graph=None, inputs=None
+        self,
+        tx: "InstructionTranslator",
+        gradient=None,
+        retain_graph=None,
+        create_graph=None,
+        inputs=None,
     ):
         """
         Trace tensor.backward() by rewriting as autograd.grad() + accumulate_grad.
 
         Implementation:
-        1. If inputs=None, auto-detect leaf tensors from leaf_var_creation_order
-           (in-graph params) and input_source_to_var (graph inputs)
+        1. Collect leaf tensors to compute gradients for
         2. Call autograd.grad(loss, inputs) to compute gradients
-        3. For each unique leaf tensor, call accumulate_grad to update .grad
-        4. Deduplication avoids double accumulation for repeated inputs
+        3. For each leaf tensor, call accumulate_grad to update .grad
 
-        Note: Non-leaf tensors in user-provided inputs cause a graph break.
-        Supporting them requires retain_grad() tracing which is not yet implemented.
+        Non-leaf tensor handling:
+        - Auto-detect (inputs=None): Non-leaf tensors are silently skipped.
+          This matches eager where only leaves get .grad.
+        - User-provided (inputs=[...]): Errors if any non-leaf tensor is found.
+          While eager backward(inputs=[non_leaf]) works, Dynamo cannot trace it
+          because the accumulate_grad polyfill accesses .grad, and Dynamo creates
+          a generic GetAttrVariable for .grad on non-leaf tensors (instead of a
+          TensorVariable), which cannot be used in tensor operations.
+
+        TODO: Support non-leaf tensors by fixing .grad access on non-leaf in Dynamo.
         """
         if not config.trace_autograd_ops:
             unimplemented(
@@ -1140,61 +1162,63 @@ class TensorVariable(VariableTracker):
                 "tensor does not require grad and does not have a grad_fn"
             )
 
-        from ..symbolic_convert import InstructionTranslator
-
-        tx = InstructionTranslator.current_tx()
-        inputs_auto_detected = inputs is None
-
-        if inputs_auto_detected:
-            # Collect from in-graph created leaves first, then graph inputs
+        # Step 1: Collect leaf tensors to compute gradients for
+        auto_detect = inputs is None
+        if auto_detect:
+            # Sources can be either user inputs (params are included here)
+            # or parameters that are created in forward.
             all_vars = chain(
                 tx.output.leaf_var_creation_order,
                 tx.output.input_source_to_var.values(),
             )
-            indexed_inputs = self._collect_backward_inputs(
-                all_vars, error_on_non_leaf=False
-            )
-            if not indexed_inputs:
+            input_vars = self._collect_backward_inputs(all_vars)
+            if not input_vars:
                 return ConstantVariable.create(None)
-            input_vars = [var for _, var in indexed_inputs]
-            inputs = VariableTracker.build(tx, input_vars)
         else:
-            # We are inside user supplied inputs case
-            # loss.backward(inputs=[bla, bla])
-            if isinstance(inputs, variables.BaseListVariable):
-                input_vars = inputs.items
-            else:
-                input_vars = [inputs]
-
-            indexed_inputs = self._collect_backward_inputs(
-                input_vars, error_on_non_leaf=True
+            provided_vars = (
+                inputs.items
+                if isinstance(inputs, variables.BaseListVariable)
+                else [inputs]
+            )
+            input_vars = self._collect_backward_inputs(
+                provided_vars, error_on_non_leaf=True
             )
 
         # Build autograd.grad call
-        grad_kwargs = {}
+        grad_kwargs = {"allow_unused": VariableTracker.build(tx, auto_detect)}
         if retain_graph is not None:
             grad_kwargs["retain_graph"] = retain_graph
         if create_graph is not None:
             grad_kwargs["create_graph"] = create_graph
-        if inputs_auto_detected:
-            grad_kwargs["allow_unused"] = VariableTracker.build(tx, True)
 
-        grad_args = [self, inputs]
+        inputs_var = VariableTracker.build(tx, input_vars)
+        grad_args = [self, inputs_var]
         if gradient is not None:
             grad_args.append(gradient)
 
         autograd_grad_fn = VariableTracker.build(tx, torch.autograd.grad)
         grads_var = autograd_grad_fn.call_function(tx, grad_args, grad_kwargs)
 
-        # Accumulate gradients for unique leaf tensors
+        # Accumulate gradients for unique leaf tensors under no_grad context.
+        # This is needed because the accumulate_grad polyfill does:
+        #   x.grad = x.grad + new_grad  (when grad_enabled and x.grad is not None)
+        # which creates a NEW tensor. We need in-place update to preserve tensor identity
+        # so that x.grad remains the same tensor object across multiple backward calls.
+        from .ctx_manager import GradModeVariable
+
+        grad_mode_var = GradModeVariable.create(tx, False, initialized=True)
+        grad_mode_var.enter(tx)
+
         accumulate_grad_fn = VariableTracker.build(
             tx, torch.ops.inductor.accumulate_grad_.default
         )
-        for idx, input_var in indexed_inputs:
+        for idx, input_var in enumerate(input_vars):
             grad_i = grads_var.call_method(
                 tx, "__getitem__", [VariableTracker.build(tx, idx)], {}
             )
             accumulate_grad_fn.call_function(tx, [input_var, grad_i], {})
+
+        grad_mode_var.exit(tx)
 
         return VariableTracker.build(tx, None)
 

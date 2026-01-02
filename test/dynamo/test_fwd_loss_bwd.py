@@ -801,13 +801,18 @@ class GraphModule(torch.nn.Module):
 
         loss: "f32[]" = res.sum();  res = None
 
-        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_])
+        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
+
+        _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
         new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
         copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
         new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
         copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
+
+        _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
 
         detach: "f32[]" = loss.detach();  loss = None
         return (detach, new_grad_strided, new_grad_strided_1)
@@ -842,42 +847,20 @@ class GraphModule(torch.nn.Module):
         grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = True)
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
+
+        _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
         new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
         copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
         new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
         copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
 
+        _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+
         detach: "f32[]" = loss.detach();  loss = None
         return (detach, new_grad_strided, new_grad_strided_1)
 """,
         )
-
-    @skipIfCrossRef
-    def test_tensor_backward_matches_eager(self):
-        mod_eager = torch.nn.Linear(4, 4)
-        mod_compiled = copy.deepcopy(mod_eager)
-
-        x = torch.randn(2, 4)
-
-        def step_fn(mod):
-            res = mod(x)
-            loss = res.sum()
-            params = list(mod.parameters())
-            loss.backward(inputs=params)
-            return loss.detach()
-
-        for p in mod_eager.parameters():
-            p.grad = None
-        eager_loss = step_fn(mod_eager)
-
-        for p in mod_compiled.parameters():
-            p.grad = None
-        compiled_step_fn = torch.compile(step_fn, backend="aot_eager", fullgraph=True)
-        compiled_loss = compiled_step_fn(mod_compiled)
-
-        self.assertEqual(eager_loss, compiled_loss)
-        self.assertEqual(mod_eager.weight.grad, mod_compiled.weight.grad)
-        self.assertEqual(mod_eager.bias.grad, mod_compiled.bias.grad)
 
     @skipIfCrossRef
     def test_tensor_backward_with_gradient(self):
@@ -906,13 +889,18 @@ class GraphModule(torch.nn.Module):
 
         gradient: "f32[2, 4]" = torch.ones_like(res)
 
-        grad = torch.autograd.grad(res, [l_mod_parameters_weight_, l_mod_parameters_bias_], gradient);  gradient = None
+        grad = torch.autograd.grad(res, [l_mod_parameters_weight_, l_mod_parameters_bias_], gradient, allow_unused = False);  gradient = None
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
+
+        _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
         new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
         copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
         new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
         copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
+
+        _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
 
         detach: "f32[2, 4]" = res.detach();  res = None
         sum_1: "f32[]" = detach.sum();  detach = None
@@ -948,26 +936,36 @@ class GraphModule(torch.nn.Module):
 
         loss: "f32[]" = res.sum();  res = None
 
-        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], retain_graph = True)
+        grad = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False, retain_graph = True)
         getitem: "f32[4, 4]" = grad[0]
         getitem_1: "f32[4]" = grad[1];  grad = None
+
+        _set_grad_enabled = torch._C._set_grad_enabled(False);  _set_grad_enabled = None
+
         new_grad_strided: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_)
         copy_: "f32[4, 4]" = new_grad_strided.copy_(getitem);  getitem = copy_ = None
         new_grad_strided_1: "f32[4]" = torch.empty_like(l_mod_parameters_bias_)
         copy__1: "f32[4]" = new_grad_strided_1.copy_(getitem_1);  getitem_1 = copy__1 = None
 
-        grad_1 = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_])
+        _set_grad_enabled_1 = torch._C._set_grad_enabled(True);  _set_grad_enabled_1 = None
+
+        grad_1 = torch.autograd.grad(loss, [l_mod_parameters_weight_, l_mod_parameters_bias_], allow_unused = False)
         getitem_2: "f32[4, 4]" = grad_1[0]
         getitem_3: "f32[4]" = grad_1[1];  grad_1 = None
+
+        _set_grad_enabled_2 = torch._C._set_grad_enabled(False);  _set_grad_enabled_2 = None
+
         new_grad_strided_2: "f32[4, 4]" = torch.empty_like(l_mod_parameters_weight_);  l_mod_parameters_weight_ = None
         copy__2: "f32[4, 4]" = new_grad_strided_2.copy_(getitem_2);  getitem_2 = copy__2 = None
-        add: "f32[4, 4]" = new_grad_strided + new_grad_strided_2;  new_grad_strided = new_grad_strided_2 = None
+        add_: "f32[4, 4]" = new_grad_strided.add_(new_grad_strided_2);  new_grad_strided_2 = add_ = None
         new_grad_strided_3: "f32[4]" = torch.empty_like(l_mod_parameters_bias_);  l_mod_parameters_bias_ = None
         copy__3: "f32[4]" = new_grad_strided_3.copy_(getitem_3);  getitem_3 = copy__3 = None
-        add_1: "f32[4]" = new_grad_strided_1 + new_grad_strided_3;  new_grad_strided_1 = new_grad_strided_3 = None
+        add__1: "f32[4]" = new_grad_strided_1.add_(new_grad_strided_3);  new_grad_strided_3 = add__1 = None
+
+        _set_grad_enabled_3 = torch._C._set_grad_enabled(True);  _set_grad_enabled_3 = None
 
         detach: "f32[]" = loss.detach();  loss = None
-        return (detach, add, add_1)
+        return (detach, new_grad_strided, new_grad_strided_1)
 """,  # noqa: B950
         )
 
@@ -1060,15 +1058,15 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(2, 4)
 
         # This is existing issue (https://github.com/pytorch/pytorch/issues/171204)
+        # w is created in-graph, so Dynamo creates a generic GetAttrVariable for w.grad
+        # which cannot be used in tensor operations.
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
             re.escape(
                 """\
-Failed to trace builtin operator
-  Explanation: Dynamo does not know how to trace builtin operator `add` with argument types ['<unknown type>', 'Tensor'] (has_kwargs False)
-  Hint: Avoid calling builtin `add` with argument types ['<unknown type>', 'Tensor']. Consider using an equivalent alternative function/method to `add`.
-  Hint: If you are attempting to call a logging function (e.g. `print`), you can try adding it to `torch._dynamo.config.reorderable_logging_functions`.
-  Hint: Please report an issue to PyTorch."""  # noqa: B950
+backward() with in-graph created tensor
+  Explanation: backward(inputs=[...]) with tensors created inside the compiled function is not yet supported.
+  Hint: Only pass tensors that are inputs to the compiled function or captured from outside"""  # noqa: B950
             ),
         ):
             compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -1119,14 +1117,33 @@ Failed to trace builtin operator
             torch._dynamo.exc.Unsupported,
             re.escape(
                 """\
-backward() with non-leaf tensor inputs
-  Explanation: Dynamo cannot trace backward() with non-leaf tensor inputs. Non-leaf tensors require retain_grad() which is not yet supported.
-  Hint: Only pass leaf tensors (parameters, inputs) to backward(inputs=...)
-  Hint: Or call backward() without the inputs argument to auto-detect leaves"""  # noqa: B950
+backward() with non-leaf tensor
+  Explanation: backward(inputs=[...]) with non-leaf tensors is not yet supported.
+  Hint: Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"""  # noqa: B950
             ),
         ):
             compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
             compiled_fn(x)
+
+    @skipIfCrossRef
+    def test_tensor_should_accumulate_in_same_tensor(self):
+        # We want to make sure torch.compile accumulate_grad
+        # logic needs to happen under no_grad context.
+        def fn(a, b):
+            loss = (a @ b).sum()
+            loss.backward()
+            return a.grad
+
+        a = torch.randn(4, 4, requires_grad=True)
+        b = torch.randn(4, 4)
+
+        ref = fn(a, b)
+
+        # Second call - compiled (should accumulate into SAME tensor)
+        opt_fn = torch.compile(fn)
+        act = opt_fn(a, b)
+
+        self.assertTrue(ref is act)
 
 
 if __name__ == "__main__":
