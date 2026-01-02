@@ -1597,6 +1597,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             expected_ops=20,
         )
 
+    def test_tensor_share_memory(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.hidden_size = 64
+                self.num_layers = 2
+
+            def forward(self, x):
+                batch_size = x.size(0)
+                h = torch.zeros(
+                    self.num_layers, batch_size, self.hidden_size
+                ).share_memory_()
+                c = torch.zeros(self.num_layers, batch_size, self.hidden_size)
+                return x + h.sum() + c.sum()
+
+        model = Model()
+        x = torch.randn(4, 10)
+        expected = model(x)
+        compiled_model = torch.compile(model, fullgraph=False)
+        actual = compiled_model(x)
+        self.assertEqual(expected, actual)
+
     def test_empty_list(self):
         def fn(x, ll):
             if len(ll) == 0 and not ll and ll is not None:
@@ -13698,7 +13720,10 @@ fn
 
             x = torch.randn(10, 10)
             compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
-            with torch._functorch.config.patch(check_custom_op_aliasing=True):
+            with torch._functorch.config.patch(
+                check_custom_op_aliasing=True,
+                error_on_custom_op_aliasing=False,
+            ):
                 with self.assertRaisesRegex(
                     RuntimeError,
                     "The output of this custom operator \(1\) must not also be an input",

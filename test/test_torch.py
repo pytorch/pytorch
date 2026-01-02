@@ -1728,7 +1728,6 @@ class TestTorchDeviceType(TestCase):
             'embedding_bag_backward_cuda_max',
             torch.device(device).type == 'cuda')
 
-    @skipIfRocmArch(MI300_ARCH)
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @onlyCUDA
     def test_deterministic_cumsum(self, device):

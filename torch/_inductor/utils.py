@@ -141,7 +141,11 @@ _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
 InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
-GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
+XPU_KERNEL_FORMAT = (
+    "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
+)
+
+GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": f".{XPU_KERNEL_FORMAT}"}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -1959,7 +1963,7 @@ def ensure_cute_available() -> bool:
     in the same interpreter to retry the import.
     """
     try:
-        return importlib.util.find_spec("cutlass.cute") is not None
+        return importlib.util.find_spec("cutlass") is not None
     except ImportError:
         return False
 
@@ -2165,8 +2169,7 @@ def use_decompose_k_choice(
     decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
 
     return (
-        not torch.version.hip
-        and V.graph.sizevars.statically_known_true(
+        V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
                 sympy.Ge(k, decompose_k_threshold * n),
