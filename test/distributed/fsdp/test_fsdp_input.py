@@ -69,6 +69,47 @@ class TestInput(FSDPTest):
             optim.step()
             optim.zero_grad()
 
+    @skip_if_lt_x_gpu(1)
+    @parametrize("input_cls", [subtest(dict, name="dict"), subtest(list, name="list")])
+    def test_input_identity_preserved(self, device, input_cls):
+        """
+        Test that FSDP preserves object identity for container inputs.
+        """
+
+        class MutatingModel(Module):
+            def __init__(self):
+                super().__init__()
+                self.layer = Linear(4, 4)
+
+            def forward(self, input):
+                if isinstance(input, list):
+                    input.append(torch.randn(4, 4, device=input[0].device))
+                    x = input[0]
+                else:
+                    assert isinstance(input, dict), input
+                    input["added"] = torch.randn(4, 4, device=input["in"].device)
+                    x = input["in"]
+                return self.layer(x)
+
+        fsdp_kwargs = {
+            "device_id": device,
+        }
+        model = FSDP(MutatingModel().to(device), **fsdp_kwargs)
+
+        in_data = torch.rand(64, 4, device=device)
+        if input_cls is list:
+            in_data = [in_data]
+            initial_len = len(in_data)
+            model(in_data)
+            # The list should have been mutated (appended to)
+            self.assertEqual(len(in_data), initial_len + 1)
+        else:
+            self.assertTrue(input_cls is dict)
+            in_data = {"in": in_data}
+            model(in_data)
+            # The dict should have been mutated (new key added)
+            self.assertIn("added", in_data)
+
 
 devices = ("cuda", "hpu", "xpu")
 instantiate_device_type_tests(TestInput, globals(), only_for=devices, allow_xpu=True)
