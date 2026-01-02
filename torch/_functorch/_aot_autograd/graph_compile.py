@@ -1732,6 +1732,7 @@ def _aot_stage2a_partition(
             fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
             inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
 
+            # See Note [Activations with no version counter checks in eager]
             # Count tensors saved with no version counter check.
             # These are tensors that were stashed on ctx (e.g., ctx.x = x) rather than
             # via save_for_backward in an autograd.Function.

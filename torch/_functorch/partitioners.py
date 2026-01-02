@@ -981,15 +981,34 @@ def _extract_fwd_bwd_modules(
     saved_sym_nodes.clear()
     saved_sym_nodes.extend(saved_sym_nodes_binding + saved_sym_nodes_derived)
 
+    # See Note [Activations with no version counter checks in eager]
+    # Sort saved_values so that tensors with saved_tensor_with_no_vc_check=True
+    # are at the end. This allows us to have two consecutive slices:
+    # 1. tensors_saved_for_backwards_slice - tensors saved via save_for_backward
+    # 2. tensors_saved_with_no_vc_check_slice - tensors stashed on ctx without save_for_backward
+    # The sort is stable, so the relative order within each group is preserved.
+    saved_values_with_vc_check = []
+    saved_values_no_vc_check = []
+    for node in saved_values:
+        if node.meta.get("saved_tensor_with_no_vc_check", False):
+            saved_values_no_vc_check.append(node)
+        else:
+            saved_values_with_vc_check.append(node)
+    saved_values.clear()
+    saved_values.extend(saved_values_with_vc_check + saved_values_no_vc_check)
+    no_vc_check_start_idx = len(saved_values_with_vc_check)
+
+    # debug assert: given saved_values where the last k of them are expected to not
+    # require VC checks, they should all have node metadata indicating so.
+    for i, node in enumerate(saved_values):
+        if i >= no_vc_check_start_idx:
+            assert node.meta.get("saved_tensor_with_no_vc_check", False), (
+                f"i={i}, no_vc_check_start_idx={no_vc_check_start_idx}, len(saved_values)={len(saved_values)}"
+            )
+
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
-    # Calculate which saved values have no VC check by checking their metadata directly.
     # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, symints)
-    no_vc_check_start_idx = len(saved_values)
-    for i, node in enumerate(saved_values):
-        if node.meta.get("saved_tensor_with_no_vc_check", False):
-            no_vc_check_start_idx = i
-            break
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
@@ -1184,20 +1203,6 @@ def default_partition(
 
     if config._sync_decision_cross_ranks:
         saved_values = _sync_decision_cross_ranks(joint_module.graph, saved_values)
-
-    # Sort saved_values so that tensors with saved_tensor_with_no_vc_check=True
-    # are at the end. This allows us to have two consecutive slices:
-    # 1. tensors_saved_for_backwards_slice - tensors saved via save_for_backward
-    # 2. tensors_saved_with_no_vc_check_slice - tensors stashed on ctx without save_for_backward
-    # The sort is stable, so the relative order within each group is preserved.
-    saved_values_with_vc_check = []
-    saved_values_no_vc_check = []
-    for node in saved_values:
-        if node.meta.get("saved_tensor_with_no_vc_check", False):
-            saved_values_no_vc_check.append(node)
-        else:
-            saved_values_with_vc_check.append(node)
-    saved_values = saved_values_with_vc_check + saved_values_no_vc_check
 
     if static_lifetime_input_nodes is None:
         static_lifetime_input_nodes = node_info.static_lifetime_input_nodes
@@ -3051,20 +3056,6 @@ def min_cut_rematerialization_partition(
     # save_for_backward on tensors and stashes symints in autograd .ctx
     saved_sym_nodes = list(filter(is_sym_node, saved_values))
     saved_values = list(filter(lambda n: not is_sym_node(n), saved_values))
-
-    # Sort saved_values so that tensors with saved_tensor_with_no_vc_check=True
-    # are at the end. This allows us to have two consecutive slices:
-    # 1. tensors_saved_for_backwards_slice - tensors saved via save_for_backward
-    # 2. tensors_saved_with_no_vc_check_slice - tensors stashed on ctx without save_for_backward
-    # The sort is stable, so the relative order within each group is preserved.
-    saved_values_with_vc_check = []
-    saved_values_no_vc_check = []
-    for node in saved_values:
-        if node.meta.get("saved_tensor_with_no_vc_check", False):
-            saved_values_no_vc_check.append(node)
-        else:
-            saved_values_with_vc_check.append(node)
-    saved_values = saved_values_with_vc_check + saved_values_no_vc_check
 
     # NB: saved_sym_nodes will be mutated to reflect the actual saved symbols
     fw_module, bw_module = _extract_fwd_bwd_modules(
