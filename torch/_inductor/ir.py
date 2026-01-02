@@ -5127,15 +5127,6 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.mutated_inputs = mutated_inputs
         self.outputs: list[Buffer] = [self]
         if mutated_inputs is not None:
-            # Ensure that the mutated inputs are only allowed for certain nodes
-            allowed_set = (
-                torch.ops.higher_order.flex_attention,
-                torch.ops.higher_order.flex_attention_backward,
-            )
-            current_node = V.graph.current_node.target
-            assert current_node in allowed_set, (
-                f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
-            )
             assert isinstance(self.inputs[0], IRNode), type(self.inputs[0])
             device = self.inputs[0].get_device()
             self.outputs += [
@@ -5837,7 +5828,7 @@ class ExternKernel(InputsKernel):
         layout: OutputSpec,
         inputs: Sequence[Union[IRNode, Sequence[IRNode]]],
         constant_args: Sequence[Any] = (),
-        kwargs: Optional[dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
         output_view: Optional[ReinterpretView] = None,
         python_kernel_name: Optional[str] = None,
         cpp_kernel_name: Optional[str] = None,
@@ -8229,10 +8220,11 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = cls.find_device(tensor_args, example_output)
 
-        if not device and isinstance(
-            kernel, torch._higher_order_ops.torchbind.CallTorchBind
+        # Default to CPU for torchbind methods or HOPs that don't produce tensors
+        if not device and (
+            isinstance(kernel, torch._higher_order_ops.torchbind.CallTorchBind)
+            or kernel is torch.ops.higher_order.print
         ):
-            # use CPU device for torchbind methods that don't take in or output any tensor, e.g. size()
             device = torch.device("cpu")
 
         if example_output is None:
@@ -8242,6 +8234,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
 
@@ -8253,6 +8246,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
 
@@ -8320,6 +8314,7 @@ class ComplexView(FallbackKernel):
         nontensor_args: Sequence[Any],
         unflatten_args: Callable[..., Any],
         *,
+        kwargs: dict[str, Any] | None = None,
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
@@ -8328,6 +8323,7 @@ class ComplexView(FallbackKernel):
             tensor_args,
             nontensor_args,
             unflatten_args,
+            kwargs=kwargs,
             unbacked_bindings=unbacked_bindings,
         )
 
