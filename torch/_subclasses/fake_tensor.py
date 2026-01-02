@@ -3056,24 +3056,6 @@ class FakeTensorMode(TorchDispatchMode):
         symbolic_context: Optional[SymbolicContext] = None,
         trace: bool = True,
     ) -> FakeTensor:
-        if (
-            isinstance(tensor, FakeTensor)
-            and tensor.fake_mode is not self
-            # TODO: add dynamic shapes support for cross compilation.
-            and symbolic_context is None
-        ):
-            # Use the wrapped meta tensor as the element, and preserve the apparent device.
-            with in_kernel_invocation_manager(tensor.fake_mode):
-                return FakeTensor(
-                    self,
-                    tensor,
-                    tensor.fake_device,
-                    constant=tensor.constant,
-                    real_tensor=tensor.real_tensor,
-                    pytype=tensor.pytype,
-                    dispatch_keys=tensor.dispatch_keys,
-                )
-
         shape_env: Optional[ShapeEnv] = self.shape_env
         if static_shapes is None:
             static_shapes = self.static_shapes

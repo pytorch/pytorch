@@ -35,15 +35,17 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import Replicate, Shard
+from torch.distributed.tensor import Partial, Replicate, Shard
 from torch.export import _restore_state_dict
 from torch.fx._graph_pickler import GraphPickler
 from torch.fx.passes.regional_inductor import regional_inductor
+from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     TEST_CUDA,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
+from torch.utils.checkpoint import checkpoint
 
 
 MY_LAMBDA = lambda x: x + 1  # noqa: E731
@@ -98,30 +100,147 @@ class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
         return self.gm(*args, **kwargs)
 
 
+def _qkv_to_local(
+    query: DTensor,
+    key: DTensor,
+    value: DTensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    q_grad_placements = []
+    kv_grad_placements = []
+
+    for query_p, key_p, value_p in zip(
+        query.placements, key.placements, value.placements
+    ):
+        if (
+            (
+                query_p.is_shard(dim=0)
+                and key_p.is_shard(dim=0)
+                and value_p.is_shard(dim=0)
+            )
+            or (
+                query_p.is_shard(dim=1)
+                and key_p.is_shard(dim=1)
+                and value_p.is_shard(dim=1)
+            )
+            or (
+                query_p.is_replicate()
+                and key_p.is_replicate()
+                and value_p.is_replicate()
+            )
+        ):
+            q_grad_placements.append(query_p)
+            kv_grad_placements.append(key_p)
+        elif (
+            query_p.is_shard(dim=2) and key_p.is_replicate() and value_p.is_replicate()
+        ):
+            q_grad_placements.append(query_p)
+            kv_grad_placements.append(Partial())
+        else:
+            raise NotImplementedError(
+                "Currently only supports Data Parallel, Tensor Parallel, "
+                "and all-gather based Context Parallel."
+            )
+
+    return (
+        query.to_local(grad_placements=q_grad_placements),
+        key.to_local(grad_placements=kv_grad_placements),
+        value.to_local(grad_placements=kv_grad_placements),
+    )
+
+
 class MultiHeadSelfAttention(nn.Module):
-    def __init__(self, embed_dim: int, num_heads: int):
+    _flex_attention_cache: dict = {}
+    _create_block_mask_fn = None
+
+    def __init__(
+        self,
+        embed_dim: int,
+        num_heads: int,
+        num_kv_heads: int,
+        dropout: float = 0.0,
+    ):
         super().__init__()
-        if embed_dim % num_heads != 0:
-            raise ValueError("embed_dim must be divisible by num_heads")
         self.embed_dim = embed_dim
         self.num_heads = num_heads
+        self.num_kv_heads = num_kv_heads if num_kv_heads is not None else num_heads
         self.head_dim = embed_dim // num_heads
+        self.kv_dim = self.num_kv_heads * self.head_dim
         self.q_proj = nn.Linear(embed_dim, embed_dim)
-        self.k_proj = nn.Linear(embed_dim, embed_dim)
-        self.v_proj = nn.Linear(embed_dim, embed_dim)
+        self.k_proj = nn.Linear(embed_dim, self.kv_dim)
+        self.v_proj = nn.Linear(embed_dim, self.kv_dim)
         self.out_proj = nn.Linear(embed_dim, embed_dim)
+        self.dropout = dropout
+        self.enable_gqa = self.num_heads != self.num_kv_heads
+
+        # Compile flex_attention with default compile_spec
+        # This creates a nested torch.compile that triggers flex_attention_hop
+        compile_spec = {
+            "mode": "default",
+            "fullgraph": True,
+            "dynamic": False,
+        }
+        compile_key = tuple(sorted(compile_spec.items()))
+        if compile_key not in MultiHeadSelfAttention._flex_attention_cache:
+            MultiHeadSelfAttention._flex_attention_cache[compile_key] = torch.compile(
+                flex_attention, **compile_spec
+            )
+        self._flex_attention = MultiHeadSelfAttention._flex_attention_cache[compile_key]
+
+        # Also compile create_block_mask
+        if MultiHeadSelfAttention._create_block_mask_fn is None:
+            MultiHeadSelfAttention._create_block_mask_fn = torch.compile(
+                create_block_mask, dynamic=False, fullgraph=True
+            )
+
+    def _shape_heads(self, x, B, S, num_heads):
+        return x.view(B, S, num_heads, self.head_dim).transpose(1, 2)
+
+    def _forward_local(
+        self,
+        query: torch.Tensor,
+        key: torch.Tensor,
+        value: torch.Tensor,
+        block_mask,
+    ) -> torch.Tensor:
+        with fx_traceback.annotate({"compile_with_inductor": 1}):
+            return self._flex_attention(
+                query=query,
+                key=key,
+                value=value,
+                block_mask=block_mask,
+                enable_gqa=self.enable_gqa,
+            )
 
     def forward(self, x):
-        B, S, E = x.shape
-        H = self.num_heads
-        D = self.head_dim
-        q = self.q_proj(x).view(B, S, H, D).transpose(1, 2)
-        k = self.k_proj(x).view(B, S, H, D).transpose(1, 2)
-        v = self.v_proj(x).view(B, S, H, D).transpose(1, 2)
-        attn_scores = torch.matmul(q, k.transpose(-2, -1)) / (D**0.5)
-        attn_probs = F.softmax(attn_scores, dim=-1)
-        attn_out = torch.matmul(attn_probs, v)
-        attn_out = attn_out.transpose(1, 2).contiguous().view(B, S, E)
+        B, S, _ = x.shape
+
+        q = self._shape_heads(self.q_proj(x), B, S, self.num_heads)
+        k = self._shape_heads(self.k_proj(x), B, S, self.num_kv_heads)
+        v = self._shape_heads(self.v_proj(x), B, S, self.num_kv_heads)
+
+        # Create block_mask inside forward to test cross-compilation
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        # Use compile_with_inductor annotation AND compiled create_block_mask
+        with fx_traceback.annotate({"compile_with_inductor": 1}):
+            # Use the compiled create_block_mask function
+            block_mask = MultiHeadSelfAttention._create_block_mask_fn(
+                causal_mask, B, self.num_heads, S, S, device=x.device
+            )
+
+        if not any(isinstance(t, DTensor) for t in (q, k, v)):
+            attn_out = self._forward_local(q, k, v, block_mask)
+        else:
+            q_local, k_local, v_local = _qkv_to_local(q, k, v)
+            attn_out_local = self._forward_local(q_local, k_local, v_local, block_mask)
+            attn_out = DTensor.from_local(
+                attn_out_local,
+                device_mesh=q.device_mesh,
+                placements=q.placements,
+            )
+
+        attn_out = attn_out.transpose(1, 2).contiguous().view(B, S, self.embed_dim)
         return self.out_proj(attn_out)
 
 
@@ -130,12 +249,13 @@ class TransformerBlock(nn.Module):
         self,
         embed_dim: int,
         num_heads: int,
+        num_kv_heads: int,
         mlp_ratio: float = 4.0,
         dropout: float = 0.0,
     ):
         super().__init__()
         self.ln1 = nn.LayerNorm(embed_dim)
-        self.attn = MultiHeadSelfAttention(embed_dim, num_heads)
+        self.attn = MultiHeadSelfAttention(embed_dim, num_heads, num_kv_heads)
         self.dropout1 = nn.Dropout(dropout)
         self.ln2 = nn.LayerNorm(embed_dim)
         hidden_dim = int(embed_dim * mlp_ratio)
@@ -147,13 +267,8 @@ class TransformerBlock(nn.Module):
         )
 
     def forward(self, x):
-        with fx_traceback.annotate({"compile_with_inductor": 0}):
-            x = x + torch.utils.checkpoint.checkpoint(
-                lambda h: self.dropout1(self.attn(self.ln1(h))), x, use_reentrant=False
-            )
-        x = x + torch.utils.checkpoint.checkpoint(
-            lambda h: self.mlp(self.ln2(h)), x, use_reentrant=False
-        )
+        x = x + self.dropout1(self.attn(self.ln1(x)))
+        x = x + checkpoint(lambda inp: self.mlp(self.ln2(inp)), x, use_reentrant=False)
         return x
 
 
@@ -165,13 +280,17 @@ class Transformer(nn.Module):
         num_heads: int,
         num_layers: int,
         max_seq_len: int,
+        num_kv_heads: int,
         device_mesh=None,
     ):
         super().__init__()
         self.embed = nn.Embedding(vocab_size, embed_dim)
         self.pos_embed = nn.Parameter(torch.zeros(1, max_seq_len, embed_dim))
         self.layers = nn.ModuleList(
-            [TransformerBlock(embed_dim, num_heads) for _ in range(num_layers)]
+            [
+                TransformerBlock(embed_dim, num_heads, num_kv_heads)
+                for _ in range(num_layers)
+            ]
         )
         self.ln_f = nn.LayerNorm(embed_dim)
         self.head = nn.Linear(embed_dim, vocab_size, bias=False)
@@ -181,13 +300,8 @@ class Transformer(nn.Module):
         input_ids = input_ids.redistribute(self.device_mesh, [Replicate()])
         x = self.embed(input_ids) + self.pos_embed[:, : input_ids.shape[1], :]
 
-        def _run_block(block, hidden):
-            return block(hidden)
-
         for block in self.layers:
-            x = torch.utils.checkpoint.checkpoint(
-                _run_block, block, x, use_reentrant=False
-            )
+            x = block(x)
 
         x = self.ln_f(x)
         logits = self.head(x)
@@ -1029,8 +1143,11 @@ from user code:
 
     @unittest.skipIf(not c10d.is_available(), "requires c10d")
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_cross_compile_dtensor_transformer(self):
-        """Test cross-compilation with DTensor transformer using compiler toolkit"""
+    def test_cross_compile_realistic_transformer_model(self):
+        """
+        Test cross-compilation with transformer model with DTensors,
+        FlexAttention, and checkpointing using the compiler toolkit.
+        """
 
         def dtensorify_module(
             module: nn.Module,
@@ -1074,8 +1191,9 @@ from user code:
             torch.cuda.set_device(device)
 
             vocab_size = 1000
-            embed_dim = 64
-            num_heads = 4
+            embed_dim = 256
+            num_heads = 8
+            num_kv_heads = 2
             num_layers = 2
             max_seq_len = 32
             batch_size = 2
@@ -1095,6 +1213,7 @@ from user code:
                 num_heads,
                 num_layers,
                 max_seq_len,
+                num_kv_heads=num_kv_heads,
                 device_mesh=device_mesh,
             ).to(device)
 
@@ -1104,8 +1223,6 @@ from user code:
                 param_placements=[Replicate()],
                 buffer_placements=[Replicate()],
             )
-
-            model.eval()
 
             outer_fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             with outer_fake_mode, torch._dynamo.config.patch(install_free_tensors=True):
