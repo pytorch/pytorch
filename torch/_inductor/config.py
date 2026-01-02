@@ -858,6 +858,11 @@ combo_kernel_foreach_dynamic_shapes = True
 # Maximum number of arguments (read/write buffers) allowed in a combo kernel
 combo_kernel_max_num_args = 250
 
+# Maximum ynumel ratio allowed when combining kernels in a combo kernel.
+# If max_ynumel / min_ynumel > this value, kernels are partitioned into separate groups.
+# This prevents grid waste when sub-kernels have vastly different y dim.
+combo_kernel_max_ynumel_ratio = 16
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
