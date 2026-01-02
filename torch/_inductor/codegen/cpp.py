@@ -952,6 +952,10 @@ class CppOverrides(OpOverrides):
         return f"std::log2({x})"
 
     @staticmethod
+    def ldexp(x, n):
+        return f"std::ldexp({x}, {n})"
+
+    @staticmethod
     def nextafter(x, y):
         return f"std::nextafter({x}, {y})"
 

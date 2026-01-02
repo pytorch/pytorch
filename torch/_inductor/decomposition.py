@@ -76,7 +76,6 @@ inductor_decompositions = get_decompositions(
         aten.gelu,
         aten.hardtanh,
         aten.lcm,
-        aten.ldexp,
         aten.leaky_relu,
         aten.linalg_vector_norm,
         aten._log_softmax,
