@@ -13525,7 +13525,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             elements = torch.tensor([1, 2, 3, 4])
             test_elements = 1
             self.common(torch.isin, (elements, test_elements), {"invert": invert})
-            
+
         elements = torch.tensor(3.0)
         test_elements = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
         self.common(torch.isin, (elements, test_elements), {"assume_unique": True})
@@ -16606,7 +16606,6 @@ def _run_and_get_stripped_kernels(
 ) -> tuple[_T, list[str]]:
     result, codes = run_and_get_kernels(fn, *args, **kwargs)
     return result, [_strip_tmp_path(code) for code in codes]
-
 
 
 if __name__ == "__main__":
