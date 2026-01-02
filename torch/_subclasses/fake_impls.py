@@ -207,7 +207,7 @@ def constructors(
 ) -> FakeTensor:
     assert func not in _non_kwarg_device_constructors
     _, new_kwargs = _normalize_function_or_error(
-        func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
+        func, args, kwargs, normalize_to_only_use_kwargs=True
     )
     if "names" in kwargs:
         # REASON: "torch.compile doesn't support named tensors"
@@ -357,11 +357,8 @@ def _sparse_coo_tensor_with_dims_and_tensors(
 
 # index.Tensor data-dependent in only some conditions
 @register_op_impl(
-    lambda func: torch.Tag.dynamic_output_shape in func.tags
     and func
     not in [aten.index.Tensor, aten.nonzero.default, aten.repeat_interleave.Tensor]
-)
-def dyn_shape(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> None:
     raise DynamicOutputShapeException(func)
