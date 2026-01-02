@@ -19,7 +19,7 @@ from dataclasses import dataclass, field
 from hashlib import sha256
 from os import PathLike
 from pathlib import Path
-from typing import cast, Generic, TypedDict
+from typing import cast, Generic, Protocol, TypedDict
 from typing_extensions import ParamSpec, TypeVar
 
 from filelock import FileLock
@@ -276,6 +276,76 @@ class DeferredRecording(Generic[_R, _EncodedR]):
             return None
 
 
+class ResultEncoderFactory(Protocol[_P, _R, _EncodedR]):
+    """Protocol for custom result encoder factories.
+
+    A result encoder factory is a callable with the following signature:
+        factory(fn) -> params_to_encoder(*args, **kwargs) -> encoder(result) -> encoded
+
+    The three levels are:
+    1. factory(fn): Takes the underlying unwrapped function, returns a params_to_encoder
+    2. params_to_encoder(*args, **kwargs): Takes the memoized function's arguments,
+       returns an encoder function
+    3. encoder(result): Converts the result R -> _EncodedR (or DeferredRecording)
+
+    The `fn` parameter allows the encoder to call the underlying function without
+    triggering memoization, which is useful when the encoder needs to re-execute
+    the function (e.g., to get a fresh result for DeferredRecording).
+
+    Example:
+        def my_encoder_factory(fn: Callable) -> Callable:
+            def params_to_encoder(*args, **kwargs) -> Callable:
+                def encode(result: R) -> EncodedR:
+                    return {"encoded": result}
+                return encode
+            return params_to_encoder
+
+        @memoizer.record(custom_result_encoder=my_encoder_factory)
+        def compute(x: int) -> int:
+            return x * 2
+    """
+
+    def __call__(
+        self,
+        fn: Callable[_P, _R],
+    ) -> Callable[_P, Callable[[_R], _EncodedR | DeferredRecording[_R, _EncodedR]]]: ...
+
+
+class ResultDecoderFactory(Protocol[_P, _R, _EncodedR]):
+    """Protocol for custom result decoder factories.
+
+    A result decoder factory is a callable with the following signature:
+        factory(fn) -> params_to_decoder(*args, **kwargs) -> decoder(encoded) -> result
+
+    The three levels are:
+    1. factory(fn): Takes the underlying unwrapped function, returns a params_to_decoder
+    2. params_to_decoder(*args, **kwargs): Takes the memoized function's arguments,
+       returns a decoder function
+    3. decoder(encoded): Converts the encoded result _EncodedR -> R
+
+    The `fn` parameter allows the decoder to call the underlying function without
+    triggering memoization, which is useful for fallback paths when the cached
+    result cannot be fully decoded.
+
+    Example:
+        def my_decoder_factory(fn: Callable) -> Callable:
+            def params_to_decoder(*args, **kwargs) -> Callable:
+                def decode(encoded_result: EncodedR) -> R:
+                    return encoded_result["value"]
+                return decode
+            return params_to_decoder
+
+        @memoizer.replay(custom_result_decoder=my_decoder_factory)
+        def compute(x: int) -> int:
+            return x * 2
+    """
+
+    def __call__(
+        self,
+        fn: Callable[_P, _R],
+    ) -> Callable[_P, Callable[[_EncodedR], _R]]: ...
+
+
 class _BaseMemoizer:
     """Base class for memoization interfaces.
 
@@ -318,7 +388,7 @@ class _BaseMemoizer:
     def record(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
+        custom_result_encoder: ResultEncoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Record a function call result. Must be implemented by subclasses.
 
@@ -332,7 +402,7 @@ class _BaseMemoizer:
     def replay(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+        custom_result_decoder: ResultDecoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Replay a cached function result. Must be implemented by subclasses.
 
@@ -346,8 +416,8 @@ class _BaseMemoizer:
     def memoize(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
-        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+        custom_result_encoder: ResultEncoderFactory[_P, _R, _EncodedR] | None = None,
+        custom_result_decoder: ResultDecoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Memoize a function with record and replay functionality.
 
@@ -750,7 +820,7 @@ class Memoizer(_BaseMemoizer):
     def record(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
+        custom_result_encoder: ResultEncoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Record a function call result with custom encoding.
 
@@ -761,8 +831,9 @@ class Memoizer(_BaseMemoizer):
             custom_params_encoder: Optional encoder for function parameters.
                                   If None, parameters are pickled directly.
             custom_result_encoder: Optional encoder factory for function results.
-                                  Takes function parameters and returns an encoder
-                                  function that converts R -> _EncodedR.
+                                  First receives the underlying function, then takes
+                                  function parameters and returns an encoder function
+                                  that converts R -> _EncodedR.
 
         Returns:
             A decorator function that can be applied to functions.
@@ -817,8 +888,11 @@ class Memoizer(_BaseMemoizer):
 
                 # Encode the result if encoder is provided
                 if custom_result_encoder is not None:
-                    # Get the encoder function by calling the factory with params
-                    encoder_fn = custom_result_encoder(*args, **kwargs)
+                    # Get the encoder function by calling the factory factory:
+                    # 1. First call with fn to get params_to_encoder factory
+                    # 2. Second call with params to get the encoder function
+                    params_to_encoder = custom_result_encoder(fn)
+                    encoder_fn = params_to_encoder(*args, **kwargs)
                     encoded_result = encoder_fn(result)
                 else:
                     encoded_result = result
@@ -827,7 +901,7 @@ class Memoizer(_BaseMemoizer):
                 if isinstance(encoded_result, DeferredRecording):
                     # Track the pending deferred recording
                     self._pending_deferred[cache_key] = encoded_result
-                    # Register the callback - handles race condition if pending already completed
+                    # Register the callback - handles race condition if encoded_result already completed
                     encoded_result.register_callback(
                         functools.partial(
                             self._finalize_deferred_recording,
@@ -854,7 +928,7 @@ class Memoizer(_BaseMemoizer):
     def replay(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+        custom_result_decoder: ResultDecoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Replay a cached function result without executing the function.
 
@@ -865,8 +939,9 @@ class Memoizer(_BaseMemoizer):
             custom_params_encoder: Optional encoder for function parameters.
                                   If None, parameters are pickled directly.
             custom_result_decoder: Optional decoder factory for cached results.
-                                  Takes function parameters and returns a decoder
-                                  function that converts _EncodedR -> R.
+                                  First receives the underlying function, then takes
+                                  function parameters and returns a decoder function
+                                  that converts _EncodedR -> R.
 
         Returns:
             A decorator function that can be applied to functions.
@@ -923,8 +998,11 @@ class Memoizer(_BaseMemoizer):
 
                     # Decode and return the cached result
                     if custom_result_decoder is not None:
-                        # Get the decoder function by calling the factory with params
-                        decoder_fn = custom_result_decoder(*args, **kwargs)
+                        # Get the decoder function by calling the factory factory:
+                        # 1. First call with fn to get params_to_decoder factory
+                        # 2. Second call with params to get the decoder function
+                        params_to_decoder = custom_result_decoder(fn)
+                        decoder_fn = params_to_decoder(*args, **kwargs)
                         return decoder_fn(cast(_EncodedR, cache_entry.encoded_result))
                     return cast(_R, cache_entry.encoded_result)
 
@@ -999,7 +1077,7 @@ class PersistentMemoizer(_BaseMemoizer):
     def record(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
+        custom_result_encoder: ResultEncoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Record a function call result with custom encoding to both caches.
 
@@ -1015,8 +1093,9 @@ class PersistentMemoizer(_BaseMemoizer):
             custom_params_encoder: Optional encoder for function parameters.
                                   If None, parameters are pickled directly.
             custom_result_encoder: Optional encoder factory for function results.
-                                  Takes function parameters and returns an encoder
-                                  function that converts R -> _EncodedR.
+                                  First receives the underlying function, then takes
+                                  function parameters and returns an encoder function
+                                  that converts R -> _EncodedR.
 
         Returns:
             A decorator function that can be applied to functions.
@@ -1116,7 +1195,7 @@ class PersistentMemoizer(_BaseMemoizer):
     def replay(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+        custom_result_decoder: ResultDecoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Replay a cached function result without executing the function.
 
@@ -1129,8 +1208,9 @@ class PersistentMemoizer(_BaseMemoizer):
             custom_params_encoder: Optional encoder for function parameters.
                                   If None, parameters are pickled directly.
             custom_result_decoder: Optional decoder factory for cached results.
-                                  Takes function parameters and returns a decoder
-                                  function that converts _EncodedR -> R.
+                                  First receives the underlying function, then takes
+                                  function parameters and returns a decoder function
+                                  that converts _EncodedR -> R.
 
         Returns:
             A decorator function that can be applied to functions.
@@ -1203,7 +1283,11 @@ class PersistentMemoizer(_BaseMemoizer):
 
                     # Decode and return
                     if custom_result_decoder is not None:
-                        decoder_fn = custom_result_decoder(*args, **kwargs)
+                        # Get the decoder function by calling the factory factory:
+                        # 1. First call with fn to get params_to_decoder factory
+                        # 2. Second call with params to get the decoder function
+                        params_to_decoder = custom_result_decoder(fn)
+                        decoder_fn = params_to_decoder(*args, **kwargs)
                         return decoder_fn(cast(_EncodedR, cache_entry.encoded_result))
                     return cast(_R, cache_entry.encoded_result)
 

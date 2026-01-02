@@ -2592,17 +2592,20 @@ class DeferredRecordingTest(TestMixin, TestCase):
         memoizer = Memoizer()
         deferred_obj: interfaces.DeferredRecording | None = None
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: object) -> interfaces.DeferredRecording:
-                nonlocal deferred_obj
-                deferred_obj = interfaces.DeferredRecording()
-                return deferred_obj
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: object) -> interfaces.DeferredRecording:
+                    nonlocal deferred_obj
+                    deferred_obj = interfaces.DeferredRecording()
+                    return deferred_obj
 
-            return encode
+                return encode
+
+            return deferred_encoder
 
         call_count = 0
 
-        @memoizer.record(custom_result_encoder=deferred_encoder)
+        @memoizer.record(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> int:
             nonlocal call_count
             call_count += 1
@@ -2638,15 +2641,18 @@ class DeferredRecordingTest(TestMixin, TestCase):
         memoizer = Memoizer()
         deferred_obj: interfaces.DeferredRecording | None = None
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: object) -> interfaces.DeferredRecording:
-                nonlocal deferred_obj
-                deferred_obj = interfaces.DeferredRecording()
-                return deferred_obj
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: object) -> interfaces.DeferredRecording:
+                    nonlocal deferred_obj
+                    deferred_obj = interfaces.DeferredRecording()
+                    return deferred_obj
 
-            return encode
+                return encode
 
-        @memoizer.record(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @memoizer.record(custom_result_encoder=deferred_encoder_factory)
         def compute_record(x: int) -> int:
             return x * 2
 
@@ -2680,22 +2686,25 @@ class DeferredRecordingTest(TestMixin, TestCase):
         memoizer = Memoizer()
         cache_populated = Event()
 
-        def future_encoder(*args: object, **kwargs: object) -> object:
-            def encode(future_result: Future[int]) -> interfaces.DeferredRecording:
-                deferred = interfaces.DeferredRecording()
+        def future_encoder_factory(fn) -> object:
+            def future_encoder(*args: object, **kwargs: object) -> object:
+                def encode(future_result: Future[int]) -> interfaces.DeferredRecording:
+                    deferred = interfaces.DeferredRecording()
 
-                def on_complete(completed_future: Future[int]) -> None:
-                    actual_result = completed_future.result()
-                    deferred.finalize(actual_result)
+                    def on_complete(completed_future: Future[int]) -> None:
+                        actual_result = completed_future.result()
+                        deferred.finalize(actual_result)
 
-                future_result.add_done_callback(on_complete)
-                return deferred
+                    future_result.add_done_callback(on_complete)
+                    return deferred
 
-            return encode
+                return encode
+
+            return future_encoder
 
         with ThreadPoolExecutor() as executor:
 
-            @memoizer.record(custom_result_encoder=future_encoder)
+            @memoizer.record(custom_result_encoder=future_encoder_factory)
             def compute_async(x: int) -> Future[int]:
                 return executor.submit(lambda: x * 2)
 
@@ -2743,13 +2752,16 @@ class DeferredRecordingTest(TestMixin, TestCase):
         # Setup
         memoizer = Memoizer()
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: object) -> interfaces.DeferredRecording:
-                return interfaces.DeferredRecording()
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: object) -> interfaces.DeferredRecording:
+                    return interfaces.DeferredRecording()
 
-            return encode
+                return encode
 
-        @memoizer.record(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @memoizer.record(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> int:
             return x * 2
 
@@ -2787,15 +2799,18 @@ class DeferredRecordingTest(TestMixin, TestCase):
         persistent = PersistentMemoizer(sub_dir=self.sub_dir())
         deferred_obj: interfaces.DeferredRecording | None = None
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: object) -> interfaces.DeferredRecording:
-                nonlocal deferred_obj
-                deferred_obj = interfaces.DeferredRecording()
-                return deferred_obj
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: object) -> interfaces.DeferredRecording:
+                    nonlocal deferred_obj
+                    deferred_obj = interfaces.DeferredRecording()
+                    return deferred_obj
 
-            return encode
+                return encode
 
-        @persistent.record(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @persistent.record(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> int:
             return x * 2
 
@@ -2836,15 +2851,18 @@ class DeferredRecordingTest(TestMixin, TestCase):
         persistent = PersistentMemoizer(sub_dir=self.sub_dir())
         deferred_obj: interfaces.DeferredRecording | None = None
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: object) -> interfaces.DeferredRecording:
-                nonlocal deferred_obj
-                deferred_obj = interfaces.DeferredRecording()
-                return deferred_obj
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: object) -> interfaces.DeferredRecording:
+                    nonlocal deferred_obj
+                    deferred_obj = interfaces.DeferredRecording()
+                    return deferred_obj
 
-            return encode
+                return encode
 
-        @persistent.record(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @persistent.record(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> int:
             return x * 2
 
@@ -2880,15 +2898,18 @@ class DeferredRecordingTest(TestMixin, TestCase):
         deferred_objects: list[interfaces.DeferredRecording] = []
         call_count = 0
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: object) -> interfaces.DeferredRecording:
-                deferred = interfaces.DeferredRecording()
-                deferred_objects.append(deferred)
-                return deferred
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: object) -> interfaces.DeferredRecording:
+                    deferred = interfaces.DeferredRecording()
+                    deferred_objects.append(deferred)
+                    return deferred
 
-            return encode
+                return encode
 
-        @persistent.memoize(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @persistent.memoize(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> int:
             nonlocal call_count
             call_count += 1
@@ -2924,15 +2945,18 @@ class DeferredRecordingTest(TestMixin, TestCase):
         memoizer = Memoizer()
         deferred_obj: interfaces.DeferredRecording | None = None
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: object) -> interfaces.DeferredRecording:
-                nonlocal deferred_obj
-                deferred_obj = interfaces.DeferredRecording()
-                return deferred_obj
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: object) -> interfaces.DeferredRecording:
+                    nonlocal deferred_obj
+                    deferred_obj = interfaces.DeferredRecording()
+                    return deferred_obj
 
-            return encode
+                return encode
 
-        @memoizer.record(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @memoizer.record(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> None:
             return None
 
@@ -2959,17 +2983,20 @@ class DeferredRecordingTest(TestMixin, TestCase):
         memoizer = Memoizer()
         deferred_objects: dict[int, interfaces.DeferredRecording] = {}
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            x = args[0]
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                x = args[0]
 
-            def encode(result: object) -> interfaces.DeferredRecording:
-                deferred = interfaces.DeferredRecording()
-                deferred_objects[x] = deferred
-                return deferred
+                def encode(result: object) -> interfaces.DeferredRecording:
+                    deferred = interfaces.DeferredRecording()
+                    deferred_objects[x] = deferred
+                    return deferred
 
-            return encode
+                return encode
 
-        @memoizer.record(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @memoizer.record(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> int:
             return x * 2
 
@@ -2989,6 +3016,189 @@ class DeferredRecordingTest(TestMixin, TestCase):
             cache_hit = memoizer._cache.get(cache_key)
             self.assertIsNotNone(cache_hit)
             self.assertEqual(cache_hit.value.encoded_result, expected)
+
+    # ============= Result Encoder/Decoder Factory Tests =============
+
+    @set_caching_module_enabled(True)
+    def test_encoder_factory_receives_underlying_function(self) -> None:
+        """Test that the encoder factory receives the underlying function.
+
+        Verifies that when custom_result_encoder is provided, the factory
+        receives the unwrapped function as the first parameter, allowing
+        the encoder to call it if needed.
+        """
+        # Setup: create a memoizer and track what fn is passed to the factory
+        memoizer = Memoizer()
+        received_fn: list[object] = []
+
+        def encoder_factory(fn: object) -> object:
+            received_fn.append(fn)
+
+            def params_to_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: object) -> object:
+                    return result
+
+                return encode
+
+            return params_to_encoder
+
+        @memoizer.record(custom_result_encoder=encoder_factory)
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Execute: call the memoized function
+        result = compute(5)
+
+        # Assert: encoder factory received a function (the unwrapped compute)
+        self.assertEqual(len(received_fn), 1)
+        self.assertTrue(callable(received_fn[0]))
+        self.assertEqual(result, 10)
+
+        # Verify that calling the received fn works correctly
+        underlying_fn = received_fn[0]
+        self.assertEqual(underlying_fn(7), 14)
+
+    @set_caching_module_enabled(True)
+    def test_encoder_factory_fn_bypasses_memoization(self) -> None:
+        """Test that calling fn from the encoder bypasses memoization.
+
+        Verifies that the fn passed to the encoder factory is the unwrapped
+        function, so calling it does not trigger caching side effects.
+        """
+        # Setup: create a memoizer and count direct vs memoized calls
+        memoizer = Memoizer()
+        direct_call_count = 0
+        received_fn: list[object] = []
+
+        def encoder_factory(fn: object) -> object:
+            received_fn.append(fn)
+
+            def params_to_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: object) -> object:
+                    return result
+
+                return encode
+
+            return params_to_encoder
+
+        @memoizer.record(custom_result_encoder=encoder_factory)
+        def compute(x: int) -> int:
+            nonlocal direct_call_count
+            direct_call_count += 1
+            return x * 2
+
+        # Execute: call the memoized function once
+        compute(5)
+        self.assertEqual(direct_call_count, 1)
+
+        # Now call the underlying fn directly multiple times
+        underlying_fn = received_fn[0]
+        underlying_fn(5)
+        underlying_fn(5)
+        underlying_fn(5)
+
+        # Assert: direct calls happened but no new cache entries
+        self.assertEqual(direct_call_count, 4)  # 1 memoized + 3 direct
+        # Cache should only have the one entry from the memoized call
+        cache_entries = len(memoizer._cache._memory)
+        self.assertEqual(cache_entries, 1)
+
+    @set_caching_module_enabled(True)
+    def test_decoder_factory_receives_underlying_function(self) -> None:
+        """Test that the decoder factory receives the underlying function.
+
+        Verifies that when custom_result_decoder is provided, the factory
+        receives the unwrapped function as the first parameter, allowing
+        the decoder to call it as a fallback if needed.
+        """
+        # Setup: create a memoizer and track what fn is passed to the factory
+        memoizer = Memoizer()
+        received_fn: list[object] = []
+
+        # First, populate the cache with a value
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+        cache_entry = interfaces.CacheEntry(
+            encoded_params={"args": (5,), "kwargs": {}},
+            encoded_result={"encoded_value": 10},
+        )
+        memoizer._cache.insert(cache_key, cache_entry)
+
+        def decoder_factory(fn: object) -> object:
+            received_fn.append(fn)
+
+            def params_to_decoder(*args: object, **kwargs: object) -> object:
+                def decode(encoded_result: object) -> int:
+                    return encoded_result["encoded_value"]
+
+                return decode
+
+            return params_to_decoder
+
+        @memoizer.replay(custom_result_decoder=decoder_factory)
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Execute: replay the cached value
+        result = compute(5)
+
+        # Assert: decoder factory received a function (the unwrapped compute)
+        self.assertEqual(len(received_fn), 1)
+        self.assertTrue(callable(received_fn[0]))
+        self.assertEqual(result, 10)
+
+        # Verify that calling the received fn works correctly
+        underlying_fn = received_fn[0]
+        self.assertEqual(underlying_fn(7), 14)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_persistent_memoizer_decoder_receives_fn(self) -> None:
+        """Test that PersistentMemoizer decoder factory receives fn.
+
+        Verifies that the two-level cache correctly passes the fn parameter
+        to the decoder factory when replaying from disk cache.
+        """
+        import pickle
+
+        # Setup: create a persistent memoizer
+        persistent = PersistentMemoizer(sub_dir=self.sub_dir())
+        received_fn: list[object] = []
+
+        # Populate the disk cache with a value
+        cache_key = interfaces._BaseMemoizer._make_key(None, 5)
+        cache_entry = interfaces.CacheEntry(
+            encoded_params={"args": (5,), "kwargs": {}},
+            encoded_result={"encoded_value": 10},
+        )
+        pickled_entry = pickle.dumps(cache_entry)
+        persistent._disk_cache.insert(cache_key, pickled_entry)
+
+        def decoder_factory(fn: object) -> object:
+            received_fn.append(fn)
+
+            def params_to_decoder(*args: object, **kwargs: object) -> object:
+                def decode(encoded_result: object) -> int:
+                    return encoded_result["encoded_value"]
+
+                return decode
+
+            return params_to_decoder
+
+        @persistent.replay(custom_result_decoder=decoder_factory)
+        def compute(x: int) -> int:
+            return x * 2
+
+        # Execute: replay from disk cache
+        result = compute(5)
+
+        # Assert: decoder factory received the underlying function
+        self.assertEqual(len(received_fn), 1)
+        self.assertTrue(callable(received_fn[0]))
+        self.assertEqual(result, 10)
+
+        # Verify fn works correctly
+        underlying_fn = received_fn[0]
+        self.assertEqual(underlying_fn(7), 14)
 
     @set_caching_module_enabled(True)
     def test_deferred_recording_double_finalize_raises(self) -> None:
@@ -3124,19 +3334,22 @@ class DeferredRecordingTest(TestMixin, TestCase):
         original_result: list[int] = []
         deferred_obj: interfaces.DeferredRecording | None = None
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: int) -> interfaces.DeferredRecording:
-                nonlocal deferred_obj
-                original_result.append(result)
-                deferred = interfaces.DeferredRecording(
-                    make_interim_result=lambda: result
-                )
-                deferred_obj = deferred
-                return deferred
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: int) -> interfaces.DeferredRecording:
+                    nonlocal deferred_obj
+                    original_result.append(result)
+                    deferred = interfaces.DeferredRecording(
+                        make_interim_result=lambda: result
+                    )
+                    deferred_obj = deferred
+                    return deferred
 
-            return encode
+                return encode
 
-        @memoizer.memoize(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @memoizer.memoize(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> int:
             nonlocal call_count
             call_count += 1
@@ -3173,18 +3386,21 @@ class DeferredRecordingTest(TestMixin, TestCase):
         shared_object = {"value": "shared"}
         deferred_obj: interfaces.DeferredRecording | None = None
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: object) -> interfaces.DeferredRecording:
-                nonlocal deferred_obj
-                deferred = interfaces.DeferredRecording(
-                    make_interim_result=lambda: shared_object
-                )
-                deferred_obj = deferred
-                return deferred
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: object) -> interfaces.DeferredRecording:
+                    nonlocal deferred_obj
+                    deferred = interfaces.DeferredRecording(
+                        make_interim_result=lambda: shared_object
+                    )
+                    deferred_obj = deferred
+                    return deferred
 
-            return encode
+                return encode
 
-        @memoizer.memoize(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @memoizer.memoize(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> object:
             return shared_object
 
@@ -3213,27 +3429,30 @@ class DeferredRecordingTest(TestMixin, TestCase):
         call_count = 0
         deferred_obj: interfaces.DeferredRecording | None = None
 
-        def future_encoder(*args: object, **kwargs: object) -> object:
-            def encode(future_result: Future[int]) -> interfaces.DeferredRecording:
-                nonlocal deferred_obj
-                deferred = interfaces.DeferredRecording(
-                    make_interim_result=lambda: future_result
-                )
+        def future_encoder_factory(fn) -> object:
+            def future_encoder(*args: object, **kwargs: object) -> object:
+                def encode(future_result: Future[int]) -> interfaces.DeferredRecording:
+                    nonlocal deferred_obj
+                    deferred = interfaces.DeferredRecording(
+                        make_interim_result=lambda: future_result
+                    )
 
-                def on_complete(completed_future: Future[int]) -> None:
-                    actual_result = completed_future.result()
-                    deferred.finalize(actual_result)
+                    def on_complete(completed_future: Future[int]) -> None:
+                        actual_result = completed_future.result()
+                        deferred.finalize(actual_result)
 
-                future_result.add_done_callback(on_complete)
-                deferred_obj = deferred
-                return deferred
+                    future_result.add_done_callback(on_complete)
+                    deferred_obj = deferred
+                    return deferred
 
-            return encode
+                return encode
+
+            return future_encoder
 
         with ThreadPoolExecutor() as executor:
             barrier = Event()
 
-            @memoizer.memoize(custom_result_encoder=future_encoder)
+            @memoizer.memoize(custom_result_encoder=future_encoder_factory)
             def compute_async(x: int) -> Future[int]:
                 nonlocal call_count
                 call_count += 1
@@ -3244,17 +3463,19 @@ class DeferredRecordingTest(TestMixin, TestCase):
 
                 return executor.submit(work)
 
-            # First call: executes function, returns Future
-            future1 = compute_async(5)
-            self.assertEqual(call_count, 1)
+            try:
+                # First call: executes function, returns Future
+                future1 = compute_async(5)
+                self.assertEqual(call_count, 1)
 
-            # Second call: should return same Future without re-execution
-            future2 = compute_async(5)
-            self.assertEqual(call_count, 1)  # No additional call
-            self.assertIs(future1, future2)  # Same Future object
-
-            # Release the barrier
-            barrier.set()
+                # Second call: should return same Future without re-execution
+                future2 = compute_async(5)
+                self.assertEqual(call_count, 1)  # No additional call
+                self.assertIs(future1, future2)  # Same Future object
+            finally:
+                # Release the barrier - must be in finally to prevent test hang
+                # if any assertion fails before this point
+                barrier.set()
 
             # Wait for Future to complete
             result = future1.result(timeout=5)
@@ -3275,18 +3496,21 @@ class DeferredRecordingTest(TestMixin, TestCase):
         deferred_obj: interfaces.DeferredRecording | None = None
         call_count = 0
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: int) -> interfaces.DeferredRecording:
-                nonlocal deferred_obj
-                deferred = interfaces.DeferredRecording(
-                    make_interim_result=lambda: result
-                )
-                deferred_obj = deferred
-                return deferred
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: int) -> interfaces.DeferredRecording:
+                    nonlocal deferred_obj
+                    deferred = interfaces.DeferredRecording(
+                        make_interim_result=lambda: result
+                    )
+                    deferred_obj = deferred
+                    return deferred
 
-            return encode
+                return encode
 
-        @memoizer.memoize(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @memoizer.memoize(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> int:
             nonlocal call_count
             call_count += 1
@@ -3324,18 +3548,21 @@ class DeferredRecordingTest(TestMixin, TestCase):
         call_count = 0
         deferred_obj: interfaces.DeferredRecording | None = None
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: int) -> interfaces.DeferredRecording:
-                nonlocal deferred_obj
-                deferred = interfaces.DeferredRecording(
-                    make_interim_result=lambda: result
-                )
-                deferred_obj = deferred
-                return deferred
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: int) -> interfaces.DeferredRecording:
+                    nonlocal deferred_obj
+                    deferred = interfaces.DeferredRecording(
+                        make_interim_result=lambda: result
+                    )
+                    deferred_obj = deferred
+                    return deferred
 
-            return encode
+                return encode
 
-        @persistent.memoize(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @persistent.memoize(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> int:
             nonlocal call_count
             call_count += 1
@@ -3379,17 +3606,20 @@ class DeferredRecordingTest(TestMixin, TestCase):
         # Keep strong references to deferred recordings to prevent GC
         deferred_objs: list[interfaces.DeferredRecording] = []
 
-        def deferred_encoder(*args: object, **kwargs: object) -> object:
-            def encode(result: int) -> interfaces.DeferredRecording:
-                deferred = interfaces.DeferredRecording(
-                    make_interim_result=lambda: result
-                )
-                deferred_objs.append(deferred)
-                return deferred
+        def deferred_encoder_factory(fn) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: int) -> interfaces.DeferredRecording:
+                    deferred = interfaces.DeferredRecording(
+                        make_interim_result=lambda: result
+                    )
+                    deferred_objs.append(deferred)
+                    return deferred
 
-            return encode
+                return encode
 
-        @memoizer.memoize(custom_result_encoder=deferred_encoder)
+            return deferred_encoder
+
+        @memoizer.memoize(custom_result_encoder=deferred_encoder_factory)
         def compute(x: int) -> int:
             nonlocal call_count
             call_count += 1
@@ -3588,16 +3818,19 @@ class DeferredRecordingTest(TestMixin, TestCase):
         # Keep strong references to deferred recordings to prevent GC
         deferred_objs: list[interfaces.DeferredRecording] = []
 
-        def deferred_encoder_no_interim(*args: object, **kwargs: object) -> object:
-            def encode(result: int) -> interfaces.DeferredRecording:
-                # Explicitly not setting make_interim_result
-                deferred = interfaces.DeferredRecording()
-                deferred_objs.append(deferred)
-                return deferred
+        def deferred_encoder_factory_no_interim(fn: object) -> object:
+            def deferred_encoder(*args: object, **kwargs: object) -> object:
+                def encode(result: int) -> interfaces.DeferredRecording:
+                    # Explicitly not setting make_interim_result
+                    deferred = interfaces.DeferredRecording()
+                    deferred_objs.append(deferred)
+                    return deferred
 
-            return encode
+                return encode
 
-        @memoizer.memoize(custom_result_encoder=deferred_encoder_no_interim)
+            return deferred_encoder
+
+        @memoizer.memoize(custom_result_encoder=deferred_encoder_factory_no_interim)
         def compute(x: int) -> int:
             nonlocal call_count
             call_count += 1
