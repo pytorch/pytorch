@@ -3716,19 +3716,13 @@ class InstructionTranslatorBase(
             self.push(ConstantVariable.create(False))
 
     def MATCH_CLASS(self, inst: Instruction) -> None:
-        import builtins
-
-        from torch._dynamo.variables.builtin import BuiltinVariable
-        from torch._dynamo.variables.constant import ConstantVariable
-
-        from .exc import Unsupported
-
         names = self.pop().realize()
         cls_type = self.pop().realize()
         subject = self.pop().realize()
 
+        isinstance_var = BuiltinVariable(isinstance)
+
         try:
-            isinstance_var = BuiltinVariable(builtins.isinstance)
             match_result = self.call_function(isinstance_var, [subject, cls_type], {})
         except AssertionError:
             match_result = ConstantVariable.create(False)
@@ -3736,24 +3730,39 @@ class InstructionTranslatorBase(
             raise
 
         if match_result is None:
-            raise Unsupported("MATCH_CLASS: isinstance returned None")
+            unimplemented(
+                gb_type="MATCH_CLASS_isinstance_none",
+                context="isinstance check",
+                explanation="MATCH_CLASS: isinstance returned None",
+                hints=[],
+            )
+            return
 
-        try:
-            is_match = match_result.as_python_constant()
-        except NotImplementedError:
-            raise Unsupported("MATCH_CLASS: cannot statically resolve isinstance")  # noqa: B904
+        if isinstance(match_result, ConstantVariable):
+            is_match = match_result.value
+        else:
+            unimplemented(
+                gb_type="MATCH_CLASS_dynamic_isinstance",
+                context="dynamic isinstance",
+                explanation="MATCH_CLASS: cannot statically resolve isinstance",
+                hints=[],
+            )
+            return
 
         if is_match:
             attr_names = names.as_python_constant()
-            getattr_var = BuiltinVariable(builtins.getattr)
+            getattr_var = BuiltinVariable(getattr)
+
+            extracted_vars = []
             for name in attr_names:
                 name_var = ConstantVariable.create(name)
-                val = self.call_function(getattr_var, [subject, name_var], {})
-                self.push(val)
-            self.push(match_result)
+                # type: ignore[arg-type]
+                val = getattr_var.call_function(self, [subject, name_var], {})
+                extracted_vars.append(val)
+
+            self.push(TupleVariable(extracted_vars))
         else:
-            self.push(subject)
-            self.push(match_result)
+            self.push(ConstantVariable.create(None))
 
     def MATCH_SEQUENCE(self, inst: Instruction) -> None:
         tos = self.stack[-1]
