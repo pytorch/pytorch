@@ -7,6 +7,7 @@ from typing import Any, cast, TYPE_CHECKING, Union
 import torch
 import torch.distributed as dist
 import torch.distributed.distributed_c10d as c10d
+from torch._utils import _maybe_view_chunk_cat
 from torch.distributed.device_mesh import DeviceMesh
 from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
@@ -208,7 +209,8 @@ def all_gather_tensor(
         # and then chunk + cat avoid us going through ACT dispatching logic again
         if isinstance(res, AsyncCollectiveTensor):
             res = res.wait()  # type: ignore[attr-defined]
-        res = torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)
+
+        res = _maybe_view_chunk_cat(res, group_size, gather_dim)
     return res
 
 
@@ -546,6 +548,404 @@ def all_to_all_single_autograd(
     return _FromTorchTensor.apply(tensor)
 
 
+# ============================================================================
+# Collecive Autograd Functions / Custom Ops
+# ============================================================================
+
+
+def wait_tensor_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for wait_tensor: identity (no-op).
+    Wait is just a synchronization primitive, so gradient flows through unchanged.
+
+    Args:
+        ctx: Context object
+        grad_output: Gradient from downstream operations
+
+    Returns:
+        Gradient unchanged (identity)
+    """
+    return grad_output
+
+
+def wait_tensor_setup_context(ctx, inputs, output):
+    """
+    Setup context for wait_tensor backward.
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (tensor,)
+        output: Output from forward pass
+    """
+    return
+
+
+torch.library.register_autograd(
+    "_c10d_functional::wait_tensor",
+    wait_tensor_backward,
+    setup_context=wait_tensor_setup_context,
+)
+
+
+def all_reduce_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for all_reduce: all_reduce with same reduce_op.
+    Forward aggregates tensors, backward aggregates gradients.
+
+    Args:
+        ctx: Context object
+        grad_output: Gradient from downstream operations
+
+    Returns:
+        Tuple of (grad_input, grad_group_name, grad_reduce_op)
+        grad_group_name and grad_reduce_op are None (not differentiable)
+    """
+    group_name = ctx.group_name
+    reduce_op = ctx.reduce_op
+
+    if reduce_op != "sum":
+        raise RuntimeError(
+            f"all_reduce backward only supports 'sum' reduction, got '{reduce_op}'"
+        )
+
+    # Backward does all_reduce with the same reduce_op
+    output = torch.ops._c10d_functional.all_reduce(
+        grad_output.contiguous(), reduce_op, group_name
+    )
+    return wait_tensor(output), None, None
+
+
+def all_reduce_setup_context(ctx, inputs, output):
+    """
+    Setup context for all_reduce backward.
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (input, reduce_op, group_name)
+        output: Output from forward pass
+    """
+    input, reduce_op, group_name = inputs
+    ctx.group_name = group_name
+    ctx.reduce_op = reduce_op.lower()
+
+
+torch.library.register_autograd(
+    "_c10d_functional::all_reduce",
+    all_reduce_backward,
+    setup_context=all_reduce_setup_context,
+)
+
+
+def all_gather_into_tensor_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for all_gather_into_tensor: reduce_scatter with sum.
+
+    Forward gathers tensors from all ranks, backward scatters gradients back
+    with sum reduction.
+
+    Args:
+        ctx: Context object with group_name and group_size
+        grad_output: Gradient from downstream operations
+
+    Returns:
+        Tuple of (grad_input, grad_group_size, grad_group_name)
+        grad_group_size and grad_group_name are None (not differentiable)
+    """
+    group_name = ctx.group_name
+    group_size = ctx.group_size
+
+    # Backward is reduce_scatter with sum
+    output = torch.ops._c10d_functional.reduce_scatter_tensor(
+        grad_output.contiguous(),
+        "sum",
+        group_size,
+        group_name,
+    )
+    return wait_tensor(output), None, None
+
+
+def all_gather_into_tensor_setup_context(ctx, inputs, output):
+    """
+    Setup context for all_gather_into_tensor backward.
+
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (input, group_size, group_name)
+        output: Output from forward pass
+    """
+    input, group_size, group_name = inputs
+    ctx.group_name = group_name
+    ctx.group_size = group_size
+
+
+torch.library.register_autograd(
+    "_c10d_functional::all_gather_into_tensor",
+    all_gather_into_tensor_backward,
+    setup_context=all_gather_into_tensor_setup_context,
+)
+
+
+def reduce_scatter_tensor_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for reduce_scatter_tensor: all_gather.
+
+    Forward reduces and scatters tensors to ranks, backward gathers gradients
+    from all ranks.
+
+    Args:
+        ctx: Context object with group_name, group_size, and reduce_op
+        grad_output: Gradient from downstream operations
+
+    Returns:
+        Tuple of (grad_input, grad_reduce_op, grad_group_size, grad_group_name)
+        grad_reduce_op, grad_group_size, grad_group_name are None (not differentiable)
+    """
+    group_name = ctx.group_name
+    group_size = ctx.group_size
+    reduce_op = ctx.reduce_op
+
+    # Lazy validation: check reduce_op only when backward is called
+    if reduce_op != "sum":
+        raise RuntimeError(
+            f"reduce_scatter_tensor backward only supports 'sum' reduction, got '{reduce_op}'"
+        )
+
+    # Backward is all_gather
+    output = torch.ops._c10d_functional.all_gather_into_tensor(
+        grad_output.contiguous(),
+        group_size,
+        group_name,
+    )
+    return wait_tensor(output), None, None, None
+
+
+def reduce_scatter_tensor_setup_context(ctx, inputs, output):
+    """
+    Setup context for reduce_scatter_tensor backward.
+
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (input, reduce_op, group_size, group_name)
+        output: Output from forward pass
+    """
+    input, reduce_op, group_size, group_name = inputs
+    ctx.group_name = group_name
+    ctx.group_size = group_size
+    ctx.reduce_op = reduce_op.lower()
+
+
+torch.library.register_autograd(
+    "_c10d_functional::reduce_scatter_tensor",
+    reduce_scatter_tensor_backward,
+    setup_context=reduce_scatter_tensor_setup_context,
+)
+
+
+def all_to_all_single_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for all_to_all_single: all_to_all with reversed split sizes.
+
+    Forward does all-to-all with specified split sizes, backward reverses them.
+
+    Args:
+        ctx: Context object with group_name, output_split_sizes, and input_split_sizes
+        grad_output: Gradient from downstream operations
+
+    Returns:
+        Tuple of (grad_input, grad_output_split_sizes, grad_input_split_sizes, grad_group_name)
+        All except grad_input are None (not differentiable)
+    """
+    group_name = ctx.group_name
+    output_split_sizes = ctx.output_split_sizes
+    input_split_sizes = ctx.input_split_sizes
+
+    # Backward is all_to_all with reversed split sizes
+    output = torch.ops._c10d_functional.all_to_all_single(
+        grad_output.contiguous(),
+        input_split_sizes,  # Reversed
+        output_split_sizes,  # Reversed
+        group_name,
+    )
+    return wait_tensor(output), None, None, None
+
+
+def all_to_all_single_setup_context(ctx, inputs, output):
+    """
+    Setup context for all_to_all_single backward.
+
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (input, output_split_sizes, input_split_sizes, group_name)
+        output: Output from forward pass
+    """
+    input, output_split_sizes, input_split_sizes, group_name = inputs
+    ctx.group_name = group_name
+    ctx.output_split_sizes = output_split_sizes
+    ctx.input_split_sizes = input_split_sizes
+
+
+torch.library.register_autograd(
+    "_c10d_functional::all_to_all_single",
+    all_to_all_single_backward,
+    setup_context=all_to_all_single_setup_context,
+)
+
+
+def all_reduce_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
+    """
+    Backward for all_reduce_coalesced: all_reduce each gradient.
+
+    Forward aggregates tensors, backward aggregates gradients.
+
+    Args:
+        ctx: Context object with group_name and reduce_op
+        grad_outputs: Gradients from downstream operations (one per input tensor)
+
+    Returns:
+        Tuple of (grad_inputs..., grad_reduce_op, grad_group_name)
+        grad_reduce_op and grad_group_name are None (not differentiable)
+    """
+    group_name = ctx.group_name
+    reduce_op = ctx.reduce_op
+
+    if reduce_op != "sum":
+        raise RuntimeError(
+            f"all_reduce_coalesced backward only supports 'sum' reduction, got '{reduce_op}'"
+        )
+
+    # Backward does all_reduce on list of gradients
+    grad_inputs = torch.ops._c10d_functional.all_reduce_coalesced(
+        [grad_output.contiguous() for grad_output in grad_outputs],
+        reduce_op,
+        group_name,
+    )
+    return (list(map(wait_tensor, grad_inputs)), None, None)
+
+
+def all_reduce_coalesced_setup_context(ctx, inputs, output):
+    """
+    Setup context for all_reduce_coalesced backward.
+
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (tensor_list, reduce_op, group_name)
+        output: Output from forward pass
+    """
+    tensor_list, reduce_op, group_name = inputs
+    ctx.group_name = group_name
+    ctx.reduce_op = reduce_op.lower()
+
+
+torch.library.register_autograd(
+    "_c10d_functional::all_reduce_coalesced",
+    all_reduce_coalesced_backward,
+    setup_context=all_reduce_coalesced_setup_context,
+)
+
+
+def all_gather_into_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
+    """
+    Backward for all_gather_into_tensor_coalesced: reduce_scatter each gradient.
+
+    Forward gathers tensors from all ranks, backward scatters gradients back
+    with sum reduction.
+
+    Args:
+        ctx: Context object with group_name and group_size
+        grad_outputs: Gradients from downstream operations (one per input tensor)
+
+    Returns:
+        Tuple of (grad_inputs..., grad_group_size, grad_group_name)
+        grad_group_size and grad_group_name are None (not differentiable)
+    """
+    group_name = ctx.group_name
+    group_size = ctx.group_size
+
+    # Backward does reduce_scatter on list of gradients
+    grad_inputs = torch.ops._c10d_functional.reduce_scatter_tensor_coalesced(
+        [grad_output.contiguous() for grad_output in grad_outputs],
+        "sum",
+        group_size,
+        group_name,
+    )
+    return (list(map(wait_tensor, grad_inputs)), None, None)
+
+
+def all_gather_into_tensor_coalesced_setup_context(ctx, inputs, output):
+    """
+    Setup context for all_gather_into_tensor_coalesced backward.
+
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (tensor_list, group_size, group_name)
+        output: Output from forward pass
+    """
+    tensor_list, group_size, group_name = inputs
+    ctx.group_name = group_name
+    ctx.group_size = group_size
+
+
+torch.library.register_autograd(
+    "_c10d_functional::all_gather_into_tensor_coalesced",
+    all_gather_into_tensor_coalesced_backward,
+    setup_context=all_gather_into_tensor_coalesced_setup_context,
+)
+
+
+def reduce_scatter_tensor_coalesced_backward(ctx, grad_outputs: list[torch.Tensor]):
+    """
+    Backward for reduce_scatter_tensor_coalesced: all_gather each gradient.
+
+    Forward reduces and scatters tensors to ranks, backward gathers gradients
+    from all ranks.
+
+    Args:
+        ctx: Context object with group_name, group_size, and reduce_op
+        grad_outputs: Gradients from downstream operations (one per input tensor)
+
+    Returns:
+        Tuple of (grad_inputs..., grad_reduce_op, grad_group_size, grad_group_name)
+        grad_reduce_op, grad_group_size, grad_group_name are None (not differentiable)
+    """
+    group_name = ctx.group_name
+    group_size = ctx.group_size
+    reduce_op = ctx.reduce_op
+
+    # Lazy validation: check reduce_op only when backward is called
+    if reduce_op != "sum":
+        raise RuntimeError(
+            f"reduce_scatter_tensor_coalesced backward only supports 'sum' reduction, got '{reduce_op}'"
+        )
+
+    # Backward does all_gather on list of gradients
+    grad_inputs = torch.ops._c10d_functional.all_gather_into_tensor_coalesced(
+        [grad_output.contiguous() for grad_output in grad_outputs],
+        group_size,
+        group_name,
+    )
+    return (list(map(wait_tensor, grad_inputs)), None, None, None)
+
+
+def reduce_scatter_tensor_coalesced_setup_context(ctx, inputs, output):
+    """
+    Setup context for reduce_scatter_tensor_coalesced backward.
+
+    Args:
+        ctx: Context object to save state for backward
+        inputs: Tuple of (tensor_list, reduce_op, group_size, group_name)
+        output: Output from forward pass
+    """
+    tensor_list, reduce_op, group_size, group_name = inputs
+    ctx.group_name = group_name
+    ctx.group_size = group_size
+    ctx.reduce_op = reduce_op.lower()
+
+
+torch.library.register_autograd(
+    "_c10d_functional::reduce_scatter_tensor_coalesced",
+    reduce_scatter_tensor_coalesced_backward,
+    setup_context=reduce_scatter_tensor_coalesced_setup_context,
+)
+
+
 def permute_tensor(
     self: torch.Tensor,
     src_dst: list[int],
@@ -842,6 +1242,69 @@ class _FromTorchTensor(torch.autograd.Function):
         return grad_output
 
 
+@torch.library.custom_op(
+    "_c10d_functional::_wrap_tensor_autograd",
+    mutates_args=(),
+    schema="(Tensor input) -> Tensor",
+)
+def _wrap_tensor_autograd(input: torch.Tensor) -> torch.Tensor:
+    """
+    Custom op that allows autograd to propagate
+    from a normal Tensor to an AsyncCollectiveTensor.
+
+    This is the low-level implementation. Users should call _maybe_wrap_tensor directly.
+
+    Args:
+        input: Input tensor to wrap in AsyncCollectiveTensor
+
+    Returns:
+        AsyncCollectiveTensor wrapping the input (or wait_tensor result if tracing)
+    """
+    return AsyncCollectiveTensor(input)
+
+
+@_wrap_tensor_autograd.register_fake
+def _(input: torch.Tensor) -> torch.Tensor:
+    """
+    Meta kernel for _wrap_tensor_autograd.
+    """
+    return torch.empty_like(input)
+
+
+def _wrap_tensor_autograd_backward(ctx, grad_output: torch.Tensor):
+    """
+    Backward for _wrap_tensor_autograd: identity (no-op).
+
+    The wrapping is just for async optimization, gradients flow through unchanged.
+
+    Args:
+        ctx: Context object (unused)
+        grad_output: Gradient from downstream operations
+
+    Returns:
+        Gradient unchanged (identity)
+    """
+    return grad_output
+
+
+def _wrap_tensor_autograd_setup_context(ctx, inputs, output):
+    """
+    Setup context for _wrap_tensor_autograd backward.
+
+    Args:
+        ctx: Context object to save state for backward (nothing to save)
+        inputs: Tuple of (input,)
+        output: Output from forward pass
+    """
+    return
+
+
+_wrap_tensor_autograd.register_autograd(
+    _wrap_tensor_autograd_backward,
+    setup_context=_wrap_tensor_autograd_setup_context,
+)
+
+
 def _are_we_tracing() -> bool:
     if is_torchdynamo_compiling():
         return True
@@ -859,8 +1322,7 @@ def _are_we_tracing() -> bool:
 def _maybe_wrap_tensor(self) -> torch.Tensor:
     if _are_we_tracing():
         return wait_tensor(self)
-    res = AsyncCollectiveTensor(self)
-    return cast(torch.Tensor, res)
+    return _wrap_tensor_autograd(self)
 
 
 @contextlib.contextmanager

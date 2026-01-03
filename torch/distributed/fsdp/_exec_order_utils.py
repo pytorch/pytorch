@@ -2,7 +2,6 @@
 import itertools
 import warnings
 from enum import auto, Enum
-from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -39,7 +38,7 @@ class _ExecOrderData:
         # and forward prefetching
         self.handles_pre_forward_order: list[FlatParamHandle] = []
         # Tracks the post-forward order for pre-backward prefetching
-        self.handles_post_forward_order: list[Optional[FlatParamHandle]] = []
+        self.handles_post_forward_order: list[FlatParamHandle | None] = []
         self._iter = 0
 
         # Gives the max number of backward/forward prefetched all-gathers by a
@@ -49,8 +48,8 @@ class _ExecOrderData:
 
         # Data structures for execution order validation
         self._checking_order: bool = debug_level == dist.DebugLevel.DETAIL
-        self.process_group: Optional[dist.ProcessGroup] = None
-        self.world_size: Optional[int] = None
+        self.process_group: dist.ProcessGroup | None = None
+        self.world_size: int | None = None
         self.all_handles: list[FlatParamHandle] = []
         # Names are prefixed from the root module
         self.param_to_fqn: dict[nn.Parameter, list[str]] = {}
@@ -89,7 +88,7 @@ class _ExecOrderData:
     def get_handle_to_backward_prefetch(
         self,
         current_handle: FlatParamHandle,
-    ) -> Optional[FlatParamHandle]:
+    ) -> FlatParamHandle | None:
         """
         Returns a :class:`list` of the handles keys of the handles to backward
         prefetch given the current handles key. If there are no valid handles
@@ -99,7 +98,7 @@ class _ExecOrderData:
         if current_index is None:
             return None
         target_index = current_index - 1
-        target_handle: Optional[FlatParamHandle] = None
+        target_handle: FlatParamHandle | None = None
         for _ in range(self._backward_prefetch_limit):
             if target_index < 0:
                 break
@@ -110,7 +109,7 @@ class _ExecOrderData:
     def get_handle_to_forward_prefetch(
         self,
         current_handle: FlatParamHandle,
-    ) -> Optional[FlatParamHandle]:
+    ) -> FlatParamHandle | None:
         """
         Returns a :class:`list` of the handles keys of the handles to forward
         prefetch given the current handles key. If there are no valid handles
@@ -120,7 +119,7 @@ class _ExecOrderData:
         if current_index is None:
             return None
         target_index = current_index + 1
-        target_handle: Optional[FlatParamHandle] = None
+        target_handle: FlatParamHandle | None = None
         for _ in range(self._forward_prefetch_limit):
             if target_index >= len(self.handles_pre_forward_order):
                 break
@@ -128,7 +127,7 @@ class _ExecOrderData:
             target_index += 1
         return target_handle
 
-    def record_post_forward(self, handle: Optional[FlatParamHandle]) -> None:
+    def record_post_forward(self, handle: FlatParamHandle | None) -> None:
         """
         Records ``handles`` in the post-forward order, where ``handles`` should
         be a group of handles used in the same module's forward. If ``handles``
@@ -149,7 +148,7 @@ class _ExecOrderData:
         self.handles_post_forward_order.append(handle)
 
     def record_pre_forward(
-        self, handle: Optional[FlatParamHandle], is_training: bool
+        self, handle: FlatParamHandle | None, is_training: bool
     ) -> None:
         """
         Records ``handles`` in the pre-forward order, where ``handles`` should
@@ -190,14 +189,14 @@ class _ExecOrderData:
             return
         if self.is_first_iter:
             msg_prefix = "Forward order differs across ranks:"
-            optional_local_indices: tuple[Optional[int], ...] = (
-                self._get_handle_indices(handle)
+            optional_local_indices: tuple[int | None, ...] = self._get_handle_indices(
+                handle
             )
             device = handle.device  # guaranteed to be non-CPU
             num_valid_indices = sum(
                 (index is not None) for index in optional_local_indices
             )
-            tensor_kwargs: dict[str, Union[torch.dtype, torch.device]] = {
+            tensor_kwargs: dict[str, torch.dtype | torch.device] = {
                 "dtype": torch.int32,
                 "device": device,
             }
@@ -308,13 +307,13 @@ class _ExecOrderData:
     def _get_handle_indices(
         self,
         handle: FlatParamHandle,
-    ) -> tuple[Optional[int], ...]:
+    ) -> tuple[int | None, ...]:
         """
         Returns the handle indices (i.e. indices into ``self.all_handles``)
         corresponding to the handles in ``handle``. An entry in the
         returned tuple is ``None`` if the handle is invalid.
         """
-        indices: list[Optional[int]] = []
+        indices: list[int | None] = []
         if handle:
             indices.append(handle._handle_index)
         return tuple(indices)

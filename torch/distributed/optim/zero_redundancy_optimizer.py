@@ -1140,7 +1140,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
         return loss
 
-    def join_hook(self, **kwargs):
+    def join_hook(self, **_kwargs: Any) -> JoinHook:
         r"""
         Return the ZeRO join hook.
 

@@ -56,7 +56,10 @@ def lower_exported_program(
     aoti_files = torch._inductor.aot_compile(
         flat_ep.module(), tuple(flat_inputs), options={"aot_inductor.package": True}
     )
-    assert isinstance(aoti_files, list)
+    if not isinstance(aoti_files, list):
+        raise AssertionError(
+            f"aoti_files must be a list, got {type(aoti_files).__name__}"
+        )
 
     lowered_aoti_module = LoweredBackendModule(
         flat_ep, backend_id, module_name=model_name
