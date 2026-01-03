@@ -529,7 +529,11 @@ def create_aot_state(
         torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
     )
 
-    from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+    from torch._library.fake_class_registry import (
+        FakeScriptMethod,
+        FakeScriptObject,
+        maybe_to_fake_obj,
+    )
     from torch._library.opaque_object import is_opaque_type
 
     # Tracing may mutate the states the fake script object,
@@ -542,14 +546,21 @@ def create_aot_state(
         for arg in fake_flat_args:
             if isinstance(arg, FakeScriptObject):
                 # Copy FakeScriptObject, preserving wrapped_obj
-                # while isolating mutations
-                result.append(
-                    FakeScriptObject(
-                        copy.deepcopy(arg.wrapped_obj),
-                        arg.script_class_name,
-                        x=None,
-                    )
+                # and FakeScriptMethod attributes
+                new_fake = FakeScriptObject(
+                    copy.deepcopy(arg.wrapped_obj),
+                    arg.script_class_name,
+                    x=None,
                 )
+                for attr_name in dir(arg):
+                    attr = object.__getattribute__(arg, attr_name)
+                    if isinstance(attr, FakeScriptMethod):
+                        object.__setattr__(
+                            new_fake,
+                            attr_name,
+                            FakeScriptMethod(new_fake, attr.method_name, attr.schema),
+                        )
+                result.append(new_fake)
             elif is_opaque_type(type(arg)):
                 result.append(maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg))
             else:
