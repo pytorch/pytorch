@@ -416,6 +416,8 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
             """\
 Mutating object of type list (source name: L['lst'])
 
+      File "test_logging.py", line N, in test_side_effects
+        fn(torch.ones(1), my_list)
       File "test_logging.py", line N, in fn
         lst.append(4)
 """,
@@ -443,6 +445,8 @@ Mutating object of type list (source name: L['lst'])
             """\
 Mutating object of type list (source name: L['my_list'])
 
+      File "test_logging.py", line N, in test_side_effects_nested_calls
+        outer(torch.ones(1), outer_list)
       File "test_logging.py", line N, in outer
         result = inner(my_list)
       File "test_logging.py", line N, in inner
@@ -450,6 +454,8 @@ Mutating object of type list (source name: L['my_list'])
 
     ********
 
+      File "test_logging.py", line N, in test_side_effects_nested_calls
+        outer(torch.ones(1), outer_list)
       File "test_logging.py", line N, in outer
         my_list.append(3)
 """,
@@ -475,21 +481,29 @@ Mutating object of type list (source name: L['my_list'])
             """\
 Mutating object of type list (source name: L['lst'])
 
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
       File "test_logging.py", line N, in fn
         lst.append(4)
 
     ********
 
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
       File "test_logging.py", line N, in fn
         lst.append(5)
 
     ********
 
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
       File "test_logging.py", line N, in fn
         lst.extend([6, 7])
 
     ********
 
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
       File "test_logging.py", line N, in fn
         lst.pop()
 """,
@@ -513,11 +527,15 @@ Mutating object of type list (source name: L['lst'])
             """\
 Mutating object of type dict (source name: L['d'])
 
+      File "test_logging.py", line N, in test_side_effects_dict_mutations
+        fn(torch.ones(1), my_dict)
       File "test_logging.py", line N, in fn
         d["b"] = 2
 
     ********
 
+      File "test_logging.py", line N, in test_side_effects_dict_mutations
+        fn(torch.ones(1), my_dict)
       File "test_logging.py", line N, in fn
         d["c"] = 3
 """,
@@ -547,16 +565,22 @@ Mutating object of type dict (source name: L['d'])
             """\
 Mutating object of type MyClass (source name: L['o'])
 
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
       File "test_logging.py", line N, in fn
         o.value = 20
 
     ********
 
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
       File "test_logging.py", line N, in fn
         o.count = 1
 
     ********
 
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
       File "test_logging.py", line N, in fn
         o.count = 2
 """,
@@ -599,6 +623,8 @@ Mutating object of type MyClass (source name: L['o'])
             """\
 Mutating object of type MyClass (source: created in torch.compile region)
 
+      File "test_logging.py", line N, in test_side_effects_local_object_with_log
+        fn(torch.ones(1))
       File "test_logging.py", line N, in fn
         obj = MyClass()  # Created inside compiled region
       File "test_logging.py", line N, in __init__
@@ -606,6 +632,8 @@ Mutating object of type MyClass (source: created in torch.compile region)
 
     ********
 
+      File "test_logging.py", line N, in test_side_effects_local_object_with_log
+        fn(torch.ones(1))
       File "test_logging.py", line N, in fn
         obj.value = 20
 """,
@@ -634,6 +662,8 @@ Mutating object of type MyClass (source: created in torch.compile region)
             """\
 Mutating object of type dict (source name: L['mod']._buffers)
 
+      File "test_logging.py", line N, in test_side_effects_nn_module_buffer
+        fn(Mod(), torch.ones(1))
       File "test_logging.py", line N, in fn
         return mod(x)
       File "test_logging.py", line N, in forward

@@ -44,7 +44,12 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented
+from .exc import (
+    collapse_resume_frames,
+    get_stack_above_dynamo,
+    SideEffectsError,
+    unimplemented,
+)
 from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -915,6 +920,7 @@ class SideEffects:
             # Format and dedupe stacks using tuple representation for efficiency
             seen = set()
             unique_formatted_stacks: list[str] = []
+            stack_above_dynamo = collapse_resume_frames(get_stack_above_dynamo())
             for stack in locations:
                 # Use tuple of frame info for fast deduplication
                 # Include position info (colno, end_lineno, end_colno) to distinguish
@@ -933,10 +939,11 @@ class SideEffects:
                 )
                 if stack_tuple not in seen:
                     seen.add(stack_tuple)
+                    stack_augmented = collapse_resume_frames(stack_above_dynamo + stack)
                     unique_formatted_stacks.append(
-                        "".join(traceback.format_list(stack))
+                        "".join(traceback.format_list(stack_augmented))
                     )
-            formatted_lines = "\n********\n\n".join(unique_formatted_stacks)
+            formatted_lines: str = "\n********\n\n".join(unique_formatted_stacks)
             log_str = f"{description}{source_info}\n\n{textwrap.indent(formatted_lines, '    ')}"
         else:
             log_str = (
