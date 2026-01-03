@@ -2839,7 +2839,7 @@ class CPUReproTests(TestCase):
             with torch.no_grad():
                 m = torch.compile(mod)
                 output_compiled = m(*input)
-            if mean==1e10 or std==1e10:
+            if mean == 1e10 or std == 1e10:
                 self.assertTrue(
                     torch.allclose(output_eager, output_compiled, atol=1, rtol=1e-4)
                 )
