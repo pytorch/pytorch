@@ -260,6 +260,7 @@ def get_added_lines(filename: str) -> set[int]:
             f"Failed to get git diff information for {filename}. Error: {e}"
         ) from e
 
+    print(f"Added lines in {filename}:\n{added_lines}")
     return added_lines
 
 
