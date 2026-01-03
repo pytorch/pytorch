@@ -23,7 +23,11 @@ from torch.distributed.checkpoint._state_dict_stager import StateDictStager
 from torch.distributed.checkpoint.staging import _ReplicationStager
 from torch.distributed.checkpoint.state_dict_saver import async_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
-from torch.testing._internal.common_distributed import HAS_ACCELERATOR, skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    HAS_ACCELERATOR,
+    requires_accelerator_dist_backend,
+    skip_if_lt_x_gpu,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -807,6 +811,42 @@ class TestStateDictStager(TestCase):
                         cpu_tensor2.storage().is_shared(),
                         "When share_memory=False, tensor storage should not be shared",
                     )
+
+
+class TestDTensorStateDictStager(DTensorTestBase):
+    @with_comms
+    @requires_accelerator_dist_backend()
+    @skip_if_lt_x_gpu(2)
+    def test_dtensor(self):
+        """
+        Test that StateDictStager works correctly with DTensors.
+        """
+        # Create a DTensor
+        device_mesh = dist.DeviceMesh(
+            self.device_type, list(range(dist.get_world_size()))
+        )
+        tensor = torch.randn(3, 3, device=self.device_type)
+        dtensor = DTensor.from_local(tensor, device_mesh, [Shard(0)])
+
+        dtensor = dtensor + 1
+        dtensor = dtensor * 2
+
+        state_dict = {
+            "dtensor": dtensor,
+        }
+
+        stager = StateDictStager(pin_memory=True, share_memory=True)
+        cpu_state_dict = stager.stage(state_dict)
+
+        # Verify the original DTensor has the expected values
+        self.assertTrue(torch.allclose(dtensor.to_local(), (tensor + 1) * 2))
+        self.assertTrue(
+            torch.allclose(
+                cpu_state_dict["dtensor"].to_local(), dtensor.to_local().cpu()
+            )
+        )
+        self.assertEqual(cpu_state_dict["dtensor"]._spec, dtensor._spec)
+        self.assertEqual(cpu_state_dict["dtensor"].size(), dtensor.size())
 
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_async_save_no_memory_leak(self):
