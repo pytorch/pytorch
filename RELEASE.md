@@ -184,7 +184,7 @@ These are examples of changes that should be made to the *default* branch after 
 ### Making release branch specific changes for ecosystem libraries
 
 Ecosystem libraries branch cut is done a few days after branch cut for the `pytorch/pytorch`. The branch cut is performed by the Ecosystem Library POC.
-After the branch cut is performed, the Pytorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
+After the branch cut is performed, the PyTorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
 
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
 * torchvision : [Update version.txt](https://github.com/pytorch/vision/pull/8968) and [change workflow branch references](https://github.com/pytorch/vision/pull/8969)
@@ -194,7 +194,7 @@ The CI workflow updating part of the above PRs can be automated by running: `pyt
 
 ## Running Launch Execution team Core XFN sync
 
-The series of meetings for Core XFN sync should be organized. The goal of these meetings are the following:
+The series of meetings for Core XFN sync should be organized. The goals of these meetings are the following:
 1. Establish release POC's from each of the workstreams
 2. Cover the tactical phase of releasing minor releases to the market
 3. Discuss possible release blockers
@@ -221,7 +221,7 @@ An example of this would look like:
 ```
 v1.12.0-rc1
 ```
-You can use following commands to perform tag from pytorch core repo (not fork):
+You can use the following commands to perform tag from PyTorch core repository (not fork):
 * Checkout and validate the repo history before tagging
 ```
 git checkout release/1.12
@@ -248,7 +248,7 @@ Backups are stored in a non-public S3 bucket at [`s3://pytorch-backup`](https://
 
 ### Release Candidate health validation
 
-Validate that the release jobs for pytorch and domain libraries are green. Validate this using the following HUD links:
+Validate that the release jobs for PyTorch and domain libraries are green. Validate this using the following HUD links:
   * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
@@ -266,7 +266,7 @@ An example of this would look like:
 
 Please also make sure to add milestone target to the PR/issue, especially if it needs to be considered for inclusion into the dot release.
 
-**NOTE**: The cherry pick process is not an invitation to add new features, it is mainly there to fix regressions
+**NOTE**: The cherry pick process is not an invitation to add new features; it is mainly there to fix regressions
 
 #### How to do Cherry Picking
 
@@ -359,7 +359,7 @@ Please note: This PR needs to be merged on the release day and hence it should b
 
 ### Open Google Colab issue
 
-This is normally done right after the release is completed. We need to create a Google Colab issue. See the following example [issue](https://github.com/googlecolab/colabtools/issues/2372)
+This is normally done right after the release is completed. We need to create a Google Colab issue. See the following example [issue](https://github.com/googlecolab/colabtools/issues/2372).
 
 # Patch Releases
 
@@ -425,7 +425,7 @@ Only following issues are accepted:
 > Main POC: Patch Release Managers
 
 1. After regressions / fixes have been triaged Patch Release Managers will work together and build /announce a schedule for the patch release
-    * *NOTE*: Ideally this should be ~2-3 weeks after a regression has been identified to allow other regressions to be identified
+    * *NOTE*: Ideally this should be approximately 2-3 weeks after a regression has been identified to allow other regressions to be identified.
 2. Patch Release Managers will work with the authors of the regressions / fixes to cherry pick their change into the related release branch (i.e. `release/1.9` for `1.9.1`)
     * *NOTE*: Patch release managers should notify authors of the regressions to post a cherry picks for their changes. It is up to authors of the regressions to post a cherry pick. If cherry pick is not posted the issue will not be included in the release.
 3. If cherry picking deadline is missed by cherry pick author, patch release managers will not accept any requests after the fact.
@@ -482,7 +482,7 @@ Tutorials in support of a release feature must be submitted to the [pytorch/tuto
 
 In the event a submodule cannot be fast forwarded, and a patch must be applied we can take two different approaches:
 
-* (preferred) Fork the said repository under the pytorch GitHub organization, apply the patches we need there, and then switch our submodule to accept our fork.
+* (preferred) Fork the said repository under the PyTorch GitHub organization, apply the patches we need there, and then switch our submodule to accept our fork.
 * Get the dependencies maintainers to support a release branch for us
 
 Editing submodule remotes can be easily done with: (running from the root of the git repository)
@@ -496,7 +496,7 @@ An example of this process can be found here:
 
 ## Triton dependency for the release
 
-In nightly builds for conda and wheels pytorch depend on Triton build by this workflow: https://hud.pytorch.org/hud/pytorch/pytorch/nightly/1?per_page=50&name_filter=Build%20Triton%20Wheel. The pinned version of triton used by this workflow is specified here:  https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton.txt .
+In nightly builds for conda and wheels, PyTorch depends on Triton build by this workflow: https://hud.pytorch.org/hud/pytorch/pytorch/nightly/1?per_page=50&name_filter=Build%20Triton%20Wheel. The pinned version of triton used by this workflow is specified here:  https://github.com/pytorch/pytorch/blob/main/.ci/docker/ci_commit_pins/triton.txt .
 
 In Nightly builds we have following configuration:
 * Wheel builds, depend on : https://download.pytorch.org/whl/nightly/triton/

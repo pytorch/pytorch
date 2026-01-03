@@ -789,7 +789,7 @@ with `pip install ninja`.  If PyTorch was already built, you will need
 to run `python setup.py clean` once after installing ninja for builds to
 succeed.
 
-Note: Make sure to use a machine with a larger number of CPU cores;this will significantly reduce your build times.
+Note: Make sure to use a machine with a larger number of CPU cores; this will significantly reduce your build times.
 
 #### Use CCache
 
