@@ -33,7 +33,7 @@ from typing import Any, Optional, TYPE_CHECKING
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
-from . import graph_break_hints, utils, variables
+from . import config, graph_break_hints, utils, variables
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
@@ -41,7 +41,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented
+from .exc import unimplemented
 from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -249,19 +249,29 @@ class SideEffects:
         if self.is_reconstructing_generator():
             # This is missing the case where one mutates a tensor. See
             # test_generator.py::test_reconstruct_generator_tensor_mutation
-            raise SideEffectsError(
-                "Cannot reconstruct a generator with variable mutations. "
+            unimplemented(
+                gb_type="Generator reconstruction with mutations",
+                context=f"mutating object: {item}",
+                explanation="Cannot reconstruct a generator with variable mutations. "
                 "Dynamo needs to fully exhaust the generator, which may cause "
-                "unintended variable modifications."
+                "unintended variable modifications.",
+                hints=[
+                    "Remove mutations from the generator.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
             )
         assert item.mutation_type is not None
         if not is_side_effect_safe(item.mutation_type):
-            # TODO plumb HOP information here
             unimplemented(
-                gb_type="HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
-                context="",
-                explanation="This is not supported.",
-                hints=[],
+                gb_type="HOP: Unsafe side effect",
+                context=f"Attempted to mutate {item}",
+                explanation="Mutating a variable from outside the scope of this HOP is not supported.",
+                hints=[
+                    "If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a "
+                    "side effect in forward method. Eager activation checkpointing replays that side-effect while "
+                    "recomputing the forward in the backward. If you are ok with side-effect not replayed in the "
+                    "backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`",
+                ],
             )
         return False
 
@@ -401,6 +411,8 @@ class SideEffects:
         item: Any,
         variable: VariableTracker,
     ) -> VariableTracker:
+        # TODO: Modify this API so that we preserve type info of
+        # variable
         return self._track_obj(
             item,
             variable,
@@ -409,7 +421,7 @@ class SideEffects:
 
     def track_object_new(
         self,
-        cls_source: Source,
+        cls_source: Source | None,
         user_cls: Any,
         variable_cls: Any,
         options: dict[str, Any],
@@ -866,6 +878,11 @@ class SideEffects:
     def codegen_update_mutated(self, cg: PyCodegen) -> None:
         suffixes = []
         for var in self._get_modified_vars():
+            # When replay_side_effects=False, only update variables with TempLocalSource
+            if not config.replay_side_effects and not isinstance(
+                var.source, TempLocalSource
+            ):
+                continue
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)  # Don't codegen via source

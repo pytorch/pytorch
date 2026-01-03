@@ -245,7 +245,10 @@ class PackageImporter(Importer):
             loaded_storages[key] = restore_location(storage, location)
 
         def persistent_load(saved_id):
-            assert isinstance(saved_id, tuple)
+            if not isinstance(saved_id, tuple):
+                raise AssertionError(
+                    f"saved_id must be a tuple, got {type(saved_id).__name__}"
+                )
             typename = _maybe_decode_ascii(saved_id[0])
             data = saved_id[1:]
 
@@ -383,7 +386,10 @@ class PackageImporter(Importer):
         ns["__torch_package__"] = True
 
         # Add this module to our private global registry. It should be unique due to mangling.
-        assert module.__name__ not in _package_imported_modules
+        if module.__name__ in _package_imported_modules:
+            raise AssertionError(
+                f"module {module.__name__} already exists in _package_imported_modules"
+            )
         _package_imported_modules[module.__name__] = module
 
         # preemptively install on the parent to prevent IMPORT_FROM from trying to
@@ -391,10 +397,14 @@ class PackageImporter(Importer):
         self._install_on_parent(parent, name, module)
 
         if filename is not None:
-            assert mangled_filename is not None
+            if mangled_filename is None:
+                raise AssertionError(
+                    "mangled_filename must not be None when filename is set"
+                )
             # preemptively install the source in `linecache` so that stack traces,
             # `inspect`, etc. work.
-            assert filename not in linecache.cache  # type: ignore[attr-defined]
+            if filename in linecache.cache:  # type: ignore[attr-defined]
+                raise AssertionError(f"filename {filename} already in linecache.cache")
             linecache.lazycache(mangled_filename, ns)
 
             code = self._compile_source(filename, mangled_filename)
@@ -633,7 +643,10 @@ class PackageImporter(Importer):
 
     def _zipfile_path(self, package, resource=None):
         package = self._get_package(package)
-        assert package.__loader__ is self
+        if package.__loader__ is not self:
+            raise AssertionError(
+                f"package.__loader__ must be self, got {package.__loader__}"
+            )
         name = demangle(package.__name__)
         if resource is not None:
             resource = _normalize_path(resource)
@@ -654,7 +667,10 @@ class PackageImporter(Importer):
                 raise ImportError(
                     f"inconsistent module structure. module {name} is not a package, but has submodules"
                 )
-            assert isinstance(node, _PackageNode)
+            if not isinstance(node, _PackageNode):
+                raise AssertionError(
+                    f"expected _PackageNode, got {type(node).__name__}"
+                )
             cur = node
         return cur
 
