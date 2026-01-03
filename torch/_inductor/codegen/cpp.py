@@ -1632,7 +1632,7 @@ class CppVecOverrides(CppOverrides):
         return code
 
     @staticmethod
-    def to_dtype(x, dtype, src_dtype=None, use_compute_dtypes=True):
+    def to_dtype(x, dtype, src_dtype=None, use_compute_types=True):
         assert dtype in [
             torch.bool,
             torch.float64,
@@ -2853,6 +2853,7 @@ class CppVecKernel(CppKernel):
             )
             with code.indent(), contextlib.ExitStack() as stack:
                 index_c = cexpr_index(index)
+                # pyrefly: ignore [bad-assignment]
                 for indirect_var in replacements:
                     index_c = re.sub(
                         r"\b" + f"{indirect_var}" + r"\b",

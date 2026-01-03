@@ -25,7 +25,6 @@ from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
-    skipIfTorchDynamo,
     TEST_WITH_CROSSREF,
     TEST_WITH_TORCHDYNAMO,
     TestCase as TorchTestCase,
@@ -101,6 +100,7 @@ class TestCase(TorchTestCase):
             print(k, v.most_common())
         reset()
         utils.counters.clear()
+        torch._C._autograd._saved_tensors_hooks_enable()
         super().tearDown()
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
@@ -120,7 +120,6 @@ class TestCase(TorchTestCase):
     # graph break tests
 
 
-@skipIfTorchDynamo("Not a suitable dynamo wrapped test")
 class CPythonTestCase(TestCase):
     """
     Test class for CPython tests located in "test/dynamo/CPython/Py_version/*".
