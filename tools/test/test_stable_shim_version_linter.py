@@ -11,7 +11,7 @@ sys.path.append(str(REPO_ROOT))
 from tools.linter.adapters.stable_shim_version_linter import (
     check_file,
     get_added_lines,
-    get_version_of_block,
+    get_current_version,
 )
 
 
@@ -99,9 +99,9 @@ index 365c954dbe7..c5fcf7a09cf 100644
                 result, {18, 19, 20, 21, 22, 23, 24, 49, 50, 51, 52, 53, 54}
             )
 
-    def test_get_version_of_block(self):
+    def test_get_current_version(self):
         """Test that we can get the current version from version.txt."""
-        version = get_version_of_block()
+        version = get_current_version()
         self.assertIsInstance(version, tuple)
         self.assertEqual(len(version), 2)
         # We can't check torch.__version__ here so this is the best we can do :(
@@ -151,7 +151,7 @@ AOTI_TORCH_EXPORT int function_without_version();
 
                 # Mock version to be 2.10
                 with patch(
-                    "tools.linter.adapters.stable_shim_version_linter.get_version_of_block",
+                    "tools.linter.adapters.stable_shim_version_linter.get_current_version",
                     return_value=(2, 10),
                 ):
                     lint_messages = check_file(temp_file)
