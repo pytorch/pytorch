@@ -320,6 +320,31 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 7)
 
+    def test_ctx_manager_nested_step_graph_break(self):
+        import contextlib
+
+        global f1, f2
+
+        def f1(x):
+            x = x + 1
+            torch._dynamo.step_unsupported()
+            return x + 2
+
+        def f2(x):
+            x = x + 4
+            with torch.no_grad():
+                x = f1(x)
+            return x + 8
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f2)
+        x = torch.zeros(3)
+        res = f2(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 5)
+
     @torch._dynamo.config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
     def test_no_recompiles(self):
         global f1, f2, f3
