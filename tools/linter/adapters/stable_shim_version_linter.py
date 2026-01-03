@@ -175,7 +175,7 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
-def get_version_of_block() -> tuple[int, int]:
+def get_current_version() -> tuple[int, int]:
     """
     Get the current PyTorch version from version.txt.
     This uses the same logic as tools/setup_helpers/gen_version_header.py
@@ -294,8 +294,8 @@ def check_file(filename: str) -> list[LintMessage]:
     is_aoti_shim = "torch/csrc/inductor/aoti_torch/c/shim.h" in filename
 
     # Get current version
-    version_of_block = get_version_of_block()
-    major, minor = version_of_block
+    current_version = get_current_version()
+    major, minor = current_version
     expected_version_macro = f"TORCH_VERSION_{major}_{minor}_0"
     expected_version_check = f"#if TORCH_FEATURE_VERSION >= {expected_version_macro}"
 
