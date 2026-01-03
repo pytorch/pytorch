@@ -1,3 +1,4 @@
+# Owner(s): ["module: dynamo"]
 import array
 import collections
 import dataclasses
@@ -3522,5 +3523,7 @@ class TestTracing(unittest.TestCase):
                 compile(code, "<string>", "exec")
 
 
+from torch.testing._internal.common_utils import run_tests
+
 if __name__ == "__main__":
-    unittest.main()
+    run_tests()
