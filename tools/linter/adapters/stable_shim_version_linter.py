@@ -264,8 +264,11 @@ def get_added_lines(filename: str) -> set[int]:
             text=True,
             timeout=5,
         )
-        if result.returncode == 0:
-            added_lines.update(parse_diff(result.stdout))
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to get git diff information for {filename}. Error: {result.stderr}"
+            )
+        added_lines.update(parse_diff(result.stdout))
 
     except Exception as e:
         raise RuntimeError(
