@@ -224,7 +224,7 @@ def check_file(
                             original=None,
                             replacement=None,
                             description=(
-                                f"Call to versioned shim function '{func_name}' is not wrapped "
+                                f"Usage '{func_name}' from shim.h is not wrapped "
                                 f"in a TORCH_FEATURE_VERSION block. This function requires at least:\n"
                                 f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
                                 f"  // ... your code calling {func_name} ...\n"
@@ -247,7 +247,7 @@ def check_file(
                             original=None,
                             replacement=None,
                             description=(
-                                f"Call to '{func_name}' is wrapped in {current_macro}, "
+                                f"Use of '{func_name}' is wrapped in {current_macro}, "
                                 f"but this function requires at least {required_macro}. "
                                 f"The version guard must be at least the required version:\n"
                                 f"#if TORCH_FEATURE_VERSION >= {required_macro}\n"
