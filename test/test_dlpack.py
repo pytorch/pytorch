@@ -128,12 +128,13 @@ class TestTorchDlPack(TestCase):
         torch.float8_e4m3fn,
         torch.float8_e4m3fnuz,
         torch.float8_e8m0fnu,
+        torch.float8_e8m0fnu_x4,
         torch.float4_e2m1fn_x2,
     )
     def test_dlpack_conversion_with_streams_narrow_precision(self, device, dtype):
         stream = torch.cuda.Stream()
         with torch.cuda.stream(stream):
-            x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
+            x = make_tensor((4,), dtype=torch.uint8, device=device) + 1
             x = x.view(dtype)
         z = self._dlpack_conversion_with_streams(stream, x)
         self.assertEqual(z.view(torch.uint8), x.view(torch.uint8))
@@ -221,13 +222,14 @@ class TestTorchDlPack(TestCase):
         torch.float8_e4m3fn,
         torch.float8_e4m3fnuz,
         torch.float8_e8m0fnu,
+        torch.float8_e8m0fnu_x4,
         torch.float4_e2m1fn_x2,
     )
     def test_dlpack_conversion_with_diff_streams_narrow_precision(self, device, dtype):
         stream_a = torch.cuda.Stream()
         stream_b = torch.cuda.Stream()
         with torch.cuda.stream(stream_a):
-            x = make_tensor((5,), dtype=torch.uint8, device=device) + 1
+            x = make_tensor((4,), dtype=torch.uint8, device=device) + 1
             x = x.view(dtype)
             z = torch.from_dlpack(x.__dlpack__(stream=stream_b.cuda_stream))
             stream_a.synchronize()

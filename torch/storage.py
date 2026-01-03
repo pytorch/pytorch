@@ -545,6 +545,7 @@ def _new_dtypes():
         torch.float8_e5m2fnuz,
         torch.float8_e4m3fnuz,
         torch.float8_e8m0fnu,
+        torch.float8_e8m0fnu_x4,
         torch.float4_e2m1fn_x2,
         torch.bits8,
         torch.bits16,

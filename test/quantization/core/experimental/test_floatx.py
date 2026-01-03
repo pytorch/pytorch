@@ -429,8 +429,45 @@ class TestFloat4Dtype(TestCase):
             )
 
 
+class TestFloat8x4Dtype(TestCase):
+    # TODO(#146647): make the testing generic for shell dtypes
+    def test_float8_e8m0fnu_x4(self, device):
+        # can create a tensor of dtype float8_e8m0fnu_x4
+        x1 = torch.empty(4096, 4096, device=device, dtype=torch.float8_e8m0fnu_x4)
+
+        # can create a string (so printing will work)
+        str(x1)
+
+        # can view float8_e8m0fnu_x4 as uint32
+        x2 = x1.view(torch.uint32)
+
+        # can view uint32 as float8_e8m0fnu_x4
+        x2.view(torch.float8_e8m0fnu_x4)
+
+        # can do equality comparisons
+        x3 = copy.deepcopy(x1)
+        self.assertEqual(x1, x3, atol=0, rtol=0)
+
+        # can call contiguous on a dim1 slice (calls `copy_` under the hood)
+        x1[:, 0:2048].contiguous()
+
+    def test_f8_e8m0fnu_x4_save_load(self, device):
+        x1 = torch.randint(0, 10, (4, 4), device=device, dtype=torch.uint32).view(
+            torch.float8_e8m0fnu_x4
+        )
+        with TemporaryFileName() as fname:
+            torch.save(x1, fname)
+            x1_save_load = torch.load(fname)
+            # TODO(#146647): make this and all other shell dtypes support equality
+            # comparison
+            torch.testing.assert_close(
+                x1.view(torch.uint32), x1_save_load.view(torch.uint32), atol=0, rtol=0
+            )
+
+
 instantiate_device_type_tests(TestFloat8Dtype, globals())
 instantiate_device_type_tests(TestFloat4Dtype, globals())
+instantiate_device_type_tests(TestFloat8x4Dtype, globals())
 
 
 class TestFloat8DtypeCPUOnly(TestCase):
