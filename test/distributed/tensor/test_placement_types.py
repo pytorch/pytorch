@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import itertools
-import sys
-import unittest
 
 from torch._dynamo.variables.distributed import PlacementClassVariable
 from torch.distributed.tensor.placement_types import (
@@ -63,9 +61,6 @@ class PlacementTypesTestCase(TestCase):
                 for lhs, rhs in itertools.product(eq_class, other_class):
                     self.assertNotEqual(lhs, rhs)
 
-    @unittest.skipIf(
-        sys.version_info < (3, 10), "kw_only is only available in python >= 3.10"
-    )
     def test_strided_shard_kwonly_argument(self):
         with self.assertRaises(TypeError):
             _StridedShard(3, 4)

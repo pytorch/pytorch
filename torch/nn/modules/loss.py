@@ -774,7 +774,8 @@ class BCEWithLogitsLoss(_Loss):
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
-            of each batch element. If given, has to be a Tensor of size `nbatch`.
+            of each batch element. The dimension of weight supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+            with respect to the output (and target) shape.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
@@ -887,6 +888,14 @@ class HingeEmbeddingLoss(_Loss):
           operates over all the elements.
         - Target: :math:`(*)`, same shape as the input
         - Output: scalar. If :attr:`reduction` is ``'none'``, then same shape as the input
+
+    Examples:
+
+        >>> loss = nn.HingeEmbeddingLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5).sign()
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["margin", "reduction"]
@@ -1042,6 +1051,14 @@ class SmoothL1Loss(_Loss):
         - Input: :math:`(*)`, where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
+
+    Examples:
+
+        >>> loss = nn.SmoothL1Loss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
@@ -1106,6 +1123,14 @@ class HuberLoss(_Loss):
         - Input: :math:`(*)` where :math:`*` means any number of dimensions.
         - Target: :math:`(*)`, same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same shape as the input.
+
+    Examples:
+
+        >>> loss = nn.HuberLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction", "delta"]
@@ -1150,6 +1175,13 @@ class SoftMarginLoss(_Loss):
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(*)`, same
           shape as input.
 
+    Examples:
+
+        >>> loss = nn.SoftMarginLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.randn(3, 5).sign()
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
@@ -1406,6 +1438,14 @@ class MultiLabelSoftMarginLoss(_WeightedLoss):
         - Input: :math:`(N, C)` where `N` is the batch size and `C` is the number of classes.
         - Target: :math:`(N, C)`, label targets must have the same shape as the input.
         - Output: scalar. If :attr:`reduction` is ``'none'``, then :math:`(N)`.
+
+    Examples:
+
+        >>> loss = nn.MultiLabelSoftMarginLoss()
+        >>> input = torch.randn(3, 5, requires_grad=True)
+        >>> target = torch.empty(3, 5).random_(2)
+        >>> output = loss(input, target)
+        >>> output.backward()
     """
 
     __constants__ = ["reduction"]
@@ -1879,6 +1919,7 @@ class TripletMarginWithDistanceLoss(_Loss):
                 f"TripletMarginWithDistanceLoss: expected margin to be greater than 0, got {margin} instead"
             )
         self.distance_function: Callable[[Tensor, Tensor], Tensor] | None = (
+            # pyrefly: ignore [bad-assignment]
             distance_function if distance_function is not None else PairwiseDistance()
         )
         self.margin = margin
