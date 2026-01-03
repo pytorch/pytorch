@@ -2289,6 +2289,44 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
                 ],
             )
 
+        if self.fn == dist.batch_isend_irecv:
+            from ..distributed_utils import p2p_compile_guard
+
+            p2p_compile_guard()
+
+            ops = list()
+            peers = list()
+            tags = list()
+            tensors = list()
+            p2p_ops = kwargs["p2p_op_list"]
+
+            if not isinstance(p2p_ops, variables.ListVariable):
+                raise torch._dynamo.exc.InternalTorchDynamoError(
+                    "`P2POp` used incorrectly"
+                )
+
+            for op in p2p_ops.items:  # list of P2POpVariable
+                ops.append(op.op)
+                tensors.append(op.tensor)
+                peers.append(op.peer)
+                tags.append(op.tag)
+            new_args = tuple()
+            new_kwargs = {
+                "op_list": variables.ListVariable(ops),
+                "peer_list": variables.ListVariable(peers),
+                "tag_list": variables.ListVariable(tags),
+                "tensors": variables.ListVariable(tensors),
+                "group_name": variables.ConstantVariable.create(""),
+            }
+            return self.replacement_var.call_function(tx, new_args, new_kwargs)
+
+        if self.fn in (dist.isend, dist.irecv):
+            from ..distributed_utils import p2p_compile_guard
+
+            p2p_compile_guard()
+
+            return self.replacement_var.call_function(tx, args, kwargs)
+
         if self.fn in (
             dist.all_reduce,
             dist.reduce_scatter_tensor,
