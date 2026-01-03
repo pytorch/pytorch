@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 from typing_extensions import final, override
 
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
@@ -17,7 +17,7 @@ BUG_CACHES_DONT_WORK_WITH_ASYNC = True
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from concurrent.futures import Future
 
     from torch._inductor.utils import InputType

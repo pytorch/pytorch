@@ -4,7 +4,7 @@
 import torch
 from enum import Enum
 from torch._C import _MobileOptimizerType as MobileOptimizerType
-from typing import Optional, AnyStr
+from typing import AnyStr
 
 class LintCode(Enum):
     BUNDLED_INPUT = 1
@@ -14,8 +14,8 @@ class LintCode(Enum):
 
 def optimize_for_mobile(
         script_module: torch.jit.ScriptModule,
-        optimization_blocklist: Optional[set[MobileOptimizerType]] = None,
-        preserved_methods: Optional[list[AnyStr]] = None,
+        optimization_blocklist: set[MobileOptimizerType] | None = None,
+        preserved_methods: list[AnyStr] | None = None,
         backend: str = 'CPU') -> torch.jit.RecursiveScriptModule:
     """
     Optimize a torch script module for mobile deployment.

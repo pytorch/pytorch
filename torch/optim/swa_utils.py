@@ -6,7 +6,7 @@ import math
 import warnings
 from collections.abc import Callable, Iterable
 from copy import deepcopy
-from typing import Any, cast, Literal, Optional, Union
+from typing import Any, cast, Literal, Union
 from typing_extensions import override
 
 import torch
@@ -43,7 +43,9 @@ def get_ema_multi_avg_fn(decay=0.999):
         )
 
     @torch.no_grad()
-    def ema_update(ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _):
+    def ema_update(
+        ema_param_list: PARAM_LIST, current_param_list: PARAM_LIST, _
+    ) -> None:
         # foreach lerp only handles float and complex
         if torch.is_floating_point(ema_param_list[0]) or torch.is_complex(
             ema_param_list[0]
@@ -63,8 +65,8 @@ def get_swa_multi_avg_fn():
     def swa_update(
         averaged_param_list: PARAM_LIST,
         current_param_list: PARAM_LIST,
-        num_averaged: Union[Tensor, int],
-    ):
+        num_averaged: Tensor | int,
+    ) -> None:
         # foreach lerp only handles float and complex
         if torch.is_floating_point(averaged_param_list[0]) or torch.is_complex(
             averaged_param_list[0]
@@ -110,7 +112,7 @@ def get_swa_avg_fn():
 
     @torch.no_grad()
     def swa_update(
-        averaged_param: Tensor, current_param: Tensor, num_averaged: Union[Tensor, int]
+        averaged_param: Tensor, current_param: Tensor, num_averaged: Tensor | int
     ):
         return averaged_param + (current_param - averaged_param) / (num_averaged + 1)
 
@@ -221,13 +223,12 @@ class AveragedModel(Module):
     def __init__(
         self,
         model: Module,
-        device: Optional[Union[int, torch.device]] = None,
-        avg_fn: Optional[Callable[[Tensor, Tensor, Union[Tensor, int]], Tensor]] = None,
-        multi_avg_fn: Optional[
-            Callable[[PARAM_LIST, PARAM_LIST, Union[Tensor, int]], None]
-        ] = None,
+        device: int | torch.device | None = None,
+        avg_fn: Callable[[Tensor, Tensor, Tensor | int], Tensor] | None = None,
+        multi_avg_fn: Callable[[PARAM_LIST, PARAM_LIST, Tensor | int], None]
+        | None = None,
         use_buffers=False,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         super().__init__()
         if avg_fn is not None and multi_avg_fn is not None:
             raise AssertionError(
@@ -247,7 +248,7 @@ class AveragedModel(Module):
         """Forward pass."""
         return self.module(*args, **kwargs)
 
-    def update_parameters(self, model: Module):
+    def update_parameters(self, model: Module) -> None:
         """Update model parameters."""
         self_param = (
             # pyrefly: ignore [bad-argument-type]
@@ -261,8 +262,8 @@ class AveragedModel(Module):
             if self.use_buffers
             else model.parameters()
         )
-        self_param_detached: list[Optional[Tensor]] = []
-        model_param_detached: list[Optional[Tensor]] = []
+        self_param_detached: list[Tensor | None] = []
+        model_param_detached: list[Tensor | None] = []
         copy_param = bool(self.n_averaged == 0)
         for p_averaged, p_model in zip(self_param, model_param, strict=False):
             p_model_ = p_model.detach().to(p_averaged.device)
@@ -328,8 +329,8 @@ class AveragedModel(Module):
 def update_bn(
     loader: Iterable[Any],
     model: Module,
-    device: Optional[Union[int, torch.device]] = None,
-):
+    device: int | torch.device | None = None,
+) -> None:
     r"""Update BatchNorm running_mean, running_var buffers in the model.
 
     It performs one pass over data in `loader` to estimate the activation
@@ -367,7 +368,7 @@ def update_bn(
 
     was_training = model.training
     model.train()
-    for module in momenta.keys():
+    for module in momenta:
         module.momentum = None
 
     for input in loader:
@@ -378,7 +379,7 @@ def update_bn(
 
         model(input)
 
-    for bn_module in momenta.keys():
+    for bn_module in momenta:
         bn_module.momentum = momenta[bn_module]
     model.train(was_training)
 
@@ -434,7 +435,7 @@ class SWALR(LRScheduler):
         anneal_epochs=10,
         anneal_strategy: Literal["cos", "linear"] = "cos",
         last_epoch=-1,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         swa_lrs = _format_param("swa_lr", optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups, strict=True):
             group["swa_lr"] = swa_lr
@@ -516,7 +517,7 @@ class SWALR(LRScheduler):
             for group, lr in zip(self.optimizer.param_groups, prev_lrs, strict=True)
         ]
 
-    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]):
+    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]) -> None:
         self._anneal_strategy = anneal_strategy
         if anneal_strategy == "cos":
             self.anneal_func = self._cosine_anneal

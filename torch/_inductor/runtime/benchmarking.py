@@ -1,15 +1,22 @@
 import functools
 import inspect
 import time
+from collections.abc import Callable
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable
-from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
+from typing import Any, Concatenate, Optional, Union
+from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.config import use_experimental_benchmarker
+from torch._inductor.config import (
+    inductor_default_autotune_rep,
+    inductor_default_autotune_warmup,
+    use_experimental_benchmarker,
+)
+from torch.utils._debug_mode import DebugMode
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
@@ -31,8 +38,8 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
         return fn
 
     def distort(
-        ms: list[float] | tuple[float] | float,
-    ) -> list[float] | tuple[float] | float:
+        ms: list[float] | tuple[float, ...] | float,
+    ) -> list[float] | tuple[float, ...] | float:
         if isinstance(ms, (list, tuple)):
             return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
 
@@ -50,7 +57,7 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
     @functools.wraps(fn)
     def wrapper(
         *args: list[Any], **kwargs: dict[str, Any]
-    ) -> list[float] | tuple[float] | float:
+    ) -> list[float] | tuple[float, ...] | float:
         ms = fn(*args, **kwargs)
 
         return distort(ms)
@@ -92,15 +99,45 @@ def time_and_count(
 
 
 class Benchmarker:
+    """
+    A device-agnostic benchmarking utility for measuring the runtime of
+    inductor generated callables.
+    """
+
     def __init__(self: Self) -> None:
         pass
+
+    def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
+        inferred_device: Optional[torch.device] = None
+        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
+            # Some callables take nested structures as arguments so use the
+            # flattened form to find any tensors
+            for arg_or_kwarg_leaf in pytree.tree_leaves(arg_or_kwarg):
+                if not isinstance(arg_or_kwarg_leaf, torch.Tensor):
+                    continue
+                if inferred_device is None:
+                    inferred_device = arg_or_kwarg_leaf.device
+                elif arg_or_kwarg_leaf.device != inferred_device:
+                    raise ValueError(
+                        "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                    )
+
+        if inferred_device is None:
+            raise ValueError(
+                "Can't safely infer the device type of `fn` with no device types"
+                " in `fn_args` or `fn_kwargs`. Use a direct benchmarking method instead e.g. "
+                "`Benchmarker.benchmark_cpu` or `Benchmarker.benchmark_gpu`."
+            )
+
+        return inferred_device
 
     @time_and_count
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
-        fn_args: tuple[Any, ...],
-        fn_kwargs: dict[str, Any],
+        fn_args: Optional[tuple[Any, ...]] = None,
+        fn_kwargs: Optional[dict[str, Any]] = None,
+        device: Optional[Union[str, torch.device]] = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark `fn(*fn_args, *fn_kwargs)` and return the runtime, in milliseconds (the
@@ -109,7 +146,14 @@ class Benchmarker:
         device-specific implementations, like `benchmark_cpu` and `benchmark_gpu`. Raises
         `ValueError(...)` if we can't safely infer the device type of `fn`; for example,
         if multiple device types are found in `fn_args` and `fn_kwargs`, or if no device
-        types are found.
+        types are found. To bypass device inference, provide the device to the `device`
+        parameter.
+
+        WARNING: if `fn` mutates `fn_args` or `fn_kwargs`, benchmarking may fail unexpectedly.
+        For example, if `fn` clears a mutable object, subsequent invocations of `fn` during
+        benchmarking will fail. In such cases, `fn` should handle cloning its arguments internally.
+        If device inference is required, `Benchmarker.infer_device` can be used prior to calling
+        this method without any arguments for `fn_args` and `fn_kwargs`.
 
         Arguments:
         - fn: The function to benchmark.
@@ -117,33 +161,50 @@ class Benchmarker:
         - fn_kwargs: The function's kwargs.
 
         Keyword Arguments:
+        - device: Which device to use for benchmarking. If not provided the device will be attempted
+        to be inferred from `fn_args` and `fn_kwargs`.
         - **kwargs: The benchmarking implementation's kwargs.
 
         Returns:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
-        inferred_device = None
-        # pyrefly: ignore [bad-assignment]
-        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
-            if not isinstance(arg_or_kwarg, torch.Tensor):
-                continue
-            if inferred_device is None:
-                inferred_device = arg_or_kwarg.device
-            elif arg_or_kwarg.device != inferred_device:
-                raise ValueError(
-                    "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
-                )
-        if inferred_device is None:
-            raise ValueError(
-                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
+        inferred_device: Optional[torch.device] = None
+        if device is not None:
+            inferred_device = (
+                torch.device(device) if isinstance(device, str) else device
             )
-        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
-        if inferred_device == torch.device("cpu"):
-            return self.benchmark_cpu(_callable, **kwargs)
-        # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
-        # implementation which was written specifically with CUDA devices in mind, we may want to
-        # explore alternate implementations for other device types.
-        return self.benchmark_gpu(_callable, **kwargs)
+        else:
+            if fn_args is None and fn_kwargs is None:
+                raise ValueError(
+                    "`fn_args` and `fn_kwargs` cannot both be None if `device` is not provided."
+                )
+
+            fn_args = fn_args or tuple()
+            fn_kwargs = fn_kwargs or {}
+            inferred_device = self.infer_device(*fn_args, **fn_kwargs)
+
+        assert isinstance(inferred_device, torch.device)
+
+        fn_args = fn_args or tuple()
+        fn_kwargs = fn_kwargs or {}
+
+        # No need to wrap if the callable takes no arguments
+        if len(fn_args) == 0 and len(fn_kwargs) == 0:
+            _callable = fn
+        else:
+            _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+
+        warmup = kwargs.pop("warmup", inductor_default_autotune_warmup)
+        rep = kwargs.pop("rep", inductor_default_autotune_rep)
+
+        # Surfacing all kernels during autotuning is super noisy; filtering these out.
+        with DebugMode._benchmarking_inductor():
+            if inferred_device == torch.device("cpu"):
+                return self.benchmark_cpu(_callable, warmup=warmup, rep=rep, **kwargs)
+            # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
+            # implementation which was written specifically with CUDA devices in mind, we may want to
+            # explore alternate implementations for other device types.
+            return self.benchmark_gpu(_callable, warmup=warmup, rep=rep, **kwargs)
 
     @time_and_count
     def benchmark_cpu(

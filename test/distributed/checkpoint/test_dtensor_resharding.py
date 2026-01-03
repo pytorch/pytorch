@@ -299,7 +299,7 @@ class TestDTensorReshardMeshChange(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
-    @skip_if_lt_x_gpu(2)
+    @skip_if_lt_x_gpu(4)
     def test_dtensor_checkpoint_with_uneven_shards(self) -> None:
         """
         Saving a dtensor with uneven shards.
@@ -436,6 +436,7 @@ class TestCheckpointableReshard(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
+    @skip_if_lt_x_gpu(4)
     def test_uneven_reshard_with_checkpointable_api(self) -> None:
         """
         Saves a 1d distributed tensor that has shards with uneven sizes using Checkpointable API.
@@ -498,6 +499,7 @@ class TestCheckpointableReshard(DTensorTestBase):
 
     @with_comms
     @with_temp_dir
+    @skip_if_lt_x_gpu(4)
     def test_uneven_reshard_with_dtensor_shards_wrapper_api(self) -> None:
         """
         Saves a 1d distributed tensor that has shards with uneven sizes using Checkpointable API.

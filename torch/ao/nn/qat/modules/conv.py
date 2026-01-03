@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import ClassVar, Literal, Union
+from typing import ClassVar, Literal
 
 import torch
 import torch.nn as nn
@@ -20,7 +20,7 @@ class _ConvNd(nn.modules.conv._ConvNd):
         out_channels: int,
         kernel_size: tuple[int, ...],
         stride: tuple[int, ...],
-        padding: Union[str, tuple[int, ...]],
+        padding: str | tuple[int, ...],
         dilation: tuple[int, ...],
         transposed: bool,
         output_padding: tuple[int, ...],
@@ -47,7 +47,8 @@ class _ConvNd(nn.modules.conv._ConvNd):
             padding_mode,
             **factory_kwargs,
         )
-        assert qconfig, "qconfig must be provided for QAT module"
+        if not qconfig:
+            raise AssertionError("qconfig must be provided for QAT module")
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
 
@@ -62,14 +63,15 @@ class _ConvNd(nn.modules.conv._ConvNd):
            `mod`: a float module, either produced by torch.ao.quantization utilities
            or directly from user
         """
-        assert type(mod) is cls._FLOAT_MODULE, (
-            "qat."
-            + cls.__name__
-            + ".from_float only works for "
-            + cls._FLOAT_MODULE.__name__
-        )
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
-        assert mod.qconfig, "Input float module must have a valid qconfig"
+        if type(mod) is not cls._FLOAT_MODULE:
+            raise AssertionError(
+                f"qat.{cls.__name__}.from_float only works for "
+                f"{cls._FLOAT_MODULE.__name__}, got {type(mod).__name__}"
+            )
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined")
+        if not mod.qconfig:
+            raise AssertionError("Input float module must have a valid qconfig")
         if issubclass(type(mod), _FusedModule):
             mod = mod[0]
         qconfig = mod.qconfig
@@ -111,7 +113,10 @@ class _ConvNd(nn.modules.conv._ConvNd):
         # conv relu
         if issubclass(cls, _FusedModule):
             modules = [conv]
-            assert hasattr(cls, "_FLOAT_RELU_MODULE")
+            if not hasattr(cls, "_FLOAT_RELU_MODULE"):
+                raise AssertionError(
+                    f"{cls.__name__} must have _FLOAT_RELU_MODULE attribute"
+                )
             relu = cls._FLOAT_RELU_MODULE()
             modules.append(relu)
             # pyrefly: ignore [missing-attribute]
@@ -145,7 +150,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         out_channels: int,
         kernel_size: _size_1_t,
         stride: _size_1_t = 1,
-        padding: Union[str, _size_1_t] = 0,
+        padding: str | _size_1_t = 0,
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -207,7 +212,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         out_channels: int,
         kernel_size: _size_2_t,
         stride: _size_2_t = 1,
-        padding: Union[str, _size_2_t] = 0,
+        padding: str | _size_2_t = 0,
         dilation: _size_2_t = 1,
         groups: int = 1,
         bias: bool = True,
@@ -272,7 +277,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         out_channels: int,
         kernel_size: _size_3_t,
         stride: _size_3_t = 1,
-        padding: Union[str, _size_3_t] = 0,
+        padding: str | _size_3_t = 0,
         dilation: _size_3_t = 1,
         groups: int = 1,
         bias: bool = True,

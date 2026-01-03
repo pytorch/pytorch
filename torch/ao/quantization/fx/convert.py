@@ -3,10 +3,9 @@
 import copy
 import operator
 import warnings
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
-from torch.ao.quantization import CUSTOM_KEY, NUMERIC_DEBUG_HANDLE_KEY
 from torch.ao.quantization.backend_config import (
     BackendConfig,
     get_native_backend_config,
@@ -66,6 +65,9 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
 
+NUMERIC_DEBUG_HANDLE_KEY = "numeric_debug_handle"
+CUSTOM_KEY = "custom"
+
 __all__ = [
     "convert",
     "convert_custom_module",
@@ -98,7 +100,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
     modules: dict[str, torch.nn.Module],
     node_name_to_scope: dict[str, tuple[str, type]],
     node_name_to_qconfig: dict[str, QConfigAny],
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> None:
     """Replace activation_post_process module call node with quantize and
     dequantize node working with decomposed Tensor
@@ -165,7 +167,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
 
         # 1. extract information for inserting q/dq node from activation_post_process
         node_type = "call_function"
-        quantize_op: Optional[Callable] = None
+        quantize_op: Callable | None = None
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined, operator]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined, arg-type]
@@ -208,7 +210,7 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 # TODO: we can add the information of whether a value needs to
                 # be registered as an attribute in qparams dict itself
                 if key in ["_scale_", "_zero_point_"] and (
-                    not isinstance(value_or_node, (float, int))
+                    not isinstance(value_or_node, (float, int))  # noqa: UP038
                 ):
                     # For scale and zero_point values we register them as buffers in the root module.
                     # However, note that when the values are not tensors, as in the case of
@@ -247,11 +249,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
                 CUSTOM_KEY in node.meta
                 and NUMERIC_DEBUG_HANDLE_KEY in node.meta[CUSTOM_KEY]
             ):
-                if CUSTOM_KEY not in dequantized_node.meta:
-                    dequantized_node.meta[CUSTOM_KEY] = {}
-                dequantized_node.meta[CUSTOM_KEY][NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
-                    CUSTOM_KEY
-                ][NUMERIC_DEBUG_HANDLE_KEY]
+                raise NotImplementedError(
+                    "pt2e numeric suite has been migrated to torchao (https://github.com/pytorch/ao)"
+                )
             graph.erase_node(node)
     elif is_dynamic:
         # uint8/int8/fp16 dynamic quantization
@@ -345,9 +345,9 @@ def _replace_observer_with_quantize_dequantize_node_decomposed(
             node.replace_all_uses_with(dequantized_node)
             # propagate numeric debug handle from observer/fake_quant node to dequantize node
             if NUMERIC_DEBUG_HANDLE_KEY in node.meta:
-                dequantized_node.meta[NUMERIC_DEBUG_HANDLE_KEY] = node.meta[
-                    NUMERIC_DEBUG_HANDLE_KEY
-                ]
+                raise NotImplementedError(
+                    "pt2e numeric suite has been migrated to torchao (https://github.com/pytorch/ao)"
+                )
             graph.erase_node(node)
     elif dtype == torch.float16:
         # Insert to_fp16 -> to_fp32 node
@@ -373,7 +373,7 @@ def _replace_observer_with_quantize_dequantize_node(
     modules: dict[str, torch.nn.Module],
     node_name_to_scope: dict[str, tuple[str, type]],
     node_name_to_qconfig: dict[str, QConfigAny],
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> None:
     """Replace activation_post_process module call node with quantize and
     dequantize node
@@ -430,7 +430,7 @@ def _replace_observer_with_quantize_dequantize_node(
         # 1. extract the information from activation_post_process module for generating
         # the quantize and dequantize operator
         node_type = "call_function"
-        quantize_op: Optional[Callable] = None
+        quantize_op: Callable | None = None
         scale, zero_point = activation_post_process.calculate_qparams()  # type: ignore[attr-defined, operator]
         if is_per_channel(activation_post_process.qscheme):  # type: ignore[attr-defined]
             ch_axis = int(activation_post_process.ch_axis)  # type: ignore[attr-defined, arg-type]
@@ -596,7 +596,7 @@ def _maybe_recursive_remove_dequantize(arg: Any, node: Node, graph: Graph) -> No
         # we only replace the specific use since dequantize could be used by other nodes
         # as well
         node.replace_input_with(arg, quantize_node)
-    elif isinstance(arg, (list, tuple)):
+    elif isinstance(arg, (list, tuple)):  # noqa: UP038
         for arg_element in arg:
             _maybe_recursive_remove_dequantize(arg_element, node, graph)
     elif isinstance(arg, dict):
@@ -678,12 +678,12 @@ def _insert_dequantize_node(node: Node, graph: Graph) -> None:
 
 def _maybe_get_observer_for_node(
     node: Node, modules: dict[str, torch.nn.Module]
-) -> Optional[torch.nn.Module]:
+) -> torch.nn.Module | None:
     """
     If the node is observed, return the observer
     instance. Otherwise, return None.
     """
-    for maybe_obs_node in node.users.keys():
+    for maybe_obs_node in node.users:
         if maybe_obs_node.op == "call_module":
             maybe_obs = modules[str(maybe_obs_node.target)]
             if _is_activation_post_process(maybe_obs):
@@ -696,7 +696,7 @@ def convert_standalone_module(
     modules: dict[str, torch.nn.Module],
     model: torch.fx.GraphModule,
     is_reference: bool,
-    backend_config: Optional[BackendConfig],
+    backend_config: BackendConfig | None,
 ) -> None:
     """Converts a observed standalone module to a quantized standalone module by calling
     the fx convert api, currently using the same `is_reference` flag as parent, but we may
@@ -765,7 +765,7 @@ def convert_weighted_module(
     backend_config: BackendConfig,
     is_decomposed: bool = False,
     is_reference: bool = False,
-    model_device: Optional[torch.device] = None,
+    model_device: torch.device | None = None,
 ) -> None:
     """Convert a weighted module to reference quantized module in the model
     If the QConfig of a QAT module is not set, the module will still be converted to
@@ -838,7 +838,7 @@ def convert_weighted_module(
                 "weight_hh": weight_qparams_hh,
             }
         )
-    elif isinstance(float_module, (torch.nn.LSTM, torch.nn.GRU)):
+    elif isinstance(float_module, (torch.nn.LSTM, torch.nn.GRU)):  # noqa: UP038
         # format for wq_or_wq_dict (flattened attributes):
         # {"weight_ih_l0_scale": ..., "weight_ih_l0_qscheme": ..., ...}
         for wn in float_module._flat_weights_names:
@@ -1033,11 +1033,11 @@ def convert_custom_module(
 def convert(
     model: GraphModule,
     is_reference: bool = False,
-    convert_custom_config: Union[ConvertCustomConfig, dict[str, Any], None] = None,
+    convert_custom_config: ConvertCustomConfig | dict[str, Any] | None = None,
     is_standalone_module: bool = False,
     _remove_qconfig_flag: bool = True,
-    qconfig_mapping: Union[QConfigMapping, dict[str, Any], None] = None,
-    backend_config: Union[BackendConfig, dict[str, Any], None] = None,
+    qconfig_mapping: QConfigMapping | dict[str, Any] | None = None,
+    backend_config: BackendConfig | dict[str, Any] | None = None,
     is_decomposed: bool = False,
     keep_original_weights: bool = False,
 ) -> GraphModule:
@@ -1217,12 +1217,12 @@ def convert(
             return_node = node
             output = node.args[0]
             # outputs can be Node, list, tuple, dict, other cases are not supported yet
-            if isinstance(output, (list, tuple)):
+            if isinstance(output, (list, tuple)):  # noqa: UP038
                 for idx in output_quantized_idxs:
                     _maybe_recursive_remove_dequantize(
                         output[idx], return_node, model.graph
                     )
-            elif isinstance(output, (Node, dict)):
+            elif isinstance(output, (Node, dict)):  # noqa: UP038
                 # we treat dict as a single argument currently, but it can be extended
                 # to support {"key": dtype} after we change output_quantized_idxs to
                 # dict

@@ -1,5 +1,4 @@
 #include <ATen/PythonTorchFunctionTLS.h>
-#include <c10/core/TensorImpl.h>
 
 namespace at::impl {
 

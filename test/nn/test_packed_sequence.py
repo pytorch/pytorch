@@ -492,6 +492,36 @@ class PackedSequenceTest(TestCase):
                 torch.randn([0, 1, 10]), torch.randn([11, 14, 14, 2]), True
             )
 
+    def test_empty_packed_sequence(self):
+        """
+        Regression test for https://github.com/pytorch/pytorch/issues/149622
+        Tests that pad_packed_sequence and unpack_sequence handle empty tensors
+        without segmentation fault (CVE-2025-2998, CVE-2025-2999)
+        """
+        # Test case 1: pad_packed_sequence with empty tensors
+        # Previously caused segmentation fault
+        empty_data = torch.randn(0, 5)
+        empty_batch_sizes = torch.tensor([], dtype=torch.int64)
+        empty_packed = rnn_utils.PackedSequence(
+            empty_data, empty_batch_sizes, None, None
+        )
+
+        # Should not crash - either return empty result or raise informative error
+        with self.assertRaises(RuntimeError):
+            rnn_utils.pad_packed_sequence(empty_packed, batch_first=True)
+
+        # Test case 2: unpack_sequence with empty tensors
+        # Previously caused segmentation fault
+        empty_data = torch.tensor([])
+        empty_batch_sizes = torch.tensor([], dtype=torch.int64)
+        packed = rnn_utils.PackedSequence(
+            data=empty_data, batch_sizes=empty_batch_sizes
+        )
+
+        # Should not crash - either return empty list or raise informative error
+        with self.assertRaises(RuntimeError):
+            rnn_utils.unpack_sequence(packed)
+
 
 if __name__ == "__main__":
     run_tests()

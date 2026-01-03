@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Iterable, Iterator, Sequence, Sized
-from typing import Generic, Optional, TypeVar, Union
+from typing import Generic, TypeVar
 
 import torch
 
@@ -132,7 +132,7 @@ class RandomSampler(Sampler[int]):
         self,
         data_source: Sized,
         replacement: bool = False,
-        num_samples: Optional[int] = None,
+        num_samples: int | None = None,
         generator=None,
     ) -> None:
         self.data_source = data_source
@@ -307,7 +307,7 @@ class BatchSampler(Sampler[list[int]]):
 
     def __init__(
         self,
-        sampler: Union[Sampler[int], Iterable[int]],
+        sampler: Sampler[int] | Iterable[int],
         batch_size: int,
         drop_last: bool,
     ) -> None:

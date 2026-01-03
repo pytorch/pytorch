@@ -139,8 +139,6 @@ dtensor_fails = {
     xfail("aminmax"),
     xfail("any"),
     xfail("arange"),
-    xfail("argmax"),
-    xfail("argmin"),
     xfail("as_strided"),
     xfail("as_strided", "partial_views"),
     xfail("as_strided_copy"),
@@ -165,7 +163,6 @@ dtensor_fails = {
     xfail("dist"),
     xfail("expand_copy"),
     xfail("exponential"),
-    xfail("equal"),
     xfail("eye"),
     xfail("fft.fft2"),
     xfail("fft.fft"),
@@ -188,14 +185,11 @@ dtensor_fails = {
     xfail("fliplr"),
     xfail("flipud"),
     xfail("floor_divide"),
-    xfail("fmax"),
-    xfail("fmin"),
     xfail("frexp"),
     xfail("full"),
     xfail("geometric"),
     xfail("geqrf"),
     xfail("grid_sampler_2d"),
-    xfail("heaviside"),
     xfail("histogram"),
     xfail("histogramdd"),
     xfail("index_add"),
@@ -253,8 +247,6 @@ dtensor_fails = {
     xfail("masked_fill"),
     xfail("masked_scatter"),
     xfail("masked_select"),
-    xfail("masked.argmax"),
-    xfail("masked.argmin"),
     xfail("masked.logsumexp"),
     xfail("masked.median"),
     xfail("matrix_exp"),
@@ -435,8 +427,6 @@ dtensor_fails = {
     xfail("signal.windows.nuttall"),
     xfail("signal.windows.kaiser"),
     xfail("stack"),
-    xfail("std"),
-    xfail("std", "unbiased"),
     xfail("std_mean"),
     xfail("std_mean", "unbiased"),
     xfail("stft"),
@@ -727,7 +717,7 @@ class TestDTensorOps(TestCase):
             self.assertEqual(full_tensor, tensor.mean(dim=reduce_dim))
 
             if is_evenly_shardable:
-                self.assertTrue("P->R" in debug_mode.debug_string())
+                self.assertTrue("P(avg)->R" in debug_mode.debug_string())
             else:
                 self.assertTrue("S(0)->R" in debug_mode.debug_string())
 

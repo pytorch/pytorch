@@ -131,7 +131,7 @@ def functional_call(
             raise ValueError(
                 "Expected all elements of parameter_and_buffer_dicts to be dictionaries"
             )
-        all_keys = [k for d in parameter_and_buffer_dicts for k in d.keys()]
+        all_keys = [k for d in parameter_and_buffer_dicts for k in d]
         all_keys_counter: dict[str, int] = {}
         for k in all_keys:
             v = all_keys_counter.get(k, 0)

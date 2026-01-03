@@ -1,3 +1,5 @@
+#pragma once
+
 // This is directly synchronized with caffe2/proto/caffe2.proto, but
 // doesn't require me to figure out how to get Protobuf headers into
 // ATen/core (which would require a lot more build system hacking.)

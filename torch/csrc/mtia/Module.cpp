@@ -19,7 +19,10 @@ struct _MTIAGraph {
 
   _MTIAGraph(bool keep_graph = false)
       : handle_(at::detail::getMTIAHooks().mtiagraphCreate(keep_graph)) {}
-  ~_MTIAGraph() = default;
+
+  ~_MTIAGraph() {
+    at::detail::getMTIAHooks().mtiagraphDestroy(handle_);
+  }
 
   void capture_begin(at::MempoolId_t pool) {
     at::detail::getMTIAHooks().mtiagraphCaptureBegin(handle_, pool);
@@ -53,6 +56,18 @@ void initModule(PyObject* module) {
     TORCH_INTERNAL_ASSERT(!torch::utils::is_device_in_bad_fork(at::kMTIA));
     torch::utils::register_fork_handler_for_device_init(at::kMTIA);
     at::globalContext().lazyInitDevice(c10::DeviceType::MTIA);
+
+    // Initialize default generators for each MTIA device
+    auto mtia_module = py::module_::import("torch.mtia");
+
+    auto num_devices = at::detail::getMTIAHooks().deviceCount();
+    py::tuple default_mtia_generators(num_devices);
+    for (const auto i : c10::irange(num_devices)) {
+      auto cast_gen = THPGenerator_initDefaultGenerator(
+          at::detail::getMTIAHooks().getDefaultGenerator(i));
+      default_mtia_generators[i] = py::reinterpret_steal<py::object>(cast_gen);
+    }
+    mtia_module.attr("default_generators") = default_mtia_generators;
   });
 
   m.def("_mtia_isBuilt", []() {
@@ -166,6 +181,10 @@ void initModule(PyObject* module) {
 
   m.def("_mtia_resetPeakMemoryStats", [](c10::DeviceIndex device_index) {
     at::detail::getMTIAHooks().resetPeakMemoryStats(device_index);
+  });
+
+  m.def("_mtia_graphPoolHandle", []() {
+    return at::detail::getMTIAHooks().graphPoolHandle();
   });
 
   py::class_<_MTIAGraph>(m, "_MTIAGraph")

@@ -14,7 +14,6 @@ in this file and seeing what breaks.
 
 from collections.abc import Iterable
 from enum import auto, Enum
-from typing import Union
 
 import sympy
 
@@ -88,7 +87,7 @@ def make_symbol(prefix: SymT, idx: int, **kwargs) -> sympy.Symbol:
 
 # This type is a little wider than it should be, because free_symbols says
 # that it contains Basic, rather than Symbol
-def symbol_is_type(sym: sympy.Basic, prefix: Union[SymT, Iterable[SymT]]) -> bool:
+def symbol_is_type(sym: sympy.Basic, prefix: SymT | Iterable[SymT]) -> bool:
     if not isinstance(sym, sympy.Symbol):
         raise AssertionError("expected sympy.Symbol")
     name_str = sym.name.lower()  # Match capitalized names like XBLOCK, RBLOCK
@@ -98,5 +97,5 @@ def symbol_is_type(sym: sympy.Basic, prefix: Union[SymT, Iterable[SymT]]) -> boo
         return name_str.startswith(tuple(prefix_str[p] for p in prefix))
 
 
-def free_symbol_is_type(e: sympy.Expr, prefix: Union[SymT, Iterable[SymT]]) -> bool:
+def free_symbol_is_type(e: sympy.Expr, prefix: SymT | Iterable[SymT]) -> bool:
     return any(symbol_is_type(v, prefix) for v in e.free_symbols)

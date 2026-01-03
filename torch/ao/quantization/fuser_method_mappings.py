@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch.ao.nn.intrinsic as nni
 import torch.nn as nn
@@ -59,7 +59,7 @@ def fuse_conv_bn(is_qat, conv, bn):
             raise AssertionError(
                 "Only support fusing BatchNorm2d with tracking_running_stats set to True"
             )
-        fused_module_class = fused_module_class_map.get((type(conv)), None)
+        fused_module_class = fused_module_class_map.get(type(conv))
         if fused_module_class is not None:
             return fused_module_class(conv, bn)
         else:
@@ -91,7 +91,7 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
         raise AssertionError(
             "Conv and BN both must be in the same mode (train or eval)."
         )
-    fused_module: Optional[type[nn.Sequential]] = None
+    fused_module: type[nn.Sequential] | None = None
     if is_qat:
         map_to_fused_module_train = {
             nn.Conv1d: nni.ConvBnReLU1d,
@@ -110,7 +110,7 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
             raise AssertionError(
                 "Only support fusing BatchNorm2d with tracking_running_stats set to True"
             )
-        fused_module = map_to_fused_module_train.get(type(conv), None)
+        fused_module = map_to_fused_module_train.get(type(conv))
         if fused_module is not None:
             return fused_module(conv, bn, relu)
         else:
@@ -121,7 +121,7 @@ def fuse_conv_bn_relu(is_qat, conv, bn, relu):
             nn.Conv2d: nni.ConvReLU2d,
             nn.Conv3d: nni.ConvReLU3d,
         }
-        fused_module = map_to_fused_module_eval.get(type(conv), None)
+        fused_module = map_to_fused_module_eval.get(type(conv))
         if fused_module is not None:
             fused_conv = nn.utils.fusion.fuse_conv_bn_eval(conv, bn)
             return fused_module(fused_conv, relu)
@@ -211,7 +211,7 @@ def _sequential_wrapper2(sequential):
     return fuser_method
 
 
-_DEFAULT_OP_LIST_TO_FUSER_METHOD: dict[tuple, Union[nn.Sequential, Callable]] = {
+_DEFAULT_OP_LIST_TO_FUSER_METHOD: dict[tuple, nn.Sequential | Callable] = {
     (nn.Conv1d, nn.BatchNorm1d): fuse_conv_bn,
     (nn.Conv1d, nn.BatchNorm1d, nn.ReLU): fuse_conv_bn_relu,
     (nn.Conv2d, nn.BatchNorm2d): fuse_conv_bn,
@@ -296,7 +296,7 @@ def _get_valid_patterns(op_pattern):
 
 def get_fuser_method_new(
     op_pattern: Pattern,
-    fuser_method_mapping: dict[Pattern, Union[nn.Sequential, Callable]],
+    fuser_method_mapping: dict[Pattern, nn.Sequential | Callable],
 ):
     """Get fuser method.
 

@@ -10,7 +10,6 @@ import tempfile
 import time
 import warnings
 from concurrent.futures import as_completed, ThreadPoolExecutor
-from typing import Optional
 
 from . import _prctl_pr_set_pdeathsig  # type: ignore[attr-defined]
 
@@ -33,26 +32,18 @@ __all__ = [
 class ProcessException(Exception):
     __slots__ = ["error_index", "error_pid"]
 
-    def __init__(self, msg: str, error_index: int, pid: int):
+    def __init__(self, msg: str, error_index: int, error_pid: int):
         super().__init__(msg)
         self.msg = msg
         self.error_index = error_index
-        self.pid = pid
+        self.error_pid = error_pid
 
     def __reduce__(self):
-        return type(self), (self.msg, self.error_index, self.pid)
+        return type(self), (self.msg, self.error_index, self.error_pid)
 
 
 class ProcessRaisedException(ProcessException):
     """Exception raised when a process failed due to an exception raised by the code."""
-
-    def __init__(
-        self,
-        msg: str,
-        error_index: int,
-        error_pid: int,
-    ):
-        super().__init__(msg, error_index, error_pid)
 
 
 class ProcessExitedException(ProcessException):
@@ -66,7 +57,7 @@ class ProcessExitedException(ProcessException):
         error_index: int,
         error_pid: int,
         exit_code: int,
-        signal_name: Optional[str] = None,
+        signal_name: str | None = None,
     ):
         super().__init__(msg, error_index, error_pid)
         self.exit_code = exit_code
@@ -75,7 +66,13 @@ class ProcessExitedException(ProcessException):
     def __reduce__(self):
         return (
             type(self),
-            (self.msg, self.error_index, self.pid, self.exit_code, self.signal_name),
+            (
+                self.msg,
+                self.error_index,
+                self.error_pid,
+                self.exit_code,
+                self.signal_name,
+            ),
         )
 
 
@@ -118,9 +115,7 @@ class ProcessContext:
             time_to_wait = max(0, end - time.monotonic())
             process.join(time_to_wait)
 
-    def join(
-        self, timeout: Optional[float] = None, grace_period: Optional[float] = None
-    ):
+    def join(self, timeout: float | None = None, grace_period: float | None = None):
         r"""Join one or more processes within spawn context.
 
         Attempt to join one or more processes in this spawn context.
@@ -265,7 +260,7 @@ def start_processes(
         # used a multiprocessing.Queue but that can be prone to
         # deadlocks, so we went with a simpler solution for a one-shot
         # message between processes.
-        tf = tempfile.NamedTemporaryFile(
+        tf = tempfile.NamedTemporaryFile(  # noqa: SIM115
             prefix="pytorch-errorfile-", suffix=".pickle", delete=False
         )
         tf.close()

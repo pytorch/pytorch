@@ -2,6 +2,7 @@
 
 import copy
 import json
+import logging
 import os
 import pickle
 import random
@@ -21,6 +22,7 @@ from unittest import mock, SkipTest
 import torch
 import torch.distributed as c10d
 import torch.distributed._functional_collectives as _functional_collectives
+from torch.distributed.distributed_c10d import SHRINK_ABORT as NCCL_SHRINK_ABORT
 
 
 if not c10d.is_available() or not c10d.is_nccl_available():
@@ -47,12 +49,15 @@ from torch._C._distributed_c10d import ErrorType, OpType, WorkResult
 from torch.nn.parallel import DistributedDataParallel
 from torch.testing._internal.common_cuda import _get_torch_rocm_version, TEST_MULTIGPU
 from torch.testing._internal.common_distributed import (
+    get_required_world_size,
     get_timeout,
     init_multigpu_helper,
     MultiProcessTestCase,
     requires_multicast_support,
     requires_nccl,
+    requires_nccl_shrink,
     requires_nccl_version,
+    requires_world_size,
     skip_if_lt_x_gpu,
     skip_if_rocm_multiprocess,
     sm_is_or_higher_than,
@@ -86,6 +91,56 @@ if TEST_WITH_DEV_DBG_ASAN:
 BFLOAT16_AVAILABLE = torch.cuda.is_available() and (
     torch.version.cuda is not None or torch.version.hip is not None
 )
+
+CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
+    torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
+)
+
+_start_time = time.time()
+_logger = logging.getLogger(__name__)
+
+
+def _ts():
+    return time.time() - _start_time
+
+
+def configure(level=logging.INFO, force=False):
+    try:
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s %(name)s %(levelname)s: %(message)s",
+            force=force,
+        )
+    except TypeError:
+        logging.basicConfig(
+            level=level, format="%(asctime)s %(name)s %(levelname)s: %(message)s"
+        )
+
+
+def log_test_info(rank, message):
+    _logger.info("[%7.3fs][Rank %s] %s", _ts(), rank, message)
+
+
+def log_test_success(rank, message):
+    _logger.info("[%7.3fs][Rank %s] ✅ %s", _ts(), rank, message)
+
+
+def log_test_validation(rank, message):
+    _logger.info("[%7.3fs][Rank %s] ✓ %s", _ts(), rank, message)
+
+
+def log_test_warning(rank, message):
+    _logger.warning("[%7.3fs][Rank %s] ⚠️ %s", _ts(), rank, message)
+
+
+def log_test_error(rank, message):
+    _logger.error("[%7.3fs][Rank %s] ✗ %s", _ts(), rank, message)
+
+
+_log_configure = configure
+
+
+_log_configure(level=logging.INFO, force=True)
 
 
 class RendezvousEnvTest(TestCase):
@@ -200,9 +255,11 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
     MAIN_PROCESS_RANK = 0
 
     def setUp(self):
+        super().setUp()
         self.rank = self.MAIN_PROCESS_RANK
         self.world_size = 1
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
 
     def tearDown(self):
         pass
@@ -292,7 +349,17 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # These tests are expected to throw SIGABRT(6);
         # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
-        TEST_NAN_ASSERT_RETURN = 0 if IS_SANDCASTLE else signal.SIGABRT
+        #
+        # CUDA: Uses native __trap() instruction → CUDA runtime catches it →
+        #       clean exit(6) → exit code 6
+        # ROCm: No native trap instruction, uses assert(0) (NanCheck.cu:24-27) →
+        #       calls abort() → OS sends SIGABRT signal → process killed by signal →
+        #       exit code -6
+        TEST_NAN_ASSERT_RETURN = (
+            0
+            if (IS_SANDCASTLE and not (TEST_MULTIGPU and CUDA_12_AND_ABOVE))
+            else (-signal.SIGABRT if torch.version.hip else signal.SIGABRT)
+        )
         self.special_return_code_checks = {
             self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
             self.test_nan_assert_float32.__wrapped__: TEST_NAN_ASSERT_RETURN,
@@ -317,7 +384,7 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
     @property
     def world_size(self):
-        return 2
+        return get_required_world_size(self, 2)
 
     @property
     def rank_to_GPU(self):
@@ -413,7 +480,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             dist.all_reduce(t)
 
     @requires_nccl()
-    @skip_if_rocm_multiprocess
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_restart_pg(self):
         # Note: restart test passes steadily only for blocking mode for now.
@@ -484,10 +550,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         # reset ENV
         os.environ["TORCH_NCCL_CUDA_EVENT_CACHE"] = "0"
 
-    CUDA_12_AND_ABOVE = torch.cuda.is_available() and (
-        torch.version.cuda is not None and int(torch.version.cuda.split(".")[0]) >= 12
-    )
-
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(
         # skip for cu126 as well due to https://github.com/pytorch/pytorch/issues/153479
@@ -505,7 +567,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             torch.float8_e5m2,
         ],
     )
-    @skip_if_rocm_multiprocess
     def test_nan_assert(self, type):
         # Expecting a device-side error when NaN is detected
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
@@ -1255,6 +1316,628 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
         pg_2 = c10d.new_group([0, 1])
         self.assertEqual(pg_2.group_desc, "undefined")
 
+    @requires_nccl_shrink()
+    @requires_world_size(2)
+    def test_shrink_group_basic(self):
+        """Test basic shrink_group functionality."""
+        self._perform_shrink_test([1], "Basic shrink test")
+
+    @requires_nccl_shrink()
+    @requires_world_size(2)
+    def test_shrink_group_validation(self):
+        """Test input validation in shrink_group."""
+        device, pg = self._setup_shrink_test("validation")
+
+        def _test_invalid_input(ranks, description, expected_exception):
+            """Helper to test invalid inputs."""
+            try:
+                c10d.shrink_group(ranks)
+                self.fail(f"Expected {expected_exception.__name__} for {description}")
+            except expected_exception:
+                log_test_validation(self.rank, f"✓ {description}")
+            except Exception:
+                if expected_exception is Exception:  # Accept any exception
+                    log_test_validation(self.rank, f"✓ {description}")
+                else:
+                    raise
+
+        # Test cases
+        _test_invalid_input([], "Empty exclusion list", ValueError)
+        if self.world_size > 1:
+            _test_invalid_input([0, 0, 1], "Duplicate ranks", Exception)
+        _test_invalid_input([self.world_size + 1], "Out of bounds rank", Exception)
+
+        log_test_success(self.rank, "All validation tests passed")
+        dist.destroy_process_group()
+
+    @requires_nccl_shrink()
+    @requires_world_size(2)
+    def test_shrink_group_backend_properties(self):
+        """Test that backend properties are preserved after shrinking."""
+
+        test_name = "Backend Properties Test"
+        ranks_to_exclude = [0]
+
+        # Reuse _setup_shrink_test for complete setup (device, environment, and process group)
+        device, pg = self._setup_shrink_test("backend_properties")
+
+        # Follow _perform_shrink_test pattern from here
+        log_test_info(self.rank, f"{test_name} (world_size={self.world_size})")
+
+        is_excluded = self.rank in ranks_to_exclude
+        log_test_info(
+            self.rank,
+            f"Excluding ranks: {ranks_to_exclude}, am_excluded: {is_excluded}",
+        )
+
+        # Store original backend property values (not references) before shrinking
+        original_timeout = None
+        original_high_priority = None
+        if not is_excluded:
+            original_backend = pg._get_backend(device)
+            original_timeout = original_backend.options._timeout
+            original_high_priority = original_backend.options.is_high_priority_stream
+            log_test_info(
+                self.rank,
+                f"Storing original backend properties: timeout={original_timeout}, high_priority={original_high_priority}",
+            )
+
+        if is_excluded:
+            log_test_info(
+                self.rank,
+                f"Excluded rank {self.rank} - setup complete, skipping shrink operation",
+            )
+            dist.destroy_process_group()  # hang without it
+            return
+
+        # Only non-excluded ranks proceed with shrink (same as _perform_shrink_test)
+        log_test_info(self.rank, "Non-excluded rank calling shrink_group")
+        shrunk_pg = c10d.shrink_group(ranks_to_exclude)
+
+        # Reuse _validate_shrunk_group helper (same as _perform_shrink_test)
+        expected_size = self.world_size - len(ranks_to_exclude)
+        _ = self._validate_shrunk_group(shrunk_pg, expected_size, test_name)
+
+        # Add custom backend properties validation
+        new_backend = shrunk_pg._get_backend(device)
+        log_test_info(self.rank, "Validating backend properties are preserved")
+
+        new_timeout = new_backend.options._timeout
+        new_high_priority = new_backend.options.is_high_priority_stream
+
+        log_test_info(
+            self.rank,
+            f"Timeout comparison - original: {original_timeout}, new: {new_timeout}",
+        )
+        self.assertEqual(
+            original_timeout, new_timeout, f"{test_name}: timeout not preserved"
+        )
+
+        log_test_info(
+            self.rank,
+            f"High priority stream comparison - original: {original_high_priority}, new: {new_high_priority}",
+        )
+        self.assertEqual(
+            original_high_priority,
+            new_high_priority,
+            f"{test_name}: high_priority_stream not preserved",
+        )
+
+        log_test_validation(
+            self.rank, f"{test_name}: Backend properties preserved successfully"
+        )
+        log_test_success(
+            self.rank, f"{test_name} successful (shrink + backend validation)"
+        )
+
+        # Cleanup (same as _perform_shrink_test)
+        dist.destroy_process_group()
+
+    @requires_nccl_shrink()
+    @requires_world_size(2)
+    def test_shrink_group_multiple_comms(self):
+        """Test shrink_group with multiple communicators and subgroup invalidation."""
+
+        device, pg = self._setup_shrink_test("multiple_comms")
+
+        # Create subgroup [0, 1] and test shrinking it
+        subgroup = c10d.new_group([0, 1])
+        if self.rank <= 1:
+            # Shrink subgroup: exclude rank 1
+            if self.rank == 0:  # Only rank 0 remains
+                shrunk_subgroup = c10d.shrink_group([1], group=subgroup)
+                self.assertEqual(shrunk_subgroup.size(), 1)
+                # Test communication on shrunk subgroup
+                tensor = torch.full((1,), self.rank).cuda(device)
+                c10d.all_reduce(tensor, group=shrunk_subgroup)
+                self.assertEqual(tensor.item(), 0)  # Only rank 0
+                log_test_success(self.rank, "Subgroup shrinking successful")
+
+        dist.barrier()  # Sync before default group test
+
+        # Shrink default group: exclude last rank
+        ranks_to_exclude = [self.world_size - 1]
+        if self.rank not in ranks_to_exclude:
+            shrunk_default = c10d.shrink_group(ranks_to_exclude)
+            expected_size = self.world_size - 1
+            self.assertEqual(shrunk_default.size(), expected_size)
+
+            # Test collective on shrunk default group
+            tensor = torch.full((1,), self.rank).cuda(device)
+            c10d.all_reduce(tensor, group=shrunk_default)
+            expected_sum = sum(
+                range(self.world_size - 1)
+            )  # 0 + 1 + ... + (world_size-2)
+            self.assertEqual(tensor.item(), expected_sum)
+            log_test_success(self.rank, "Default group shrinking successful")
+
+            # Note: After shrinking default group, the old subgroup is invalid
+            # due to global rank reassignment
+
+        dist.destroy_process_group()
+
+    def _test_shrink_group_with_flag(self, shrink_flag, flag_name, rank_to_exclude):
+        """Helper method to test shrink_group with a specific flag."""
+        if self.world_size < 2:
+            log_test_info(self.rank, f"Skipping (needs ≥2 GPUs, got {self.world_size})")
+            return
+        ranks_to_exclude = [rank_to_exclude]
+        log_test_info(self.rank, f"Using {flag_name} flag (value: {shrink_flag})")
+        if flag_name == "NCCL_SHRINK_ABORT":
+            log_test_info(
+                self.rank,
+                "ABORT flag will terminate ongoing operations before shrinking",
+            )
+
+        self._perform_shrink_test(
+            ranks_to_exclude, f"{flag_name} flag test", shrink_flags=shrink_flag
+        )
+
+    @requires_nccl_shrink()
+    @requires_world_size(2)
+    def test_shrink_group_flags(self):
+        """Test shrink_group with different shrink flags."""
+        # Test ABORT flags
+        log_test_info(self.rank, "Testing NCCL_SHRINK_ABORT flag")
+        self._test_shrink_group_with_flag(NCCL_SHRINK_ABORT, "NCCL_SHRINK_ABORT", 1)
+
+    @requires_nccl_shrink()
+    @requires_world_size(2)
+    def test_shrink_group_nccl_config(self):
+        """Verify that passing NCCL config via pg_options influences the shrunk group's backend options."""
+        device, pg = self._setup_shrink_test("config")
+        if self.rank == self.world_size - 1:
+            # excluded rank should not call shrink_group
+            dist.destroy_process_group()
+            return
+
+        # Prepare pg_options with NCCL config overrides
+        # Capture parent's current backend options to ensure we can prove override vs inherit
+        parent_backend = pg._get_backend(torch.device("cuda"))
+        parent_hp = parent_backend.options.is_high_priority_stream
+        parent_blocking = parent_backend.options.config.blocking
+
+        # Choose overrides that differ from the parent (flip where possible)
+        override_hp = not parent_hp
+        if parent_blocking in (0, 1):
+            override_blocking = 1 - parent_blocking
+        else:
+            # If undefined or unexpected, set to 1 which is a concrete value
+            override_blocking = 1
+
+        opts = c10d.ProcessGroupNCCL.Options()
+        opts.is_high_priority_stream = override_hp
+        opts.config.blocking = override_blocking
+
+        shrunk_pg = c10d.shrink_group([self.world_size - 1], pg_options=opts)
+
+        # Validate backend options propagated
+        backend = shrunk_pg._get_backend(torch.device("cuda"))
+        # is_high_priority_stream should exactly match our override and differ from parent
+        self.assertEqual(backend.options.is_high_priority_stream, override_hp)
+        self.assertNotEqual(backend.options.is_high_priority_stream, parent_hp)
+        # config is a struct; check representative field and difference from parent when meaningful
+        self.assertEqual(backend.options.config.blocking, override_blocking)
+        if parent_blocking in (0, 1):
+            self.assertNotEqual(backend.options.config.blocking, parent_blocking)
+
+        dist.destroy_process_group()
+
+    @requires_nccl_shrink()
+    @requires_world_size(2)
+    def test_shrink_group_performance(self):
+        """Test shrink_group performance and regression detection."""
+        import time
+
+        ranks_to_exclude = self._get_default_ranks_to_exclude()
+        is_excluded = self.rank in ranks_to_exclude
+
+        if not ranks_to_exclude:
+            log_test_info(self.rank, "Skipping performance test (world_size=1)")
+            return
+
+        log_test_info(self.rank, f"Performance test with {self.world_size} processes")
+        device, pg = self._setup_shrink_test("performance")
+
+        if not is_excluded:
+            log_test_info(self.rank, "Measuring shrink_group performance")
+            start_time = time.time()
+            shrunk_pg = c10d.shrink_group(ranks_to_exclude)
+            end_time = time.time()
+
+            elapsed_time = end_time - start_time
+            log_test_info(self.rank, f"shrink_group: {elapsed_time:.3f}s")
+
+            # Regression check: should complete within reasonable time
+            self.assertLess(
+                elapsed_time,
+                30.0,
+                f"shrink_group took {elapsed_time:.3f}s, possible regression",
+            )
+
+            # Test collective performance
+            expected_size = self.world_size - len(ranks_to_exclude)
+            self._validate_shrunk_group(shrunk_pg, expected_size, "performance")
+
+            collective_start = time.time()
+            _ = self._test_collective_on_shrunk_group(
+                shrunk_pg, device, ranks_to_exclude, "performance"
+            )
+            collective_time = time.time() - collective_start
+
+            log_test_info(self.rank, f"all_reduce: {collective_time:.3f}s")
+            log_test_success(self.rank, "Performance test passed")
+        else:
+            log_test_info(self.rank, "Excluded rank - waiting")
+
+        dist.destroy_process_group()
+
+    @requires_nccl_shrink()
+    @requires_world_size(4)
+    def test_shrink_group_multiple_exclusions(self):
+        """Test shrink_group with multiple ranks excluded at once."""
+        # Scale exclusions with world size
+        ranks_to_exclude = list(range(2, self.world_size, 2))  # Every other rank from 2
+
+        self._perform_shrink_test(ranks_to_exclude, "Multiple exclusions test")
+
+    @requires_nccl_shrink()
+    @requires_world_size(3)
+    def test_shrink_group_multiple_iterations(self):
+        """Test multiple shrink operations in sequence."""
+        log_test_info(
+            self.rank,
+            f"Starting test_shrink_group_multiple_iterations with world_size={self.world_size}",
+        )
+
+        store = c10d.FileStore(self.file_name, self.world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        _ = self._create_process_group_nccl(store, self.opts(), device_id=device)
+
+        # Track current effective world size throughout shrinking operations
+        current_world_size = self.world_size
+        log_test_info(self.rank, f"Initial world_size: {current_world_size}")
+
+        # First shrinking: exclude the last rank(s)
+        first_exclusion = [self.world_size - 1]
+        if self.world_size >= 6:
+            first_exclusion.append(
+                self.world_size - 2
+            )  # Exclude last two ranks for larger sizes
+
+        log_test_info(self.rank, f"First shrinking: excluding ranks {first_exclusion}")
+
+        if self.rank not in first_exclusion:
+            # Only non-excluded ranks should call shrink_group
+            first_pg = c10d.shrink_group(first_exclusion)
+            self.assertIsNotNone(first_pg)
+            # IMPORTANT: Update world size after first shrinking
+            current_world_size = first_pg.size()
+            expected_first_size = self.world_size - len(first_exclusion)
+            log_test_info(
+                self.rank,
+                f"After first shrinking: world_size {self.world_size} -> {current_world_size}",
+            )
+            self.assertEqual(first_pg.size(), expected_first_size)
+
+            # Second shrinking: exclude another rank from the remaining group
+            # Choose a rank that's in the middle range
+            if current_world_size >= 3:
+                second_exclusion = [
+                    current_world_size - 1
+                ]  # Exclude the new "last" rank
+                log_test_info(
+                    self.rank,
+                    f"Second shrinking from group of size {current_world_size}: excluding ranks {second_exclusion}",
+                )
+
+                if self.rank not in second_exclusion:
+                    # Only non-excluded ranks should call shrink_group for second iteration
+                    second_pg = c10d.shrink_group(second_exclusion, group=first_pg)
+                    self.assertIsNotNone(second_pg)
+                    # IMPORTANT: Update world size after second shrinking
+                    final_world_size = second_pg.size()
+                    expected_final_size = current_world_size - len(second_exclusion)
+                    log_test_info(
+                        self.rank,
+                        f"After second shrinking: world_size {current_world_size} -> {final_world_size}",
+                    )
+                    self.assertEqual(second_pg.size(), expected_final_size)
+
+                    # Test collective on final group
+                    tensor = torch.full((1,), self.rank).cuda(device)
+                    log_test_info(
+                        self.rank,
+                        f"Performing all_reduce on final group (size {final_world_size}) with tensor: {tensor.item()}",
+                    )
+                    c10d.all_reduce(tensor, group=second_pg)
+                    log_test_info(
+                        self.rank,
+                        f"Final all_reduce completed, result: {tensor.item()}",
+                    )
+
+                    # Calculate expected sum of remaining ranks
+                    all_excluded = set(first_exclusion + second_exclusion)
+                    remaining_ranks = [
+                        r for r in range(self.world_size) if r not in all_excluded
+                    ]
+                    expected_sum = sum(remaining_ranks)
+                    log_test_info(
+                        self.rank,
+                        f"Remaining ranks: {remaining_ranks}, expected sum: {expected_sum}, actual: {tensor.item()}",
+                    )
+                    self.assertEqual(tensor.item(), expected_sum)
+                    log_test_info(self.rank, "Final verification passed")
+                else:
+                    log_test_info(
+                        self.rank,
+                        "This rank excluded in second shrinking, not calling shrink_group",
+                    )
+            else:
+                log_test_info(
+                    self.rank, "Skipping second shrinking (remaining group too small)"
+                )
+        else:
+            log_test_info(
+                self.rank,
+                "This rank excluded in first shrinking, not calling shrink_group",
+            )
+
+        log_test_info(self.rank, "Destroying process group")
+        dist.destroy_process_group()
+        log_test_info(self.rank, "test_shrink_group_multiple_iterations completed")
+
+    # Helper methods for optimized shrink group tests
+    def _setup_shrink_test(self, test_suffix, world_size=None, warmup=True):
+        """Common setup for shrink group tests."""
+        os.environ["TORCH_NCCL_USE_COMM_NONBLOCKING"] = "1"
+        world_size = world_size or self.world_size
+        store = c10d.FileStore(self.file_name + f"_{test_suffix}", world_size)
+        device = torch.device(f"cuda:{self.rank}")
+        c10d.init_process_group(
+            "nccl",
+            world_size=world_size,
+            rank=self.rank,
+            store=store,
+            pg_options=self.opts(),
+            device_id=device,
+        )
+        pg = c10d.distributed_c10d._get_default_group()
+
+        if warmup:
+            c10d.all_reduce(torch.ones(1).cuda(device), group=pg)
+
+        return device, pg
+
+    def _validate_shrunk_group(self, shrunk_pg, expected_size, test_name=""):
+        """Validate properties of a shrunk process group."""
+        self.assertIsNotNone(shrunk_pg, f"{test_name}: shrunk_pg should not be None")
+        actual_size = shrunk_pg.size()
+        self.assertEqual(
+            actual_size, expected_size, f"{test_name}: group size mismatch"
+        )
+
+        new_rank = shrunk_pg.rank()
+        self.assertTrue(
+            0 <= new_rank < expected_size, f"{test_name}: invalid new rank {new_rank}"
+        )
+
+        log_test_info(
+            self.rank,
+            f"{test_name}: world_size {self.world_size} -> {actual_size}, rank {self.rank} -> {new_rank}",
+        )
+        return new_rank
+
+    def _test_collective_on_shrunk_group(
+        self, shrunk_pg, device, ranks_to_exclude, test_name=""
+    ):
+        """Test collective communication on shrunk group and verify correctness."""
+        test_tensor = torch.full((1,), self.rank, device=device, dtype=torch.float32)
+        c10d.all_reduce(test_tensor, group=shrunk_pg)
+
+        result = test_tensor.item()
+        expected_sum = sum(
+            r for r in range(self.world_size) if r not in ranks_to_exclude
+        )
+
+        self.assertEqual(
+            result, expected_sum, f"{test_name}: collective result mismatch"
+        )
+        log_test_info(
+            self.rank, f"{test_name}: collective passed ({result} == {expected_sum})"
+        )
+        return result
+
+    def _perform_shrink_test(
+        self, ranks_to_exclude, test_name, shrink_flags=0, with_collective=True
+    ):
+        """Complete shrink test flow: setup, shrink, validate, test collective, cleanup.
+
+        Consistent API: All ranks perform setup to initialize distributed environment.
+        ONLY non-excluded ranks call shrink_group() for both default and non-default groups.
+        Excluded ranks perform setup, then exit without calling shrink_group() or waiting.
+        """
+        log_test_info(self.rank, f"{test_name} (world_size={self.world_size})")
+
+        is_excluded = self.rank in ranks_to_exclude
+        log_test_info(
+            self.rank,
+            f"Excluding ranks: {ranks_to_exclude}, am_excluded: {is_excluded}",
+        )
+
+        # All ranks (including excluded ones) perform setup to initialize distributed environment
+        device, pg = self._setup_shrink_test(test_name.lower().replace(" ", "_"))
+        is_default_group = pg == c10d.distributed_c10d._get_default_group()
+
+        if is_excluded:
+            log_test_info(
+                self.rank,
+                f"Excluded rank {self.rank} - setup complete, skipping shrink operation",
+            )
+            if shrink_flags & NCCL_SHRINK_ABORT:
+                log_test_info(self.rank, f"Using abort for excluded rank {self.rank}")
+                pg._get_backend(torch.device(device)).abort()
+                log_test_info(
+                    self.rank, f"cleanup resources for excluded rank {self.rank}"
+                )
+                dist.destroy_process_group()
+                log_test_info(self.rank, f"Excluded rank {self.rank} - exit")
+            else:
+                log_test_info(
+                    self.rank, f"Using regular destroy for excluded rank {self.rank}"
+                )
+                dist.destroy_process_group()
+            return None
+
+        # Only non-excluded ranks proceed with shrink
+        log_test_info(
+            self.rank,
+            f"Non-excluded rank calling shrink_group (default_group={is_default_group})",
+        )
+        shrunk_pg = c10d.shrink_group(ranks_to_exclude, shrink_flags=shrink_flags)
+        log_test_info(
+            self.rank,
+            f"Non-excluded rank calling shrink_group (default_group={is_default_group}) done",
+        )
+
+        # Non-excluded ranks: validate and test the new group
+        expected_size = self.world_size - len(ranks_to_exclude)
+        _ = self._validate_shrunk_group(shrunk_pg, expected_size, test_name)
+
+        if with_collective:
+            _ = self._test_collective_on_shrunk_group(
+                shrunk_pg, device, ranks_to_exclude, test_name
+            )
+            log_test_success(self.rank, f"{test_name} successful (shrink + collective)")
+        else:
+            log_test_success(self.rank, f"{test_name} successful (shrink only)")
+
+        dist.destroy_process_group()
+        return shrunk_pg
+
+    def _get_default_ranks_to_exclude(self):
+        """Get default ranks to exclude based on world size."""
+        if self.world_size <= 1:
+            return []
+        return [self.world_size - 1]  # Exclude last rank by default
+
+    @requires_nccl_shrink()
+    @requires_world_size(3)
+    def test_shrink_group_vs_abort_reinit_performance(self):
+        """Compare performance of shrink_group vs traditional abort+reinit (simplified for reliability)."""
+        log_test_info(self.rank, "=== TEST 1: abort+reinit ===")
+
+        device, pg1 = self._setup_shrink_test("_perf_reinit")
+        torch.cuda.synchronize(device)
+
+        # Test 1: Traditional abort + reinit
+        start_time = time.perf_counter()
+        dist.destroy_process_group()
+
+        device, new_pg = self._setup_shrink_test("perf_shrink_test1")
+        reinit_time = time.perf_counter() - start_time
+
+        # Test collective with original rank values for fair comparison (non-blocking mode)
+        test_tensor = torch.full((1,), self.rank, device=device, dtype=torch.float32)
+        work = c10d.all_reduce(test_tensor, group=new_pg, async_op=True)
+        work.wait()
+
+        torch.cuda.synchronize(device)
+
+        # Verify correctness
+        expected_sum = sum(r for r in range(self.world_size))
+        self.assertEqual(test_tensor.item(), expected_sum, "Reinit collective failed")
+
+        log_test_info(self.rank, f"abort+reinit: {reinit_time:.4f}s")
+        dist.destroy_process_group(new_pg)
+
+        # Test 2: shrink_group with NCCL_SHRINK_ABORT
+        log_test_info(self.rank, "=== TEST 2: shrink_group ===")
+
+        ranks_to_exclude = [self.world_size - 1]
+        is_excluded = self.rank in ranks_to_exclude
+        log_test_info(
+            self.rank,
+            f"Excluding ranks: {ranks_to_exclude}, am_excluded: {is_excluded}",
+        )
+
+        device, pg1 = self._setup_shrink_test("perf_shrink_test2")  # Unique suffix
+
+        shrink_time = 0
+        if not is_excluded:
+            torch.cuda.synchronize(device)  # Ensure accurate timing
+            start_time = time.perf_counter()
+            shrunk_pg = c10d.shrink_group(
+                ranks_to_exclude, shrink_flags=NCCL_SHRINK_ABORT
+            )
+            c10d.all_reduce(torch.ones(1).cuda(device), group=shrunk_pg)
+            shrink_time = time.perf_counter() - start_time
+
+            # Test collective communication on shrunk group (non-blocking mode)
+            test_tensor = torch.full(
+                (1,), self.rank, device=device, dtype=torch.float32
+            )
+            work = c10d.all_reduce(test_tensor, group=shrunk_pg, async_op=True)
+            work.wait()
+
+            # Verify correctness
+            expected_sum = sum(
+                r for r in range(self.world_size) if r not in ranks_to_exclude
+            )
+            self.assertEqual(
+                test_tensor.item(),
+                expected_sum,
+                "shrink_test: collective result mismatch",
+            )
+
+            torch.cuda.synchronize(device)  # Ensure operations complete
+            log_test_info(self.rank, f"shrink_group: {shrink_time:.4f}s")
+            dist.destroy_process_group()
+        else:
+            log_test_info(self.rank, "Excluded from shrink test - exiting immediately")
+            dist.destroy_process_group()
+            return
+
+        # Performance analysis (only for participating ranks)
+        if shrink_time > 0 and reinit_time > 0:
+            speedup = reinit_time / shrink_time
+            time_saved = reinit_time - shrink_time
+
+            log_test_info(self.rank, "=== PERFORMANCE RESULTS ===")
+            log_test_info(self.rank, f"shrink_group:  {shrink_time:.4f}s")
+            log_test_info(self.rank, f"abort+reinit:  {reinit_time:.4f}s")
+            log_test_info(self.rank, f"time_saved:    {time_saved:+.4f}s")
+            log_test_info(self.rank, f"speedup:       {speedup:.2f}x")
+
+            if speedup > 1.1:
+                log_test_success(self.rank, "shrink_group significantly faster")
+            elif speedup > 0.9:
+                log_test_info(self.rank, "≈ comparable performance")
+            else:
+                log_test_warning(self.rank, "abort+reinit faster")
+
+        log_test_info(self.rank, "Performance test completed")
+
     @requires_nccl()
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_deterministic_mode_no_break(self):
@@ -1318,6 +2001,228 @@ class DistributedDataParallelTest(
         self._test_ddp_with_process_group(
             process_group, devices, device_ids, multi_device, gradient_as_bucket_view
         )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_complex_params_and_grads(self):
+        # test ddp with complex parameters and gradients
+        process_group = self._get_process_group()
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device = torch.device(f"cuda:{device_id}")
+
+        torch.manual_seed(42 + self.rank)
+        model = nn.Sequential(
+            nn.Linear(4, 8, dtype=torch.cfloat),
+            nn.Linear(8, 2, dtype=torch.cfloat),
+        ).to(device)
+
+        torch.manual_seed(42 + self.rank)
+        ref_model = nn.Sequential(
+            nn.Linear(4, 8, dtype=torch.cfloat),
+            nn.Linear(8, 2, dtype=torch.cfloat),
+        ).to(device)
+
+        # 0.001 forces tiny buckets, creating multiple buckets, stress-testing bucketing
+        ddp_model = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+            bucket_cap_mb=0.001,
+        )
+
+        torch.manual_seed(100)
+        batch_size = 16
+        input_dim = 4
+        output_dim = 2
+
+        x = torch.randn(batch_size, input_dim, dtype=torch.cfloat, device=device)
+        y = torch.randn(batch_size, output_dim, dtype=torch.cfloat, device=device)
+
+        optimizer_ddp = torch.optim.SGD(ddp_model.parameters(), lr=0.01)
+        optimizer_ref = torch.optim.SGD(ref_model.parameters(), lr=0.01)
+
+        for iteration in range(5):
+            optimizer_ddp.zero_grad()
+            output_ddp = ddp_model(x)
+            loss_ddp = torch.mean(torch.abs(output_ddp - y) ** 2)
+            loss_ddp.backward()
+
+            optimizer_ref.zero_grad()
+            with torch.no_grad():
+                for p_ddp, p_ref in zip(ddp_model.parameters(), ref_model.parameters()):
+                    p_ref.copy_(p_ddp)
+
+            output_ref = ref_model(x)
+            loss_ref = torch.mean(torch.abs(output_ref - y) ** 2)
+            loss_ref.backward()
+
+            for param in ref_model.parameters():
+                if param.grad is not None:
+                    dist.all_reduce(
+                        param.grad.data, op=dist.ReduceOp.SUM, group=process_group
+                    )
+                    param.grad.data /= self.world_size
+
+            for name, (p_ddp, p_ref) in enumerate(
+                zip(ddp_model.parameters(), ref_model.parameters())
+            ):
+                self.assertIsNotNone(
+                    p_ddp.grad,
+                    f"DDP gradient is None at iteration {iteration}, param {name}",
+                )
+
+                self.assertIsNotNone(
+                    p_ref.grad,
+                    f"Reference gradient is None at iteration {iteration}, param {name}",
+                )
+
+                self.assertTrue(
+                    p_ddp.grad.is_complex(),
+                    f"DDP gradient lost complex dtype at iteration {iteration}, param {name}",
+                )
+
+                self.assertTrue(
+                    p_ref.grad.is_complex(),
+                    f"Reference gradient lost complex dtype at iteration {iteration}, param {name}",
+                )
+
+                self.assertFalse(
+                    torch.allclose(p_ddp.grad.imag, torch.zeros_like(p_ddp.grad.imag)),
+                    f"DDP imaginary gradient is all zeros at iteration {iteration}, param {name}! "
+                    f"This indicates the complex gradient bug.",
+                )
+
+                self.assertTrue(
+                    torch.allclose(
+                        p_ddp.grad.real, p_ref.grad.real, rtol=1e-5, atol=1e-5
+                    ),
+                    f"Real gradient mismatch at iteration {iteration}, param {name}\n"
+                    f"DDP real: {p_ddp.grad.real.mean():.6f}, "
+                    f"Ref real: {p_ref.grad.real.mean():.6f}",
+                )
+
+                self.assertTrue(
+                    torch.allclose(
+                        p_ddp.grad.imag, p_ref.grad.imag, rtol=1e-5, atol=1e-5
+                    ),
+                    f"Imaginary gradient mismatch at iteration {iteration}, param {name}\n"
+                    f"DDP imag: {p_ddp.grad.imag.mean():.6f}, "
+                    f"Ref imag: {p_ref.grad.imag.mean():.6f}",
+                )
+
+            optimizer_ddp.step()
+            optimizer_ref.step()
+
+        for p_ddp, p_ref in zip(ddp_model.parameters(), ref_model.parameters()):
+            self.assertTrue(
+                torch.allclose(p_ddp, p_ref, rtol=1e-4, atol=1e-4),
+                "Final model parameters don't match after training",
+            )
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_ddp_mixed_real_and_complex_params(self):
+        # test ddp with mixed real and complex parameters and gradients
+        process_group = self._get_process_group()
+        device_id = gpus_for_rank(self.world_size)[self.rank][0]
+        device = torch.device(f"cuda:{device_id}")
+
+        class MixedModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.complex_fc = nn.Linear(4, 4, dtype=torch.cfloat)
+                self.real_fc = nn.Linear(4, 4, dtype=torch.float32)
+                self.final_fc = nn.Linear(4, 2, dtype=torch.cfloat)
+
+            def forward(self, x_complex, x_real):
+                complex_branch = self.complex_fc(x_complex)
+                real_branch = self.real_fc(x_real)
+                real_as_complex = torch.complex(
+                    real_branch, torch.zeros_like(real_branch)
+                )
+                return self.final_fc(complex_branch + real_as_complex)
+
+        torch.manual_seed(42 + self.rank)
+        model = MixedModule().to(device)
+        ref_model = MixedModule().to(device)
+
+        # 100 forces large bucket, forcing the BucketKey mechanism to segregate buckets, testing bucket segregation by dtype
+        ddp_model = DistributedDataParallel(
+            model,
+            device_ids=[device_id],
+            process_group=process_group,
+            bucket_cap_mb=100,
+        )
+
+        optimizer_ddp = torch.optim.SGD(ddp_model.parameters(), lr=0.01)
+        optimizer_ref = torch.optim.SGD(ref_model.parameters(), lr=0.01)
+
+        torch.manual_seed(100)
+        x_complex = torch.randn(8, 4, dtype=torch.cfloat, device=device)
+        x_real = torch.randn(8, 4, dtype=torch.float32, device=device)
+        target = torch.randn(8, 2, dtype=torch.cfloat, device=device)
+
+        for iteration in range(5):
+            optimizer_ddp.zero_grad()
+            loss_ddp = torch.mean(torch.abs(ddp_model(x_complex, x_real) - target) ** 2)
+            loss_ddp.backward()
+
+            optimizer_ref.zero_grad()
+            with torch.no_grad():
+                for p_ddp, p_ref in zip(ddp_model.parameters(), ref_model.parameters()):
+                    p_ref.copy_(p_ddp)
+            loss_ref = torch.mean(torch.abs(ref_model(x_complex, x_real) - target) ** 2)
+            loss_ref.backward()
+            for param in ref_model.parameters(5):
+                if param.grad is not None and param.grad.is_floating_point():
+                    dist.all_reduce(
+                        param.grad.data,
+                        op=dist.ReduceOp.SUM,
+                        group=process_group,
+                    )
+                    param.grad.data /= self.world_size
+
+            for name, (p_ddp, p_ref) in enumerate(
+                zip(ddp_model.parameters(), ref_model.parameters())
+            ):
+                self.assertIsNotNone(
+                    p_ddp.grad,
+                    f"DDP gradient is None at iteration {iteration}, param {name}",
+                )
+                self.assertIsNotNone(
+                    p_ref.grad,
+                    f"Reference gradient is None at iteration {iteration}, param {name}",
+                )
+
+                self.assertTrue(
+                    p_ddp.grad.is_complex() == p_ref.grad.is_complex(),
+                    f"Gradient dtype mismatch at iteration {iteration}, param {name}",
+                )
+
+                if p_ddp.grad.is_complex():
+                    self.assertFalse(
+                        torch.allclose(
+                            p_ddp.grad.imag, torch.zeros_like(p_ddp.grad.imag)
+                        ),
+                        f"DDP imaginary gradient is all zeros at iteration {iteration}, param {name}",
+                    )
+                    self.assertTrue(
+                        torch.allclose(
+                            p_ddp.grad.real, p_ref.grad.real, rtol=1e-5, atol=1e-5
+                        ),
+                        f"Real gradient mismatch at iteration {iteration}, param {name}",
+                    )
+                    self.assertTrue(
+                        torch.allclose(
+                            p_ddp.grad.imag, p_ref.grad.imag, rtol=1e-5, atol=1e-5
+                        ),
+                        f"Imaginary gradient mismatch at iteration {iteration}, param {name}",
+                    )
+                else:
+                    self.assertTrue(
+                        torch.allclose(p_ddp.grad, p_ref.grad, rtol=1e-5, atol=1e-5),
+                        f"Real gradient mismatch at iteration {iteration}, param {name}",
+                    )
 
     @requires_nccl()
     @skip_if_lt_x_gpu(2)
@@ -2147,7 +3052,6 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    @skip_if_rocm_multiprocess
     def test_grad_layout_2devicemodule(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         dev0 = torch.device("cuda:" + str(int_devices[0]))
@@ -2891,7 +3795,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm_multiprocess
     def test_send_recv_non_dense_tensor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device("cuda", self.rank % torch.cuda.device_count())
@@ -2947,7 +3850,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm_multiprocess
     def test_nccl_errors_blocking(self):
         self._reduce_timeout()
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
@@ -3062,7 +3964,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
-    @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(3)
     def test_restart_pg_after_error(self):
         self._reduce_timeout()
@@ -3101,8 +4002,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             self.assertEqual(nccl_backend.get_error(), ErrorType.TIMEOUT)
             # we need a brand new fileStore for the new PG
             # the new file name is shared through the old fileStore
-            new_file_name = tempfile.NamedTemporaryFile(delete=False).name
-            store.set("file", new_file_name)
+            with tempfile.NamedTemporaryFile(delete=False) as f:
+                new_file_name = f.name
+                store.set("file", new_file_name)
         else:
             # other ranks not exiting before rank 0 timeout, this is to avoid
             # nccl error happening before rank 0 timeouts
@@ -3159,21 +4061,21 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        nccl_debug_file = tempfile.NamedTemporaryFile()
-        nccl_env = {
-            # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
-            # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
-            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
-            "NCCL_ALGO": "NVLS",
-            "NCCL_DEBUG": "INFO",
-            "NCCL_DEBUG_SUBSYS": "NVLS",
-            "NCCL_DEBUG_FILE": nccl_debug_file.name,
-        }
-        if torch.cuda.nccl.version() >= (2, 24, 3):
-            nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
-        self.env_patcher = mock.patch.dict(os.environ, nccl_env)
-        self.env_patcher.start()
-        self._spawn_processes()
+        with tempfile.NamedTemporaryFile(delete=False) as nccl_debug_file:
+            nccl_env = {
+                # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+                # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+                "NCCL_ALGO": "NVLS",
+                "NCCL_DEBUG": "INFO",
+                "NCCL_DEBUG_SUBSYS": "NVLS",
+                "NCCL_DEBUG_FILE": nccl_debug_file.name,
+            }
+            if torch.cuda.nccl.version() >= (2, 24, 3):
+                nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
+            self.env_patcher = mock.patch.dict(os.environ, nccl_env)
+            self.env_patcher.start()
+            self._spawn_processes()
 
     def tearDown(self):
         self.env_patcher.stop()
@@ -3545,15 +4447,15 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg_opts.config.cga_cluster_size = 2
         pg_opts.config.net_name = "Socket"
         pg_opts.config.split_share = 1
-        nccl_debug_file = tempfile.NamedTemporaryFile()
         os.environ["NCCL_DEBUG"] = "INFO"
-        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+        with tempfile.NamedTemporaryFile() as nccl_debug_file:
+            os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
 
-        # Tests functionality when passing nccl config
-        self._test_pass_nccl_options(pg_opts)
+            # Tests functionality when passing nccl config
+            self._test_pass_nccl_options(pg_opts)
 
-        # Tests if comms were configured
-        nccl_debug_file_content = nccl_debug_file.read()
+            # Tests if comms were configured
+            nccl_debug_file_content = nccl_debug_file.read()
         max_ctas = re.search(rb"Max CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
         min_ctas = re.search(rb"Min CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
         split_share = re.search(
@@ -4338,6 +5240,80 @@ class SparseCollective(MultiProcessTestCase):
                 raise
 
 
+class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 1
+
+    def setUp(self):
+        super().setUp()
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # self.num_gpus = torch.cuda.device_count()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter(self):
+        """
+        This is testing against a known bug in NCCL.
+
+        TODO: remove once this is fixed upstream
+
+        https://github.com/pytorch/pytorch/issues/168092
+        https://github.com/NVIDIA/nccl/issues/1950
+        """
+        device = torch.device(f"cuda:{self.rank:d}")
+
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            device_id=device,
+        )
+
+        size = 8192 + 1  # known bad size
+        input_tensor = torch.randn(size, dtype=torch.bfloat16, device=device)
+
+        with self.subTest("reduce_scatter"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            dist.reduce_scatter(
+                output=output_tensor,
+                input_list=[input_tensor],
+                op=dist.ReduceOp.AVG,
+            )
+            torch.testing.assert_close(output_tensor, input_tensor)
+
+        with self.subTest("reduce_scatter_tensor"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            dist.reduce_scatter_tensor(
+                output=output_tensor,
+                input=input_tensor,
+                op=dist.ReduceOp.AVG,
+            )
+            torch.testing.assert_close(output_tensor, input_tensor)
+
+        with self.subTest("reduce_scatter_tensor_coalesced"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            with dist._coalescing_manager():
+                dist.reduce_scatter_tensor(
+                    output=output_tensor,
+                    input=input_tensor,
+                    op=dist.ReduceOp.AVG,
+                )
+            torch.testing.assert_close(output_tensor, input_tensor)
+
+
 class NCCLTraceTestBase(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
@@ -5115,6 +6091,229 @@ class NCCLTraceTest(NCCLTraceTestBase):
         else:
             self.assertTrue("duration_ms" not in t["entries"][0])
 
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    def test_fr_record_reset_circular_buffer_full(self, timing_enabled):
+        """
+        Test that when the circular buffer in entries_ is full and we call reset,
+        then fill the buffer with new entries, dump_entries returns only the new
+        entries and not the old ones.
+        """
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        # Override buffer size to 10 for faster testing
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
+
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        self.set_thread_name("fr_test_thread")
+        a = torch.full((3, 4), float(self.rank), device=device)
+
+        # Fill the buffer completely with 10 entries
+        for _ in range(10):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Verify buffer is full with 10 entries
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 10)
+
+        # Now reset the flight recorder
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        # Add new entries after reset - fill the buffer completely again
+        for _ in range(10):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Verify we get exactly 10 new entries, not 20
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 10)
+
+        # Verify all entries have the expected properties (from after reset)
+        # After reset, record IDs should start from 0 again
+        for i, entry in enumerate(t["entries"]):
+            self.assertIn("profiling_name", entry)
+            self.assertEqual(entry["profiling_name"], "nccl:all_reduce")
+            self.assertIn("record_id", entry)
+            # Record IDs should be sequential starting from 0 after reset
+            self.assertEqual(entry["record_id"], i)
+
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    def test_fr_record_reset_partial_overwrite(self, timing_enabled):
+        """
+        Test that when the circular buffer is full, we reset, and then add fewer
+        entries than the buffer size, we only get the new entries.
+        This tests that old entries at the end of the circular buffer are properly
+        filtered out based on reset_epoch.
+        """
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        # Override buffer size to 10 for faster testing
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
+
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        self.set_thread_name("fr_test_thread")
+        a = torch.full((3, 4), float(self.rank), device=device)
+
+        # Fill the buffer completely
+        for _ in range(10):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Reset the flight recorder
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        # Add only 3 new entries (much less than buffer size)
+        for _ in range(3):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Verify we only get the 3 new entries, not 10
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 3)
+
+        # Verify record IDs start from 0 after reset
+        for i, entry in enumerate(t["entries"]):
+            self.assertIn("record_id", entry)
+            self.assertEqual(entry["record_id"], i)
+
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    def test_fr_record_reset_wraparound(self, timing_enabled):
+        """
+        Test that when we reset in the middle of the circular buffer and then
+        wrap around, dump_entries correctly returns only entries from the current
+        epoch in the correct order.
+        """
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        # Override buffer size to 10 for faster testing
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
+
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        self.set_thread_name("fr_test_thread")
+        a = torch.full((3, 4), float(self.rank), device=device)
+
+        # Fill half the buffer
+        for _ in range(5):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Reset at this point (reset happens at index 5)
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        # Now add 8 entries, which will wrap around
+        # (5->9 fills rest of buffer, then 0->2 wraps around)
+        for _ in range(8):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Should get exactly 8 entries, properly ordered
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 8)
+
+        # Entries should be in chronological order
+        # The dump_entries() method returns entries from next_ to end, then 0 to next_
+        # After filtering old entries, we should have 8 entries in order
+        # Verify record IDs start from 0 after reset (id_ is reset in reset_all())
+        for i, entry in enumerate(t["entries"]):
+            self.assertIn("profiling_name", entry)
+            self.assertIn("record_id", entry)
+            self.assertEqual(entry["record_id"], i)
+
+        dist.destroy_process_group()
+
+    @requires_nccl()
+    @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
+    @parametrize("timing_enabled", [True, False])
+    def test_fr_record_multiple_resets(self, timing_enabled):
+        """
+        Test multiple consecutive resets to ensure each reset properly increments
+        the epoch and filters out entries from previous epochs.
+        """
+        if self.rank == self.MAIN_PROCESS_RANK:
+            return
+
+        # Override buffer size to 10 for faster testing
+        os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "10"
+
+        pg = self._create_process_group_nccl()
+        if timing_enabled:
+            pg._enable_collectives_timing()
+        device = self.local_device
+        self.set_thread_name("fr_test_thread")
+        a = torch.full((3, 4), float(self.rank), device=device)
+
+        # First batch: 2 entries
+        for _ in range(2):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # First reset
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        # Second batch: 3 entries
+        for _ in range(3):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Second reset
+        torch._C._distributed_c10d._reset_fr_recording_nccl()
+
+        # Third batch: 4 entries
+        for _ in range(4):
+            f = pg.allreduce(a)
+        f.wait()
+        torch.cuda.synchronize(device=device)
+        time.sleep(1)
+
+        # Should only see the last 4 entries
+        t = pickle.loads(torch._C._distributed_c10d._dump_nccl_trace())
+        self.assertEqual(len(t["entries"]), 4)
+
+        # Verify record IDs start from 0 after the last reset
+        for i, entry in enumerate(t["entries"]):
+            self.assertIn("record_id", entry)
+            self.assertEqual(entry["record_id"], i)
+
+        dist.destroy_process_group()
+
 
 def check_if_test_is_skipped(fn):
     def wrapper(self, *args, **kwargs):
@@ -5142,7 +6341,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
         return pg
 
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -5211,7 +6410,7 @@ instantiate_parametrized_tests(NCCLTraceTest)
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -5272,7 +6471,7 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
             return None
 
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort with exception and rank1 to exit with exit 1
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -5281,7 +6480,6 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_multiprocess
     def test_nccl_errors_dump(self):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "1000"
@@ -5446,6 +6644,14 @@ class ProcessGroupNCCLLargerScaleTest(MultiProcessTestCase):
         if self.rank == 6 or self.rank == 7:
             dist.broadcast(tensor2, 6, group=ng2)
             self.assertEqual(tensor2, torch.full((1,), 6))
+
+        # Test the case when the split changes the pg option of split group
+        # while the parent pg option is not changed.
+        new_pg = c10d.new_group([0, 1, 2, 3, 4, 5, 6, 7], device_id=device)
+        backend_new_pg = new_pg._get_backend(torch.device(device))
+        self.assertEqual(len(backend_new_pg.options.global_ranks_in_group), 8)
+        c10d.split_group(new_pg, [[0, 2, 4, 6], [1, 3, 5, 7]])
+        self.assertEqual(len(backend_new_pg.options.global_ranks_in_group), 8)
         # a barrier and a cuda sync before destroying all pgs.
         dist.barrier(pg)
         torch.cuda.synchronize()

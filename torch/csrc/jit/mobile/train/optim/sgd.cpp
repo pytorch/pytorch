@@ -1,9 +1,6 @@
 #include <torch/csrc/jit/mobile/train/optim/sgd.h>
 
-#include <torch/types.h>
 #include <torch/utils.h>
-
-#include <ATen/ATen.h>
 
 namespace torch::jit::mobile {
 

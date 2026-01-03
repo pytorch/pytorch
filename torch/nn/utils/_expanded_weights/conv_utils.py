@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -19,7 +18,10 @@ def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
     if func is F.conv2d:
         return conv2dOpt
     else:
-        assert func is F.conv3d
+        if func is not F.conv3d:
+            raise AssertionError(
+                f"Expected func to be F.conv1d, F.conv2d, or F.conv3d, got {func}"
+            )
         return conv3dOpt
 
 
@@ -143,7 +145,7 @@ def conv_backward(func, ctx, grad_output):
     kernel_size = [weight_shape[i] for i in range(2, conv_picker(func, 3, 4, 5))]
 
     batch_size = ctx.batch_size
-    results: list[Optional[torch.Tensor]] = []
+    results: list[torch.Tensor | None] = []
     results.append(None)  # for kwarg names
     results.append(None)  # for op reference
 

@@ -1,6 +1,6 @@
 import functools
-from collections.abc import Sequence
-from typing import Callable, Optional, Protocol, Union
+from collections.abc import Callable, Sequence
+from typing import Optional, Protocol, Union
 
 import sympy
 

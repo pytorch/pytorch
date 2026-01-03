@@ -4,9 +4,8 @@ import logging
 import operator
 import os
 from collections import defaultdict
-from collections.abc import Sequence
-from typing import Any, Callable
-from typing_extensions import TypeAlias
+from collections.abc import Callable, Sequence
+from typing import Any, TypeAlias
 
 import torch
 from torch._dynamo.utils import counters
@@ -405,8 +404,8 @@ def normalize_stack_default(match: Match, *args, **kwargs):
 
 def find_next_users(split_node: torch.fx.Node) -> list[torch.fx.Node]:
     next_users = []
-    for getitem_node in split_node.users.keys():
-        for getitem_user in getitem_node.users.keys():
+    for getitem_node in split_node.users:
+        for getitem_user in getitem_node.users:
             if getitem_user not in next_users:
                 next_users.append(getitem_user)
     return next_users
@@ -624,7 +623,7 @@ def merge_splits(
             )
         first_split_num_to_user = {
             user.args[1]: user
-            for user in first_split.users.keys()  # type: ignore[union-attr]
+            for user in first_split.users  # type: ignore[union-attr]
         }
 
         new_split_num = 0
@@ -638,9 +637,7 @@ def merge_splits(
                 old_getitem.update_arg(1, new_split_num)
                 new_split_num += 1
             else:
-                next_split_num_to_user = {
-                    user.args[1]: user for user in node.users.keys()
-                }
+                next_split_num_to_user = {user.args[1]: user for user in node.users}
                 # It is not necessary all getitems from the split node are used.
                 for next_split_num in range(len(next_split_sections)):
                     with graph.inserting_after(new_split):
@@ -779,6 +776,7 @@ class SplitCatSimplifier:
         """
         merged_ranges = []
         cur_range = None
+        # pyrefly: ignore [bad-assignment]
         for input_ in inputs:
             if isinstance(input_, int):
                 if not cur_range:
@@ -872,6 +870,7 @@ class SplitCatSimplifier:
                 elif isinstance(user_input, tuple):  # Split being simplified
                     # Verify equal split
                     subset_split_sections = split_sections[  # type: ignore[index]
+                        # pyrefly: ignore [bad-index]
                         user_input[0] : user_input[1]
                         + 1  # type: ignore[index]
                     ]
@@ -997,6 +996,7 @@ class SplitCatSimplifier:
             to_stack, to_stack_meta = [], []
             stack_dim = None
             with graph.inserting_before(user_node):
+                # pyrefly: ignore [bad-assignment]
                 for user_input_new, transform_param in zip(
                     user_inputs_new, transform_params
                 ):
@@ -1161,9 +1161,7 @@ class UnbindCatRemover(SplitCatSimplifier):
             return
         # we need to check if the getitem indices from unbind are consecutive and all go to the same cat node
         # before we do the unbind remove, otherwise it will hit the error when we unbind part of them
-        getitem_indices = [
-            getitem_node.args[1] for getitem_node in unbind_node.users.keys()
-        ]
+        getitem_indices = [getitem_node.args[1] for getitem_node in unbind_node.users]
         if not is_sorted_and_consecutive(getitem_indices) or len(  # type: ignore[arg-type]
             getitem_indices
         ) != len(unbind_node.meta["example_value"]):
@@ -1315,10 +1313,7 @@ def merge_split_squeeze(
                 split_input.meta["example_value"], dim=dim
             )
         for item_index, getitem_node in sorted(
-            [
-                (getitem_node.args[1], getitem_node)
-                for getitem_node in split.users.keys()
-            ]
+            [(getitem_node.args[1], getitem_node) for getitem_node in split.users]
         ):
             squeeze = next(iter(getitem_node.users.keys()))
             new_get_item = graph.call_function(
@@ -2754,14 +2749,12 @@ def unbind_stack_to_slices(match: Match, unbind_input: torch.fx.Node, dim: int):
 def get_view_shape_list(cat_arg: torch.fx.Node, stack_dim: int) -> list[int]:
     # cat_arg must be the split input
     view_shape_list = []
-    for user in cat_arg.users.keys():
+    for user in cat_arg.users:
         if user.target is torch.split:
-            for getitem in user.users.keys():
+            for getitem in user.users:
                 if getitem.target is operator.getitem:
                     reshape_user = [
-                        user
-                        for user in getitem.users.keys()
-                        if user.target is torch.reshape
+                        user for user in getitem.users if user.target is torch.reshape
                     ]
                     if len(reshape_user) > 0:
                         view_shape_list = list(

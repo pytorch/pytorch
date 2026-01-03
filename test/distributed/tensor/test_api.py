@@ -79,7 +79,13 @@ class DTensorAPITest(DTensorTestBase):
         dist_tensor = distribute_tensor(tensor_to_shard, device_mesh, shard_minus_spec)
         self.assertEqual(dist_tensor.placements[0].dim, 1)
 
-        placement_combs = [[Shard(0)], [Shard(1)], [Replicate()]]
+        placement_combs = [
+            [Shard(0)],
+            [Shard(1)],
+            [Replicate()],
+            [Partial(reduce_op="sum")],
+            [Partial(reduce_op="avg")],
+        ]
 
         if not self.is_local_tensor_enabled:
             # test src_data_rank == 1
@@ -124,6 +130,10 @@ class DTensorAPITest(DTensorTestBase):
         with self.assertRaisesRegex(ValueError, "must have the same length"):
             shard_spec = [Shard(0)]
             distribute_tensor(tensor_to_distribute, device_mesh, shard_spec)
+
+        with self.assertRaisesRegex(ValueError, "conversion is not supported"):
+            new_spec = [Replicate(), Partial(reduce_op="prod")]
+            distribute_tensor(tensor_to_distribute, device_mesh, new_spec)
 
         with self.assertRaisesRegex(RuntimeError, "distribute leaf tensor"):
             shard_spec = [Shard(0)]

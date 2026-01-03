@@ -10,7 +10,7 @@ import os
 import struct
 import time
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import distributed as dist
@@ -257,11 +257,11 @@ def _process_output_file(
             )
 
             # Process each input safetensors file
-            for safetensors_file in input_files_data.keys():
+            for safetensors_file in input_files_data:
                 file_metadata = input_files_data[safetensors_file].metadata
                 input_metadata_size = input_files_data[safetensors_file].metadata_size
 
-                if tensor_fqn not in file_metadata.keys():
+                if tensor_fqn not in file_metadata:
                     continue
 
                 metadata = file_metadata[tensor_fqn]
@@ -277,6 +277,7 @@ def _process_output_file(
                 )
 
                 # Get the offsets of this tensor shard within the full tensor
+                # pyrefly: ignore [unsupported-operation]
                 fqn_custom_metadata = _get_dcp_custom_metadata(file_metadata)[
                     tensor_fqn
                 ]  # type: ignore[index]
@@ -620,7 +621,7 @@ def consolidate_safetensors_files_on_every_rank(
     output_dir: str,
     fqn_to_index_mapping: dict[str, int],
     num_threads: int = 1,
-    process_group: Optional[dist.ProcessGroup] = None,
+    process_group: dist.ProcessGroup | None = None,
 ) -> None:
     """
     Consolidate sharded safetensors files across multiple ranks, with each rank handling a subset of output files.

@@ -4,7 +4,6 @@ import math
 import os
 import weakref
 from functools import lru_cache
-from typing import Optional
 
 import torch
 from torch._dynamo.utils import warn_once
@@ -66,7 +65,8 @@ def check_dtype(f_name, t, dtype, *additional_dtypes):
 
 
 def check_blocksize(f_name, blocksize):
-    assert len(blocksize) == 2
+    if len(blocksize) != 2:
+        raise AssertionError(f"blocksize must have length 2, got {len(blocksize)}")
 
     def is_power_of_two(v):
         return not (v & (v - 1))
@@ -134,8 +134,10 @@ def ptr_stride_extractor(*tensors):
 
 
 def grid_partitioner(full_grid, grid_blocks, tensor_dims_map):
-    assert 0 <= len(full_grid) <= 3
-    assert 0 <= len(grid_blocks) <= 3
+    if len(full_grid) < 0 or len(full_grid) > 3:
+        raise AssertionError(f"full_grid length must be 0-3, got {len(full_grid)}")
+    if len(grid_blocks) < 0 or len(grid_blocks) > 3:
+        raise AssertionError(f"grid_blocks length must be 0-3, got {len(grid_blocks)}")
 
     import itertools
 
@@ -255,7 +257,10 @@ def as1Dbatch(tensor):
         tensor = tensor.unsqueeze(0)
     if tensor.ndim > 3:
         tensor = tensor.flatten(0, tensor.ndim - 3)
-    assert tensor.ndim == 3, tensor.shape
+    if tensor.ndim != 3:
+        raise AssertionError(
+            f"tensor should have 3 dimensions after reshape, got {tensor.shape}"
+        )
     return tensor
 
 
@@ -361,15 +366,18 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
     """
     indices_format = indices_data[0]
 
-    assert blocks.ndim == 3
+    if blocks.ndim != 3:
+        raise AssertionError(f"blocks must be 3D, got {blocks.ndim}D")
     _P, Ms, Ks = blocks.shape
 
     if indices_format == "scatter_mm":
         c_offsets, pq = indices_data[1:]
 
-        assert others.ndim == 3
+        if others.ndim != 3:
+            raise AssertionError(f"others must be 3D, got {others.ndim}D")
         _Q, Ks_, Ns = others.shape
-        assert Ks == Ks_
+        if Ks != Ks_:
+            raise AssertionError(f"blocks K ({Ks}) != others K ({Ks_})")
 
         if accumulators is None:
             R = c_offsets.shape[0] - 1
@@ -378,8 +386,10 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
             )
         else:
             R, Ms_, Ns_ = accumulators.shape
-            assert Ms_ == Ms
-            assert Ns_ == Ns
+            if Ms_ != Ms:
+                raise AssertionError(f"accumulators Ms ({Ms_}) != blocks Ms ({Ms})")
+            if Ns_ != Ns:
+                raise AssertionError(f"accumulators Ns ({Ns_}) != others Ns ({Ns})")
 
         if Ms % 16 or Ks % 16 or Ns % 16 or _scatter_mm2 is None:
             for r in range(c_offsets.shape[0] - 1):
@@ -398,7 +408,8 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
         others = as1Dbatch(others)
 
         B, K, N = others.shape
-        assert K % Ks == 0
+        if K % Ks != 0:
+            raise AssertionError(f"K ({K}) must be divisible by Ks ({Ks})")
 
         c_indices, r_offsets, p_offsets, q_offsets, meta = indices_data[1:]
         SPLIT_N = meta["SPLIT_N"]
@@ -410,7 +421,8 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
             )
         else:
             M, N_ = accumulators.shape[-2:]
-            assert N_ == N
+            if N_ != N:
+                raise AssertionError(f"accumulators N ({N_}) != others N ({N})")
 
         accumulators_shape = accumulators.shape
         accumulators = as1Dbatch(accumulators)
@@ -448,7 +460,8 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
         others = as1Dbatch(others)
 
         B, K, N = others.shape
-        assert K % Ks == 0
+        if K % Ks != 0:
+            raise AssertionError(f"K ({K}) must be divisible by Ks ({Ks})")
 
         c_indices, r_offsets, q_offsets, meta = indices_data[1:]
         SPLIT_N = meta["SPLIT_N"]
@@ -460,7 +473,8 @@ def scatter_mm(blocks, others, indices_data, *, accumulators=None):
             )
         else:
             M, N_ = accumulators.shape[-2:]
-            assert N_ == N
+            if N_ != N:
+                raise AssertionError(f"accumulators N ({N_}) != others N ({N})")
 
         accumulators_shape = accumulators.shape
         accumulators = as1Dbatch(accumulators)
@@ -721,11 +735,16 @@ def scatter_mm_meta(
             num_warps = {16: 1, 32: 2}.get(Ms, 4)
     GROUP_SIZE = GROUP_SIZE or 4
 
-    assert TILE_M <= Ms, dict(TILE_M=TILE_M, Ms=Ms)
-    assert TILE_N <= Ns, dict(TILE_N=TILE_N, Ns=Ns)
-    assert Ms <= M, dict(M=M, Ms=Ms)
-    assert Ns <= N, dict(N=N, Ns=Ns)
-    assert Ks <= K, dict(K=K, Ks=Ks)
+    if TILE_M > Ms:
+        raise AssertionError(f"TILE_M ({TILE_M}) must be <= Ms ({Ms})")
+    if TILE_N > Ns:
+        raise AssertionError(f"TILE_N ({TILE_N}) must be <= Ns ({Ns})")
+    if Ms > M:
+        raise AssertionError(f"Ms ({Ms}) must be <= M ({M})")
+    if Ns > N:
+        raise AssertionError(f"Ns ({Ns}) must be <= N ({N})")
+    if Ks > K:
+        raise AssertionError(f"Ks ({Ks}) must be <= K ({K})")
 
     return dict(
         TILE_M=TILE_M,
@@ -871,7 +890,10 @@ class TensorAsKey:
             # complex tensors, the values of these bits (see is_neg
             # and is_conj methods) must be included in the key as
             # well.
-            assert not (obj.dtype.is_floating_point or obj.dtype.is_complex), obj.dtype
+            if obj.dtype.is_floating_point or obj.dtype.is_complex:
+                raise AssertionError(
+                    f"TensorAsKey does not support floating point or complex dtype: {obj.dtype}"
+                )
             return (
                 obj.data_ptr(),
                 obj.storage_offset(),
@@ -920,7 +942,8 @@ def _bsr_scatter_mm_indices_data(
     indices_format, M, K, N, Ms, Ks, nbatches, SPLIT_N, compressed_sparse_tensor_as_key
 ):
     bsr = compressed_sparse_tensor_as_key.obj
-    assert bsr is not None
+    if bsr is None:
+        raise AssertionError("compressed_sparse_tensor_as_key.obj is None")
     crow_indices, col_indices = bsr.crow_indices(), bsr.col_indices()
     device = crow_indices.device
     indices_dtype = torch.int32
@@ -1018,13 +1041,16 @@ def bsr_scatter_mm_indices_data(
     """Computes indices data for :func:`scatter_mm` used in BSR and
     strided tensor matrix multiplication.
     """
-    assert bsr.dense_dim() == 0
-    assert bsr.ndim == 2  # no batch dims
+    if bsr.dense_dim() != 0:
+        raise AssertionError(f"bsr.dense_dim() must be 0, got {bsr.dense_dim()}")
+    if bsr.ndim != 2:
+        raise AssertionError(f"bsr must be 2D (no batch dims), got {bsr.ndim}D")
     blocksize = bsr.values().shape[-2:]
     M, K = bsr.shape
     Ms, Ks = blocksize
     K_, N = other.shape[-2:]
-    assert K_ == K
+    if K_ != K:
+        raise AssertionError(f"other K ({K_}) != bsr K ({K})")
     nbatches = other.shape[:-2].numel()
 
     meta = scatter_mm_meta(M, K, N, Ms, Ks, **meta_input)
@@ -1048,8 +1074,12 @@ def bsr_scatter_mm_indices_data(
 def bsr_scatter_mm(bsr, other, indices_data=None, out=None):
     """BSR @ strided -> strided"""
 
-    assert bsr.ndim == 2
-    assert other.ndim >= 2
+    if bsr.ndim != 2:
+        raise AssertionError(f"bsr must be 2D, got {bsr.ndim}D")
+    if other.ndim < 2:
+        raise AssertionError(
+            f"other must have at least 2 dimensions, got {other.ndim}D"
+        )
 
     Ms, Ks, Ns = bsr.shape[-2], bsr.shape[-1], other.shape[-1]
     blocksize = bsr.values().shape[-2:]
@@ -1123,12 +1153,12 @@ def _int_bsr_dense_addmm(
     *,
     beta=1,
     alpha=1,
-    left_alpha: Optional[torch.Tensor] = None,
-    right_alpha: Optional[torch.Tensor] = None,
-    out: Optional[torch.Tensor] = None,
+    left_alpha: torch.Tensor | None = None,
+    right_alpha: torch.Tensor | None = None,
+    out: torch.Tensor | None = None,
     skip_checks: bool = False,
-    max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
-    meta: Optional[dict] = None,
+    max_grid: tuple[int | None, int | None, int | None] | None = None,
+    meta: dict | None = None,
 ):
     if out is None and dense.dtype is torch.int8:
         f_name = "_int_bsr_dense_addmm"
@@ -1164,12 +1194,12 @@ def bsr_dense_addmm(
     *,
     beta=1,
     alpha=1,
-    left_alpha: Optional[torch.Tensor] = None,
-    right_alpha: Optional[torch.Tensor] = None,
-    out: Optional[torch.Tensor] = None,
+    left_alpha: torch.Tensor | None = None,
+    right_alpha: torch.Tensor | None = None,
+    out: torch.Tensor | None = None,
     skip_checks: bool = False,
-    max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
-    meta: Optional[dict] = None,
+    max_grid: tuple[int | None, int | None, int | None] | None = None,
+    meta: dict | None = None,
 ):
     """Compute
 
@@ -1224,8 +1254,14 @@ def bsr_dense_addmm(
         right_alpha = right_alpha.view(*original_batch_dims_broadcasted, 1, N).expand(
             *original_batch_dims_broadcasted, M, N
         )
-    assert left_alpha.stride()[-1] == 0
-    assert right_alpha.stride()[-2] == 0
+    if left_alpha.stride()[-1] != 0:
+        raise AssertionError(
+            f"left_alpha.stride()[-1] must be 0, got {left_alpha.stride()[-1]}"
+        )
+    if right_alpha.stride()[-2] != 0:
+        raise AssertionError(
+            f"right_alpha.stride()[-2] must be 0, got {right_alpha.stride()[-2]}"
+        )
 
     if meta is None:
         sparsity = round(1 - bsr._nnz() * blocksize[0] * blocksize[1] / (M * K), 2)
@@ -1296,23 +1332,35 @@ def bsr_dense_addmm(
         out: (0, -3, -4),
     }
 
-    assert alpha != 0
+    if alpha == 0:
+        raise AssertionError("alpha must not be 0")
 
     def kernel(grid, *sliced_tensors):
         # pyrefly: ignore [unsupported-operation]
         _bsr_strided_addmm_kernel[grid](
             *ptr_stride_extractor(*sliced_tensors),
+            # pyrefly: ignore [bad-argument-count]
             beta,
             alpha,
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             beta_is_one=beta == 1,
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             beta_is_nonzero=beta != 0,
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             alpha_is_one=alpha == 1,
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             left_alpha_is_one=left_alpha_is_one,
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             right_alpha_is_one=right_alpha_is_one,
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             BLOCKSIZE_ROW=BM,
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             BLOCKSIZE_INNER=BK,
+            # pyrefly: ignore [bad-keyword-argument]
             BLOCKSIZE_COL=BN,
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             allow_tf32=dot_out_dtype == tl.float32,
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             acc_dtype=dot_out_dtype,
             **meta,
         )
@@ -1429,7 +1477,7 @@ if has_triton():
 
                 mat1_block = tl.load(
                     mat1_block_ptrs + mat1_col_block_stride * k_offsets[None, :],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     mask=mask_k[None, :],
                     other=0.0,
                 )
@@ -1438,7 +1486,7 @@ if has_triton():
                     mat2_block_ptrs
                     + mat2_tiled_col_stride * col_block
                     + mat2_row_block_stride * k_offsets[:, None],
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     mask=mask_k[:, None],
                     other=0.0,
                 )
@@ -1633,12 +1681,17 @@ if has_triton():
                 beta,
                 is_beta_zero,
                 *blocksize,
+                # pyrefly: ignore [bad-argument-count]
                 k,
                 tile_k,
                 *ptr_stride_extractor(*sliced_tensors),
+                # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
                 acc_dtype=acc_dtype,
+                # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
                 allow_tf32=allow_tf32,
+                # pyrefly: ignore [unexpected-keyword]
                 num_stages=1,
+                # pyrefly: ignore [unexpected-keyword]
                 num_warps=4,
             )
 
@@ -1651,9 +1704,9 @@ if has_triton():
         *,
         beta=1.0,
         alpha=1.0,
-        out: Optional[torch.Tensor] = None,
+        out: torch.Tensor | None = None,
         skip_checks: bool = False,
-        max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
+        max_grid: tuple[int | None, int | None, int | None] | None = None,
     ):
         f_name = "sampled_addmm"
 
@@ -1735,10 +1788,10 @@ if has_triton():
         bsr: torch.Tensor,
         dense: torch.Tensor,
         *,
-        out: Optional[torch.Tensor] = None,
+        out: torch.Tensor | None = None,
         skip_checks: bool = False,
-        max_grid: Optional[tuple[Optional[int], Optional[int], Optional[int]]] = None,
-        meta: Optional[dict] = None,
+        max_grid: tuple[int | None, int | None, int | None] | None = None,
+        meta: dict | None = None,
     ):
         f_name = "bsr_dense_mm"
         m, _kl = bsr.shape[-2:]
@@ -1923,6 +1976,7 @@ if has_triton():
         def kernel(grid, *sliced_tensors):
             _bsr_softmax_kernel[grid](
                 *ptr_stride_extractor(*sliced_tensors),
+                # pyrefly: ignore [bad-argument-count]
                 row_block,
                 col_block,
                 max_row_nnz,
@@ -1950,15 +2004,16 @@ if has_triton():
         query: torch.Tensor,
         key: torch.Tensor,
         value: torch.Tensor,
-        attn_mask: Optional[torch.Tensor],
+        attn_mask: torch.Tensor | None,
         dropout_p: float = 0.0,
         is_causal: bool = False,
-        scale: Optional[float] = None,
+        scale: float | None = None,
     ):
         f_name = "_scaled_dot_product_attention"
         check(not is_causal, f"{f_name}(): is_causal == True is not supported.")
         check(attn_mask is not None, f"{f_name}(): attn_mask == None is not supported.")
-        assert attn_mask is not None
+        if attn_mask is None:
+            raise AssertionError("attn_mask must not be None")
 
         check(
             attn_mask.layout == torch.sparse_bsr,
@@ -2096,8 +2151,11 @@ if has_triton():
         if "allow_tf32" not in meta:
             meta.update(allow_tf32=dot_out_dtype == tl.float32)
         _scatter_mm2_kernel[grid](
+            # pyrefly: ignore [bad-argument-type]
             M,
+            # pyrefly: ignore [bad-argument-type]
             K,
+            # pyrefly: ignore [bad-argument-type]
             N,
             blocks,
             blocks.stride(0),
@@ -2116,7 +2174,9 @@ if has_triton():
             pq_indices,
             pq_indices.stride(0),
             pq_indices.stride(1),
+            # pyrefly: ignore [bad-argument-type]
             dot_out_dtype=dot_out_dtype,
+            # pyrefly: ignore [bad-argument-type]
             **meta,
         )
 
@@ -2249,9 +2309,11 @@ if has_triton():
         _P, Ms, Ks = blocks.shape
         B, _K, N = others.shape
         B_, _M, N_ = accumulators.shape
-        assert N_ == N
+        if N_ != N:
+            raise AssertionError(f"accumulators N ({N_}) != others N ({N})")
         Ns = N // SPLIT_N
-        assert B_ == B
+        if B_ != B:
+            raise AssertionError(f"accumulators B ({B_}) != others B ({B})")
 
         def grid(META):
             return (
@@ -2268,10 +2330,22 @@ if has_triton():
         if "allow_tf32" not in meta:
             meta.update(allow_tf32=dot_out_dtype == tl.float32)
 
-        assert c_indices.stride(0) == 1
-        assert r_offsets.stride(0) == 1
-        assert p_offsets.stride(0) == 1
-        assert q_offsets.stride(0) == 1
+        if c_indices.stride(0) != 1:
+            raise AssertionError(
+                f"c_indices.stride(0) must be 1, got {c_indices.stride(0)}"
+            )
+        if r_offsets.stride(0) != 1:
+            raise AssertionError(
+                f"r_offsets.stride(0) must be 1, got {r_offsets.stride(0)}"
+            )
+        if p_offsets.stride(0) != 1:
+            raise AssertionError(
+                f"p_offsets.stride(0) must be 1, got {p_offsets.stride(0)}"
+            )
+        if q_offsets.stride(0) != 1:
+            raise AssertionError(
+                f"q_offsets.stride(0) must be 1, got {q_offsets.stride(0)}"
+            )
 
         # Re non-contiguous tensor arguments. Sometimes triton kernel
         # launches may fail with
@@ -2299,6 +2373,7 @@ if has_triton():
         _scatter_mm6_kernel[grid](
             B,
             Ms,
+            # pyrefly: ignore [bad-argument-type]
             Ks,
             N,
             blocks,
@@ -2317,6 +2392,7 @@ if has_triton():
             r_offsets,
             p_offsets,
             q_offsets,
+            # pyrefly: ignore [bad-argument-type]
             dot_out_dtype=dot_out_dtype,
             **meta,
         )
@@ -2399,10 +2475,22 @@ if has_triton():
         SPLIT_N: tl.constexpr,
     ):
         # left/right_alpha tensors are originally (* + 1)-dimensional
-        assert left_alpha_tiled_col_stride == 0
-        assert left_alpha_col_block_stride == 0
-        assert right_alpha_tiled_row_stride == 0
-        assert right_alpha_row_block_stride == 0
+        if left_alpha_tiled_col_stride != 0:
+            raise AssertionError(
+                f"left_alpha_tiled_col_stride must be 0, got {left_alpha_tiled_col_stride}"
+            )
+        if left_alpha_col_block_stride != 0:
+            raise AssertionError(
+                f"left_alpha_col_block_stride must be 0, got {left_alpha_col_block_stride}"
+            )
+        if right_alpha_tiled_row_stride != 0:
+            raise AssertionError(
+                f"right_alpha_tiled_row_stride must be 0, got {right_alpha_tiled_row_stride}"
+            )
+        if right_alpha_row_block_stride != 0:
+            raise AssertionError(
+                f"right_alpha_row_block_stride must be 0, got {right_alpha_row_block_stride}"
+            )
 
         batch_pid = tl.program_id(axis=2)
         row_block_pid = tl.program_id(axis=0)

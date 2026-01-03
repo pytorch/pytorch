@@ -9,7 +9,7 @@ import os
 import signal
 import sys
 from subprocess import Popen
-from typing import Any, Optional
+from typing import Any
 
 from torch.numa.binding import maybe_wrap_command_args_with_numa_binding, NumaOptions
 
@@ -38,13 +38,13 @@ class SubprocessHandler:
         entrypoint: str,
         args: tuple,
         env: dict[str, str],
-        stdout: Optional[str],
-        stderr: Optional[str],
+        stdout: str | None,
+        stderr: str | None,
         local_rank_id: int,
-        numa_options: Optional[NumaOptions],
+        numa_options: NumaOptions | None,
     ):
-        self._stdout = open(stdout, "w") if stdout else None
-        self._stderr = open(stderr, "w") if stderr else None
+        self._stdout = open(stdout, "w") if stdout else None  # noqa: SIM115
+        self._stderr = open(stderr, "w") if stderr else None  # noqa: SIM115
         # inherit parent environment vars
         env_vars = os.environ.copy()
         env_vars.update(env)
@@ -76,7 +76,7 @@ class SubprocessHandler:
             **kwargs,
         )
 
-    def close(self, death_sig: Optional[signal.Signals] = None) -> None:
+    def close(self, death_sig: signal.Signals | None = None) -> None:
         if not death_sig:
             death_sig = _get_default_signal()
         if IS_WINDOWS:

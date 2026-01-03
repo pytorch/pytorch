@@ -206,6 +206,10 @@ class TestPyCodeCache(TestCase):
                 .decode()
                 .strip()
             )
+            # XPU have extra lines, so get the last line, refer https://github.com/intel/torch-xpu-ops/issues/2261
+            if torch.xpu.is_available():
+                wrapper_path = wrapper_path.splitlines()[-1]
+                hit = hit.splitlines()[-1]
             self.assertEqual(hit, "1")
 
             with open(wrapper_path) as f:
@@ -276,23 +280,28 @@ class TestFxGraphCache(TestCase):
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
     @parametrize("bundle_triton", (False, True))
-    @parametrize("use_static_cuda_launcher", (False, True))
+    @parametrize("use_static_triton_launcher", (False, True))
     @parametrize("grad", (False, True))
     def test_cache_load_function(
-        self, device, dtype, dynamic, bundle_triton, use_static_cuda_launcher, grad
+        self, device, dtype, dynamic, bundle_triton, use_static_triton_launcher, grad
     ):
         """
         Verify that we can populate and load functions from the cache.
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+        if (
+            device == "cuda"
+            and torch.version.hip is None
+            and dtype == torch.bfloat16
+            and not SM80OrLater
+        ):
             raise unittest.SkipTest("requires SM80 or later")
-        if use_static_cuda_launcher and not (device == "cuda" and bundle_triton):
+        if use_static_triton_launcher and not (device == "cuda" and bundle_triton):
             raise unittest.SkipTest(
                 "Static cuda launcher requires cuda and triton bundling"
             )
-        if use_static_cuda_launcher and TEST_WITH_ROCM:
+        if use_static_triton_launcher and TEST_WITH_ROCM:
             raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         grad_multiplier = 2 if grad else 1
@@ -306,7 +315,7 @@ class TestFxGraphCache(TestCase):
 
         with config.patch(
             bundle_triton_into_fx_graph_cache=bundle_triton,
-            use_static_cuda_launcher=use_static_cuda_launcher,
+            use_static_triton_launcher=use_static_triton_launcher,
         ):
             compiled_fn = torch.compile(fn, dynamic=dynamic)
 
@@ -352,7 +361,7 @@ class TestFxGraphCache(TestCase):
                 self.assertEqual(
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"], 0
                 )
-                if use_static_cuda_launcher:
+                if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
                         grad_multiplier if device == "cuda" else 0,
@@ -400,7 +409,7 @@ class TestFxGraphCache(TestCase):
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
                     grad_multiplier * save_and_read_min_artifact_count,
                 )
-                if use_static_cuda_launcher:
+                if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
                         grad_multiplier if device == "cuda" else 0,
@@ -448,7 +457,7 @@ class TestFxGraphCache(TestCase):
                     counters["inductor"]["triton_bundler_read_and_emit_kernel"],
                     grad_multiplier * save_and_read_min_artifact_count,
                 )
-                if use_static_cuda_launcher:
+                if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
                         grad_multiplier * 2 if device == "cuda" else 0,
@@ -464,12 +473,12 @@ class TestFxGraphCache(TestCase):
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("dynamic", (False, True))
     @parametrize("bundle_triton", (False, True))
-    @parametrize("use_static_cuda_launcher", (False, True))
+    @parametrize("use_static_triton_launcher", (False, True))
     @config.patch(
         {"compile_threads": 1}
     )  # Can't check globalStats if there are workers
     def test_remote_cache_load_function(
-        self, device, dtype, dynamic, bundle_triton, use_static_cuda_launcher
+        self, device, dtype, dynamic, bundle_triton, use_static_triton_launcher
     ):
         from unittest.mock import patch
 
@@ -477,11 +486,11 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
-        if use_static_cuda_launcher and not (device == "cuda" and bundle_triton):
+        if use_static_triton_launcher and not (device == "cuda" and bundle_triton):
             raise unittest.SkipTest(
                 "Static cuda launcher requires cuda and triton bundling"
             )
-        if use_static_cuda_launcher and TEST_WITH_ROCM:
+        if use_static_triton_launcher and TEST_WITH_ROCM:
             raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         def fn(x, y):
@@ -495,7 +504,7 @@ class TestFxGraphCache(TestCase):
                 {
                     "fx_graph_remote_cache": True,
                     "bundle_triton_into_fx_graph_cache": bundle_triton,
-                    "use_static_cuda_launcher": use_static_cuda_launcher,
+                    "use_static_triton_launcher": use_static_triton_launcher,
                 }
             ),
             patch.dict(os.environ),
@@ -517,7 +526,7 @@ class TestFxGraphCache(TestCase):
             self.assertEqual(global_stats.fx_graph, Stats(2, 3, 2))
 
         # Check that the cache entries seem reasonable
-        for k in global_stats.fx_graph.cache.keys():
+        for k in global_stats.fx_graph.cache:
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
     @requires_triton()
@@ -538,7 +547,12 @@ class TestFxGraphCache(TestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+        if (
+            device == "cuda"
+            and torch.version.hip is None
+            and dtype == torch.bfloat16
+            and not SM80OrLater
+        ):
             raise unittest.SkipTest("requires SM80 or later")
 
         def fn(x, y):
@@ -630,7 +644,12 @@ class TestFxGraphCache(TestCase):
 
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+        if (
+            device == "cuda"
+            and torch.version.hip is None
+            and dtype == torch.bfloat16
+            and not SM80OrLater
+        ):
             raise unittest.SkipTest("requires SM80 or later")
 
         def fn(x, y):
@@ -999,7 +1018,12 @@ class TestFxGraphCache(TestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+        if (
+            device == "cuda"
+            and torch.version.hip is None
+            and dtype == torch.bfloat16
+            and not SM80OrLater
+        ):
             raise unittest.SkipTest("requires CUDA SM80 or later")
 
         def fn(x, y):
@@ -1048,7 +1072,12 @@ class TestFxGraphCache(TestCase):
         """
         if device == GPU_TYPE and not HAS_GPU:
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
-        if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
+        if (
+            device == "cuda"
+            and torch.version.hip is None
+            and dtype == torch.bfloat16
+            and not SM80OrLater
+        ):
             raise unittest.SkipTest("requires SM80 or later")
 
         # See lowering; for all of the pooling operators, we always guard and
@@ -1458,9 +1487,9 @@ class TestFxGraphCache(TestCase):
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"compile_threads": 1})
     @parametrize("bundle_triton", (False, True))
-    @parametrize("use_static_cuda_launcher", (False, True))
-    def test_triton_op(self, bundle_triton, use_static_cuda_launcher):
-        if use_static_cuda_launcher and TEST_WITH_ROCM:
+    @parametrize("use_static_triton_launcher", (False, True))
+    def test_triton_op(self, bundle_triton, use_static_triton_launcher):
+        if use_static_triton_launcher and TEST_WITH_ROCM:
             raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
 
         libname = "my_cool_namespace"
@@ -1480,10 +1509,10 @@ class TestFxGraphCache(TestCase):
         def f(x, y):
             return add(x, y)
 
-        compile_threads = 1 if use_static_cuda_launcher else config.compile_threads
+        compile_threads = 1 if use_static_triton_launcher else config.compile_threads
         with config.patch(
             bundle_triton_into_fx_graph_cache=bundle_triton,
-            use_static_cuda_launcher=use_static_cuda_launcher,
+            use_static_triton_launcher=use_static_triton_launcher,
             compile_threads=compile_threads,
         ):
             compiled_fn = torch.compile(f, fullgraph=True)
@@ -2910,7 +2939,7 @@ class TestAutotuneCache(TestCase):
     @unittest.skipIf(
         TEST_WITH_ROCM, "Requires static cuda launcher, which does not support ROCM"
     )
-    @config.patch({"use_static_cuda_launcher": True})
+    @config.patch({"use_static_triton_launcher": True})
     @config.patch({"fx_graph_cache": True})
     @config.patch({"fx_graph_remote_cache": False})
     @config.patch({"autotune_local_cache": False})
@@ -2951,9 +2980,9 @@ class TestAutotuneCache(TestCase):
         self.assertEqual(global_stats.autotune_remote, Stats(2, 2, 2))
 
         # Check that the cache entries seem reasonable
-        for k in global_stats.autotune_remote.cache.keys():
+        for k in global_stats.autotune_remote.cache:
             self.assertRegex(k, r"[0-9a-z]{52}")
-        for k in global_stats.triton.cache.keys():
+        for k in global_stats.triton.cache:
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @requires_gpu_and_triton
@@ -2992,9 +3021,9 @@ class TestAutotuneCache(TestCase):
         self.assertEqual(global_stats.autotune_remote, Stats(2, 2, 2))
 
         # Check that the cache entries seem reasonable
-        for k in global_stats.autotune_remote.cache.keys():
+        for k in global_stats.autotune_remote.cache:
             self.assertRegex(k, r"[0-9a-z]{52}")
-        for k in global_stats.triton.cache.keys():
+        for k in global_stats.triton.cache:
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @requires_gpu_and_triton
@@ -3050,11 +3079,11 @@ class TestAutotuneCache(TestCase):
                 self.assertEqual(global_stats.bundled_autotune, Stats(1, 1, 1))
 
         # Check that the cache entries seem reasonable
-        for k in global_stats.autotune_local.cache.keys():
+        for k in global_stats.autotune_local.cache:
             self.assertRegex(k, r"tmp[^/]*/([^/]{2})/[^/]{64}\.best_config")
-        for k in global_stats.bundled_autotune.cache.keys():
+        for k in global_stats.bundled_autotune.cache:
             self.assertRegex(k, r"pt2:bundled-autotune-v1::[0-9a-z]{64}:c[0-9]+")
-        for k in global_stats.triton.cache.keys():
+        for k in global_stats.triton.cache:
             self.assertRegex(k, r"triton:[0-9a-f]{64}::[0-9a-f]{64}:c[0-9]+")
 
     @requires_triton()
@@ -3155,10 +3184,10 @@ class TestRemoteAOTAutogradCache(TestCase):
             self.assertEqual(global_stats.fx_graph, Stats(2, 1, 2))
 
         # Check that the cache entries seem reasonable
-        for k in global_stats.aot_autograd.cache.keys():
+        for k in global_stats.aot_autograd.cache:
             self.assertRegex(k, r"pt2:autograd-experimental::[0-9a-z]{52}:c[0-9]+")
 
-        for k in global_stats.fx_graph.cache.keys():
+        for k in global_stats.fx_graph.cache:
             self.assertRegex(k, r"pt2:fx-graph-v1::[0-9a-z]{52}:c[0-9]+")
 
     @requires_gpu_and_triton

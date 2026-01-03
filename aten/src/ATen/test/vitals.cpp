@@ -19,7 +19,7 @@ TEST(Vitals, Basic) {
     c10::utils::set_env("TORCH_VITAL", "1");
     TORCH_VITAL_DEFINE(Testing);
     TORCH_VITAL(Testing, Attribute0) << 1;
-    TORCH_VITAL(Testing, Attribute1) << "1";
+    TORCH_VITAL(Testing, Attribute1) << '1';
     TORCH_VITAL(Testing, Attribute2) << 1.0f;
     TORCH_VITAL(Testing, Attribute3) << 1.0;
     auto t = at::ones({1, 1});

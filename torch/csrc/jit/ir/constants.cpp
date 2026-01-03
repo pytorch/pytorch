@@ -1,11 +1,7 @@
-#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
-#include <torch/csrc/jit/runtime/register_ops_utils.h>
 
 namespace torch::jit {
 

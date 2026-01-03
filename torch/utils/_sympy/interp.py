@@ -10,7 +10,7 @@ of a full handler, see torch.utils._sympy.value_ranges.ValueRangeAnalysis.
 
 import functools
 import logging
-from typing import Any, Union
+from typing import Any
 
 import sympy
 from sympy.logic.boolalg import Boolean as SympyBoolean, BooleanAtom
@@ -20,6 +20,7 @@ import torch
 from .functions import (
     BitwiseFn_bitwise_and,
     BitwiseFn_bitwise_or,
+    BitwiseFn_bitwise_xor,
     CeilToInt,
     CleanDiv,
     FloatPow,
@@ -86,7 +87,7 @@ def handlers():
         # to add a FloatMul to impede this optimization
         sympy.Pow: "pow_by_natural",
         Mod: "mod",
-        PythonMod: "mod",  # TODO: this is wrong
+        PythonMod: "python_mod",
         # TODO: Inductor can generate these, but it's ill-specified which
         # semantics were intended here.  Needs to be cleaned up along with
         # FloorDiv in a bigger cleanup
@@ -108,6 +109,7 @@ def handlers():
         OpaqueUnaryFn_log2: "log2",
         BitwiseFn_bitwise_and: "bitwise_and",
         BitwiseFn_bitwise_or: "bitwise_or",
+        BitwiseFn_bitwise_xor: "bitwise_xor",
     }
     # TODO: This is kind of pointless, we shouldn't be generating sympy.sin
     # for these functions, they should be Opaque instead
@@ -184,7 +186,7 @@ _nil = object()
 def sympy_interp(
     analysis,
     env: dict[sympy.Symbol, Any],
-    expr: Union[sympy.Expr, SympyBoolean],
+    expr: sympy.Expr | SympyBoolean,
     *,
     index_dtype=torch.int64,
     missing_handler=None,

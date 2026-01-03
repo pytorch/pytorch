@@ -4,6 +4,7 @@ import inspect
 import logging
 import operator
 import types
+import typing
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from typing import Any, Optional, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, TypeVar
@@ -44,7 +45,7 @@ BaseArgumentTypes = Union[
     torch.SymBool,
     torch.SymFloat,
 ]
-base_types = BaseArgumentTypes.__args__  # type: ignore[attr-defined]
+base_types = typing.get_args(BaseArgumentTypes)
 
 Target: TypeAlias = Union[Callable[..., Any], str]
 
@@ -87,6 +88,14 @@ _side_effectful_need_to_be_preserved_pre_dispatch: list[Callable[..., Any]] = [
 
 # TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
 # or add logic to correctly mark all inplace ops as side effectful.
+#
+# NOTE: For new operators, please do not add to this set!
+# Instead, consider using the effects system via
+# torch.library._register_effectful_op() for operators.
+#
+# This _side_effectful_functions set is only for:
+# - Legacy functions that aren't operators (e.g., profiler ops, asserts)
+# - Things that cannot be marked via the normal effects system
 _side_effectful_functions: set[Callable[..., Any]] = {
     torch._assert,
     torch._assert_async,
@@ -96,8 +105,11 @@ _side_effectful_functions: set[Callable[..., Any]] = {
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
+    _ops.profiler._record_function_enter.default,
     _ops.profiler._record_function_enter_new,
+    _ops.profiler._record_function_enter_new.default,
     _ops.profiler._record_function_exit,
+    _ops.profiler._record_function_exit._RecordFunction,
     _ops.inductor.accumulate_grad_.default,
     operator.setitem,
     *_side_effectful_need_to_be_preserved_pre_dispatch,
@@ -109,6 +121,18 @@ if hasattr(_ops.inductor, "resize_storage_bytes_"):
 
 @compatibility(is_backward_compatible=False)
 def has_side_effect(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    """
+    Registers a function to not be dead code eliminated by
+    fx.graph.eliminate_dead_code
+
+    NOTE: For new operators, please do not add to this set!
+    Instead, consider using the effects system via
+    torch.library._register_effectful_op() for operators.
+
+    This _side_effectful_functions set is only for:
+    - Legacy functions that aren't operators (e.g., profiler ops, asserts)
+    - Things that cannot be marked via the normal effects system
+    """
     _side_effectful_functions.add(fn)
     return fn
 
@@ -174,6 +198,8 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     # Fixup segment_reduce mismatch
     if module == "torch" and name == "segment_reduce":
         name = "_" + name
+    if module == "torch.nn.functional" and name in ("_ScalingType", "_SwizzleType"):
+        name = name.removeprefix("_")
     return f"{module}.{name}"
 
 
@@ -496,7 +522,7 @@ class Node(_NodeBase):
         _new_input_nodes: dict[Node, None] = {}
         _fx_map_arg(arg, _new_input_nodes.setdefault)
 
-        for new_use in _new_input_nodes.keys():
+        for new_use in _new_input_nodes:
             if new_use not in self._input_nodes:
                 self._input_nodes.setdefault(new_use)
                 new_use.users.setdefault(self)
@@ -715,64 +741,9 @@ class Node(_NodeBase):
 
             bool: If the op is impure or not.
         """
+        # Placeholders and outputs are always impure for DCE purposes
         if self.op in {"placeholder", "output"}:
             return True
-
-        if self.op == "call_function":
-            schema = getattr(self.target, "_schema", None)
-            if schema is not None and schema.is_mutable:
-                # impure since it mutates inputs
-                return True
-
-            if impure_random:
-                if getattr(self.target, "_nondeterministic_seeded", False):
-                    # impure since it mutates RNG state
-                    return True
-
-            # Handle Python random functions that don't have _nondeterministic_seeded
-            # but still affect global RNG state (issue #151524)
-            # These should be impure regardless of impure_random setting to maintain
-            # consistency between eager and compiled execution
-            _random_functions = {
-                torch.rand,
-                torch.randn,
-                torch.randint,
-                torch.randperm,
-                torch.rand_like,
-                torch.randn_like,
-                torch.randint_like,
-                torch.normal,
-                torch.poisson,
-                torch.bernoulli,
-                torch.multinomial,
-            }
-
-            if self.target in _random_functions:
-                # All random operations are impure to ensure consistent behavior
-                # between eager and compiled execution, regardless of generator usage
-                return True
-
-            return self.target in _side_effectful_functions
-
-        def subgraph_has_impure_ops(module: torch.fx.GraphModule) -> bool:
-            """
-            Return True if a GraphModule type subgraph contains any impure op, else False.
-            """
-            assert isinstance(module, torch.fx.GraphModule), (
-                "caller should only pass GraphModule to subgraph_has_impure_ops check"
-            )
-            for node in module.graph.nodes:
-                if node.op == "call_function" and node.is_impure(impure_random):
-                    return True
-                if (
-                    # pyrefly: ignore [invalid-argument]
-                    node.op == "call_module"
-                    # pyrefly: ignore [not-callable]
-                    and (submodule := module.get_submodule(node.target))
-                    and isinstance(submodule, torch.fx.GraphModule)
-                ):
-                    return subgraph_has_impure_ops(submodule)
-            return False
 
         # Check if an impure module.
         if self.op == "call_module":
@@ -783,10 +754,22 @@ class Node(_NodeBase):
             assert target_mod is not None, (
                 f"Did not find expected submodule target {self.target}"
             )
-            if isinstance(target_mod, torch.fx.GraphModule):
-                return subgraph_has_impure_ops(target_mod)
-            else:
-                return getattr(target_mod, "_is_impure", False)
+            # NOTE: here we can end up considering GraphModule submodules pure,
+            # even if they contain impure ops. It may not be safe to change
+            # because this function is used by graph.eliminate_dead_code,
+            # and some users depend on current elimination behavior.
+            return getattr(target_mod, "_is_impure", False)
+
+        # For call_function, delegate to the unified has_side_effects function
+        if self.op == "call_function":
+            from torch._library.utils import is_impure
+
+            return is_impure(
+                self.target,  # pyrefly: ignore[bad-argument-type]
+                args=self.args,
+                kwargs=self.kwargs,
+                impure_random=impure_random,
+            )
 
         return False
 

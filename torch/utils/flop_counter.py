@@ -1,8 +1,10 @@
 # mypy: allow-untyped-defs
+from types import NoneType
+import logging
 import torch
 from torch.utils._pytree import tree_map, tree_flatten, tree_unflatten
 from .module_tracker import ModuleTracker
-from typing import Any, Optional, Union, TypeVar
+from typing import Any, TypeVar
 from collections.abc import Callable
 from collections.abc import Iterator
 from typing_extensions import ParamSpec
@@ -16,6 +18,9 @@ __all__ = ["FlopCounterMode", "register_flop_formula"]
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+log = logging.getLogger(__name__)
+
 
 aten = torch.ops.aten
 
@@ -34,16 +39,22 @@ def shape_wrapper(f):
     return nf
 
 def register_flop_formula(targets, get_raw=False) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
+    try:
+        from triton.runtime.jit import JITFunction
+    except ImportError:
+        log.warning("triton not found; flop counting will not work for triton kernels")
+        JITFunction = NoneType
+
     def register_fun(flop_formula: Callable[_P, _T]) -> Callable[_P, _T]:
         if not get_raw:
             flop_formula = shape_wrapper(flop_formula)
 
-        def register(target):
-            if not isinstance(target, torch._ops.OpOverloadPacket):
+        def register(target) -> None:
+            if not (isinstance(target, (torch._ops.OpOverloadPacket, JITFunction))):
                 raise ValueError(
                     f"register_flop_formula(targets): expected each target to be "
-                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), got "
-                    f"{target} which is of type {type(target)}")
+                    f"OpOverloadPacket (i.e. torch.ops.mylib.foo), or JitFunction"
+                    f", got {target} which is of type {type(target)}")
             if target in flop_registry:
                 raise RuntimeError(f"duplicate registrations for {target}")
             flop_registry[target] = flop_formula
@@ -149,7 +160,11 @@ def conv_flop_count(
     flop = prod(conv_shape) * prod(filter_size) * batch_size * c_out * c_in * 2
     return flop
 
-@register_flop_formula([aten.convolution, aten._convolution, aten.cudnn_convolution, aten._slow_conv2d_forward])
+@register_flop_formula([aten.convolution,
+                        aten._convolution,
+                        aten.cudnn_convolution,
+                        aten._slow_conv2d_forward,
+                        aten.convolution_overrideable])
 def conv_flop(x_shape, w_shape, _bias, _stride, _padding, _dilation, transposed, *args, out_shape=None, **kwargs) -> int:
     """Count flops for convolution."""
     # pyrefly: ignore [bad-argument-type]
@@ -310,7 +325,7 @@ def _unpack_flash_attention_nested_shapes(
     cum_seq_k,
     max_q,
     max_k,
-) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], Optional[tuple[int, ...]]]]:
+) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...] | None]]:
     """
     Given inputs to a flash_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
@@ -362,7 +377,7 @@ def _unpack_efficient_attention_nested_shapes(
     cu_seqlens_k,
     max_seqlen_q,
     max_seqlen_k,
-) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], Optional[tuple[int, ...]]]]:
+) -> Iterator[tuple[tuple[int, ...], tuple[int, ...], tuple[int, ...], tuple[int, ...] | None]]:
     """
     Given inputs to a efficient_attention_(forward|backward) kernel, this will handle behavior for
     NestedTensor inputs by effectively unbinding the NestedTensor and yielding the shapes for
@@ -582,6 +597,7 @@ flop_registry = {
     aten.convolution: conv_flop,
     aten._convolution: conv_flop,
     aten.cudnn_convolution: conv_flop,
+    aten.convolution_overrideable: conv_flop,
     aten._slow_conv2d_forward: conv_flop,
     aten.convolution_backward: conv_backward_flop,
     aten._scaled_dot_product_efficient_attention: sdpa_flop,
@@ -619,7 +635,7 @@ def convert_num_with_suffix(number, suffix):
     # Return the value and the suffix as a string
     return value + suffixes[index]
 
-def convert_to_percent_str(num, denom):
+def convert_to_percent_str(num, denom) -> str:
     if denom == 0:
         return "0%"
     return f"{num / denom:.2%}"
@@ -656,15 +672,15 @@ class FlopCounterMode:
 
     def __init__(
             self,
-            mods: Optional[Union[torch.nn.Module, list[torch.nn.Module]]] = None,
+            mods: torch.nn.Module | list[torch.nn.Module] | None = None,
             depth: int = 2,
             display: bool = True,
-            custom_mapping: Optional[dict[Any, Any]] = None):
+            custom_mapping: dict[Any, Any] | None = None) -> None:
         super().__init__()
         self.flop_counts: dict[str, dict[Any, int]] = defaultdict(lambda: defaultdict(int))
         self.depth = depth
         self.display = display
-        self.mode: Optional[_FlopCounterMode] = None
+        self.mode: _FlopCounterMode | None = None
         if custom_mapping is None:
             custom_mapping = {}
         if mods is not None:
@@ -776,13 +792,12 @@ class FlopCounterMode:
             flop_count = flop_count_func(*args, **kwargs, out_val=out)  # type: ignore[operator]
             for par in set(self.mod_tracker.parents):
                 self.flop_counts[par][func_packet] += flop_count
-
         return out
 
 class _FlopCounterMode(TorchDispatchMode):
     supports_higher_order_operators = True
 
-    def __init__(self, counter: FlopCounterMode):
+    def __init__(self, counter: FlopCounterMode) -> None:
         self.counter = counter
 
     def _execute_with_isolated_flop_counting(self, branch_fn, operands):
@@ -806,15 +821,25 @@ class _FlopCounterMode(TorchDispatchMode):
         return result, flop_counts
 
     def _handle_higher_order_ops(self, func, types, args, kwargs):
-        if func is not torch.ops.higher_order.cond:
-            return NotImplemented
-
-        # The flop counter for cond counts the upper bound of flops.
-        # For example, if a matmul is executed 2 times in true branch
-        # but only 1 time in the false branch, the flop counter will
-        # record the larger number of flops, i.e. 2 times.
-        if func is torch.ops.higher_order.cond:
-
+        is_triton = func in {torch.ops.higher_order.triton_kernel_wrapper_mutation,
+                             torch.ops.higher_order.triton_kernel_wrapper_functional}
+        if is_triton:
+            from torch._higher_order_ops.triton_kernel_wrap import get_kernel
+            # Special case - look in the triton flop registry for the kernel
+            from triton.runtime.jit import JITFunction
+            kernel_name = get_kernel(kwargs["kernel_idx"])
+            # Unwrap heuristics if they are present
+            while not isinstance(kernel_name, JITFunction):
+                if hasattr(kernel_name, "fn"):
+                    kernel_name = kernel_name.fn
+                else:
+                    break
+            return self.counter._count_flops(kernel_name, None, args, kwargs)
+        elif func is torch.ops.higher_order.cond:
+            # The flop counter for cond counts the upper bound of flops.
+            # For example, if a matmul is executed 2 times in true branch
+            # but only 1 time in the false branch, the flop counter will
+            # record the larger number of flops, i.e. 2 times.
             pred, true_branch, false_branch, operands = args
             # Step 1: Count flops for true branch and false branch separately
             true_out, true_flop_counts = self._execute_with_isolated_flop_counting(
@@ -853,6 +878,8 @@ class _FlopCounterMode(TorchDispatchMode):
             # It doesn't matter which one we return since true_fn and false_fn return
             # output with the same structure.
             return true_out
+        else:
+            return NotImplemented
 
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs if kwargs else {}

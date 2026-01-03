@@ -544,7 +544,7 @@ def get_default_qat_qconfig_dict(backend="x86", version=1):
     ).to_dict()
 
 
-def _assert_valid_qconfig(qconfig: Optional[QConfig], mod: torch.nn.Module) -> None:
+def _assert_valid_qconfig(qconfig: QConfig | None, mod: torch.nn.Module) -> None:
     """
     Verifies that this `qconfig` is valid.
     """
@@ -578,11 +578,11 @@ if sys.version_info < (3, 12):
 else:
     from typing import TypeAliasType
 
-    QConfigAny = TypeAliasType("QConfigAny", Optional[QConfig])
+    QConfigAny = TypeAliasType("QConfigAny", QConfig | None)
 
 
 def _add_module_to_qconfig_obs_ctr(
-    qconfig: QConfigAny, module: Optional[nn.Module]
+    qconfig: QConfigAny, module: nn.Module | None
 ) -> Any:
     r"""This is a helper function for use in quantization prepare that updates a qconfig so that
     the constructors stored in the qconfig will create observers on the same device that
@@ -707,7 +707,7 @@ def _activation_is_memoryless(qconfig: QConfig):
         return _is_memoryless(act)
 
 
-def _is_reuse_input_qconfig(qconfig: Optional[QConfig]):
+def _is_reuse_input_qconfig(qconfig: QConfig | None):
     return (
         qconfig is not None
         and isinstance(qconfig.activation(), ReuseInputObserver)

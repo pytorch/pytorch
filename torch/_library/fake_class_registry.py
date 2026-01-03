@@ -163,14 +163,16 @@ def maybe_to_fake_obj(
 
     from torch._library.opaque_object import (
         FakeOpaqueObject,
+        get_opaque_type_name,
         is_opaque_type,
         OpaqueTypeStr,
     )
 
-    if x is None or is_opaque_type(type(x)) or str(x._type()) == OpaqueTypeStr:
+    if x is None or is_opaque_type(type(x)):
         # In order to make OpaqueObjects truly opaque, the fake kernel should
         # not depend on the contents of the OpaqueObject at all.
-        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), OpaqueTypeStr, None)
+        type_name = OpaqueTypeStr if x is None else get_opaque_type_name(type(x))
+        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, None)
         return fake_x_wrapped
     else:
         # x.__obj_flatten__() could be calling some tensor operations inside but we don't

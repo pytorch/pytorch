@@ -146,4 +146,18 @@ c10::intrusive_ptr<Store> PrefixStore::getUnderlyingNonPrefixStore() {
   return store;
 }
 
+std::vector<std::string> PrefixStore::listKeys() {
+  auto keys = store_->listKeys();
+  std::vector<std::string> filteredKeys;
+  filteredKeys.reserve(keys.size());
+
+  for (auto& key : keys) {
+    if (key.find(prefix_) == 0) {
+      key = key.substr(prefix_.size() + 1);
+      filteredKeys.push_back(std::move(key));
+    }
+  }
+  return filteredKeys;
+}
+
 } // namespace c10d
