@@ -56,6 +56,7 @@ def apply_reordering_and_get_graph(graph, out_li) -> None:
         "custom_runtime_estimation",
         "insert_overlap_deps",
         "collective_estimator",
+        "bucket_exposed_first",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key)) is not None:
@@ -508,6 +509,7 @@ def get_bucket_patches(compute_multiplier=1.0):
     return {
         "aten_distributed_optimizations.custom_runtime_estimation": estimate_aten_runtime_part,
         "aten_distributed_optimizations.collective_bucketing": True,
+        "aten_distributed_optimizations.bucket_exposed_first": False,
         "reorder_for_locality": False,
         "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],
@@ -725,66 +727,6 @@ class TestComputeCommReorderingBucketing(TestComputeCommReorderingMultiProc):
                 "_c10d_functional.all_gather_into_tensor", 1, exactly=True
             ).check_count("ops.aten.mm", 2, exactly=True).check(
                 "_c10d_functional.wait_tensor"
-            ).run(aten_graph_str)
-
-            correct = func(a, b, c, d, ranks=ranks)
-            self.assertTrue(same(out, correct))
-
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @torch._inductor.config.patch(get_bucket_patches(2.0))
-    def test_bucketing_split_for_overlap_blocking_no_deps(self):
-        """Test that 4 independent all-gathers split into 2+2 buckets for better overlap with compute."""
-
-        def func(a, b, c, d, *, ranks):
-            # All 4 all-gathers are independent - COULD be bucketed together
-            ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
-            ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
-            ag3 = _functional_collectives.all_gather_tensor(c[:4], 0, ranks)
-            ag4 = _functional_collectives.all_gather_tensor(d[:4], 0, ranks)
-
-            # First compute - can hide ag1 and ag2
-            e = a * 5  # Use a to avoid fusion
-            mm1 = torch.matmul(e, e.T)
-
-            # Force ag1/ag2 to complete before mm2 (but ag3/ag4 can still be deferred)
-            # Use first 8x8 elements to match mm1's shape
-            intermediate = ag1[:8, :8] + ag2[:8, :8]
-
-            # Second compute - depends on ag1/ag2 through intermediate, can hide ag3/ag4
-            mm2 = torch.matmul(mm1 + intermediate, c[:8])
-
-            # Use all results
-            result = (
-                ag1.sum() * 1.1
-                + ag2.sum() * 1.2
-                + ag3.sum() * 1.3
-                + ag4.sum() * 1.4
-                + mm1.sum()
-                + mm2.sum()
-            )
-            return result
-
-        with _dynamo_dist_per_rank_init(
-            self.rank,
-            self.world_size,
-            self.backend(device_type),
-            fake_pg=not at_least_x_gpu(2),
-        ):
-            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
-            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
-            c = torch.ones(8, 8, dtype=torch.float, device=device_type) * 3
-            d = torch.ones(8, 8, dtype=torch.float, device=device_type) * 4
-            ranks = list(range(self.world_size))
-
-            func_c = functools.partial(func, ranks=ranks)
-            compiled = torch.compile(func_c)
-            out, aten_graph_str = run_and_get_aten_graph(compiled, a, b, c, d)
-
-            # The 4 all gathers can be bucketed, and the wait should be sunk below the mms
-            FileCheck().check_count(
-                "_c10d_functional.all_gather_into_tensor", 1, exactly=True
-            ).check_count("ops.aten.mm", 2, exactly=True).check_count(
-                "_c10d_functional.wait_tensor", 1, exactly=True
             ).run(aten_graph_str)
 
             correct = func(a, b, c, d, ranks=ranks)

@@ -1,7 +1,9 @@
 import itertools
 import logging
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any
+
+import sympy
 
 import torch
 import torch._inductor.config as config
@@ -19,6 +21,7 @@ from torch._inductor.ir import (
 from torch._inductor.runtime.benchmarking import benchmarker
 from torch._inductor.utils import do_bench_using_profiling
 from torch._inductor.virtualized import V
+from torch.utils._ordered_set import OrderedSet
 
 
 log = logging.getLogger(__name__)
@@ -37,7 +40,13 @@ def inline_subgraph_to_ir_nodes(
     """
     from torch._inductor.lowering import process_subgraph_nodes
 
-    return process_subgraph_nodes(gm, inputs)
+    # Temporarily switch V.graph.module to subgraph during processing; restore to prevent IR nodes added to wrong graph
+    original_module = V.graph.module
+    try:
+        V.graph.module = gm
+        return process_subgraph_nodes(gm, inputs)
+    finally:
+        V.graph.module = original_module
 
 
 class SubgraphChoiceCaller(ir.ChoiceCaller):
@@ -53,39 +62,80 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         layout: Layout,
         description: str,
         make_fx_graph: Callable[..., Any],
+        input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
     ) -> None:
         super().__init__(name, input_nodes, layout, description)
 
         self.example_inputs = []
         with V.fake_mode:
-            for inp in self.input_nodes:
+            for i, inp in enumerate(self.input_nodes):
                 # Here there will be no unbacked symbols, as SubgraphBuffer does not support them
                 assert len(get_free_symbols(inp.get_size(), unbacked_only=True)) == 0
                 assert len(get_free_symbols(inp.get_stride(), unbacked_only=True)) == 0
 
                 inp.data.freeze_layout()  # type: ignore[attr-defined]
-                self.example_inputs.append(ir_node_to_tensor(inp))
+
+                # Use input_gen_fn if provided for this index (e.g., for range-based autotuning)
+                # This ensures the graph is traced with correct target shapes
+                if input_gen_fns is not None and i in input_gen_fns:
+                    self.example_inputs.append(input_gen_fns[i](inp))
+                else:
+                    self.example_inputs.append(ir_node_to_tensor(inp))
 
         self.gm = make_fx_graph(*self.example_inputs)
         gm_original_output_strides(self.gm)
 
         self.sym_inputs = get_symbolic_inputs(self.input_nodes)
+        self.sym_input_values = self._compute_sym_input_values()
 
+        # Cached decomposition info for range-based dispatch (set via cache_decomposition)
+        self.decomposition: Callable[..., Any] | None = None
+        self.decomposition_kwargs: dict[str, Any] = {}
         # Cache compiled module to avoid recompiling on every benchmark call
         self._compiled_module: Any = None
-        self._compiled_sym_inputs: list[Any] | None = None
+
+    def _compute_sym_input_values(self) -> list[int]:
+        """Extract concrete dimension values for sym_inputs from example_inputs.
+
+        The compiled module expects symbolic dimension values as runtime arguments.
+        This maps each symbolic variable to its concrete value from the example tensors.
+        Used for range based autotuning.
+        """
+        sym_input_names = OrderedSet(
+            [s.name for s in self.sym_inputs if hasattr(s, "name")]
+        )
+
+        # Build mapping: symbolic dimension name -> concrete value
+        sym_name_to_value: dict[str, int] = {}
+        for inp_node, example_inp in zip(self.input_nodes, self.example_inputs):
+            if isinstance(example_inp, torch.Tensor):
+                for sym_dim, actual_dim in zip(inp_node.get_size(), example_inp.shape):
+                    if isinstance(sym_dim, sympy.Symbol):
+                        sym_name_to_value[sym_dim.name] = int(actual_dim)
+                    elif str(sym_dim) in sym_input_names:
+                        sym_name_to_value[str(sym_dim)] = int(actual_dim)
+
+        result = []
+        for sym_var in self.sym_inputs:
+            if isinstance(sym_var, sympy.Symbol) and sym_var.name in sym_name_to_value:
+                result.append(sym_name_to_value[sym_var.name])
+            else:
+                hint = V.graph.sizevars.shape_env.size_hint(sym_var)
+                result.append(int(hint) if hint is not None else 1)
+        return result
+
+    def cache_decomposition(
+        self, decomposition: Callable[..., Any], kwargs: dict[str, Any]
+    ) -> None:
+        """Cache decomposition function and kwargs for range-based dispatch lookup."""
+        self.decomposition = decomposition
+        self.decomposition_kwargs = kwargs
 
     def __str__(self) -> str:
         return f"SubgraphCaller({self.name})"
 
-    def _compile_for_benchmarking(self, *args: list[Any]) -> tuple[Any, list[Any]]:
-        """
-        Compile the subgraph for benchmarking and return (module, sym_inputs).
-
-        TODO: Add precompile() method to enable parallel compilation of all choices
-        before benchmarking.
-        """
-        import torch._inductor.config as inductor_config
+    def _compile_for_benchmarking(self) -> Any:
+        """Compile the subgraph for benchmarking, returns the compiled module."""
         from torch._inductor.graph import GraphLowering
 
         safe_name = self.name.replace("::", "_").replace(".", "_")
@@ -106,49 +156,23 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             bm_graph_lowering.graph_inputs[sym_inp.name] = sym_inp
             bm_graph_lowering.graph_input_names.append(sym_inp.name)
 
-        sym_inputs = [
-            # pyrefly: ignore [no-matching-overload]
-            int(V.graph.sizevars.shape_env.size_hint(sym_var))
-            for sym_var in self.sym_inputs
-        ]
-
-        if len(sym_inputs) == 0:
-            # Sanity check that args are same layout as example inputs
-            # Only do it if there are no symbolic inputs, otherwise
-            # the dynamic dim will be realized to the same size as args
-            for ar, example_inp in zip(args, self.example_inputs):
-                # Sanity check that args are same layout as example inputs
-                if isinstance(ar, torch.Tensor):
-                    assert isinstance(example_inp, torch.Tensor)
-                    assert ar.shape == example_inp.shape
-                    assert ar.stride() == example_inp.stride()
-
         with V.set_graph_handler(bm_graph_lowering):
             # Don't bother autotuning on Triton here
-            with inductor_config.patch(
+            with config.patch(
                 max_autotune=False,
                 max_autotune_gemm=False,
                 max_autotune_gemm_backends="ATEN",
             ):
                 bm_graph_lowering.run(*self.example_inputs)
-                mod = bm_graph_lowering.compile_to_module()
-
-        return mod, sym_inputs
+                return bm_graph_lowering.compile_to_module()
 
     def benchmark(self, *args: list[Any], out: torch.Tensor) -> float:
-        """
-        Regular benchmarking: compile and use benchmarker with warmup/rep.
-        """
+        """Regular benchmarking: compile and use benchmarker with warmup/rep."""
         if self._compiled_module is None:
-            mod, sym_inputs = self._compile_for_benchmarking(*args)
-            self._compiled_module = mod
-            self._compiled_sym_inputs = sym_inputs
-        else:
-            mod = self._compiled_module
-            sym_inputs = self._compiled_sym_inputs
-            assert sym_inputs is not None  # Type narrowing
+            self._compiled_module = self._compile_for_benchmarking()
 
-        bm_func = mod.call
+        bm_func = self._compiled_module.call
+        sym_inputs = self.sym_input_values
         if config.profile_bandwidth_with_do_bench_using_profiling:
             return do_bench_using_profiling(lambda: bm_func([*sym_inputs, *args]))
         return benchmarker.benchmark(
@@ -158,22 +182,11 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
         )
 
     def benchmark_collective(self, *args: list[Any], out: torch.Tensor) -> None:
-        """
-        Only run once with cached compiled module.
-        Called by benchmark_collective_choice which handles warmup
-        and timing with barrier synchronization across all ranks.
-        """
+        """Run once for collective benchmarking (barrier sync handled by caller)."""
         if self._compiled_module is None:
-            mod, sym_inputs = self._compile_for_benchmarking(*args)
-            self._compiled_module = mod
-            self._compiled_sym_inputs = sym_inputs
-        else:
-            mod = self._compiled_module
-            sym_inputs = self._compiled_sym_inputs
-            assert sym_inputs is not None  # Type narrowing
+            self._compiled_module = self._compile_for_benchmarking()
 
-        bm_func = mod.call
-        bm_func([*sym_inputs, *args])
+        self._compiled_module.call([*self.sym_input_values, *args])
 
     def hash_key(self) -> str:
         return "-".join(
@@ -185,7 +198,7 @@ class SubgraphChoiceCaller(ir.ChoiceCaller):
             ]
         )
 
-    def output_node(self) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
+    def output_node(self) -> ir.TensorBox:
         return ir.TensorBox.create(
             ir.SubgraphBuffer(
                 layout=self.layout,
@@ -238,6 +251,7 @@ class SubgraphTemplate(KernelTemplate):
         layout: Layout,
         make_fx_graph: Callable[..., Any],
         description: str = "",
+        input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
         **kwargs: Any,
     ) -> SubgraphChoiceCaller:
         """
@@ -249,6 +263,7 @@ class SubgraphTemplate(KernelTemplate):
             layout: Memory layout information for the output
             make_fx_graph: Callable that creates the FX graph for this subgraph
             description: Optional description of this choice
+            input_gen_fns: Optional dict mapping input indices to tensor generators
             **kwargs: Additional keyword arguments
 
         Returns:
@@ -261,6 +276,7 @@ class SubgraphTemplate(KernelTemplate):
             layout=layout,
             description=description,
             make_fx_graph=make_fx_graph,
+            input_gen_fns=input_gen_fns,
         )
 
     def generate_custom_op_choices(
@@ -270,6 +286,7 @@ class SubgraphTemplate(KernelTemplate):
         input_nodes: list[Buffer],
         non_tensor_args: list[dict[str, Any]],
         default_impl: Callable[..., Any] | None = None,
+        input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
     ) -> list[SubgraphChoiceCaller]:
         """
         Generate multiple SubgraphChoiceCaller instances for custom op autotuning.
@@ -283,6 +300,7 @@ class SubgraphTemplate(KernelTemplate):
             input_nodes: List of tensor inputs. All tensor arguments must be passed here.
             non_tensor_args: List of non-tensor kwargs only, one dict per corresponding decomposition.
             default_impl: Default implementation for layout inference
+            input_gen_fns: Optional dict mapping input indices to tensor generators
 
         Returns:
             List of SubgraphChoiceCaller instances for autotuning
@@ -297,7 +315,9 @@ class SubgraphTemplate(KernelTemplate):
 
         # Infer layouts and ensure layout consistency for fair autotuning comparison
         layouts = [
-            self._infer_custom_op_layout(input_nodes, decomp, kwargs, default_impl)
+            self._infer_custom_op_layout(
+                input_nodes, decomp, kwargs, default_impl, input_gen_fns
+            )
             for decomp, kwargs in zip(decompositions, non_tensor_args)
         ]
 
@@ -336,7 +356,10 @@ class SubgraphTemplate(KernelTemplate):
                 layout=layout,
                 make_fx_graph=make_fx_graph,
                 description=f"CustomOp {decomp.__name__}",
+                input_gen_fns=input_gen_fns,
             )
+            # Cache decomposition info for range-based dispatch
+            choice.cache_decomposition(decomp, decomp_kwargs)
             choices.append(choice)
 
         return choices
@@ -392,6 +415,7 @@ class SubgraphTemplate(KernelTemplate):
         function_decomposition: Callable[..., Any],
         kwargs: dict[str, Any],
         default_impl: Callable[..., Any] | None = None,
+        input_gen_fns: dict[int, Callable[[Any], torch.Tensor]] | None = None,
     ) -> Layout:
         """Infer output layout for custom ops using the default implementation when available.
         Note that the Subgraph assumes custom ops return exactly one tensor output.
@@ -406,14 +430,24 @@ class SubgraphTemplate(KernelTemplate):
 
         with V.fake_mode:
             example_inputs = []
-            for inp in input_nodes:
-                raw_shape = inp.get_size()
-                concrete_shape = V.graph.sizevars.size_hints(
-                    raw_shape, fallback=config.unbacked_symint_fallback
-                )
-                fake_tensor = torch.empty(
-                    concrete_shape, dtype=inp.get_dtype(), device=inp.get_device()
-                )
+            for i, inp in enumerate(input_nodes):
+                if input_gen_fns and i in input_gen_fns:
+                    fake_tensor = input_gen_fns[i](inp)
+                else:
+                    raw_shape = inp.get_size()
+                    concrete_shape = V.graph.sizevars.size_hints(
+                        raw_shape, fallback=config.unbacked_symint_fallback
+                    )
+                    raw_stride = inp.get_stride()
+                    concrete_stride = V.graph.sizevars.size_hints(
+                        raw_stride, fallback=config.unbacked_symint_fallback
+                    )
+                    fake_tensor = torch.empty_strided(
+                        concrete_shape,
+                        concrete_stride,
+                        dtype=inp.get_dtype(),
+                        device=inp.get_device(),
+                    )
                 example_inputs.append(fake_tensor)
 
             fn = functools.partial(function_decomposition, **kwargs)

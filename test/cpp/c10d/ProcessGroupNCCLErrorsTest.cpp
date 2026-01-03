@@ -207,7 +207,7 @@ class ProcessGroupNCCLNoHeartbeatCaught
     void runLoop() override {
       try {
         c10d::ProcessGroupNCCL::HeartbeatMonitor::runLoop();
-      } catch (std::runtime_error& e) {
+      } catch (const std::runtime_error&) {
         // Safe cast because we know it's a ProcessGroupNCCLNoHeartbeatCaught
         auto* pg = static_cast<ProcessGroupNCCLNoHeartbeatCaught*>(pg_);
         pg->hasMonitorThreadCaughtError_ = true;
