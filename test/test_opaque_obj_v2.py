@@ -1108,7 +1108,7 @@ def forward(self, L_x_ : torch.Tensor, L_scale_obj_ : {"test_opaque_obj_v2" if i
     l_scale_obj_ = L_scale_obj_
     result = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
     result_1 = result * 2;  result = None
-    return (result_1,)""",
+    return (result_1,)""",  # noqa: B950
         )
 
         backend = AotEagerAndRecordGraphs()

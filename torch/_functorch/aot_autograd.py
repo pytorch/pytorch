@@ -530,7 +530,6 @@ def create_aot_state(
     )
 
     from torch._library.fake_class_registry import (
-        FakeScriptMethod,
         FakeScriptObject,
         maybe_to_fake_obj,
     )
@@ -544,25 +543,17 @@ def create_aot_state(
 
         result = []
         for arg in fake_flat_args:
-            if isinstance(arg, FakeScriptObject):
-                # Copy FakeScriptObject, preserving wrapped_obj
-                # and FakeScriptMethod attributes
-                new_fake = FakeScriptObject(
-                    copy.deepcopy(arg.wrapped_obj),
-                    arg.script_class_name,
-                    x=None,
+            if isinstance(arg, FakeScriptObject) and arg.real_obj is None:
+                result.append(
+                    FakeScriptObject(
+                        copy.deepcopy(arg.wrapped_obj),
+                        arg.script_class_name,
+                        x=None,
+                    )
                 )
-                for attr_name in dir(arg):
-                    attr = object.__getattribute__(arg, attr_name)
-                    if isinstance(attr, FakeScriptMethod):
-                        object.__setattr__(
-                            new_fake,
-                            attr_name,
-                            FakeScriptMethod(new_fake, attr.method_name, attr.schema),
-                        )
-                result.append(new_fake)
-            elif is_opaque_type(type(arg)):
-                result.append(maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg))
+
+            elif isinstance(arg, FakeScriptObject) or is_opaque_type(type(arg)):
+                result.append(maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj))
             else:
                 result.append(arg)
         return result
