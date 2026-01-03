@@ -1,4 +1,5 @@
 #pragma once
+#include <c10/util/StringUtil.h>
 #include <torch/csrc/Export.h>
 #include <memory>
 #include <ostream>
@@ -94,12 +95,12 @@ TORCH_API std::ostream& operator<<(
   JIT_LOG(                                        \
       ::torch::jit::JitLoggingLevels::GRAPH_DUMP, \
       MSG,                                        \
-      "\n",                                       \
+      '\n',                                       \
       ::torch::jit::log_function(G));
 // use GRAPH_DUMP for dumping graphs after optimization passes
 #define GRAPH_DUMP(MSG, G) \
   JIT_LOG(                 \
-      ::torch::jit::JitLoggingLevels::GRAPH_DUMP, MSG, "\n", (G)->toString());
+      ::torch::jit::JitLoggingLevels::GRAPH_DUMP, MSG, '\n', (G)->toString());
 // use GRAPH_UPDATE for reporting graph transformations (i.e. node deletion,
 // constant folding, CSE)
 #define GRAPH_UPDATE(...) \

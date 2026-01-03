@@ -94,7 +94,7 @@ __global__ void flag_kernel(const T* d_in, int64_t * d_out, const int64_t * agg,
 
   // Specialize BlockScan type for our thread block
   using BlockScanT = ROCM_HIPCUB(at_cuda_detail::cub)::BlockScan<int, BLOCK_THREADS, ROCM_HIPCUB(at_cuda_detail::cub)::BLOCK_SCAN_WARP_SCANS>;
-  using TransformInputIteratorT = ROCM_HIPCUB(at_cuda_detail::cub)::TransformInputIterator<int, NonZeroOp<T>, const T*>;
+  using TransformInputIteratorT = ATEN_CUB_TRANSFORM_ITERATOR(int, NonZeroOp<T>, const T*);
   using BlockExchangeT =  ROCM_HIPCUB(at_cuda_detail::cub)::BlockExchange<int, BLOCK_THREADS, ITEMS_PER_THREAD>;
 
   // Shared memory
@@ -183,8 +183,8 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto num_nonzeros = allocator.allocate(sizeof(int) * num_chunks);
   for (int64_t idx = 0; idx < num_chunks; idx++) {
-    int64_t remaining = std::min(chunk_size, self.numel() - idx * chunk_size);
-    cub::TransformInputIterator<bool, NonZeroOp<scalar_t>, const scalar_t*> itr(
+    int64_t remaining = std::min<int64_t>(chunk_size, self.numel() - idx * chunk_size);
+    ATEN_CUB_TRANSFORM_ITERATOR(bool, NonZeroOp<scalar_t>, const scalar_t*) itr(
         self_.const_data_ptr<scalar_t>() + idx * chunk_size,
         NonZeroOp<scalar_t>());
     AT_CUDA_CHECK(cub::DeviceReduce::Sum(
@@ -212,7 +212,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
       std::nullopt /* memory format */
   );
   at::cuda::memcpy_and_sync(
-      (void*)pinned_num_nonzeros_h.const_data_ptr<int>(),
+      pinned_num_nonzeros_h.template data_ptr<int>(),
       num_nonzeros.get(),
       sizeof(int) * num_chunks,
       cudaMemcpyDeviceToHost,
@@ -220,7 +220,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   int64_t num_nonzeros_h = 0;
 
   for (int64_t idx = 0; idx < num_chunks; idx++) {
-    num_nonzeros_h += (int)*(pinned_num_nonzeros_h.const_data_ptr<int>() + idx);
+    num_nonzeros_h += pinned_num_nonzeros_h.template const_data_ptr<int>()[idx];
   }
   // num_nonzeros_h = (int)*(pinned_num_nonzeros_h.const_data_ptr<int>());
   // expected output size is num_nonzeros x ndim
@@ -241,10 +241,10 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   int64_t curr_nonzeros = 0;
   if (self.dim() > 0) {
     for (int64_t idx = 0; idx < num_chunks; idx++) {
-      int remaining = std::min(chunk_size, self.numel() - idx * chunk_size);
+      int remaining = std::min<int64_t>(chunk_size, self.numel() - idx * chunk_size);
 
-      cub::CountingInputIterator<int64_t> counting_itr(idx * chunk_size);
-      cub::TransformInputIterator<bool, NonZeroOp<scalar_t>, const scalar_t*>
+      ATEN_CUB_COUNTING_ITERATOR(int64_t) counting_itr(idx * chunk_size);
+      ATEN_CUB_TRANSFORM_ITERATOR(bool, NonZeroOp<scalar_t>, const scalar_t*)
           itr(self_.const_data_ptr<scalar_t>() + idx * chunk_size,
               NonZeroOp<scalar_t>());
       temp_storage_bytes = 0;
@@ -267,8 +267,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
           ((int*)num_nonzeros.get()) + idx,
           remaining,
           stream));
-      curr_nonzeros +=
-          (int)*(pinned_num_nonzeros_h.const_data_ptr<int>() + idx);
+      curr_nonzeros += pinned_num_nonzeros_h.template const_data_ptr<int>()[idx];
     }
     if (num_nonzeros_h > 0 && self.dim() > 1) {
       TensorDims<int64_t> dims;
@@ -300,8 +299,6 @@ void nonzero_static_cuda_out_impl(
     int64_t size,
     int64_t fill_value,
     Tensor& out) {
-# if (defined(CUDA_VERSION) && CUDA_VERSION > 11040) || defined(USE_ROCM)
-
   Tensor self_contiguous_ = self.contiguous();
   // see comment in nonzero_cuda_out_impl on reqs for out
   bool out_correct_size =
@@ -316,6 +313,17 @@ void nonzero_static_cuda_out_impl(
   if (need_to_copy) {
     out_temp =
         Tensor(at::detail::empty_cuda({self.dim(), size}, out.options())).t();
+  }
+  // If input has zero elements, avoid kernel grid calculations (which can
+  // produce zero divisors) and just fill the output with fill_value.
+  if (self.numel() == 0) {
+    if (need_to_copy) {
+      out_temp.fill_(fill_value);
+      out.copy_(out_temp);
+    } else {
+      out.fill_(fill_value);
+    }
+    return;
   }
   int64_t* out_data_ptr = need_to_copy ? out_temp.mutable_data_ptr<int64_t>()
                                        : out.mutable_data_ptr<int64_t>();
@@ -345,7 +353,7 @@ void nonzero_static_cuda_out_impl(
   <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
     in_data_ptr, out_data_ptr, (int64_t*)agg_cum.get(), self.numel(), size, iters_per_cta);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  int64_t out_grid = std::min(num_sms, (size + BLOCK_THREADS - 1)/BLOCK_THREADS);
+  int64_t out_grid = std::min<int64_t>(num_sms, (size + BLOCK_THREADS - 1)/BLOCK_THREADS);
   write_fill_value<<<out_grid, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(out_data_ptr, (int64_t *)agg_cum.get() + grid_size - 1, fill_value, size);
   if (self.dim() > 1) {
     TensorDims<int64_t> dims;
@@ -366,9 +374,6 @@ void nonzero_static_cuda_out_impl(
   if (need_to_copy) {
     out.copy_(out_temp);
   }
-#else
-  TORCH_CHECK(false, "Nonzero_static is not supported for cuda <= 11.4");
-#endif
 }
 
 Tensor& nonzero_out_cuda(const Tensor& self, Tensor& out) {

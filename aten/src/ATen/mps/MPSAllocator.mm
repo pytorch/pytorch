@@ -440,7 +440,7 @@ bool MPSHeapAllocatorImpl::release_cached_buffers() {
   // we need to release the lock temporarily as synchronizing may cause deadlock with completion handlers.
   m_mutex.unlock();
   auto stream = getDefaultMPSStream();
-  dispatch_sync(stream->queue(), ^() {
+  dispatch_sync_with_rethrow(stream->queue(), ^() {
     stream->synchronize(SyncType::COMMIT_AND_WAIT);
   });
   m_mutex.lock();
@@ -639,7 +639,7 @@ IntArrayRef MPSHeapAllocatorImpl::getBufferShape(const void* ptr) {
   std::lock_guard<std::recursive_mutex> lock(m_mutex);
 
   BufferBlock* buffer_block = get_allocated_buffer_block(ptr);
-  if (buffer_block && buffer_block->shape.size() > 0) {
+  if (buffer_block && !buffer_block->shape.empty()) {
     return IntArrayRef{buffer_block->shape};
   }
   return IntArrayRef();

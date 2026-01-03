@@ -145,12 +145,6 @@
 #include <utility>
 #include <vector>
 
-namespace at::native {
-
-AdvancedIndex make_info(Tensor self, IOptTensorListRef orig);
-
-} // namespace at::native
-
 namespace at::meta {
 
 TORCH_META_FUNC(gather)
@@ -175,9 +169,10 @@ TORCH_META_FUNC(gather)
   auto is_index_empty = index.numel() == 0;
   if (!is_index_empty) {
     TORCH_CHECK(
-        index.scalar_type() == at::ScalarType::Long,
+        index.scalar_type() == ScalarType::Long ||
+            index.scalar_type() == ScalarType::Int,
         "gather",
-        "(): Expected dtype int64 for index");
+        "(): Expected dtype int32/int64 for index");
   }
   if (is_index_empty)
     return;
@@ -474,7 +469,7 @@ static void build_index_op(
     TensorIteratorBase& iter,
     const at::native::AdvancedIndex& info,
     const Tensor& result) {
-  // 'TensorIterator' needs to own the things comming from 'info', since
+  // 'TensorIterator' needs to own the things coming from 'info', since
   // 'info' will be destroyed after the META function.
   TensorIteratorConfig config;
   // info.src is a restrided view of result
@@ -993,7 +988,8 @@ Tensor& _index_put_impl_(
   }
   if ((self.device().type() == DeviceType::CUDA ||
        self.device().type() == DeviceType::XPU) &&
-      (accumulate || globalContext().deterministicAlgorithms())) {
+      (accumulate ||
+       (globalContext().deterministicAlgorithms() && value_.numel() > 1))) {
     TORCH_CHECK(
         value_.device() == self.device(),
         "expected device ",
@@ -1091,7 +1087,8 @@ TORCH_IMPL_FUNC(index_copy_out)
     result.copy_(self);
 
   // See Note [Enabling Deterministic Operations]
-  if (result.is_cuda() && globalContext().deterministicAlgorithms()) {
+  if ((result.is_cuda() || result.is_xpu()) &&
+      globalContext().deterministicAlgorithms()) {
     torch::List<std::optional<Tensor>> indices;
     indices.resize(dim + 1);
     indices.set(dim, index);
@@ -1705,13 +1702,13 @@ Tensor& index_select_out_cpu_(
                   TORCH_CHECK_INDEX(
                       (self_i >= 0) && (self_i < self_dim_size),
                       "index out of range in self");
-                  auto self_data = static_cast<const char*>(selfSlice_data) +
+                  auto self_data = const_cast<char*>(static_cast<const char*>(
+                                       selfSlice_data)) +
                       self_i * self_stride_bytes;
                   auto result_data = static_cast<char*>(resultSlice_data) +
                       i * result_stride_bytes;
                   sub_iter.unsafe_replace_operand(0, result_data);
-                  sub_iter.unsafe_replace_operand(
-                      1, const_cast<char*>(self_data));
+                  sub_iter.unsafe_replace_operand(1, self_data);
                   copy_stub(sub_iter.device_type(), sub_iter, false);
                 };
               });
@@ -1910,11 +1907,9 @@ Tensor& index_fill_(
         "This also applies to advanced indexing e.g. tensor[mask] = scalar");
   }
 
-  if (!self.is_complex() && source.isComplex()) {
-    TORCH_CHECK(
-        false,
-        "index_fill_(): Converting complex Scalar to non-complex type is not supported");
-  }
+  TORCH_CHECK(
+      self.is_complex() || !source.isComplex(),
+      "index_fill_(): Converting complex Scalar to non-complex type is not supported");
 
   // Handle the case when `self` is 0-dim
   Tensor self_nonzero_dim = (self.dim() == 0) ? self.unsqueeze(-1) : self;
@@ -2151,81 +2146,53 @@ static void _scatter_via_index_put(
     const Tensor& src,
     const Tensor& mut_out,
     bool accumulate) {
-  if (self.dim() == 1) {
-    torch::List<std::optional<Tensor>> indices;
-    indices.reserve(1);
-    indices.push_back(index);
-    mut_out.index_put_(indices, src, accumulate);
-  } else {
-    Tensor mut_out_contig = mut_out.contiguous();
-
-    auto index_coords_sizes = index.sizes().vec();
-    index_coords_sizes.push_back(self.dim());
-    auto index_coords = at::empty(
-        index_coords_sizes,
-        at::TensorOptions().dtype(at::ScalarType::Long).device(self.device()));
-
-    for (int64_t dim_other = 0; dim_other < self.dim(); dim_other++) {
-      if (dim_other == dim) {
-        continue;
-      }
-      auto dim_coord_vals = at::arange(
-          index.size(dim_other), at::TensorOptions().device(self.device()));
-
-      for (int64_t dim_unsqueeze = 0; dim_unsqueeze < self.dim() - 1;
-           dim_unsqueeze++) {
-        dim_coord_vals =
-            dim_coord_vals.unsqueeze((dim_unsqueeze >= dim_other) ? -1 : 0);
-      }
-
-      auto view_sizes = index.sizes().vec();
-      view_sizes.push_back(1);
-      auto view_strides = index_coords.strides().vec();
-      view_strides[self.dim()] = self.dim();
-
-      at::as_strided(index_coords, view_sizes, view_strides, dim_other)
-          .copy_(dim_coord_vals.unsqueeze(-1));
+  // If index is expanded with zero strides across non-scatter dimensions,
+  // advanced indexing with the index tensor alone achieves the desired
+  // semantics and avoids creating large intermediate tensors.
+  bool broadcast_index = true;
+  for (const auto i : c10::irange(index.dim())) {
+    if (i == dim) {
+      continue;
     }
-
-    auto view_sizes = index.sizes().vec();
-    view_sizes.push_back(1);
-    auto view_strides = index_coords.strides().vec();
-    view_strides[self.dim()] = self.dim();
-
-    at::as_strided(index_coords, view_sizes, view_strides, dim)
-        .copy_(index.unsqueeze(-1));
-
-    Tensor index_coords_flat = index_coords.flatten(0, -2);
-
-    // Copy mut_out_contig's strides into a tensor
-    // TODO: Is there a utility function that already does this?
-    IntArrayRef mut_out_contig_strides = mut_out_contig.strides();
-    Tensor coord_strides = at::empty(
-        {mut_out_contig.dim()},
-        TensorOptions().dtype(at::ScalarType::Long).device(at::kCPU));
-    std::memcpy(
-        coord_strides.mutable_data_ptr(),
-        mut_out_contig_strides.data(),
-        coord_strides.nbytes());
-    coord_strides = coord_strides.to(mut_out_contig.device());
-
-    // `index_flat` contains the 1-D indices corresponding with the
-    // flattened `mut_out`
-    Tensor index_flat = (index_coords_flat * coord_strides).sum({-1});
-    Tensor mut_out_flat = mut_out_contig.flatten();
-    Tensor src_flat =
-        at::as_strided(src, index.sizes(), src.strides()).flatten();
-
-    torch::List<std::optional<Tensor>> indices;
-    indices.reserve(1);
-    indices.push_back(index_flat);
-
-    mut_out_flat.index_put_(indices, src_flat, accumulate);
-
-    if (!mut_out.is_contiguous()) {
-      mut_out.copy_(mut_out_flat.reshape(mut_out.sizes()));
+    if (index.stride(i) != 0) {
+      broadcast_index = false;
+      break;
     }
   }
+
+  auto src_view = at::as_strided(src, index.sizes(), src.strides());
+  torch::List<std::optional<Tensor>> indices;
+  indices.reserve(self.dim());
+
+  if (self.dim() == 1 || broadcast_index) {
+    Tensor squeezed = index;
+    if (broadcast_index && index.dim() > 1) {
+      for (int64_t d = index.dim() - 1; d >= 0; --d) {
+        if (d == dim) {
+          continue;
+        }
+        squeezed = squeezed.select(d, 0);
+      }
+    }
+    for ([[maybe_unused]] const auto d : c10::irange(dim)) {
+      indices.push_back(Tensor());
+    }
+    indices.push_back(squeezed);
+    mut_out.index_put_(indices, src_view, accumulate);
+    return;
+  }
+
+  for (const auto d : c10::irange(self.dim())) {
+    if (d == dim) {
+      indices.push_back(index);
+    } else {
+      auto arange = at::arange(index.size(d), index.options());
+      std::vector<int64_t> shape(index.dim(), 1);
+      shape[d] = index.size(d);
+      indices.push_back(arange.view(shape).expand(index.sizes()));
+    }
+  }
+  mut_out.index_put_(indices, src_view, accumulate);
 }
 
 template <
@@ -2266,8 +2233,12 @@ static void scatter_impl(
       scatter_reduce_exclude_self_helper(mut_out, dim, index, op);
     }
     // _scatter_via_index_put can only handle sum and mean reduction type
+    // we don't need to go index_put route if our inputs are integral
+    // we check in the meta function that self and src dtypes match,
+    // so here we need to check just one of them
     deterministic = deterministic &&
-        (op == ReductionType::SUM || op == ReductionType::MEAN);
+        (op == ReductionType::SUM || op == ReductionType::MEAN) &&
+        !at::isIntegralType(self.scalar_type(), /*includeBool=*/true);
   }
 
   // Scalar src should already be deterministic
@@ -2359,9 +2330,13 @@ TORCH_IMPL_FUNC(scatter_add)
 
   // See Note [Enabling Deterministic Operations]
   // Avoid gpuAtomicAdd for CUDA and XPU if deterministic mode is turned on
+  // we don't need to go index_put route if our inputs are integral
+  // we check in the meta function that self and src dtypes match,
+  // so here we need to check just one of them
   if (globalContext().deterministicAlgorithms() &&
       (self.device().type() == DeviceType::CUDA ||
-       self.device().type() == DeviceType::XPU)) {
+       self.device().type() == DeviceType::XPU) &&
+      !at::isIntegralType(self.scalar_type(), /*includeBool=*/true)) {
     _scatter_via_index_put(self, dim, index, src, mut_out, /*accumulate*/ true);
   } else {
     if (can_use_expanded_index_path(
@@ -2702,13 +2677,16 @@ inline std::tuple<Tensor, Tensor, int64_t> _take_along_dim_helper(
   broadcast_shape = infer_size_symint(indices_sizes, self.sym_sizes());
   auto self_broadcasted = at::broadcast_to_symint(self, broadcast_shape);
 
+  // Wrap negative indices to positive (Python-style)
+  indices_broadcasted =
+      indices_broadcasted.remainder(self_broadcasted.size(dim));
   return std::make_tuple(
       std::move(self_broadcasted),
       std::move(indices_broadcasted),
       std::move(dim));
 }
 
-static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
+inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
   TORCH_CHECK(
       !t.defined() || t.device() == device,
       "Expected tensor to have ",
@@ -2721,7 +2699,7 @@ static inline void checkDevice(CheckedFrom c, const Tensor& t, Device device) {
       ")");
 }
 
-static inline void checkDevice(
+inline void checkDevice(
     CheckedFrom c,
     at::ArrayRef<Tensor> tensors,
     Device device) {

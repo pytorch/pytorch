@@ -11,13 +11,19 @@
 
 namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
-inline
-namespace CPU_CAPABILITY {
+inline namespace CPU_CAPABILITY {
 
 // Following vec128_half_neon.h, we only support aarch64.
 #if !defined(C10_MOBILE) && defined(__aarch64__)
 #ifdef __BIG_ENDIAN__
 #error "Big endian is not supported."
+#endif
+
+// GCC does not properly optimize bf16 operators
+#if defined(__ARM_FEATURE_BF16) && (__clang_major__ >= 19)
+#define BF16_ARITHMETIC_SUPPORTED() 1
+#else
+#define BF16_ARITHMETIC_SUPPORTED() 0
 #endif
 
 // Unlike the float16_t family of types, bfloat16_t is not available
@@ -26,70 +32,63 @@ namespace CPU_CAPABILITY {
 // definitions in case they are actually there!). (See
 // https://godbolt.org/z/orv6e94n4 ) So, we need to handle it as
 // uint16_t in that case.
-#define IMPLEMENT_AT_BF16_SHIM(vec_suffix)                              \
-  inline at_bfloat16x4_t at_vget_low_bf16(                              \
-      at_bfloat16x8_t a) {                                              \
-    return vget_low_##vec_suffix(a);                                    \
-  }                                                                     \
-                                                                        \
-  inline at_bfloat16x4_t at_vget_high_bf16(                             \
-      at_bfloat16x8_t a) {                                              \
-    return vget_high_##vec_suffix(a);                                   \
-  }                                                                     \
-                                                                        \
-  inline at_bfloat16x8_t at_vcombine_bf16(                              \
-      at_bfloat16x4_t low,                                              \
-      at_bfloat16x4_t high) {                                           \
-    return vcombine_##vec_suffix(low, high);                            \
-  }                                                                     \
-                                                                        \
-  inline at_bfloat16x8_t at_vdupq_n_bf16(                               \
-      at_bfloat16_t value) {                                            \
-    return vdupq_n_##vec_suffix(value);                                 \
-  }                                                                     \
-                                                                        \
-  inline at_bfloat16x8_t at_vld1q_bf16(                                 \
-      const at_bfloat16_t* ptr) {                                       \
-    return vld1q_##vec_suffix(ptr);                                     \
-  }                                                                     \
-                                                                        \
-  inline void at_vst1q_bf16(                                            \
-      at_bfloat16_t* ptr,                                               \
-      at_bfloat16x8_t value) {                                          \
-    vst1q_##vec_suffix(ptr, value);                                     \
-  }                                                                     \
-                                                                        \
-  template <typename T>                                                 \
-  inline at_bfloat16x8_t at_vreinterpretq_bf16_u16(T val) {             \
-    if constexpr (std::is_same_v<at_bfloat16x8_t, uint16x8_t>) {        \
-      return val;                                                       \
-    } else {                                                            \
-      return vreinterpretq_bf16_u16(val);                               \
-    }                                                                   \
-  }                                                                     \
-  template <typename T>                                                 \
-  inline at_bfloat16x4_t at_vreinterpret_bf16_u16(T val) {              \
-    if constexpr (std::is_same_v<at_bfloat16x4_t, uint16x4_t>) {        \
-      return val;                                                       \
-    } else {                                                            \
-      return vreinterpret_bf16_u16(val);                                \
-    }                                                                   \
-  }                                                                     \
-  template <typename T>                                                 \
-  inline uint16x8_t at_vreinterpretq_u16_bf16(T val) {                  \
-    if constexpr (std::is_same_v<at_bfloat16x8_t, uint16x8_t>) {        \
-      return val;                                                       \
-    } else {                                                            \
-      return vreinterpretq_u16_bf16(val);                               \
-    }                                                                   \
-  }                                                                     \
-  template <typename T>                                                 \
-  inline uint16x4_t at_vreinterpret_u16_bf16(T val) {                   \
-    if constexpr (std::is_same_v<at_bfloat16x4_t, uint16x4_t>) {        \
-      return val;                                                       \
-    } else {                                                            \
-      return vreinterpret_u16_bf16(val);                                \
-    }                                                                   \
+#define IMPLEMENT_AT_BF16_SHIM(vec_suffix)                               \
+  inline at_bfloat16x4_t at_vget_low_bf16(at_bfloat16x8_t a) {           \
+    return vget_low_##vec_suffix(a);                                     \
+  }                                                                      \
+                                                                         \
+  inline at_bfloat16x4_t at_vget_high_bf16(at_bfloat16x8_t a) {          \
+    return vget_high_##vec_suffix(a);                                    \
+  }                                                                      \
+                                                                         \
+  inline at_bfloat16x8_t at_vcombine_bf16(                               \
+      at_bfloat16x4_t low, at_bfloat16x4_t high) {                       \
+    return vcombine_##vec_suffix(low, high);                             \
+  }                                                                      \
+                                                                         \
+  inline at_bfloat16x8_t at_vdupq_n_bf16(at_bfloat16_t value) {          \
+    return vdupq_n_##vec_suffix(value);                                  \
+  }                                                                      \
+                                                                         \
+  inline at_bfloat16x8_t at_vld1q_bf16(const at_bfloat16_t* ptr) {       \
+    return vld1q_##vec_suffix(ptr);                                      \
+  }                                                                      \
+                                                                         \
+  inline void at_vst1q_bf16(at_bfloat16_t* ptr, at_bfloat16x8_t value) { \
+    vst1q_##vec_suffix(ptr, value);                                      \
+  }                                                                      \
+                                                                         \
+  template <typename T>                                                  \
+  inline at_bfloat16x8_t at_vreinterpretq_bf16_u16(T val) {              \
+    if constexpr (std::is_same_v<at_bfloat16x8_t, uint16x8_t>) {         \
+      return val;                                                        \
+    } else {                                                             \
+      return vreinterpretq_bf16_u16(val);                                \
+    }                                                                    \
+  }                                                                      \
+  template <typename T>                                                  \
+  inline at_bfloat16x4_t at_vreinterpret_bf16_u16(T val) {               \
+    if constexpr (std::is_same_v<at_bfloat16x4_t, uint16x4_t>) {         \
+      return val;                                                        \
+    } else {                                                             \
+      return vreinterpret_bf16_u16(val);                                 \
+    }                                                                    \
+  }                                                                      \
+  template <typename T>                                                  \
+  inline uint16x8_t at_vreinterpretq_u16_bf16(T val) {                   \
+    if constexpr (std::is_same_v<at_bfloat16x8_t, uint16x8_t>) {         \
+      return val;                                                        \
+    } else {                                                             \
+      return vreinterpretq_u16_bf16(val);                                \
+    }                                                                    \
+  }                                                                      \
+  template <typename T>                                                  \
+  inline uint16x4_t at_vreinterpret_u16_bf16(T val) {                    \
+    if constexpr (std::is_same_v<at_bfloat16x4_t, uint16x4_t>) {         \
+      return val;                                                        \
+    } else {                                                             \
+      return vreinterpret_u16_bf16(val);                                 \
+    }                                                                    \
   }
 
 #ifdef __ARM_FEATURE_BF16
@@ -137,11 +136,26 @@ struct BlendBFloat16Regs<index, false> {
 };
 
 template <>
-class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFloat16, BlendBFloat16Regs, Vectorized<c10::BFloat16>> {
-  using Base = Vectorized16<at_bfloat16x8_t, c10::BFloat16, BlendBFloat16Regs, Vectorized<c10::BFloat16>>;
+struct is_vec_specialized_for<c10::BFloat16> : std::bool_constant<true> {};
+
+template <>
+class Vectorized<c10::BFloat16> : public Vectorized16<
+                                      at_bfloat16x8_t,
+                                      c10::BFloat16,
+                                      BlendBFloat16Regs,
+                                      Vectorized<c10::BFloat16>> {
+  using Base = Vectorized16<
+      at_bfloat16x8_t,
+      c10::BFloat16,
+      BlendBFloat16Regs,
+      Vectorized<c10::BFloat16>>;
   friend Base;
-  friend std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<c10::BFloat16>& a);
-  friend Vectorized<c10::BFloat16> convert_float_bfloat16(const Vectorized<float>& a, const Vectorized<float>& b);
+  friend std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(
+      const Vectorized<c10::BFloat16>& a);
+  friend Vectorized<c10::BFloat16> convert_float_bfloat16(
+      const Vectorized<float>& a,
+      const Vectorized<float>& b);
+
  private:
   Vectorized<c10::BFloat16> map2(
       const Vectorized<c10::BFloat16>& second,
@@ -171,10 +185,14 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
 #else
     static_assert(std::is_same_v<uint16x4_t, at_bfloat16x4_t>);
     uint32x4_t as_uint32 = vreinterpretq_u32_f32(f32);
-    uint32x4_t rounding_bias = vaddq_u32(vandq_u32(vshrq_n_u32(as_uint32, 16), vdupq_n_u32(1)), vdupq_n_u32(0x7FFF));
-    at_bfloat16x4_t rounded = vshrn_n_u32(vaddq_u32(as_uint32, rounding_bias), 16);
+    uint32x4_t rounding_bias = vaddq_u32(
+        vandq_u32(vshrq_n_u32(as_uint32, 16), vdupq_n_u32(1)),
+        vdupq_n_u32(0x7FFF));
+    at_bfloat16x4_t rounded =
+        vshrn_n_u32(vaddq_u32(as_uint32, rounding_bias), 16);
     const auto bf16_nan = vdup_n_u16(0x7FC0);
-    return vbsl_u16(vmovn_u32(vreinterpretq_u32_f32(f32.isnan())), bf16_nan, rounded);
+    return vbsl_u16(
+        vmovn_u32(vreinterpretq_u32_f32(f32.isnan())), bf16_nan, rounded);
 #endif // __ARM_FEATURE_BF16
   }
 
@@ -215,9 +233,12 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
     Vectorized<float> mv0 = (Vectorized<float>(v00).*m)(second_v00);
     Vectorized<float> mv1 = (Vectorized<float>(v01).*m)(second_v01);
     // Assume the operator returns a bitmask, not "real" floats, and
-    // just narrow the bits. All-ones is a NaN and will get mangled by conversion!
-    at_bfloat16x4_t r00 = at_vreinterpret_bf16_u16(vmovn_u32(vreinterpretq_u32_f32(mv0)));
-    at_bfloat16x4_t r01 = at_vreinterpret_bf16_u16(vmovn_u32(vreinterpretq_u32_f32(mv1)));
+    // just narrow the bits. All-ones is a NaN and will get mangled by
+    // conversion!
+    at_bfloat16x4_t r00 =
+        at_vreinterpret_bf16_u16(vmovn_u32(vreinterpretq_u32_f32(mv0)));
+    at_bfloat16x4_t r01 =
+        at_vreinterpret_bf16_u16(vmovn_u32(vreinterpretq_u32_f32(mv1)));
     return Vectorized<c10::BFloat16>(at_vcombine_bf16(r00, r01));
   }
 
@@ -226,7 +247,8 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
 
   Vectorized() = default;
 
-  Vectorized(c10::BFloat16 val) : Vectorized16(at_vdupq_n_bf16(c10::bit_cast<at_bfloat16_t>(val.x))) {}
+  Vectorized(c10::BFloat16 val)
+      : Vectorized16(at_vdupq_n_bf16(c10::bit_cast<at_bfloat16_t>(val.x))) {}
   Vectorized(float val) : Vectorized(c10::BFloat16(val)) {}
   Vectorized(
       value_type val0,
@@ -238,27 +260,26 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
       value_type val6,
       value_type val7)
       : Vectorized16(at_bfloat16x8_t{
-          c10::bit_cast<at_bfloat16_t>(val0.x),
-          c10::bit_cast<at_bfloat16_t>(val1.x),
-          c10::bit_cast<at_bfloat16_t>(val2.x),
-          c10::bit_cast<at_bfloat16_t>(val3.x),
-          c10::bit_cast<at_bfloat16_t>(val4.x),
-          c10::bit_cast<at_bfloat16_t>(val5.x),
-          c10::bit_cast<at_bfloat16_t>(val6.x),
-          c10::bit_cast<at_bfloat16_t>(val7.x)}) {}
-
+            c10::bit_cast<at_bfloat16_t>(val0.x),
+            c10::bit_cast<at_bfloat16_t>(val1.x),
+            c10::bit_cast<at_bfloat16_t>(val2.x),
+            c10::bit_cast<at_bfloat16_t>(val3.x),
+            c10::bit_cast<at_bfloat16_t>(val4.x),
+            c10::bit_cast<at_bfloat16_t>(val5.x),
+            c10::bit_cast<at_bfloat16_t>(val6.x),
+            c10::bit_cast<at_bfloat16_t>(val7.x)}) {}
 
   static Vectorized<c10::BFloat16> blendv(
       const Vectorized<c10::BFloat16>& a,
       const Vectorized<c10::BFloat16>& b,
       const Vectorized<c10::BFloat16>& mask) {
-    // NOTE: blendv has the same problems as it does for Half; see comments in vec128_half_neon.h.
+    // NOTE: blendv has the same problems as it does for Half; see comments in
+    // vec128_half_neon.h.
     Vectorized<c10::BFloat16> vec(mask.values);
-    vec.values = at_vreinterpretq_bf16_u16(
-        vbslq_u16(
-            at_vreinterpretq_u16_bf16(vec.values),
-            at_vreinterpretq_u16_bf16(b.values),
-            at_vreinterpretq_u16_bf16(a.values)));
+    vec.values = at_vreinterpretq_bf16_u16(vbslq_u16(
+        at_vreinterpretq_u16_bf16(vec.values),
+        at_vreinterpretq_u16_bf16(b.values),
+        at_vreinterpretq_u16_bf16(a.values)));
     return vec;
   }
   static Vectorized<c10::BFloat16> set(
@@ -271,16 +292,16 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
     }
     uint16x8_t mask = vld1q_u16(pre_mask);
 
-    Vectorized<c10::BFloat16> vec(
-        at_vreinterpretq_bf16_u16(
-            vbslq_u16(
-                mask,
-                at_vreinterpretq_u16_bf16(b.values),
-                at_vreinterpretq_u16_bf16(a.values))));
+    Vectorized<c10::BFloat16> vec(at_vreinterpretq_bf16_u16(vbslq_u16(
+        mask,
+        at_vreinterpretq_u16_bf16(b.values),
+        at_vreinterpretq_u16_bf16(a.values))));
 
     return vec;
   }
-  static Vectorized<c10::BFloat16> loadu(const void* ptr, int64_t count = size()) {
+  static Vectorized<c10::BFloat16> loadu(
+      const void* ptr,
+      int64_t count = size()) {
     if (count == size()) {
       return at_vld1q_bf16(reinterpret_cast<const at_bfloat16_t*>(ptr));
     }
@@ -332,23 +353,78 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
     return map_with_vec_float_method(&Vectorized<float>::name); \
   }
 
-#define DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(name)        \
-  Vectorized name(const Vectorized& other) const {                      \
-    return map2_bitmask_with_vec_float_method(other, &Vectorized<float>::name); \
+#define DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(name) \
+  Vectorized name(const Vectorized& other) const {               \
+    return map2_bitmask_with_vec_float_method(                   \
+        other, &Vectorized<float>::name);                        \
   }
 
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(abs)
   Vectorized frac() const;
-  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(neg)
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(trunc)
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(sqrt)
+
+#ifdef __ARM_FEATURE_BF16
+  // Flip sign bit
+  Vectorized<c10::BFloat16> neg() const {
+    return vreinterpretq_bf16_s16(vreinterpretq_s16_bf16(values) ^ (-32768));
+  }
+  // Fast reciprocal is fine because we are truncating results
+  Vectorized<c10::BFloat16> reciprocal() const {
+    auto x = vcvtq_low_f32_bf16(values);
+    auto y = vcvtq_high_f32_bf16(values);
+    x = vrecpeq_f32(x);
+    y = vrecpeq_f32(y);
+    return vcvtq_high_bf16_f32(vcvtq_low_bf16_f32(x), y);
+  }
+  // Clearing the sign bit
+  Vectorized<c10::BFloat16> abs() const {
+    return vreinterpretq_bf16_u16(vreinterpretq_u16_bf16(values) & 0x7FFF);
+  }
+#else
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(abs)
+  DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(neg)
   DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD(reciprocal)
+#endif
+
+// These functions are optimized on clang-21+
+#if BF16_ARITHMETIC_SUPPORTED() && (__clang_major__ >= 21)
+  Vectorized<c10::BFloat16> operator==(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values == other.values;
+  }
+
+  Vectorized<c10::BFloat16> operator!=(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values != other.values;
+  }
+
+  Vectorized<c10::BFloat16> operator<(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values < other.values;
+  }
+
+  Vectorized<c10::BFloat16> operator<=(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values <= other.values;
+  }
+
+  Vectorized<c10::BFloat16> operator>(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values > other.values;
+  }
+
+  Vectorized<c10::BFloat16> operator>=(
+      const Vectorized<c10::BFloat16>& other) const {
+    return values >= other.values;
+  }
+#else
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator==)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator!=)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator<)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator<=)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator>)
   DEFINE_BINARY_COMPARISON_OPERATOR_VIA_FLOAT_METHOD(operator>=)
+#endif
 
 #undef DEFINE_UNARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD
 #undef DEFINE_BINARY_ELEMENTWISE_FUNC_VIA_FLOAT_METHOD
@@ -361,15 +437,22 @@ class Vectorized<c10::BFloat16> : public Vectorized16<at_bfloat16x8_t, c10::BFlo
   Vectorized le(const Vectorized& other) const;
 }; // Vectorized<c10::BFloat16>
 
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(const Vectorized<c10::BFloat16>& a) {
-  static_assert(Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
+inline std::tuple<Vectorized<float>, Vectorized<float>> convert_bfloat16_float(
+    const Vectorized<c10::BFloat16>& a) {
+  static_assert(
+      Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
   at_bfloat16x8_t x = a;
-  float32x4_t x1 = Vectorized<c10::BFloat16>::convert_f32_bf16(at_vget_low_bf16(x));
-  float32x4_t x2 = Vectorized<c10::BFloat16>::convert_f32_bf16(at_vget_high_bf16(x));
-  return { Vectorized<float>(x1), Vectorized<float>(x2) };
+  float32x4_t x1 =
+      Vectorized<c10::BFloat16>::convert_f32_bf16(at_vget_low_bf16(x));
+  float32x4_t x2 =
+      Vectorized<c10::BFloat16>::convert_f32_bf16(at_vget_high_bf16(x));
+  return {Vectorized<float>(x1), Vectorized<float>(x2)};
 }
-inline Vectorized<c10::BFloat16> convert_float_bfloat16(const Vectorized<float>& a, const Vectorized<float>& b) {
-  static_assert(Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
+inline Vectorized<c10::BFloat16> convert_float_bfloat16(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
+  static_assert(
+      Vectorized<c10::BFloat16>::size() == 2 * Vectorized<float>::size());
   at_bfloat16x4_t x1 = Vectorized<c10::BFloat16>::convert_bf16_f32(a);
   at_bfloat16x4_t x2 = Vectorized<c10::BFloat16>::convert_bf16_f32(b);
   return Vectorized<c10::BFloat16>(at_vcombine_bf16(x1, x2));
@@ -383,36 +466,59 @@ Vectorized<c10::BFloat16> binary_operator_via_float(
   const auto [a_float_low, a_float_high] = convert_bfloat16_float(a);
   const auto [b_float_low, b_float_high] = convert_bfloat16_float(b);
   return convert_float_bfloat16(
-      op(a_float_low, b_float_low),
-      op(a_float_high, b_float_high));
+      op(a_float_low, b_float_low), op(a_float_high, b_float_high));
 }
 
 template <>
 Vectorized<c10::BFloat16> inline operator+(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  return x + y;
+#else
   return binary_operator_via_float(std::plus<Vectorized<float>>(), a, b);
+#endif
 }
 
 template <>
 Vectorized<c10::BFloat16> inline operator-(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  return x - y;
+#else
   return binary_operator_via_float(std::minus<Vectorized<float>>(), a, b);
+#endif
 }
 
 template <>
 Vectorized<c10::BFloat16> inline operator*(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  return x * y;
+#else
   return binary_operator_via_float(std::multiplies<Vectorized<float>>(), a, b);
+#endif
 }
 
 template <>
 Vectorized<c10::BFloat16> inline operator/(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  return x / y;
+#else
   return binary_operator_via_float(std::divides<Vectorized<float>>(), a, b);
+#endif
 }
 
 // frac. Implement this here so we can use subtraction
@@ -425,7 +531,8 @@ Vectorized<c10::BFloat16> inline maximum(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
   return binary_operator_via_float(
-      static_cast<Vectorized<float>(*)(const Vectorized<float>&, const Vectorized<float>&)>(&maximum),
+      static_cast<Vectorized<float> (*)(
+          const Vectorized<float>&, const Vectorized<float>&)>(&maximum),
       a,
       b);
 }
@@ -435,7 +542,8 @@ Vectorized<c10::BFloat16> inline minimum(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
   return binary_operator_via_float(
-      static_cast<Vectorized<float>(*)(const Vectorized<float>&, const Vectorized<float>&)>(&minimum),
+      static_cast<Vectorized<float> (*)(
+          const Vectorized<float>&, const Vectorized<float>&)>(&minimum),
       a,
       b);
 }
@@ -466,24 +574,24 @@ template <>
 Vectorized<c10::BFloat16> inline operator&(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
-  return Vectorized<c10::BFloat16>(at_vreinterpretq_bf16_u16(vandq_u16(
-      at_vreinterpretq_u16_bf16(a), at_vreinterpretq_u16_bf16(b))));
+  return Vectorized<c10::BFloat16>(at_vreinterpretq_bf16_u16(
+      vandq_u16(at_vreinterpretq_u16_bf16(a), at_vreinterpretq_u16_bf16(b))));
 }
 
 template <>
 Vectorized<c10::BFloat16> inline operator|(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
-  return Vectorized<c10::BFloat16>(at_vreinterpretq_bf16_u16(vorrq_u16(
-      at_vreinterpretq_u16_bf16(a), at_vreinterpretq_u16_bf16(b))));
+  return Vectorized<c10::BFloat16>(at_vreinterpretq_bf16_u16(
+      vorrq_u16(at_vreinterpretq_u16_bf16(a), at_vreinterpretq_u16_bf16(b))));
 }
 
 template <>
 Vectorized<c10::BFloat16> inline operator^(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b) {
-  return Vectorized<c10::BFloat16>(at_vreinterpretq_bf16_u16(veorq_u16(
-      at_vreinterpretq_u16_bf16(a), at_vreinterpretq_u16_bf16(b))));
+  return Vectorized<c10::BFloat16>(at_vreinterpretq_bf16_u16(
+      veorq_u16(at_vreinterpretq_u16_bf16(a), at_vreinterpretq_u16_bf16(b))));
 }
 
 inline Vectorized<c10::BFloat16> Vectorized<c10::BFloat16>::eq(
@@ -521,12 +629,35 @@ Vectorized<c10::BFloat16> inline fmadd(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  bfloat16x8_t z = c;
+  return x * y + z;
+#else
   // NOTE [BF16 FMA]: There isn't an FMA that accumulates into BF16!  Also,
   // vbfmlalbq_f32 and vbfmlaltq_f32 take the even and odd-numbered
   // elements, not the bottom and top half, so they don't seem
   // particularly useful here. Ideally we would include dot product in
   // the Vectorized interface...
   return a * b + c;
+#endif
+}
+
+template <>
+Vectorized<c10::BFloat16> inline fnmadd(
+    const Vectorized<c10::BFloat16>& a,
+    const Vectorized<c10::BFloat16>& b,
+    const Vectorized<c10::BFloat16>& c) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  bfloat16x8_t z = c;
+  return (-x) * y + z;
+#else
+  // See NOTE [BF16 FMA] above.
+  return -a * b + c;
+#endif
 }
 
 template <>
@@ -534,8 +665,31 @@ Vectorized<c10::BFloat16> inline fmsub(
     const Vectorized<c10::BFloat16>& a,
     const Vectorized<c10::BFloat16>& b,
     const Vectorized<c10::BFloat16>& c) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  bfloat16x8_t z = c;
+  return x * y - z;
+#else
   // See NOTE [BF16 FMA] above.
   return a * b - c;
+#endif
+}
+
+template <>
+Vectorized<c10::BFloat16> inline fnmsub(
+    const Vectorized<c10::BFloat16>& a,
+    const Vectorized<c10::BFloat16>& b,
+    const Vectorized<c10::BFloat16>& c) {
+#if BF16_ARITHMETIC_SUPPORTED()
+  bfloat16x8_t x = a;
+  bfloat16x8_t y = b;
+  bfloat16x8_t z = c;
+  return (-x) * y - z;
+#else
+  // See NOTE [BF16 FMA] above.
+  return -a * b - c;
+#endif
 }
 
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)

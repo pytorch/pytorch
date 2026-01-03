@@ -54,47 +54,49 @@ bool setFallbackAllowed(bool value) {
 }
 
 bool fallbackAllowed() {
-  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
-  if (!enable_c_str) {
+  static const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_FALLBACK");
+  if (!enable_opt.has_value()) {
     return fallback_allowed;
   }
-  if (std::string(enable_c_str) == "0") {
+  if (enable_opt == "0") {
     return false;
   }
   return true;
 }
 
 static bool fallbackEnforced() {
-  static const char* enable_c_str = std::getenv("PYTORCH_TENSOREXPR_FALLBACK");
+  static const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_FALLBACK");
   if (tensorexpr::getTEGenerateBlockCode()) {
     return false;
   }
-  if (!enable_c_str) {
+  if (!enable_opt.has_value()) {
     return fallback_allowed;
   }
-  if (std::string(enable_c_str) == "2") {
+  if (enable_opt == "2") {
     return true;
   }
   return false;
 }
 
 static int64_t randomTransformsRequested() {
-  const char* enable_c_str =
-      std::getenv("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
-  if (!enable_c_str) {
+  const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_RANDOM_TRANSFORM_SEED");
+  if (!enable_opt.has_value()) {
     return 0;
   }
-  return std::stoi(std::string(enable_c_str));
+  return std::stoi(enable_opt.value());
 }
 
 #ifdef TORCH_ENABLE_LLVM
 static bool dontUseLLVMFlag() {
-  static const char* enable_c_str =
-      std::getenv("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
-  if (!enable_c_str) {
+  static const auto enable_opt =
+      c10::utils::get_env("PYTORCH_TENSOREXPR_DONT_USE_LLVM");
+  if (!enable_opt) {
     return false;
   }
-  return std::string(enable_c_str) == "1";
+  return enable_opt == "1";
 }
 #endif
 
@@ -793,7 +795,7 @@ static void parallelizeOuterLoops(LoopNest& l, const Bufs& bufs) {
 StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   torch::jit::tensorexpr::LoopNest l(std::move(st), bufOutputs_);
   LoopNest::sanitizeNames(l.root_stmt());
-  GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), "\n");
+  GRAPH_DEBUG("Original Stmt:\n", std::to_string(l.root_stmt()), '\n');
   int64_t random_tr_seed = randomTransformsRequested();
   if (random_tr_seed) {
     if (random_tr_seed == -1)
@@ -937,7 +939,7 @@ StmtPtr TensorExprKernel::transformLoops(BackendType backendType, StmtPtr st) {
   StmtPtr stmt = l.root_stmt();
   // Arithmetic Simplification.
   stmt = IRSimplifier::simplify(stmt);
-  GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), "\n");
+  GRAPH_DEBUG("Final Stmt:\n", std::to_string(stmt), '\n');
   return stmt;
 }
 
@@ -1261,11 +1263,11 @@ Tensor TensorExprKernel::convertSymbolicOutputToCorrectStrides(
     const std::vector<size_t>& sorted_stride_indices_descending,
     const std::vector<ExprPtr>& strides,
     BufPtr& buf) {
-  // We need to convert the output tensor so that its values are layed
+  // We need to convert the output tensor so that its values are laid
   // so that when viewed from the output strides the values are correct.
-  // A contiguous Tensor of size(2, 3) with values 0-5 is layed out as:
+  // A contiguous Tensor of size(2, 3) with values 0-5 is laid out as:
   // [0] [1] [2] [3] [4] [5]
-  // The same valued tensor with strides (1, 2) would be layed out like
+  // The same valued tensor with strides (1, 2) would be laid out like
   // [0] [3] [1] [4] [2] [5]
   // When we are doing the re-ordering of values into the output tensor,
   // we are iterating per-element of the input, and we are fixed
@@ -1376,7 +1378,7 @@ Tensor TensorExprKernel::convertStaticShapeOutputToCorrectStrides(
       tt->strides().concrete_sizes(),
       buildErrorMessage("Output strides are unknown."));
   const std::vector<int64_t> strides = *tt->strides().concrete_sizes();
-  // All Tensors in NNC are layed out in default, contiguous layout.
+  // All Tensors in NNC are laid out in default, contiguous layout.
   // If the output is also default contiguous we don't need to do anything
   if (strides == default_strides) {
     return Tensor(buf, nullptr);
@@ -1480,7 +1482,7 @@ std::vector<BufPtr> TensorExprKernel::preAllocIntermediateBufs(
       remaining_interm_bufs.push_back(buf);
       continue;
     }
-    auto bp = (void*)malloc(size);
+    auto bp = malloc(size);
     if (!bp) {
       remaining_interm_bufs.push_back(buf);
       continue;

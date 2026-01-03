@@ -4,8 +4,9 @@ import functools
 import logging
 import math
 import operator
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import sympy
 
@@ -180,6 +181,7 @@ try:
             return x if x.is_int() else z3.ToInt(x)
 
         def sym_sum(self, args: z3.ArithRef) -> z3.ArithRef:
+            # pyrefly: ignore
             return sum(args)
 
         # Implements Python division semantics.
@@ -203,9 +205,7 @@ try:
             return _Z3Ops.to_real(result) if cast_result_to_real else result
 
         def ceil(self, number: z3.ArithRef) -> z3.ArithRef:
-            return z3.If(
-                self.floor(number) < number, self.floor(number + 1), number
-            )  # type: ignore[return-value]
+            return z3.If(self.floor(number) < number, self.floor(number + 1), number)  # type: ignore[return-value]
 
         def trunc(self, number: z3.ArithRef) -> z3.ArithRef:
             return z3.If(number >= 0, self.floor(number), self.ceil(number))  # type: ignore[return-value]
@@ -358,14 +358,14 @@ try:
         def call_function(
             self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
         ) -> Any:
-            if target != torch._assert:
+            if target is not torch._assert:
                 # Lift and runs the node target function
                 return super().call_function(z3op(target, self.validator), args, kwargs)  # type: ignore[arg-type]
             # Adds the Z3 expression corresponding to the first argument
             # as a validator input.
-            assert (
-                len(args) == 1
-            ), f"expected 1 argument on assertion. Got: {len(args)} "
+            assert len(args) == 1, (
+                f"expected 1 argument on assertion. Got: {len(args)} "
+            )
             self.validator.add_source_expr(args[0])  # type: ignore[arg-type]
 
     # Translates SymPy expressions into Z3 expressions.
@@ -430,6 +430,9 @@ try:
             return self._ops.pow(base, exp)
 
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
+            return self._ops.mod(p, q)
+
+        def python_mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
             return self._ops.mod(p, q)
 
         def ceil_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:
@@ -536,9 +539,9 @@ try:
 
         def to_z3_boolean_expr(self, e: sympy.Basic) -> z3.BoolRef:
             z3expr = SympyToZ3(self).run(e)
-            assert isinstance(
-                z3expr, z3.BoolRef
-            ), f"expected boolean expression. Got: {z3expr}"
+            assert isinstance(z3expr, z3.BoolRef), (
+                f"expected boolean expression. Got: {z3expr}"
+            )
             return z3expr
 
         def add_source_expr(self, e: z3.BoolRef) -> None:
@@ -653,7 +656,7 @@ from torch.fx.experimental import _config as config
 
 
 def translation_validation_enabled() -> bool:
-    # Checks everytime this function is called, in case the Dynamo
+    # Checks every time this function is called, in case the Dynamo
     # option is set, but Z3 is not installed.
     _assert_z3_installed_if_tv_set()
     return _HAS_Z3 and config.translation_validation
@@ -815,7 +818,7 @@ def bisect(shape_env):
     # Bisection happens on the assertion nodes of the recorded FX graph for
     # dynamic shapes.
     assert_nodes = [
-        node for node in shape_env.graph.nodes if node.target == torch._assert
+        node for node in shape_env.graph.nodes if node.target is torch._assert
     ]
 
     # Preparing the indices for binary search.

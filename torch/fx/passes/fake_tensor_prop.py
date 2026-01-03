@@ -7,6 +7,7 @@ from torch.fx import Node
 from torch.fx._compatibility import compatibility
 from torch.fx.experimental.proxy_tensor import py_sym_types, snapshot_fake
 from torch.fx.node import map_aggregate
+from torch.utils._ordered_set import OrderedSet
 
 
 __all__ = ["FakeTensorProp"]
@@ -36,12 +37,40 @@ class FakeTensorProp(torch.fx.Interpreter):
         self._mode = mode
         mode.epoch += 1
         mode.reset_nt_tensor_id_counter()
+        self.seen_subgraphs: OrderedSet[str] = OrderedSet()
 
     def run_node(self, n: Node):
         from torch.fx.experimental.symbolic_shapes import (
             compute_unbacked_bindings,
             rebind_unbacked,
         )
+
+        if (
+            n.op == "call_function"
+            and n.target is torch.ops.higher_order.invoke_subgraph
+            and n.args[1] not in self.seen_subgraphs
+        ):
+            # Prevent redundant fake tensor prop for invoke_subgraphs. Note that
+            # there is also fake tensor caching for the entire subgraph. This
+            # happens the next time we call `run_node` for the same subgraph,
+            # which goes through super.run_node and caches the fake tensor prop.
+            # Therefore, we are propagating fake tensor through the subgraphs
+            # twice.
+            assert isinstance(n.args[1], str)
+            assert (
+                isinstance(n.args[0], torch.fx.Node)
+                and n.args[0].op == "get_attr"
+                and isinstance(n.args[0].target, str)
+            )
+            self.seen_subgraphs.add(n.args[1])
+            operands = n.args[2:]
+            example_inputs = []
+            for operand in operands:
+                assert isinstance(operand, torch.fx.Node) and "val" in operand.meta
+                example_inputs.append(operand.meta["val"])
+            return FakeTensorProp(
+                getattr(self.module, n.args[0].target), mode=self._mode
+            ).propagate(*example_inputs)
 
         result = super().run_node(n)
         rebind_unbacked(self._mode.shape_env, n, result)

@@ -153,7 +153,7 @@ struct ArgumentSpec {
   bool isPresent(size_t i) const {
     return optional_presence[i];
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -308,7 +308,7 @@ struct CompleteArgumentSpec {
   size_t size() const {
     return ninputs;
   }
-  size_t hashCode() const {
+  size_t hashCode() const noexcept {
     return hash_code;
   }
 
@@ -402,12 +402,12 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentInfo& info) {
   }
   out << "Tensor(device=" << info.device() << ", type=" << toString(info.type())
       << ", requires_grad=" << info.requires_grad() << ", dims=" << info.dim()
-      << ")";
+      << ')';
   return out;
 }
 
 inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
-  out << "{";
+  out << '{';
   for (const auto i : c10::irange(spec.numTensors())) {
     if (i > 0)
       out << ", ";
@@ -419,7 +419,7 @@ inline std::ostream& operator<<(std::ostream& out, const ArgumentSpec& spec) {
       out << ", ";
     out << spec.isPresent(i);
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
@@ -431,20 +431,20 @@ inline std::ostream& operator<<(
   }
   out << "Tensor(device=" << info.device() << ", type=" << toString(info.type())
       << ", requires_grad=" << info.requires_grad()
-      << ", sizes=" << info.sizes() << ", strides=" << info.strides() << ")";
+      << ", sizes=" << info.sizes() << ", strides=" << info.strides() << ')';
   return out;
 }
 
 inline std::ostream& operator<<(
     std::ostream& out,
     const CompleteArgumentSpec& spec) {
-  out << "{";
+  out << '{';
   for (const auto i : c10::irange(spec.size())) {
     if (i > 0)
       out << ", ";
     out << spec.at(i);
   }
-  out << "}";
+  out << '}';
   return out;
 }
 
@@ -454,8 +454,8 @@ inline CompleteArgumentInfo CompleteArgumentSpec::at(size_t i) const {
 
 inline std::optional<int8_t> convertOptional(
     std::optional<c10::ScalarType> const& from) {
-  return (from) ? std::optional<int8_t>(static_cast<int8_t>(*from))
-                : std::optional<int8_t>{};
+  return from ? std::optional<int8_t>(static_cast<int8_t>(*from))
+              : std::optional<int8_t>{};
 }
 
 } // namespace torch::jit
@@ -488,13 +488,14 @@ struct hash<c10::TensorType> {
 
 template <>
 struct hash<torch::jit::ArgumentSpec> {
-  size_t operator()(const torch::jit::ArgumentSpec& spec) const {
+  size_t operator()(const torch::jit::ArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };
 template <>
 struct hash<torch::jit::CompleteArgumentSpec> {
-  size_t operator()(const torch::jit::CompleteArgumentSpec& spec) const {
+  size_t operator()(
+      const torch::jit::CompleteArgumentSpec& spec) const noexcept {
     return spec.hashCode();
   }
 };

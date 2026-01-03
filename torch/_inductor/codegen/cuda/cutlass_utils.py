@@ -1,28 +1,60 @@
 # mypy: allow-untyped-defs
+import atexit
 import functools
 import logging
 import os
+import shutil
 import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+from typing_extensions import TypeIs
 
 import sympy
 
 import torch
-from torch._inductor.utils import clear_on_fresh_inductor_cache
+from torch._inductor.runtime.runtime_utils import dynamo_timed
+from torch._inductor.utils import clear_on_fresh_cache
+from torch.utils._ordered_set import OrderedSet
 
 from ... import config
 from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
+from ..cpp_utils import DTYPE_TO_CPP
 from .cuda_env import get_cuda_arch, get_cuda_version
 
 
 log = logging.getLogger(__name__)
 
 CUTLASS_OPERATION_KIND: str = "gemm"
+ACCUMULATOR_DTYPES: OrderedSet[torch.dtype] = OrderedSet([torch.float, torch.int32])
+XW_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
+    [torch.half, torch.bfloat16, torch.float8_e4m3fn, torch.int8]
+)
+
+
+@atexit.register
+def move_cutlass_compiled_cache() -> None:
+    """Move CUTLASS compiled cache file to the cache directory if it exists."""
+    if not try_import_cutlass.cache_info().currsize > 0:
+        return
+
+    import cutlass_cppgen  # type: ignore[import-not-found]
+
+    # Check if the CACHE_FILE attribute exists in cutlass_cppgen and if the file exists
+    if not hasattr(cutlass_cppgen, "CACHE_FILE") or not os.path.exists(
+        cutlass_cppgen.CACHE_FILE
+    ):
+        return
+
+    try:
+        filename = os.path.basename(cutlass_cppgen.CACHE_FILE)
+        shutil.move(cutlass_cppgen.CACHE_FILE, os.path.join(cache_dir(), filename))
+        log.debug("Moved CUTLASS compiled cache file to %s", cache_dir())
+    except OSError:
+        log.warning("Failed to move CUTLASS compiled cache file", exc_info=True)
 
 
 def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
@@ -34,45 +66,26 @@ def _rename_cutlass_import(content: str, cutlass_modules: list[str]) -> str:
     return content
 
 
-@functools.lru_cache(None)
+@functools.cache
 def try_import_cutlass() -> bool:
     """
     We want to support three ways of passing in CUTLASS:
     1. fbcode, handled by the internal build system.
-    2. pip install nvidia-cutlass, which provides the cutlass_library package
-       and the header files in the cutlass_library/source directory.
-    3. User specifies cutlass_dir. The default is ../third_party/cutlass/,
+    2. User specifies cutlass_dir. The default is ../third_party/cutlass/,
        which is the directory when developers build from source.
     """
     if config.is_fbcode():
-        return True
-
-    try:
-        import cutlass  # type: ignore[import-not-found]
-        import cutlass_library  # type: ignore[import-not-found]
-
-        cutlass_minor_vesion = int(cutlass.__version__.split(".")[1])
-        if cutlass_minor_vesion < 7:
-            log.warning("CUTLASS version < 3.7 is not recommended.")
-
-        log.debug(
-            "Found cutlass_library in python search path, overriding config.cuda.cutlass_dir"
-        )
-        cutlass_library_dir = os.path.dirname(cutlass_library.__file__)
-        assert os.path.isdir(cutlass_library_dir), (
-            f"{cutlass_library_dir} is not a directory"
-        )
-        config.cuda.cutlass_dir = os.path.abspath(
-            os.path.join(
-                cutlass_library_dir,
-                "source",
+        try:
+            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401
+            import cutlass_library  # type: ignore[import-not-found]
+        except ImportError as e:
+            log.warning(  # noqa: G200
+                "Failed to import CUTLASS packages in fbcode: %s, ignoring the CUTLASS backend.",
+                str(e),
             )
-        )
+            return False
+
         return True
-    except ModuleNotFoundError:
-        log.debug(
-            "cutlass_library not found in sys.path, trying to import from config.cuda.cutlass_dir"
-        )
 
     # Copy CUTLASS python scripts to a temp dir and add the temp dir to Python search path.
     # This is a temporary hack to avoid CUTLASS module naming conflicts.
@@ -97,13 +110,13 @@ def try_import_cutlass() -> bool:
     )
 
     cutlass_library_src_path = path_join(cutlass_python_path, "cutlass_library")
-    cutlass_src_path = path_join(cutlass_python_path, "cutlass")
+    cutlass_cppgen_src_path = path_join(cutlass_python_path, "cutlass_cppgen")
     pycute_src_path = path_join(cutlass_python_path, "pycute")
 
     tmp_cutlass_full_path = os.path.abspath(os.path.join(cache_dir(), "torch_cutlass"))
 
     dst_link_library = path_join(tmp_cutlass_full_path, "cutlass_library")
-    dst_link_cutlass = path_join(tmp_cutlass_full_path, "cutlass")
+    dst_link_cutlass_cppgen = path_join(tmp_cutlass_full_path, "cutlass_cppgen")
     dst_link_pycute = path_join(tmp_cutlass_full_path, "pycute")
 
     # mock modules to import cutlass
@@ -113,7 +126,7 @@ def try_import_cutlass() -> bool:
         if tmp_cutlass_full_path not in sys.path:
 
             def link_and_append(dst_link, src_path, parent_dir):
-                if os.path.exists(dst_link):
+                if os.path.lexists(dst_link):
                     assert os.path.islink(dst_link), (
                         f"{dst_link} is not a symlink. Try to remove {dst_link} manually and try again."
                     )
@@ -130,7 +143,9 @@ def try_import_cutlass() -> bool:
             link_and_append(
                 dst_link_library, cutlass_library_src_path, tmp_cutlass_full_path
             )
-            link_and_append(dst_link_cutlass, cutlass_src_path, tmp_cutlass_full_path)
+            link_and_append(
+                dst_link_cutlass_cppgen, cutlass_cppgen_src_path, tmp_cutlass_full_path
+            )
             link_and_append(dst_link_pycute, pycute_src_path, tmp_cutlass_full_path)
 
             for module in mock_modules:
@@ -141,7 +156,7 @@ def try_import_cutlass() -> bool:
                 )
 
         try:
-            import cutlass  # noqa: F401
+            import cutlass_cppgen  # type: ignore[import-not-found]  # noqa: F401, F811
             import cutlass_library.generator  # noqa: F401
             import cutlass_library.library  # noqa: F401
             import cutlass_library.manifest  # noqa: F401
@@ -149,7 +164,7 @@ def try_import_cutlass() -> bool:
 
             return True
         except ImportError as e:
-            log.debug(
+            log.debug(  # noqa: G200
                 "Failed to import CUTLASS packages: %s, ignoring the CUTLASS backend.",
                 str(e),
             )
@@ -217,8 +232,8 @@ class CUTLASSArgs:
         self.architectures = _normalize_cuda_arch(self.architectures)
 
 
-@clear_on_fresh_inductor_cache
-@functools.lru_cache(None)
+@clear_on_fresh_cache
+@functools.cache
 def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     # Note: Cache needs to be specific for cuda architecture and version
 
@@ -272,11 +287,21 @@ def gen_ops() -> dict[Any, Any]:
     """
     Generates all supported CUTLASS operations.
     """
-    arch = get_cuda_arch()
-    version = get_cuda_version()
-    return _gen_ops_cached(arch, version)
+    with dynamo_timed("cutlass_utils.gen_ops"):
+        arch = get_cuda_arch()
+        version = get_cuda_version()
+        return _gen_ops_cached(arch, version)
 
 
+DTYPE_TO_CUTLASS_TYPE = {
+    **DTYPE_TO_CPP,
+    torch.float16: "__half",
+    torch.bfloat16: "__nv_bfloat16",
+    torch.float8_e4m3fn: "__nv_fp8_e4m3",
+}
+
+
+@functools.lru_cache(32)
 def torch_dtype_to_cutlass_type(
     torch_dtype: torch.dtype,
 ) -> "cutlass_library.library.DataType":  # type: ignore[name-defined] # noqa: F821
@@ -294,6 +319,7 @@ def torch_dtype_to_cutlass_type(
         raise NotImplementedError(f"Unsupported data type: {torch_dtype=}")
 
 
+@functools.lru_cache(32)
 def dtype_match(
     torch_dtype: Optional[torch.dtype],
     cutlass_dtype: "cutlass_library.library.DataType",  # type: ignore[name-defined]  # noqa: F821
@@ -317,6 +343,8 @@ def dtype_match(
         return cutlass_dtype == cutlass_library.library.DataType.u8
     elif torch_dtype == torch.int32:
         return cutlass_dtype == cutlass_library.library.DataType.s32
+    elif torch_dtype == torch.float8_e4m3fn:
+        return cutlass_dtype == cutlass_library.library.DataType.e4m3
     else:
         return False
 
@@ -327,6 +355,10 @@ def get_accumulator_dtype(
     """
     Given a pair of input torch dtypes, returns the inferred accumulator torch dtype.
     """
+
+    assert OrderedSet(input_torch_dtypes) <= XW_DTYPES, (
+        f"{input_torch_dtypes=} is not supported"
+    )
 
     if len(input_torch_dtypes) != 2:
         return None
@@ -347,13 +379,20 @@ def get_accumulator_dtype(
         ]:
             torch_dtype = dtype0
 
-    if torch_dtype in (torch.float16, torch.bfloat16, torch.float):
-        return torch.float
-    if torch_dtype == torch.int8:
-        return torch.int32
-    raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
+    if torch_dtype in (torch.float16, torch.bfloat16, torch.float, torch.float8_e4m3fn):
+        accumulator_dtype = torch.float
+    elif torch_dtype == torch.int8:
+        accumulator_dtype = torch.int32
+    else:
+        raise NotImplementedError(f"Unsupported data types: {input_torch_dtypes=}")
+
+    assert accumulator_dtype in ACCUMULATOR_DTYPES, (
+        f"{accumulator_dtype=} is not supported"
+    )
+    return accumulator_dtype
 
 
+@functools.lru_cache(32)
 def get_alignments(torch_dtype: torch.dtype) -> list[int]:
     """
     Returns all possible valid CUTLASS alignments in terms of the number of elements for a given dtype.
@@ -364,7 +403,7 @@ def get_alignments(torch_dtype: torch.dtype) -> list[int]:
         return [8, 4, 2, 1]
     elif torch_dtype == torch.float:
         return [4, 2, 1]
-    elif torch_dtype in (torch.uint8, torch.int8):
+    elif torch_dtype in (torch.uint8, torch.int8, torch.float8_e4m3fn):
         return [16, 8, 4, 2]
     elif torch_dtype == torch.int32:
         return [4, 2, 1]
@@ -381,8 +420,8 @@ def get_max_alignment(inductor_layout: Layout) -> int:
     size = inductor_layout.size
     offset = inductor_layout.offset
 
-    def is_static_int(number):
-        return isinstance(number, (int, sympy.Integer))
+    def is_static_int(number: object) -> TypeIs[int | sympy.Integer]:
+        return isinstance(number, (int | sympy.Integer))
 
     def a_factor_of(x, alignment):
         if is_static_int(x) and is_static_int(alignment):
@@ -425,10 +464,13 @@ class CUDACompileSourceCapturingContext:
 
         _compile_method_orig = torch._inductor.codecache.CUDACodeCache.compile
 
-        def my_compile(source_code, dst_file_ext):
+        def my_compile(
+            source_code, dst_file_ext, extra_args: Optional[list[str]] = None
+        ):
             self.sources.append(source_code)
             return _compile_method_orig(source_code, dst_file_ext)
 
+        # pyrefly: ignore [bad-assignment]
         self._compile_patch = mock.patch(
             "torch._inductor.codecache.CUDACodeCache.compile", my_compile
         )

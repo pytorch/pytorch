@@ -16,7 +16,7 @@ struct QuantFusionInfo {
   std::string quantized_op_name;
   std::string pattern;
   std::string replacement;
-  std::vector<MatchFilter> filters = {};
+  std::vector<MatchFilter> filters;
 };
 
 namespace {
@@ -206,7 +206,7 @@ QuantFusionInfo getFixedQParamOpFusionInfo(
           %r = )";
   op_pattern += op_name + "(" + "%a_dequant" + extra_op_arg_list + ")";
   // IR pattern common to all ops with fixed quantization parameters for
-  // asymetric quantization
+  // asymmetric quantization
   std::string asym_fixed_qparam_op_suffix = R"(
           %r_scale : float = prim::Constant[value=0.00390625]()
           %r_zero_point : int = prim::Constant[value=0]()

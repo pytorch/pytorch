@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """
 Utility functions and classes used throughout the TorchDynamo system.
 
@@ -47,22 +45,24 @@ import uuid
 import warnings
 import weakref
 from collections import Counter, OrderedDict
-from contextlib import contextmanager
+from contextlib import AbstractContextManager, contextmanager
 from dataclasses import is_dataclass
 from functools import lru_cache
-from types import MethodWrapperType
+from types import CodeType, MethodWrapperType
 from typing import (
     Any,
-    Callable,
     cast,
     ClassVar,
     Generic,
+    Literal,
     Optional,
     overload,
+    TypeAlias,
+    TypeGuard,
     TypeVar,
     Union,
 )
-from typing_extensions import Literal, TypeIs
+from typing_extensions import ParamSpec, TypeIs
 
 import torch
 import torch._functorch.config
@@ -89,19 +89,35 @@ from torch._utils_internal import (
 from torch.fx._utils import _format_graph_code, lazy_format_graph_code
 from torch.monitor import _WaitCounter
 from torch.nn.modules.lazy import LazyModuleMixin
+from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._triton import has_triton, has_triton_package
 from torch.utils.hooks import RemovableHandle
+
+from .graph_utils import _get_flat_args
 
 
 if typing.TYPE_CHECKING:
     from collections.abc import (
+        Callable,
+        Container,
         Generator,
         ItemsView,
         Iterable,
         Iterator,
         KeysView,
+        Mapping,
+        Sequence,
         ValuesView,
     )
+
+    from torch._dynamo.replay_record import ExecutionRecord
+    from torch._dynamo.symbolic_convert import (
+        InstructionTranslator,
+        InstructionTranslatorBase,
+    )
+    from torch._dynamo.variables.base import VariableTracker
+    from torch._prims_common import DeviceLikeType
+    from torch._subclasses import FakeTensorMode
 
 
 try:
@@ -112,7 +128,7 @@ except ModuleNotFoundError:
 try:
     import torch._logging
     import torch._numpy as tnp
-    from torch._guards import detect_fake_mode  # noqa: F401n
+    from torch._guards import detect_fake_mode  # noqa: F401
     from torch._logging import LazyString
 
     from . import config
@@ -142,6 +158,8 @@ except ImportError:
 
 
 T = TypeVar("T")
+R = TypeVar("R")
+_P = ParamSpec("_P")
 
 unpatched_nn_module_getattr = torch.nn.Module.__getattr__
 unpatched_nn_module_call = torch.nn.Module.__call__
@@ -151,9 +169,7 @@ counters: collections.defaultdict[str, Counter[str]] = collections.defaultdict(
     collections.Counter
 )
 optimus_scuba_log: dict[str, Any] = {}
-troubleshooting_url = (
-    "https://pytorch.org/docs/main/torch.compiler_troubleshooting.html"
-)
+troubleshooting_url = "https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.recompilation.html"
 nnmodule_doc_url = "https://pytorch.org/docs/main/torch.compiler_nn_module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
@@ -181,43 +197,43 @@ class ReinplaceCounters:
 
     # Track sizes of known not re-inplaced tensors (exclude dynamic shapes).
     @classmethod
-    def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int):
+    def add_missed_bytes(cls, trigger: ReInplaceTrigger, bytes: int) -> None:
         if bytes != 0:
             cls._values[f"missed_bytes_{trigger.name}"] += bytes
 
     # Track number of not re-inplaced tensors.
     @classmethod
-    def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int):
+    def add_missed_opportunities(cls, trigger: ReInplaceTrigger, count: int) -> None:
         if count != 0:
             cls._values[f"missed_tensors_{trigger}"] += count
 
     @classmethod
-    def clear(cls):
+    def clear(cls) -> None:
         cls._values.clear()
 
     @classmethod
-    def get_total_missed(cls):
+    def get_total_missed(cls) -> int:
         sum = 0
         for trigger in ReInplaceTrigger:
             sum += cls._values.get(f"missed_tensors_{trigger}", 0)
         return sum
 
     @classmethod
-    def get_total_missed_bytes(cls):
+    def get_total_missed_bytes(cls) -> int:
         sum = 0
         for trigger in ReInplaceTrigger:
             sum += cls._values.get(f"missed_bytes_{trigger.name}", 0)
         return sum
 
     @classmethod
-    def log(cls):
+    def log(cls) -> None:
         # if not empty log.
         if cls._values:
             signpost_event("inductor", "reinplace_counters", cls._values)
 
 
 def tabulate(
-    rows: Union[list[tuple[str, object]], list[list[object]]],
+    rows: Union[list[tuple[str, Any]], list[list[Any]]],
     headers: Union[tuple[str, ...], list[str]],
 ) -> str:
     try:
@@ -247,6 +263,33 @@ def reset_frame_count() -> None:
     curr_frame = 0
 
 
+_recompile_user_contexts: Optional[list[Callable[[], str]]] = None
+
+
+def register_hook_for_recompile_user_context(hook: Callable[[], str]) -> None:
+    """
+    Register a hook to be called when a recompile is triggered. The hook
+    should return a string describing user contexts that are not available
+    to the compiler, such as the current training epoch. This is useful for
+    debugging and data analysis for recompile. For data retention purposes,
+    the user context string is capped at 256 characters.
+    """
+    global _recompile_user_contexts
+    if _recompile_user_contexts is None:
+        _recompile_user_contexts = []
+    _recompile_user_contexts.append(hook)
+
+
+def get_hook_for_recompile_user_context() -> Optional[list[Callable[[], str]]]:
+    return _recompile_user_contexts
+
+
+def reset_recompile_user_contexts() -> None:
+    """Clear any registered recompile user-context hooks (test helper)."""
+    global _recompile_user_contexts
+    _recompile_user_contexts = None
+
+
 op_count = 0
 
 
@@ -260,11 +303,13 @@ def increment_op_count(cnt: int) -> None:
 def calculate_time_spent() -> dict[str, float]:
     total_by_key = {}
     for phase, timing in cumulative_time_spent_ns.items():
+        # pyrefly: ignore [unsupported-operation]
         total_by_key[phase] = timing / 1e9
 
     total_by_key["total_wall_time"] = total_by_key.get(
         "entire_frame_compile", 0
     ) + total_by_key.get("entire_backward_compile", 0)
+    # pyrefly: ignore [bad-return]
     return total_by_key
 
 
@@ -304,16 +349,23 @@ def print_time_report() -> None:
 #        with dynamo_timed("metric", dynamo_compile_column_us="metric_us")
 #            ...
 #
-_METRICS_CONTEXT: MetricsContext
-_RUNTIME_METRICS_CONTEXT: RuntimeMetricsContext
+_metrics_context_tls = threading.local()
 
 
 def get_metrics_context() -> MetricsContext:
-    return _METRICS_CONTEXT
+    if not hasattr(_metrics_context_tls, "metrics_context"):
+        _metrics_context_tls.metrics_context = MetricsContext(
+            on_exit=record_compilation_metrics
+        )
+    return _metrics_context_tls.metrics_context
 
 
 def get_runtime_metrics_context() -> RuntimeMetricsContext:
-    return _RUNTIME_METRICS_CONTEXT
+    if not hasattr(_metrics_context_tls, "runtime_metrics_context"):
+        _metrics_context_tls.runtime_metrics_context = RuntimeMetricsContext(
+            on_exit=record_compilation_metrics
+        )
+    return _metrics_context_tls.runtime_metrics_context
 
 
 class CompileEventLogLevel(enum.Enum):
@@ -361,7 +413,7 @@ class CompileEventLogger:
         metadata: dict[str, Any],
         time_ns: Optional[int] = None,
         log_level: CompileEventLogLevel = CompileEventLogLevel.CHROMIUM,
-    ):
+    ) -> None:
         if time_ns is None:
             time_ns = time.time_ns()
         chromium_log = get_chromium_event_logger()
@@ -383,7 +435,7 @@ class CompileEventLogger:
         log_level: CompileEventLogLevel,
         overwrite: bool = False,
         **metadata: object,
-    ):
+    ) -> None:
         """
         Centralized API for adding data to various events
         Log an event to a toplevel "dynamo" event or metrics context
@@ -426,7 +478,7 @@ class CompileEventLogger:
     @staticmethod
     def add_toplevel(
         log_level: CompileEventLogLevel, overwrite: bool = False, **metadata: object
-    ):
+    ) -> None:
         """
         Syntactic sugar for logging to the toplevel event
         """
@@ -440,7 +492,7 @@ class CompileEventLogger:
     @staticmethod
     def increment(
         event_name: str, log_level: CompileEventLogLevel, key: str, value: int
-    ):
+    ) -> None:
         """
         Increments an existing field, or adds it
         """
@@ -473,7 +525,7 @@ class CompileEventLogger:
         key: str,
         value: int = 1,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
-    ):
+    ) -> None:
         """
         Increments a value on the toplevel metric. By default, logs to metric.
         """
@@ -488,7 +540,7 @@ class CompileEventLogger:
     @staticmethod
     def add_to_set(
         event_name: str, log_level: CompileEventLogLevel, key: str, value: Any
-    ):
+    ) -> None:
         """
         Add metadata <value> to a set of values with key <key>. Creates a set if it doesn't exist.
         """
@@ -521,7 +573,7 @@ class CompileEventLogger:
         key: str,
         value: Any,
         log_level: CompileEventLogLevel = CompileEventLogLevel.COMPILATION_METRIC,
-    ):
+    ) -> None:
         """
         Same as add to set, just does it automatically to the toplevel event instead of having to explicitly name it.
         Defaults to COMPILATION_METRIC log level.
@@ -537,7 +589,7 @@ class CompileEventLogger:
     # Helper functions that are syntactic sugar
 
     @staticmethod
-    def chromium(event_name: str, **metadata: object):
+    def chromium(event_name: str, **metadata: object) -> None:
         """
         Add <metadata> to <event_name> in chromium. Each key/value of metadata will appear in the chromium trace.
         <event_name> should be the name of a timed event span passed to `dynamo_timed`.
@@ -547,7 +599,7 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def pt2_compile(event_name: str, **metadata: object):
+    def pt2_compile(event_name: str, **metadata: object) -> None:
         """
         Add <metadata> to <event_name> in chromium and PT2 Compile Events.
         Each key/value of metadata will appear in the chromium trace. Each kwarg name becomes
@@ -560,7 +612,7 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def compilation_metric(overwrite: bool = False, **metadata: object):
+    def compilation_metric(overwrite: bool = False, **metadata: object) -> None:
         """
         Add <metadata> to the CompilationMetrics context. Also logs to PT2 Compile Events
         and chromium.
@@ -574,7 +626,7 @@ class CompileEventLogger:
     @staticmethod
     def instant(
         event_name: str, metadata: dict[str, Any], time_ns: Optional[int] = None
-    ):
+    ) -> None:
         """
         Log an instant event to chromium logs with name <event_name> at time <time_ns>. The `args` field in
         Perfetto will point to metadata. <time_ns> should be a value obtained from time.time_ns().
@@ -584,23 +636,23 @@ class CompileEventLogger:
         )
 
     @staticmethod
-    def try_add_pt2_compile(event_name: str, **metadata: object):
+    def try_add_pt2_compile(event_name: str, **metadata: object) -> None:
         """
         Adds to an existing pt2_compile event, but silently returns if the event doesn't exist
         or ChromiumEventLogger is not initialized.
         This function is syntactic sugar for chromium_event_logger().try_add_event_data.
         """
-        if CHROMIUM_EVENT_LOG is None:
+        if not chromium_event_log_active():
             return
         chromium_log = get_chromium_event_logger()
         chromium_log.try_add_event_data(event_name, **metadata)
 
     @staticmethod
-    def try_(method_fn, *args, **kwargs):
+    def try_(method_fn: Callable[_P, Any], *args: _P.args, **kwargs: _P.kwargs) -> None:
         """
         Special function that quietly runs a given method, returning if CHROMIUM_EVENT_LOG is None or metrics context is not set
         """
-        if CHROMIUM_EVENT_LOG is None:
+        if not chromium_event_log_active():
             return
         metrics_context = get_metrics_context()
         if not metrics_context.in_progress():
@@ -609,6 +661,30 @@ class CompileEventLogger:
 
 
 _dynamo_timed_tls = threading.local()
+
+
+@contextmanager
+def compile_time_record_function(name: str) -> Generator[Any, None, None]:
+    """
+    A context manager for compile-time profiling that uses _RecordFunctionFast
+    for lower overhead than torch.profiler.record_function.
+
+    This is intended for use during compilation (dynamo, inductor, etc.) where
+    we want profiling support but with minimal overhead. Moreover, we do not
+    want the record_function call inside torch.compile to be dispatched.
+
+    Args:
+        name: The name of the record function event that will appear in profiles.
+    """
+    if torch.autograd.profiler._is_profiler_enabled:
+        rf = torch._C._profiler._RecordFunctionFast(name)
+        rf.__enter__()
+        try:
+            yield
+        finally:
+            rf.__exit__(None, None, None)
+    else:
+        yield
 
 
 @contextmanager
@@ -675,6 +751,7 @@ def dynamo_timed(
     if key not in compilation_time_metrics:
         compilation_time_metrics[key] = []
 
+    metrics = compilation_time_metrics[key]
     event_metadata = {}
     if metadata:
         event_metadata.update(metadata)
@@ -689,9 +766,7 @@ def dynamo_timed(
         event_name, start_ns, event_metadata, log_pt2_compile_event, compile_id
     )
 
-    cx_mgrs: list[typing.Any] = [
-        torch.profiler.record_function(f"{key} (dynamo_timed)")
-    ]
+    cx_mgrs: list[typing.Any] = [compile_time_record_function(f"{key} (dynamo_timed)")]
     if log_waitcounter:
         wc_name = waitcounter_name_override if waitcounter_name_override else key
         cx_mgrs.append(_WaitCounter(f"pytorch.wait_counter.{wc_name}").guard())
@@ -722,7 +797,7 @@ def dynamo_timed(
     finally:
         end_ns = time.time_ns()
         time_spent_ns = end_ns - start_ns
-        compilation_time_metrics[key].append(time_spent_ns / 1e9)
+        metrics.append(time_spent_ns / 1e9)
         chromium_log.log_event_end(
             event_name, end_ns, {}, start_ns, log_pt2_compile_event, compile_id
         )
@@ -762,12 +837,15 @@ def compile_times(repr: Literal["str"], aggregate: bool = False) -> str: ...
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def compile_times(
     repr: Literal["csv"], aggregate: bool = False
 ) -> tuple[list[str], list[object]]: ...
 
 
-def compile_times(repr="str", aggregate: bool = False):
+def compile_times(  # type: ignore[misc]
+    repr: str = "str", aggregate: bool = False
+) -> Union[str, None, tuple[list[str], list[str]]]:
     """
     Get metrics about torchdynamo frontend/backend compilation times.
 
@@ -781,7 +859,7 @@ def compile_times(repr="str", aggregate: bool = False):
     per metric.
     """
 
-    def fmt_fn(values, item_fn=lambda x: x):
+    def fmt_fn(values: list[float], item_fn: Callable[[float], str] = str) -> str:
         if aggregate:
             return item_fn(sum(values))
         return ", ".join(map(item_fn, values))
@@ -828,8 +906,8 @@ class DuplicateWarningChecker:
         self.maxsize = maxsize
         self.reset()
 
-    def reset(self):
-        self.set = OrderedDict()
+    def reset(self) -> None:
+        self.set: OrderedDict[Any, Any] = OrderedDict()
 
     def add(self, key: Union[str, tuple[object, object]]) -> bool:
         if key in self.set:
@@ -846,7 +924,7 @@ class DuplicateWarningChecker:
 graph_break_dup_warning_checker = DuplicateWarningChecker()
 
 
-def setup_compile_debug():
+def setup_compile_debug() -> contextlib.ExitStack:
     compile_debug = os.environ.get("TORCH_COMPILE_DEBUG", "0") == "1"
 
     if compile_debug:
@@ -859,11 +937,33 @@ def reset_graph_break_dup_checker() -> None:
     graph_break_dup_warning_checker.reset()
 
 
-def add_file_handler():
+# Matches ANSI escape sequences (CSI)
+ANSI_ESCAPE_PATTERN = re.compile(
+    r"""
+    \x1B            # ESC
+    \[              # [
+    [0-?]*          # Parameter bytes
+    [ -/]*          # Intermediate bytes
+    [@-~]           # Final byte
+    """,
+    re.VERBOSE,
+)
+
+
+class StripAnsiFormatter(logging.Formatter):
+    """Logging formatter that strips ANSI escape codes."""
+
+    def format(self, record):
+        msg = super().format(record)
+        return ANSI_ESCAPE_PATTERN.sub("", msg)
+
+
+def add_file_handler() -> contextlib.ExitStack:
     log_path = os.path.join(get_debug_dir(), "torchdynamo")
     os.makedirs(log_path, exist_ok=True)
 
     log_file_handler = logging.FileHandler(os.path.join(log_path, "debug.log"))
+    log_file_handler.setFormatter(StripAnsiFormatter("%(message)s"))
     logger = logging.getLogger("torch._dynamo")
     logger.addHandler(log_file_handler)
 
@@ -872,7 +972,7 @@ def add_file_handler():
     return exitstack
 
 
-def setup_log_file():
+def setup_log_file() -> contextlib.ExitStack:
     exitstack = contextlib.ExitStack()
     if config.log_file_name is not None:
         log_file_handler = logging.FileHandler(config.log_file_name)
@@ -884,12 +984,12 @@ def setup_log_file():
     return exitstack
 
 
-def gen_record_file_name(exc, code) -> str:
+def gen_record_file_name(exc: Exception, code: CodeType) -> str:
     return f"{get_debug_dir()}/error_recordings/\
 {code.co_name}_{type(exc).__name__}_{code.co_firstlineno}.rec"
 
 
-def write_record_to_file(filename: str, exec_record) -> None:
+def write_record_to_file(filename: str, exec_record: ExecutionRecord) -> None:
     try:
         if os.path.exists(filename):
             log.warning(
@@ -915,7 +1015,7 @@ def identity(x: T) -> T:
     return x
 
 
-def hashable(x):
+def hashable(x: Any) -> bool:
     try:
         hash(x)
         return True
@@ -926,39 +1026,39 @@ def hashable(x):
         return False
 
 
-def nothing(*args, **kwargs):
+def nothing(*args: Any, **kwargs: Any) -> None:
     pass
 
 
 class ExactWeakKeyDictionary:
     """Similar to weakref.WeakKeyDictionary, but use `is`/`id` rather than `==` to compare equality"""
 
-    def __init__(self):
-        self.values = {}
-        self.refs = {}
+    def __init__(self) -> None:
+        self.values: dict[int, Any] = {}
+        self.refs: dict[int, weakref.ReferenceType[Any]] = {}
 
-    def __getitem__(self, key):
+    def __getitem__(self, key: Any) -> Any:
         return self.values[id(key)]
 
-    def get(self, key, default=None):
+    def get(self, key: Any, default: Any = None) -> Any:
         return self.values.get(id(key), default)
 
-    def __contains__(self, key):
+    def __contains__(self, key: Any) -> bool:
         return id(key) in self.values
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key: Any, value: Any) -> None:
         idx = id(key)
         if idx not in self.refs:
             self.refs[idx] = weakref.ref(key, lambda ref: self._remove_id(idx))
         self.values[idx] = value
 
-    def _remove_id(self, idx):
+    def _remove_id(self, idx: int) -> None:
         if idx in self.values:
             del self.values[idx]
         if idx in self.refs:
             del self.refs[idx]
 
-    def clear(self):
+    def clear(self) -> None:
         self.refs.clear()
         self.values.clear()
 
@@ -977,7 +1077,7 @@ def istype(
 def istype(obj: object, allowed_types: Iterable[type]) -> bool: ...
 
 
-def istype(obj, allowed_types):
+def istype(obj: object, allowed_types: Any) -> bool:
     """isinstance() without subclasses"""
     if isinstance(allowed_types, (tuple, list, set)):
         return type(obj) in allowed_types
@@ -987,6 +1087,8 @@ def istype(obj, allowed_types):
 if sys.version_info >= (3, 12):
     # Some typing classes moved to C in 3.12,
     # which no longer have the _Final mixin.
+    # Check for consistency e.g. here:
+    # https://github.com/python/cpython/blob/f2b82b3b3b1f8c7a81e84df35ee921e44517cf32/Lib/typing.py#L32
     _builtin_final_typing_classes = (
         typing.ParamSpecArgs,
         typing.ParamSpecKwargs,
@@ -997,21 +1099,29 @@ if sys.version_info >= (3, 12):
     )
 
 
-def is_typing(value):
+if sys.version_info >= (3, 14):
+    _builtin_final_typing_classes += (typing.Union,)
+
+
+def is_typing(value: Any) -> bool:
     # _Final catches most of typing classes:
     #   - Any
     #   - Callable
-    #   - Union
+    #   - Union (Python < 3.14)
     #   ...
     #
     # NB: we intentionally ignore classes that inherit from Generic, since they
     # can be used as both TypingVariable as well as UserDefinedClassVariable.
     if sys.version_info >= (3, 12) and isinstance(value, _builtin_final_typing_classes):
         return True
-    return isinstance(value, typing._Final) or value is typing.Generic  # type: ignore[attr-defined]
+    return (
+        isinstance(value, typing._Final)  # type: ignore[attr-defined]
+        or value is typing.Generic
+        or value is typing.Union
+    )
 
 
-def is_numpy_int_type(value):
+def is_numpy_int_type(value: Any) -> bool:
     if not np:
         return False
 
@@ -1030,7 +1140,7 @@ def is_numpy_int_type(value):
     )
 
 
-def is_numpy_float_type(value):
+def is_numpy_float_type(value: Any) -> bool:
     if not np:
         return False
 
@@ -1044,19 +1154,45 @@ def is_numpy_float_type(value):
     )
 
 
-def is_lru_cache_wrapped_function(value):
+@overload
+def is_lru_cache_wrapped_function(
+    value: Callable[..., T],
+) -> TypeGuard[functools._lru_cache_wrapper[T]]: ...
+
+
+@overload
+def is_lru_cache_wrapped_function(
+    value: Any,
+) -> TypeGuard[functools._lru_cache_wrapper[Any]]: ...
+
+
+def is_lru_cache_wrapped_function(
+    value: Any,
+) -> bool:
     return isinstance(value, functools._lru_cache_wrapper) and is_function(
         inspect.getattr_static(value, "__wrapped__")
     )
 
 
-def is_function_or_wrapper(value):
+_FuncTypes: TypeAlias = Union[
+    types.FunctionType,
+    types.BuiltinFunctionType,
+    types.MethodDescriptorType,
+    types.WrapperDescriptorType,
+]
+
+
+def is_function_or_wrapper(
+    value: Any,
+) -> TypeIs[Union[_FuncTypes, torch._ops.OpOverloadPacket, torch._ops.OpOverload]]:
     return is_function(value) or isinstance(
         value, (torch._ops.OpOverloadPacket, torch._ops.OpOverload)
     )
 
 
-def is_function(value):
+def is_function(
+    value: Any,
+) -> TypeIs[_FuncTypes]:
     return isinstance(
         value,
         (
@@ -1088,7 +1224,17 @@ cmp_name_to_op_str_mapping = {
 }
 
 
-def is_wrapper_or_member_descriptor(value):
+def is_wrapper_or_member_descriptor(
+    value: Any,
+) -> TypeIs[
+    Union[
+        types.GetSetDescriptorType,
+        types.MethodDescriptorType,
+        types.WrapperDescriptorType,
+        types.MemberDescriptorType,
+        types.MethodWrapperType,
+    ]
+]:
     return isinstance(
         value,
         (
@@ -1106,11 +1252,11 @@ def is_wrapper_or_member_descriptor(value):
     )
 
 
-def unwrap_if_wrapper(fn):
+def unwrap_if_wrapper(fn: Any) -> Any:
     return unwrap_with_attr_name_if_wrapper(fn)[0]
 
 
-def unwrap_with_attr_name_if_wrapper(fn):
+def unwrap_with_attr_name_if_wrapper(fn: Any) -> tuple[Any, Optional[str]]:
     # TODO(anijain2305) - Investigate if we can get rid of this function
     # unpack @torch._dynamo.optimize()(fn) wrapped function
     if is_function(fn) and inspect.getattr_static(fn, "_torchdynamo_inline", False):
@@ -1121,14 +1267,14 @@ def unwrap_with_attr_name_if_wrapper(fn):
     return fn, attr_name
 
 
-def is_numpy_ndarray(value):
+def is_numpy_ndarray(value: Any) -> TypeGuard[np.ndarray]:  # type: ignore[type-arg]
     if not np:
         return False
 
     return istype(value, np.ndarray)
 
 
-def istensor(obj):
+def istensor(obj: Any) -> bool:
     """Check of obj is a tensor"""
     tensor_list: tuple[type, ...] = (
         torch.Tensor,
@@ -1139,36 +1285,36 @@ def istensor(obj):
     return istype(obj, tensor_list)
 
 
-def is_lazy_module(mod):
+def is_lazy_module(mod: Any) -> bool:
     return isinstance(mod, LazyModuleMixin)
 
 
 @functools.lru_cache(4096)
-def print_once(*args):
+def print_once(*args: Any) -> None:
     print(*args)
 
 
-def make_cell(val=None):
+def make_cell(val: Any = None) -> types.CellType:
     """Some black magic to create a cell object that usually only exists in a closure"""
     x = val
 
-    def f():
+    def f() -> Any:
         return x
 
     assert f.__closure__ is not None and len(f.__closure__) == 1
     return f.__closure__[0]
 
 
-def proxy_args_kwargs(args, kwargs):
+def proxy_args_kwargs(args: Any, kwargs: Any) -> tuple[tuple[Any, ...], dict[str, Any]]:
     try:
         proxy_args = tuple(arg.as_proxy() for arg in args)
         proxy_kwargs = {key: arg.as_proxy() for key, arg in kwargs.items()}
         return proxy_args, proxy_kwargs
     except NotImplementedError as e:
-        from .exc import unimplemented_v2
+        from .exc import unimplemented
         from .variables.base import typestr
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Failed to convert args/kwargs to proxy",
             context=f"call_function args: {typestr(*args)} {typestr(*list(kwargs.values()))}",
             explanation="Missing `as_proxy()` implementation for some arg/kwarg.",
@@ -1219,6 +1365,9 @@ class CompilationMetrics:
     compliant_custom_ops: Optional[set[str]] = None
     restart_reasons: Optional[set[str]] = None
     dynamo_time_before_restart_s: Optional[float] = None
+    stack_trace: Optional[list[str]] = None
+    exception_stack_trace: Optional[list[str]] = None
+    graph_node_shapes: Optional[str] = None
     # Sometimes, we will finish analyzing a frame but conclude we don't want
     # to install any guarded code.  True means we actually decided to install
     # a compiled frame
@@ -1229,6 +1378,7 @@ class CompilationMetrics:
     config_inline_inbuilt_nn_modules: Optional[bool] = None
     specialize_float: Optional[bool] = None
     dynamo_config: Optional[str] = None
+    compiler_config: Optional[str] = None
     is_forward: Optional[bool] = None
     num_triton_bundles: Optional[int] = None
     remote_fx_graph_cache_get_time_ms: Optional[int] = None
@@ -1243,7 +1393,6 @@ class CompilationMetrics:
     runtime_cudagraphify_time_us: Optional[int] = None
     runtime_triton_autotune_time_us: Optional[int] = None
     dynamo_compile_time_before_restart_us: Optional[int] = None
-    cuda_synchronize_time_us: Optional[int] = None  # TODO: instrument
     distributed_ephemeral_timeout_us: Optional[int] = None
     structured_logging_overhead_us: Optional[int] = None
     remote_fx_graph_cache_get_time_us: Optional[int] = None
@@ -1288,9 +1437,13 @@ class CompilationMetrics:
     # The number of parameters counted by fields. This is mostly a proxy for
     # the number of distinct type of params.
     param_count: Optional[int] = None
+    recompile_user_contexts: Optional[set[str]] = None
+    inline_inbuilt_nn_modules_candidate: Optional[bool] = False
+    pytorch_version: Optional[str] = None
+    inductor_provenance: Optional[set[str]] = None
 
     @classmethod
-    def create(cls, metrics: dict[str, Any]):
+    def create(cls, metrics: dict[str, Any]) -> CompilationMetrics:
         """
         Factory method to create a CompilationMetrics from a dict of fields.
         Includes the logic to add legacy fields and any pre-processing, e.g.,
@@ -1371,6 +1524,7 @@ class CompilationMetrics:
         compile_id = all_metrics.get("compile_id")
         all_metrics["compile_id"] = str(compile_id) if compile_id else None
 
+        # pyrefly: ignore [bad-argument-type]
         return cls(**all_metrics)
 
 
@@ -1415,15 +1569,15 @@ def add_compilation_metrics_to_chromium(c: CompilationMetrics) -> None:
         fail_user_frame_filename=c.fail_user_frame_filename,
         fail_user_frame_lineno=c.fail_user_frame_lineno,
         # Sets aren't JSON serializable
-        non_compliant_ops=list(c.non_compliant_ops)
-        if c.non_compliant_ops is not None
-        else None,
-        compliant_custom_ops=list(c.compliant_custom_ops)
-        if c.compliant_custom_ops is not None
-        else None,
-        restart_reasons=list(c.restart_reasons)
-        if c.restart_reasons is not None
-        else None,
+        non_compliant_ops=(
+            list(c.non_compliant_ops) if c.non_compliant_ops is not None else None
+        ),
+        compliant_custom_ops=(
+            list(c.compliant_custom_ops) if c.compliant_custom_ops is not None else None
+        ),
+        restart_reasons=(
+            list(c.restart_reasons) if c.restart_reasons is not None else None
+        ),
         dynamo_time_before_restart_s=c.dynamo_time_before_restart_s,
         has_guarded_code=c.has_guarded_code,
         dynamo_config=c.dynamo_config,
@@ -1465,6 +1619,30 @@ def _get_dynamo_config_for_logging() -> Optional[str]:
     return json.dumps(config_dict, sort_keys=True)
 
 
+def _compiler_config_for_logging() -> Optional[str]:
+    def clean_for_json(d: dict[str, Any]) -> dict[str, Any]:
+        blocklist = {
+            "TYPE_CHECKING",
+        }
+
+        return {
+            key: sorted(value) if isinstance(value, set) else value
+            for key, value in d.items()
+            if key not in blocklist
+        }
+
+    if not torch.compiler.config:
+        return None
+
+    try:
+        compiler_config_copy = torch.compiler.config.get_config_copy()  # type: ignore[attr-defined]
+    except (TypeError, AttributeError):
+        return "Compiler Config cannot be pickled"
+
+    config_dict = clean_for_json(compiler_config_copy)
+    return json.dumps(config_dict, sort_keys=True)
+
+
 def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     """
     Method to parse and scrub uninteresting configs from inductor config
@@ -1473,7 +1651,7 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
     # TypeSafeSerializer for json.dumps()
     # Skips complex types as values in config dict
     class TypeSafeSerializer(json.JSONEncoder):
-        def default(self, o):
+        def default(self, o: Any) -> Any:
             try:
                 return super().default(o)
             except Exception:
@@ -1481,9 +1659,14 @@ def _scrubbed_inductor_config_for_logging() -> Optional[str]:
 
     keys_to_scrub: set[Any] = set()
     inductor_conf_str = None
-    inductor_config_copy = (
-        torch._inductor.config.get_config_copy() if torch._inductor.config else None
-    )
+    inductor_config_copy = None
+
+    if torch._inductor.config:
+        try:
+            inductor_config_copy = torch._inductor.config.get_config_copy()
+        except (TypeError, AttributeError, RuntimeError, AssertionError):
+            inductor_conf_str = "Inductor Config cannot be pickled"
+
     if inductor_config_copy is not None:
         try:
             for key, val in inductor_config_copy.items():
@@ -1514,7 +1697,7 @@ def record_compilation_metrics(
     metrics: dict[str, Any],
     exc_type: Optional[type[BaseException]],
     exc_value: Optional[BaseException],
-):
+) -> None:
     if torch._inductor.utils.should_use_remote_fx_graph_cache():
         try:
             from torch._inductor.fb.remote_cache import REMOTE_CACHE_VERSION
@@ -1544,12 +1727,16 @@ def record_compilation_metrics(
             torch._logging.get_structured_logging_overhead()
         ),
         "dynamo_config": _get_dynamo_config_for_logging(),
+        "config_suppress_errors": config.suppress_errors,
+        "config_inline_inbuilt_nn_modules": config.inline_inbuilt_nn_modules,
         "inductor_config": _scrubbed_inductor_config_for_logging(),
+        "compiler_config": _compiler_config_for_logging(),
         "cuda_version": torch.version.cuda,
         "triton_version": triton.__version__ if has_triton() else "",
         "remote_cache_version": remote_cache_version,
         "inductor_fx_remote_cache_backend_type": inductor_fx_remote_cache_backend_type,
         "python_version": sys.version,
+        "pytorch_version": torch.__version__,
     }
 
     compilation_metrics = CompilationMetrics.create({**common_metrics, **metrics})
@@ -1584,11 +1771,6 @@ def record_compilation_metrics(
     # Finally log the compilation metrics.
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
-
-
-# record_compilation_metrics is called by the singleton MetricsContext exit handler.
-_METRICS_CONTEXT = MetricsContext(on_exit=record_compilation_metrics)
-_RUNTIME_METRICS_CONTEXT = RuntimeMetricsContext(on_exit=record_compilation_metrics)
 
 
 def set_compilation_metrics_limit(new_size: int) -> None:
@@ -1634,7 +1816,7 @@ class ChromiumEventLogger:
         stack = self.get_stack()
         return stack[0] if stack else None
 
-    def get_pt2_compile_substack(self):
+    def get_pt2_compile_substack(self) -> list[str]:
         """
         A smaller subset of the main stack that gets used to log
         PT2 Compile Events internally.
@@ -1650,16 +1832,22 @@ class ChromiumEventLogger:
             self.tls.event_data = {}
         return self.tls.event_data
 
-    def __init__(self):
+    def __init__(self) -> None:
         self.tls = threading.local()
+
+        from . import config
+
         # Generate a unique id for this logger, which we can use in scuba to filter down
         # to a single python run.
-        self.id_ = str(uuid.uuid4())
+        if config.pt2_compile_id_prefix:
+            self.id_ = f"{config.pt2_compile_id_prefix}-{uuid.uuid4()}"
+        else:
+            self.id_ = str(uuid.uuid4())
 
         # TODO: log to init/id tlparse after I add support for it
         log.info("ChromiumEventLogger initialized with id %s", self.id_)
 
-    def try_add_event_data(self, event_name: str, **kwargs) -> None:
+    def try_add_event_data(self, event_name: str, **kwargs: Any) -> None:
         """
         Same as add_event_data, but will silently not log if the event isn't in the stack.
         """
@@ -1670,7 +1858,7 @@ class ChromiumEventLogger:
     def add_event_data(
         self,
         event_name: str,
-        **kwargs,
+        **kwargs: Any,
     ) -> None:
         """
         Adds additional metadata info to an in-progress event
@@ -1687,7 +1875,7 @@ class ChromiumEventLogger:
             event_data[event_name] = {}
         event_data[event_name].update(kwargs)
 
-    def increment(self, event_name: str, key: str, value: int):
+    def increment(self, event_name: str, key: str, value: int) -> None:
         """
         Increment an integer event data field by the given amount
         """
@@ -1710,7 +1898,7 @@ class ChromiumEventLogger:
         event_name: str,
         key: str,
         value: Any,
-    ):
+    ) -> None:
         """
         Add a value to a set within a event_name's metadata if it exists
         """
@@ -1806,7 +1994,7 @@ class ChromiumEventLogger:
             event_metadata,
         )
 
-        def pop_stack(stack):
+        def pop_stack(stack: list[str]) -> None:
             while event_name != stack[-1]:
                 # If the event isn't the most recent one to end, pop
                 # off the stack until it is.
@@ -1922,6 +2110,11 @@ def get_chromium_event_logger() -> ChromiumEventLogger:
     return CHROMIUM_EVENT_LOG
 
 
+def chromium_event_log_active() -> bool:
+    global CHROMIUM_EVENT_LOG
+    return CHROMIUM_EVENT_LOG is not None
+
+
 @contextmanager
 def chromium_event_timed(
     event_name: str,
@@ -1962,14 +2155,14 @@ class CleanupHook:
     scope: dict[str, Any]
     name: str
 
-    def __call__(self, *args):
+    def __call__(self, *args: Any) -> None:
         # Make sure we're not shutting down
         if CleanupManager is not None:
             CleanupManager.count -= 1
         del self.scope[self.name]
 
     @staticmethod
-    def create(scope, name, val):
+    def create(scope: dict[str, Any], name: str, val: Any) -> CleanupHook:
         assert name not in scope
         CleanupManager.count += 1
         scope[name] = val
@@ -1980,7 +2173,7 @@ class CleanupManager(ExactWeakKeyDictionary):
     count = 0
     instance: ClassVar[CleanupManager]
 
-    def _remove_id(self, idx):
+    def _remove_id(self, idx: int) -> None:
         for hook in self.values[idx]:
             hook()
         super()._remove_id(idx)
@@ -1989,7 +2182,7 @@ class CleanupManager(ExactWeakKeyDictionary):
 CleanupManager.instance = CleanupManager()
 
 
-def clone_tensor(x):
+def clone_tensor(x: torch.Tensor) -> torch.Tensor:
     """Clone the tensor and its gradient"""
     y = x.clone().requires_grad_(x.requires_grad)
     if x.is_leaf and x.grad is not None:
@@ -1997,14 +2190,16 @@ def clone_tensor(x):
     return y
 
 
-def clone_input(x, *, dtype=None):
+def clone_input(
+    x: torch.Tensor, *, dtype: Optional[torch.dtype] = None
+) -> torch.Tensor:
     """copy while preserving strides"""
     # TODO: this is questionable
     if is_fake(x):
         # this func fails on fake tensors in __torch_dispatch__
         return x
 
-    def torch_clone(x):
+    def torch_clone(x: torch.Tensor) -> torch.Tensor:
         y = torch.clone(x)
         if x.is_leaf:
             y.requires_grad_(x.requires_grad)
@@ -2041,6 +2236,10 @@ def clone_input(x, *, dtype=None):
                 x.shape,
                 layout=x.layout,
             )
+        elif is_traceable_wrapper_subclass(x):
+            # Questionable - but this is required to not fail executorch related
+            # torchao tests.
+            return torch_clone(x)
 
         needed_size = sum(
             (shape - 1) * stride for shape, stride in zip(x.size(), x.stride())
@@ -2071,8 +2270,18 @@ def clone_input(x, *, dtype=None):
         return result
 
 
-def clone_inputs(example_inputs):
-    res: Union[dict[Any, Any], list[Any]]
+@overload
+def clone_inputs(
+    example_inputs: dict[str, Union[T, tuple[T, ...]]],
+) -> dict[str, list[T]]: ...
+
+
+@overload
+def clone_inputs(example_inputs: Sequence[T]) -> list[T]: ...
+
+
+def clone_inputs(example_inputs: Any) -> Any:
+    res: Union[dict[str, Any], list[Any]]
     if type(example_inputs) is dict:
         res = dict(example_inputs)
         for key, value in res.items():
@@ -2090,21 +2299,27 @@ def clone_inputs(example_inputs):
     return res
 
 
-def skip_frame_if_in_functorch_mode(val: torch.Tensor):
+def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
     try:
         val.data_ptr()  # will throw for functorch tensors
     except RuntimeError as e:
-        from .exc import SkipFrame
+        from .exc import unimplemented
 
         # This will be GradTrackingTensor/BatchedTensor/etc
         functorch_subclass_name = re.sub(r"\(.*", "", repr(val))
-        raise SkipFrame(
-            f"torch.compile cannot be run in context: {functorch_subclass_name}"
-        ) from e
+
+        unimplemented(
+            gb_type="skip frame due to being in functorh mode",
+            context="",
+            explanation=f"torch.compile cannot be run in context: {functorch_subclass_name}. Skipping frame.",
+            hints=[],
+            from_exc=e,
+            skip_frame=True,
+        )
 
 
 @contextmanager
-def preserve_rng_state():
+def preserve_rng_state() -> Generator[None, None, None]:
     disable_functorch = torch._C._DisableFuncTorch
     disable_current_modes = torch.utils._python_dispatch._disable_current_modes
     with disable_current_modes(), disable_functorch():
@@ -2121,7 +2336,17 @@ def preserve_rng_state():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
 
 
-def is_jit_model(model0):
+def is_jit_model(
+    model0: Any,
+) -> TypeIs[
+    Union[
+        torch.jit._trace.TopLevelTracedModule,
+        torch.jit._script.RecursiveScriptModule,
+        # pyrefly: ignore [invalid-param-spec]
+        torch.jit.ScriptFunction[Any, Any],
+        torch.jit.ScriptModule,
+    ]
+]:
     return isinstance(
         model0,
         (
@@ -2133,7 +2358,7 @@ def is_jit_model(model0):
     )
 
 
-def torchscript(model, example_inputs, verbose=False):
+def torchscript(model: Any, example_inputs: Any, verbose: bool = False) -> Any:
     if is_jit_model(model):
         # already done?
         return model
@@ -2151,19 +2376,19 @@ def torchscript(model, example_inputs, verbose=False):
     return None
 
 
-def getfile(obj):
+def getfile(obj: Any) -> Optional[str]:
     try:
         return inspect.getfile(obj)
     except (TypeError, OSError):
         return None
 
 
-def is_namedtuple(obj):
+def is_namedtuple(obj: Any) -> bool:
     """Test if an object is a namedtuple or a torch.return_types.* quasi-namedtuple"""
     return is_namedtuple_cls(type(obj))
 
 
-def is_namedtuple_cls(cls):
+def is_namedtuple_cls(cls: Any) -> bool:
     """Test if an object is a namedtuple or a (torch.return_types|torch.autograd.forward_ad).* quasi-namedtuple"""
     try:
         if issubclass(cls, tuple):
@@ -2194,7 +2419,7 @@ def is_namedtuple_cls(cls):
 
 
 @functools.lru_cache(1)
-def namedtuple_fields(cls) -> tuple[str, ...]:
+def namedtuple_fields(cls: type) -> tuple[str, ...]:
     """Get the fields of a namedtuple or a torch.return_types.* quasi-namedtuple"""
     if cls is slice:
         return ("start", "stop", "step")
@@ -2210,26 +2435,27 @@ def namedtuple_fields(cls) -> tuple[str, ...]:
 
     # frustrating ones e.g. torch.return_types.max
     assert cls.__module__ == "torch.return_types"
-    obj = cls(map(Marker, range(cls.n_fields)))
+    obj = cls(map(Marker, range(cls.n_fields)))  # type: ignore[attr-defined]
     fields: dict[str, int] = {}
     for name in dir(obj):
         if name[0] != "_" and isinstance(getattr(obj, name), Marker):
             fields[name] = getattr(obj, name).index
-    assert len(fields) == cls.n_fields
+    assert len(fields) == cls.n_fields  # type: ignore[attr-defined]
     return tuple(sorted(fields, key=fields.get))  # type: ignore[arg-type]
 
 
-def checkpoint_params(gm):
+def checkpoint_params(gm: torch.fx.GraphModule) -> Callable[[], None]:
     with torch.no_grad():
         rng_state = torch.clone(torch.random.get_rng_state())
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
         saved_state = [
             (param, param._version, torch.clone(param))
+            # pyrefly: ignore [bad-argument-type]
             for param in itertools.chain(gm.parameters(), gm.buffers())
         ]
 
-    def restore():
+    def restore() -> None:
         with torch.no_grad():
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
@@ -2241,7 +2467,9 @@ def checkpoint_params(gm):
     return restore
 
 
-def timed(model, example_inputs, times=1):
+def timed(
+    model: Any, example_inputs: Iterable[Any], times: int = 1
+) -> tuple[Any, float]:
     if torch.cuda.is_available():
         synchronize = torch.cuda.synchronize
     else:
@@ -2258,12 +2486,12 @@ def timed(model, example_inputs, times=1):
     return result, t1 - t0  # type: ignore[possibly-undefined]
 
 
-def check_is_cuda(gm, example_inputs):
+def check_is_cuda(gm: torch.fx.GraphModule, example_inputs: Iterable[Any]) -> bool:
     return all(x.is_cuda for x in itertools.chain(example_inputs, gm.parameters(True)))
 
 
 @lru_cache(32)
-def rot_n_helper(n):
+def rot_n_helper(n: int) -> Callable[..., Any]:
     assert n > 1
     vars = [f"v{i}" for i in range(n)]
     rotated = reversed(vars[-1:] + vars[:-1])
@@ -2307,7 +2535,7 @@ if has_triton_package():
 """
 
 
-def is_safe_constant(v):
+def is_safe_constant(v: Any) -> bool:
     if istype(v, (tuple, frozenset)):
         return all(map(is_safe_constant, v))
     return isinstance(
@@ -2325,8 +2553,8 @@ def is_safe_constant(v):
     )
 
 
-@functools.lru_cache(None)
-def common_constants():
+@functools.cache
+def common_constants() -> set[int]:
     return {
         # We zero-one specialize shapes, so specialize these constants
         # too
@@ -2335,27 +2563,31 @@ def common_constants():
     }
 
 
-def is_torch_sym(value):
+def is_torch_sym(value: Any) -> TypeGuard[Union[torch.SymBool, torch.SymInt]]:
     return isinstance(value, (torch.SymBool, torch.SymInt)) and not isinstance(
         value.node, torch.nested._internal.nested_int.NestedIntNode
     )
 
 
-def is_int_specialization_case(value, source):
+def is_int_specialization_case(value: Any, source: Any) -> bool:
     from .source import is_from_defaults
 
     return not TracingContext.get().force_unspec_int_unbacked_size_like and (
         # Assume integers from global variables want to be specialized
-        not source.guard_source().is_local()
+        not source.guard_source.is_local()
         # Assume that integers that came from NN modules want to be
         # specialized (as we don't expect users to be changing the
         # NN modules on the fly), unless explicitly disabled
         or (
-            source.guard_source().is_specialized_nn_module()
+            source.guard_source.is_specialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or (
-            source.guard_source().is_unspecialized_builtin_nn_module()
+            source.guard_source.is_unspecialized_builtin_nn_module()
+            and not config.allow_unspec_int_on_nn_module
+        )
+        or (
+            source.guard_source.is_unspecialized_nn_module()
             and not config.allow_unspec_int_on_nn_module
         )
         or is_from_defaults(source)
@@ -2368,7 +2600,7 @@ def is_int_specialization_case(value, source):
     )
 
 
-def specialize_symnode(arg):
+def specialize_symnode(arg: Any) -> Any:
     from .variables import ConstantVariable, LazyVariableTracker, SymNodeVariable
 
     # Guard and specialize
@@ -2393,35 +2625,37 @@ def specialize_symnode(arg):
     return arg
 
 
-def guard_if_dyn(arg):
-    from .variables import ConstantVariable
+def guard_if_dyn(arg: Any) -> Any:
+    from .variables import VariableTracker
 
     arg = specialize_symnode(arg)
 
-    if isinstance(arg, ConstantVariable):
+    if isinstance(arg, VariableTracker) and arg.is_python_constant():
         return arg.as_python_constant()
 
     return arg
 
 
-def check_constant_args(args, kwargs):
+def check_constant_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
     return all(x.is_python_constant() for x in itertools.chain(args, kwargs.values()))
 
 
-def check_unspec_python_args(args, kwargs):
-    from .variables.constant import ConstantVariable
+def check_unspec_python_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
+    from .variables import VariableTracker
     from .variables.tensor import UnspecializedPythonVariable
 
     unspec_count = 0
     for x in itertools.chain(args, kwargs.values()):
         if isinstance(x, UnspecializedPythonVariable):
             unspec_count += 1
-        elif not isinstance(x, ConstantVariable):
+        elif not (isinstance(x, VariableTracker) and x.is_python_constant()):
             return False
     return unspec_count > 0
 
 
-def check_unspec_or_constant_args(args, kwargs):
+def check_unspec_or_constant_args(
+    args: Iterable[Any], kwargs: Mapping[Any, Any]
+) -> bool:
     # A fused version of:
     # return check_constant_args(args, kwargs) or check_unspec_python_args(args, kwargs)
     from .variables.tensor import UnspecializedPythonVariable
@@ -2432,7 +2666,7 @@ def check_unspec_or_constant_args(args, kwargs):
     return True
 
 
-def check_numpy_ndarray_args(args, kwargs):
+def check_numpy_ndarray_args(args: Iterable[Any], kwargs: Mapping[Any, Any]) -> bool:
     from .variables.tensor import NumpyNdarrayVariable
 
     return any(
@@ -2445,7 +2679,9 @@ dict_keys: type[KeysView[Any]] = type({}.keys())
 dict_values: type[ValuesView[Any]] = type({}.values())
 dict_items: type[ItemsView[Any, Any]] = type({}.items())
 odict_values: type[ValuesView[Any]] = type(OrderedDict().values())
+# pyrefly: ignore [bad-assignment]
 tuple_iterator: type[Iterator[Any]] = type(iter(()))
+# pyrefly: ignore [bad-assignment]
 range_iterator: type[Iterator[Any]] = type(iter(range(0)))
 tuple_iterator_len = tuple_iterator.__length_hint__  # type: ignore[attr-defined]
 object_new = object.__new__
@@ -2455,6 +2691,10 @@ dict_methods = {
     for method in itertools.chain(dict.__dict__.values(), OrderedDict.__dict__.values())
     if callable(method)
 }
+set_methods = {method for method in set.__dict__.values() if callable(method)}
+frozenset_methods = {
+    method for method in frozenset.__dict__.values() if callable(method)
+}
 
 tuple_new = tuple.__new__
 tuple_methods = {method for method in tuple.__dict__.values() if callable(method)}
@@ -2463,68 +2703,89 @@ list_getitem = list.__getitem__
 
 str_methods = {method for method in str.__dict__.values() if callable(method)}
 
+K = TypeVar("K")
+V = TypeVar("V")
 
-def builtin_dict_keys(d):
+
+def builtin_dict_keys(d: dict[K, V]) -> KeysView[K]:
     # Avoids overridden keys method of the dictionary
     assert isinstance(d, dict)
     return dict.keys(d)
 
 
-def get_items_from_dict(obj):
+def get_items_from_dict(obj: dict[K, V]) -> Iterable[tuple[K, Union[V, Any]]]:
     # Get items without calling the user defined __getitem__ or keys method.
     assert isinstance(obj, dict)
     if istype(obj, (dict, OrderedDict)):
         return obj.items()
     elif isinstance(obj, OrderedDict):
+        # pyrefly: ignore [bad-argument-type]
         return [(k, OrderedDict.__getitem__(obj, k)) for k in OrderedDict.keys(obj)]
     else:
+        # pyrefly: ignore [bad-argument-type]
         return [(k, dict.__getitem__(obj, k)) for k in dict.keys(obj)]
 
 
-def nn_module_new(cls):
+def nn_module_new(cls: Any) -> Any:
     obj = object_new(cls)
+    # pyrefly: ignore [bad-argument-type]
     torch.nn.Module.__init__(obj)
     return obj
 
 
-def product(it):
+def product(it: Iterable[T]) -> int:
     return functools.reduce(operator.mul, it, 1)
 
 
-def tuple_iterator_getitem(it, index):
+def tuple_iterator_getitem(it: Any, index: int) -> Any:
     _, (obj,), start = it.__reduce__()
     return obj[start + index]
+
+
+def dataclass_fields(cls: Any) -> Any:
+    return torch._dynamo.disable(dataclasses.fields)(cls)
 
 
 iter_next = next
 
 
-def normalize_range_iter(range_iter) -> tuple[int, int, int]:
+def normalize_range_iter(range_iter: Any) -> tuple[int, int, int]:
     _, (range_obj,), maybe_idx = range_iter.__reduce__()
     # In 3.12+, `maybe_idx` could be None, and `range_obj.start` would've been
     # already incremented by the current index.
-    start = range_obj.start + (maybe_idx or 0)
+    # The index (maybe_idx) is the number of steps taken so far. To get the
+    # correct start value, one must add (maybe_idx * step) to the original
+    # start. See:
+    # https://github.com/python/cpython/blob/ea77feecbba389916af8f90b2fc77f07910a2963/Objects/rangeobject.c#L885-L899
+    start = range_obj.start + (maybe_idx or 0) * range_obj.step
     stop = range_obj.stop
     step = range_obj.step
     return (start, stop, step)
 
 
-def to_subclass(t, cls):
+def to_subclass(t: Any, cls: type) -> Any:
     return t.as_subclass(cls)
 
 
 dict_getitem = dict.__getitem__
 
 
-def dict_keys_getitem(d, n):
+@torch.fx.wrap
+def dict_keys_getitem(d: dict[Any, Any], n: int) -> Any:
     # Call dict(d) to prevent calling overridden __iter__/keys
     dict_class = dict
     if isinstance(d, OrderedDict):
         dict_class = OrderedDict
+    # pyrefly: ignore [bad-argument-type]
     return next(itertools.islice(dict_class.keys(d), n, n + 1))
 
 
-def enum_repr(value, local):
+def set_getitem(s: set[T], n: int) -> T:
+    # Set ordering might not be stable
+    return list(s)[n]
+
+
+def enum_repr(value: Any, local: bool) -> str:
     # enum class can override __str__ method. Use __class__ and name attribute
     # to extract the class name and key name.
     name = value.__class__.__name__
@@ -2534,7 +2795,7 @@ def enum_repr(value, local):
     return local_name
 
 
-def set_example_value(node, example_value):
+def set_example_value(node: torch.fx.Node, example_value: Any) -> None:
     # NB: example_value is a bit of a misnomer, because this is always a fake
     # tensor of some sort.  Furthermore, these example values serve as the
     # runtime state of Dynamo tracing, which means if metadata mutation
@@ -2542,7 +2803,9 @@ def set_example_value(node, example_value):
     # this to accurately reflect what the state of the value was at the time
     # the program was traced).
     node.meta["example_value"] = example_value
-    shape_env = TracingContext.get().fake_mode.shape_env
+    fake_mode = TracingContext.get().fake_mode
+    assert fake_mode is not None
+    shape_env = fake_mode.shape_env
     if (
         symbol_to_path
         := torch.fx.experimental.symbolic_shapes.compute_unbacked_bindings(
@@ -2552,13 +2815,13 @@ def set_example_value(node, example_value):
         node.meta["unbacked_bindings"] = symbol_to_path
 
 
-def _get_fake_tensor(vt):
+def _get_fake_tensor(vt: VariableTracker) -> Any:
     fake_tensor = vt.as_proxy().node.meta.get("example_value")
     if not is_fake(fake_tensor):
         from . import graph_break_hints
-        from .exc import unimplemented_v2
+        from .exc import unimplemented
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Cannot check Tensor object identity without its fake value",
             context=str(fake_tensor),
             explanation="TensorVariable is missing a fake example_value.",
@@ -2567,13 +2830,40 @@ def _get_fake_tensor(vt):
     return fake_tensor
 
 
-def iter_contains(items, search, tx, check_tensor_identity=False):
-    from .variables import (
-        BuiltinVariable,
-        ConstantVariable,
-        TensorVariable,
-        VariableTracker,
+def slice_length(s: slice, seq_len: int) -> int:
+    start, stop, step = s.indices(seq_len)
+    return max(0, (stop - start + (step - (1 if step > 0 else -1))) // step)
+
+
+def raise_args_mismatch(
+    tx: InstructionTranslatorBase,
+    name: str,
+    expect: str = "",
+    actual: str = "",
+) -> None:
+    from torch._dynamo.exc import raise_observed_exception
+    from torch._dynamo.variables import ConstantVariable
+
+    msg_str = (
+        f"wrong number of arguments or keyword arguments for {name}() call.\n"
+        f"  Expect: {expect}\n"
+        f"  Actual: {actual}"
     )
+
+    raise_observed_exception(
+        TypeError,
+        tx,
+        args=[ConstantVariable(msg_str)],
+    )
+
+
+def iter_contains(
+    items: Iterable[Any],
+    search: Any,
+    tx: InstructionTranslator,
+    check_tensor_identity: bool = False,
+) -> Any:
+    from .variables import BuiltinVariable, ConstantVariable
 
     if search.is_python_constant():
         found_const = any(
@@ -2584,7 +2874,7 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
         return ConstantVariable.create(found_const)
 
     must_check_tensor_id = False
-    if check_tensor_identity and isinstance(search, TensorVariable):
+    if check_tensor_identity and search.is_tensor():
         must_check_tensor_id = True
         # Match of Tensor means match of FakeTensor
         search = _get_fake_tensor(search)
@@ -2592,7 +2882,7 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     found: Optional[VariableTracker] = None
     for x in items:
         if must_check_tensor_id:
-            if isinstance(x, TensorVariable):
+            if x.is_tensor():
                 if search is _get_fake_tensor(x):  # Object equivalence
                     return ConstantVariable.create(True)
         else:
@@ -2608,16 +2898,18 @@ def iter_contains(items, search, tx, check_tensor_identity=False):
     return found
 
 
-def key_is_id(k):
+def key_is_id(
+    k: Any,
+) -> TypeIs[Union[torch.Tensor, torch.nn.Module, MethodWrapperType]]:
     """Returns whether it indexes dictionaries using its id"""
     return isinstance(k, (torch.Tensor, torch.nn.Module, MethodWrapperType))
 
 
-def key_to_id(value):
-    return [id(k) if key_is_id(k) else k for k in value.keys()]
+def key_to_id(value: Any) -> list[Any]:
+    return [id(k) if key_is_id(k) else k for k in value]
 
 
-def const_repr(x, *, local) -> str:
+def const_repr(x: Any, *, local: Any) -> str:
     from .trace_rules import is_builtin_callable
 
     if isinstance(x, (list, tuple)):
@@ -2638,7 +2930,7 @@ def const_repr(x, *, local) -> str:
         return x.__name__
     elif isinstance(x, type):
 
-        def fullname(o):
+        def fullname(o: Any) -> str:
             klass = o.__class__
             module = klass.__module__
             if module == "builtins":
@@ -2650,7 +2942,7 @@ def const_repr(x, *, local) -> str:
         return f"{x!r}"
 
 
-def dict_keys_repr(const_keys, *, local) -> str:
+def dict_keys_repr(const_keys: Any, *, local: Any) -> str:
     keys_str = ",".join(const_repr(s, local=local) for s in const_keys)
     return "[" + keys_str + "]"
 
@@ -2661,24 +2953,26 @@ GLOBAL_KEY_PREFIX = "__dict_key"
 from torch._subclasses import UnsupportedFakeTensorException  # noqa: F401
 
 
-def get_safe_global_name(tx, root, obj):
+def get_safe_global_name(tx: InstructionTranslatorBase, root: str, obj: Any) -> str:
     # The global_mangled_class_name should be different for different
     # invocations of torch.compile. Otherwise, we can run into a situation
-    # where multiple torch.compile invocations re-use the same global name,
+    # where multiple torch.compile invocations reuse the same global name,
     # but the global's lifetime is tied to the first invocation (and
     # may be deleted when the first torch.compile invocation is deleted)
     # We mangle it based off of the output_graph's id.
     return f"{root}_{id(obj)}_c{tx.output.compile_id}"
 
 
-def is_in(item: Any, *containers) -> bool:
+def is_in(item: T, *containers: Container[T]) -> bool:
     for container in containers:
         if item in container:
             return True
     return False
 
 
-def get_unique_name_wrt(prefix: str, *containers, requires_suffix=False) -> str:
+def get_unique_name_wrt(
+    prefix: str, *containers: Any, requires_suffix: bool = False
+) -> str:
     """
     Return a name that starts with `prefix` and is not in any of the
     `containers` (e.g., map, set).
@@ -2694,15 +2988,15 @@ def get_unique_name_wrt(prefix: str, *containers, requires_suffix=False) -> str:
     raise AssertionError("unreachable")
 
 
-def wrap_fake_exception(fn):
+def wrap_fake_exception(fn: Callable[[], Any]) -> Any:
     try:
         return fn()
     except UnsupportedFakeTensorException as e:
-        from .exc import unimplemented_v2
+        from .exc import unimplemented
 
         msg = f"Encountered exception ({e.reason}) during fake tensor propagation."
         log.warning(msg)
-        unimplemented_v2(
+        unimplemented(
             gb_type="Fake tensor propagation exception",
             context=str(e.reason),
             explanation=msg,
@@ -2711,32 +3005,43 @@ def wrap_fake_exception(fn):
         )
 
 
-def deepcopy_to_fake_tensor(obj, fake_mode):
+def deepcopy_to_fake_tensor(
+    obj: Any, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+) -> Any:
     with torch._subclasses.fake_tensor.FakeCopyMode(fake_mode):
         return wrap_fake_exception(lambda: copy.deepcopy(obj))
 
 
-def rmse(ref, res):
+def rmse(ref: torch.Tensor, res: torch.Tensor) -> torch.Tensor:
     """
     Calculate root mean squared error
     """
     return torch.sqrt(torch.mean(torch.square(ref - res)))
 
 
+def bitwise_same(ref: Any, res: Any, equal_nan: bool = False) -> bool:
+    return same(
+        ref,
+        res,
+        tol=0.0,
+        equal_nan=equal_nan,
+    )
+
+
 def same(
-    ref,
-    res,
-    fp64_ref=None,
-    cos_similarity=False,
-    tol=1e-4,
-    equal_nan=False,
-    exact_dtype=True,
-    relax_numpy_equality=False,
-    ignore_non_fp=False,
-    log_error=log.error,
-    use_larger_multiplier_for_smaller_tensor=False,
+    ref: Any,
+    res: Any,
+    fp64_ref: Any = None,
+    cos_similarity: bool = False,
+    tol: float = 1e-4,
+    equal_nan: bool = False,
+    exact_dtype: bool = True,
+    relax_numpy_equality: bool = False,
+    ignore_non_fp: bool = False,
+    log_error: Callable[..., None] = log.error,
+    use_larger_multiplier_for_smaller_tensor: bool = False,
     force_max_multiplier: bool = False,
-):
+) -> bool:
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
         fp64_ref = ref
@@ -2817,7 +3122,7 @@ def same(
         assert not isinstance(ref, torch._subclasses.FakeTensor)
         assert not isinstance(res, torch._subclasses.FakeTensor)
 
-        def to_tensor(t):
+        def to_tensor(t: Any) -> torch.Tensor:
             return t if isinstance(t, torch.Tensor) else torch.tensor(t)
 
         ref, res, fp64_ref = (to_tensor(val) for val in (ref, res, fp64_ref))
@@ -2856,7 +3161,7 @@ def same(
             score = torch.nn.functional.cosine_similarity(ref, res, dim=0, eps=1e-6)
             if score < 0.99:
                 log.warning("Similarity score=%s", score.detach().cpu().item())
-            return score >= 0.99
+            return bool(score >= 0.99)
         else:
             if not exact_dtype:
                 ref = ref.to(res.dtype)
@@ -2896,7 +3201,7 @@ def same(
 
                 res_error = rmse(fp64_ref, res).item()
 
-                def get_multiplier():
+                def get_multiplier() -> float:
                     # In some particular cases, we expect high difference in results.
                     # At the moment one of this cases is inductor freezing bfloat16 convolution const folding.
                     # In case of it the res_error is at least one order of magnitude higher.
@@ -2927,7 +3232,7 @@ def same(
                     ):
                         # In the presence of noise, noise might dominate our error
                         # metric for smaller tensors.
-                        # Similary, for 1x1 kernels, there seems to be high noise with amp.
+                        # Similarly, for 1x1 kernels, there seems to be high noise with amp.
                         multiplier = 3.0
                     return multiplier
 
@@ -3021,22 +3326,24 @@ def same(
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             )
-            for key in ref.__dict__.keys()
+            for key in ref.__dict__
         )
     else:
         raise RuntimeError(f"unsupported type: {type(ref).__name__}")
 
 
-def format_func_info(code):
+def format_func_info(code: CodeType) -> str:
     short_filename = code.co_filename.split("/")[-1]
     return f"'{code.co_name}' ({short_filename}:{code.co_firstlineno})"
 
 
 @contextlib.contextmanager
-def disable_cache_limit():
+def disable_cache_limit() -> Generator[None, None, None]:
     prior = config.recompile_limit
+    # pyrefly: ignore [bad-assignment]
     config.recompile_limit = sys.maxsize
     prior_acc_limit = config.accumulated_recompile_limit
+    # pyrefly: ignore [bad-assignment]
     config.accumulated_recompile_limit = sys.maxsize
 
     try:
@@ -3061,8 +3368,8 @@ seen_code_map = ExactWeakKeyDictionary()
 
 
 # return same dir unless user changes config between calls
-@functools.lru_cache(None)
-def _get_debug_dir(root_dir):
+@functools.cache
+def _get_debug_dir(root_dir: str) -> str:
     dir_name = (
         "run_"
         + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f")
@@ -3073,20 +3380,20 @@ def _get_debug_dir(root_dir):
     return os.path.join(root_dir, dir_name)
 
 
-def get_debug_dir():
+def get_debug_dir() -> str:
     debug_root = config.debug_dir_root
     return _get_debug_dir(debug_root)
 
 
-def extract_fake_example_value(node, required=True):
+def extract_fake_example_value(node: torch.fx.Node, required: bool = True) -> Any:
     if "example_value" in node.meta and is_fake(node.meta["example_value"]):
         return node.meta["example_value"]
     elif required:
-        from torch._dynamo.exc import unimplemented_v2
+        from torch._dynamo.exc import unimplemented
 
         from . import graph_break_hints
 
-        unimplemented_v2(
+        unimplemented(
             gb_type="Missing FakeTensor example value",
             context=str(node),
             explanation=f"`FakeTensor` example value was required for {node} but not available.",
@@ -3096,13 +3403,15 @@ def extract_fake_example_value(node, required=True):
         return None
 
 
-def ensure_graph_fake(e, tx):
+def ensure_graph_fake(e: Any, tx: InstructionTranslatorBase) -> Any:
     assert maybe_get_fake_mode(e) is tx.fake_mode
     return e
 
 
-def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
-    def visit(n: torch.fx.Node):
+def get_fake_values_from_nodes(
+    tx: InstructionTranslatorBase, nodes: Any, allow_non_graph_fake: bool
+) -> Any:
+    def visit(n: torch.fx.Node) -> Any:
         if n.op == "call_function" and "example_value" not in n.meta:
             # fake tensor validity is checked inside get_fake_value using
             # ensure_graph_fake
@@ -3110,7 +3419,7 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
 
         elif n.op == "get_attr" and "example_value" not in n.meta:
             assert n.target in tx.output.nn_modules
-            gm = tx.output.nn_modules[n.target]
+            gm = tx.output.nn_modules[n.target]  # type: ignore[index]
             assert isinstance(gm, torch.fx.GraphModule)
             return gm
 
@@ -3122,7 +3431,46 @@ def get_fake_values_from_nodes(tx, nodes, allow_non_graph_fake):
     return torch.fx.node.map_arg(nodes, visit)
 
 
-def get_fake_value(node, tx, allow_non_graph_fake=False):
+def get_concrete_sizes_from_symints(
+    msg: str, fake_mode: Optional[FakeTensorMode]
+) -> str:
+    """
+    Replace symbolic size expressions (like 's0', 's94') in error messages
+    with their concrete runtime values for better readability.
+
+    Example: "size (s94)" -> "size (s94: hint= 10)" if s94's value is 10.
+    """
+    import re
+
+    from sympy.core.numbers import Integer
+
+    if fake_mode is None:
+        return msg
+
+    pattern = r"\(s(\d+)\)"
+    assert fake_mode.shape_env is not None
+    shape_env = fake_mode.shape_env
+    var_to_val = shape_env.var_to_val
+
+    def replace_sym(match):
+        sym_name = f"s{match.group(1)}"
+        val = next(
+            (v for k, v in var_to_val.items() if k.name == sym_name),
+            None,
+        )
+        if isinstance(val, (int, Integer)):
+            return f"({sym_name}: hint = {str(val)})"
+        return match.group(0)
+
+    msg = re.sub(pattern, replace_sym, msg)
+    return msg
+
+
+def get_fake_value(
+    node: torch.fx.Node,
+    tx: InstructionTranslatorBase,
+    allow_non_graph_fake: bool = False,
+) -> Any:
     """
     Run the computation represented by `node` using fake tensors and return the result.
 
@@ -3135,7 +3483,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
 
     from .exc import (
         TorchRuntimeError,
-        unimplemented_v2,
+        unimplemented,
         Unsupported,
         UserError,
         UserErrorType,
@@ -3151,13 +3499,29 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         tx, (node.args, node.kwargs), allow_non_graph_fake
     )
 
+    if (
+        torch._dynamo.config.use_graph_deduplication
+        or torch._dynamo.config.track_nodes_for_deduplication
+    ):
+        flat_args_kwargs = get_fake_values_from_nodes(
+            tx, _get_flat_args(node, {}), allow_non_graph_fake
+        )
+        id_to_initial_version = {
+            id(arg): arg._version for arg in flat_args_kwargs if is_fake(arg)
+        }
+    else:
+        flat_args_kwargs = []
+        id_to_initial_version = {}
+
     nnmodule = None
+    fake_mode = tx.fake_mode
+    assert fake_mode is not None
     if op == "call_method" and len(args) > 0 and isinstance(args[0], torch.nn.Module):
         # If the first argument is nn.Module, should copy to fake mode.
-        args = (deepcopy_to_fake_tensor(args[0], tx.fake_mode),) + tuple(args[1:])
+        args = (deepcopy_to_fake_tensor(args[0], fake_mode),) + tuple(args[1:])
 
     if op == "call_module":
-        nnmodule = tx.output.nn_modules[node.target]
+        nnmodule = tx.output.nn_modules[node.target]  # type: ignore[index]
 
         if is_lazy_module(nnmodule) and hasattr(nnmodule, "_initialize_hook"):
             # In the case of a lazy module, we want to run
@@ -3167,21 +3531,23 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             nnmodule._infer_parameters(nnmodule, args)
 
         # no matter it's lazy module or not, we should copy to fake mode.
-        nnmodule = deepcopy_to_fake_tensor(nnmodule, tx.fake_mode)
+        nnmodule = deepcopy_to_fake_tensor(nnmodule, fake_mode)
 
     if node.name in ["interpolate", "is_integer", "wrapped_gradient"] or any(
         isinstance(a, complex) for a in args
     ):
         # We need to specialize symfloats for now. Eventually we should do a tensorify pass in dynamo.
         args = tuple(
-            float(arg)
-            if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
-            else arg
+            (
+                float(arg)
+                if isinstance(arg, torch.SymFloat) and arg.node.hint is not None
+                else arg
+            )
             for arg in args
         )
 
     try:
-        with tx.fake_mode, enable_python_dispatcher():
+        with fake_mode, enable_python_dispatcher():
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
@@ -3211,7 +3577,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                     "Consider wrapping the operator into a PyTorch-understood custom operator "
                     "(see https://pytorch.org/tutorials/advanced/custom_ops_landing_page.html)",
                 ]
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Data dependent operator",
                 context=str(cause.func),
                 explanation=f"Operator `{cause.func}` has a non-Tensor output "
@@ -3222,7 +3588,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
             cause, torch._subclasses.fake_tensor.DynamicOutputShapeException
         ):
             if not torch._dynamo.config.capture_dynamic_output_shape_ops:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Dynamic shape operator",
                     context=str(cause.func),
                     explanation=f"Operator `{cause.func}`'s output shape depends on input Tensor data.",
@@ -3232,7 +3598,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                     ],
                 )
             else:
-                unimplemented_v2(
+                unimplemented(
                     gb_type="Dynamic shape operator (no meta kernel)",
                     context=str(cause.func),
                     explanation=f"Operator `{cause.func}` does not have a meta kernel that supports dynamic output shapes",
@@ -3243,7 +3609,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(
             cause, torch._subclasses.fake_tensor.UnsupportedOperatorException
         ):
-            op = cause.func
+            op = cause.func  # type: ignore[assignment]
             import_suggestion = ""
             if isinstance(op, torch._ops.OpOverload):
                 maybe_pystub = torch._C._dispatch_pystub(
@@ -3256,7 +3622,7 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
                         f"module `{module}` and you may need to `import {module}`"
                         f"({ctx}), otherwise "
                     )
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Operator does not support running with fake tensors",
                 context=f"unsupported operator: {cause.func}",
                 explanation="",
@@ -3277,31 +3643,42 @@ def get_fake_value(node, tx, allow_non_graph_fake=False):
         elif isinstance(cause, ValueRangeError):
             raise UserError(UserErrorType.CONSTRAINT_VIOLATION, e.args[0]) from e
         elif isinstance(cause, TypeError) and "argument" in str(cause):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="TypeError when making fake tensor call",
                 context=f"TypeError {node.target}: {cause}",
                 explanation="",
                 hints=[],
             )
-
-        raise TorchRuntimeError(str(e)).with_traceback(e.__traceback__) from None
+        msg = get_concrete_sizes_from_symints(str(e), fake_mode)
+        raise TorchRuntimeError(msg).with_traceback(e.__traceback__) from None
 
     if not allow_non_graph_fake:
         _ = pytree.tree_map_only(
             torch.Tensor, functools.partial(ensure_graph_fake, tx=tx), ret_val
         )
+
+    if (
+        torch._dynamo.config.use_graph_deduplication
+        or torch._dynamo.config.track_nodes_for_deduplication
+    ):
+        tx.output.region_tracker.track_node_mutations(
+            node,
+            flat_args_kwargs,
+            id_to_initial_version,
+        )
+
     return ret_val
 
 
 _current_node = threading.local()
 
 
-def get_current_node():
+def get_current_node() -> Optional[torch.fx.Node]:
     return getattr(_current_node, "value", None)
 
 
 @contextmanager
-def set_current_node(node):
+def set_current_node(node: torch.fx.Node) -> Generator[None, None, None]:
     old = get_current_node()
     _current_node.value = node
     try:
@@ -3310,7 +3687,9 @@ def set_current_node(node):
         _current_node.value = old
 
 
-def run_node(tracer, node, args, kwargs, nnmodule):
+def run_node(
+    tracer: Any, node: torch.fx.Node, args: Any, kwargs: Any, nnmodule: Any
+) -> Any:
     """
     Runs a given node, with the given args and kwargs.
 
@@ -3329,7 +3708,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
 
     with set_current_node(node):
 
-        def make_error_message(e):
+        def make_error_message(e: Any) -> str:
             return (
                 f"Dynamo failed to run FX node with fake tensors: {op} {node.target}(*{args}, **{kwargs}): got "
                 + repr(e)
@@ -3339,18 +3718,18 @@ def run_node(tracer, node, args, kwargs, nnmodule):
 
         try:
             if op == "call_function":
-                return node.target(*args, **kwargs)
+                return node.target(*args, **kwargs)  # type: ignore[operator]
             elif op == "call_method":
-                if not hasattr(args[0], node.target):
-                    from .exc import unimplemented_v2
+                if not hasattr(args[0], node.target):  # type: ignore[arg-type]
+                    from .exc import unimplemented
 
-                    unimplemented_v2(
+                    unimplemented(
                         gb_type="Missing attribute when running call_method node",
                         context="",
                         explanation=make_error_message("attribute not defined"),
                         hints=[],
                     )
-                return getattr(args[0], node.target)(*args[1:], **kwargs)
+                return getattr(args[0], node.target)(*args[1:], **kwargs)  # type: ignore[arg-type]
             elif op == "call_module":
                 assert nnmodule is not None
                 return nnmodule(*args, **kwargs)
@@ -3362,7 +3741,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
 
         except (NotImplementedError, UnsupportedFakeTensorException) as e:
             # NB: mimic how wrap_fake_exception does it
-            from .exc import unimplemented_v2
+            from .exc import unimplemented
 
             hints = []
             if isinstance(e, NotImplementedError):
@@ -3370,7 +3749,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
                     "If the op is a PyTorch op, please file an issue to PyTorch.",
                 ]
 
-            unimplemented_v2(
+            unimplemented(
                 gb_type="NotImplementedError/UnsupportedFakeTensorException when running FX node",
                 context="",
                 explanation=make_error_message(e),
@@ -3387,7 +3766,7 @@ def run_node(tracer, node, args, kwargs, nnmodule):
     raise AssertionError(op)
 
 
-def get_real_value(node, tracer):
+def get_real_value(node: torch.fx.Node, tracer: Any) -> Any:
     """
     Run the actual computation represented by `node` and return the result.
     This will execute any dependent nodes in the graph as well.
@@ -3426,10 +3805,10 @@ def get_real_value(node, tracer):
     return real_value
 
 
-def assert_no_fake_params_or_buffers(gm):
+def assert_no_fake_params_or_buffers(gm: torch.fx.GraphModule) -> None:
     from torch._subclasses.fake_tensor import FakeTensorConfig, is_fake
 
-    def stack_or_hint(t):
+    def stack_or_hint(t: Any) -> str:
         if FakeTensorConfig.debug:
             import traceback
 
@@ -3447,21 +3826,21 @@ def assert_no_fake_params_or_buffers(gm):
         )
 
 
-def fqn(obj: Any):
+def fqn(obj: Any) -> str:
     """
     Returns the fully qualified name of the object.
     """
     return f"{obj.__module__}.{obj.__qualname__}"
 
 
-def ifdynstaticdefault(count1, count2):
+def ifdynstaticdefault(count1: Any, count2: Any) -> Any:
     if torch._dynamo.config.assume_static_by_default:
         return count1
     else:
         return count2
 
 
-def import_submodule(mod: types.ModuleType):
+def import_submodule(mod: types.ModuleType) -> None:
     """
     Ensure all the files in a given submodule are imported
     """
@@ -3470,11 +3849,17 @@ def import_submodule(mod: types.ModuleType):
             importlib.import_module(f"{mod.__name__}.{filename[:-3]}")
 
 
-def object_has_getattribute(value: Any):
+def object_has_getattribute(value: Any) -> bool:
     return class_has_getattribute(type(value))
 
 
-def class_has_getattribute(cls: type):
+def object_setattr_ignore_descriptor(obj: Any, name: str, value: Any) -> None:
+    # https://github.com/python/cpython/blob/3.11/Objects/object.c#L1286-L1335
+    d = object.__getattribute__(obj, "__dict__")
+    d[name] = value
+
+
+def class_has_getattribute(cls: type) -> bool:
     try:
         if isinstance(
             inspect.getattr_static(cls, "__getattribute__"),
@@ -3486,7 +3871,9 @@ def class_has_getattribute(cls: type):
     return False
 
 
-def get_custom_getattr(value: Any, ignore_nn_module_getattr: bool = False):
+def get_custom_getattr(
+    value: Any, ignore_nn_module_getattr: bool = False
+) -> Optional[Any]:
     try:
         getattr_fn = inspect.getattr_static(type(value), "__getattr__")
     except AttributeError:
@@ -3503,7 +3890,7 @@ class TensorStaticReason(enum.Enum):
     NN_MODULE_PROPERTY = 5
 
 
-def tensor_static_reason_to_message(reason: TensorStaticReason):
+def tensor_static_reason_to_message(reason: TensorStaticReason) -> str:
     if reason == TensorStaticReason.PARAMETER:
         return "mark_dynamic on parameter, parameters are always static today."
     if reason == TensorStaticReason.NOT_TENSOR:
@@ -3532,8 +3919,8 @@ def tensor_always_has_static_shape(
     from .source import is_from_unspecialized_param_buffer_source
 
     if (
-        tensor_source.guard_source().is_specialized_nn_module()
-        or tensor_source.guard_source().is_unspecialized_builtin_nn_module()
+        tensor_source.guard_source.is_specialized_nn_module()
+        or tensor_source.guard_source.is_unspecialized_builtin_nn_module()
     ) and config.force_nn_module_property_static_shapes:
         return True, TensorStaticReason.NN_MODULE_PROPERTY
 
@@ -3547,8 +3934,8 @@ def tensor_always_has_static_shape(
     return False, None
 
 
-def lazy_format_graph_tabular(fn_name, gm):
-    def inner():
+def lazy_format_graph_tabular(fn_name: str, gm: torch.fx.GraphModule) -> Any:
+    def inner() -> str:
         try:
             from tabulate import tabulate  # TODO: Check that this is installed
         except ImportError:
@@ -3568,7 +3955,9 @@ def lazy_format_graph_tabular(fn_name, gm):
     return LazyString(inner)
 
 
-def format_bytecode(prefix, name, filename, line_no, code):
+def format_bytecode(
+    prefix: str, name: str, filename: str, line_no: int, code: Any
+) -> str:
     return f"{prefix} {name} {filename} line {line_no} \n{dis.Bytecode(code).dis()}\n"
 
 
@@ -3583,20 +3972,21 @@ state_dict_hook_names = [
 all_hook_names = forward_hook_names + backward_hook_names + state_dict_hook_names
 
 
-def nn_module_has_global_hooks():
+def nn_module_has_global_hooks() -> bool:
     # This is limited to backward hooks for now because NNModuleVariable
     # supports fwd hooks underneath.
-    return len(torch.nn.modules.module._global_backward_hooks) or len(
-        torch.nn.modules.module._global_backward_pre_hooks
+    return bool(
+        len(torch.nn.modules.module._global_backward_hooks)
+        or len(torch.nn.modules.module._global_backward_pre_hooks)
     )
 
 
 def nn_module_get_all_hooks(
-    mod,
-    check_forward_hooks=False,
-    check_backward_hooks=False,
-    check_state_dict_hooks=False,
-):
+    mod: torch.nn.Module,
+    check_forward_hooks: bool = False,
+    check_backward_hooks: bool = False,
+    check_state_dict_hooks: bool = False,
+) -> list[Any]:
     """
     Sometimes its useful to differentiate between types of hooks such as forward/backward/pre
     hooks executed during module.__call__, and state_dict hooks which are executed separately.
@@ -3625,11 +4015,11 @@ def nn_module_get_all_hooks(
 
 
 def nnmodule_has_hooks(
-    mod,
-    check_forward_hooks=False,
-    check_backward_hooks=False,
-    check_state_dict_hooks=False,
-):
+    mod: torch.nn.Module,
+    check_forward_hooks: bool = False,
+    check_backward_hooks: bool = False,
+    check_state_dict_hooks: bool = False,
+) -> bool:
     """
     Helper function to check if a module has any hooks attached to it.
     """
@@ -3642,7 +4032,7 @@ def nnmodule_has_hooks(
     return bool(hooks)
 
 
-def to_numpy_helper(value):
+def to_numpy_helper(value: Any) -> Any:
     """Convert tensor and tnp.ndarray to numpy.ndarray."""
     if is_fake(value):
         return value
@@ -3656,7 +4046,7 @@ def to_numpy_helper(value):
         return value
 
 
-def numpy_to_tensor(value):
+def numpy_to_tensor(value: Any) -> Any:
     """Convert tnp.ndarray to tensor, leave other types intact. If a list/tuple, loop through it to convert."""
     assert np is not None
     if isinstance(value, np.ndarray):
@@ -3669,20 +4059,20 @@ def numpy_to_tensor(value):
         return value
 
 
-class numpy_to_tensor_wrapper:
-    def __init__(self, f):
+class numpy_to_tensor_wrapper(Generic[_P, R]):
+    def __init__(self, f: Callable[_P, R]) -> None:
         self.f = f
         self.__name__ = "wrapped_" + self.f.__name__
 
     def __repr__(self) -> str:
         return f"<Wrapped function <original {self.f.__name__}>>"
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> Any:
         out = self.f(*args, **kwargs)
         return numpy_to_tensor(out)
 
 
-def numpy_attr_wrapper(obj, name):
+def numpy_attr_wrapper(obj: Any, name: str) -> Any:
     if isinstance(obj, tnp.ndarray):
         out = getattr(obj, name)
         return numpy_to_tensor(out)
@@ -3694,14 +4084,14 @@ def numpy_attr_wrapper(obj, name):
 class numpy_method_wrapper:
     """Convert obj from torch.Tensor to tnp.ndarray and call method. Then convert result back to torch.Tensor."""
 
-    def __init__(self, method: str):
+    def __init__(self, method: str) -> None:
         self.method = method
         self.__name__ = "wrapped_" + self.method
 
     def __repr__(self) -> str:
         return f"<Wrapped method <original {self.method}>>"
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
         obj = args[0]
         if isinstance(obj, torch.Tensor):
             obj = tnp.ndarray(obj)
@@ -3710,19 +4100,20 @@ class numpy_method_wrapper:
         return numpy_to_tensor(out)
 
 
-class numpy_operator_wrapper:
+class numpy_operator_wrapper(Generic[_P, R]):
     """Implements dunder methods for tnp.ndarray via functions from the operator library"""
 
-    def __init__(self, op: Callable[..., Any]):
+    def __init__(self, op: Callable[..., Any]) -> None:
         self.op = op
         self.__name__ = f"wrapped_{op.__name__}"
 
     def __repr__(self) -> str:
         return f"<Wrapped operator <original {self.__name__}>>"
 
-    def __call__(self, *args, **kwargs):
+    def __call__(self, *args: _P.args, **kwargs: _P.kwargs) -> Any:
         assert not kwargs
 
+        # pyrefly: ignore [bad-assignment]
         args = (
             tnp.ndarray(arg) if isinstance(arg, torch.Tensor) else arg for arg in args
         )
@@ -3730,7 +4121,7 @@ class numpy_operator_wrapper:
         return numpy_to_tensor(out)
 
 
-def defake(x):
+def defake(x: Any) -> Any:
     if not isinstance(x, FakeTensor):
         return x
     size: torch._prims_common.ShapeType
@@ -3762,20 +4153,26 @@ def defake(x):
     return y
 
 
-def is_utils_checkpoint(obj):
+def _disable_side_effect_safety_checks_for_current_subtracer(
+    fn: Callable[_P, R], *args: _P.args, **kwargs: _P.kwargs
+) -> R:
+    return fn(*args, **kwargs)
+
+
+def is_utils_checkpoint(obj: Any) -> bool:
     # Lazy import to avoid circular dependencies
     import torch.utils.checkpoint
 
     return obj is torch.utils.checkpoint.checkpoint
 
 
-def is_invoke_subgraph(obj):
+def is_invoke_subgraph(obj: Any) -> bool:
     from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_placeholder
 
     return obj is invoke_subgraph_placeholder
 
 
-def build_invoke_subgraph_variable(**options):
+def build_invoke_subgraph_variable(**options: Any) -> Any:
     from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
 
     return TorchHigherOrderOperatorVariable.make(
@@ -3784,7 +4181,7 @@ def build_invoke_subgraph_variable(**options):
     )
 
 
-def build_checkpoint_variable(**options):
+def build_checkpoint_variable(**options: Any) -> Any:
     import torch._higher_order_ops.wrap as higher_order_ops
 
     from .variables.higher_order_ops import TorchHigherOrderOperatorVariable
@@ -3803,14 +4200,14 @@ def build_checkpoint_variable(**options):
     )
 
 
-def is_compile_supported(device_type):
+def is_compile_supported(device_type: DeviceLikeType) -> Any:
     from .eval_frame import is_dynamo_supported
 
     type = torch.device(device_type).type
     compile_supported = is_dynamo_supported()
     if type == "cpu":
         pass
-    elif type in ["cuda", "xpu"] and compile_supported:
+    elif type in ["cuda", "xpu", "mtia"] and compile_supported:
         compile_supported = has_triton()
     else:
         compile_supported = False
@@ -3869,12 +4266,12 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
     lines = segment.split("\n")
 
     # get character index given byte offset
-    def normalize(lineno, offset):
+    def normalize(lineno: int, offset: int) -> int:
         return _fix_offset(lines[lineno], offset)
 
     # Gets the next valid character index in `lines`, if
     # the current location is not valid. Handles empty lines.
-    def next_valid_char(lineno, col):
+    def next_valid_char(lineno: int, col: int) -> tuple[int, int]:
         while lineno < len(lines) and col >= len(lines[lineno]):
             col = 0
             lineno += 1
@@ -3882,14 +4279,14 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
         return lineno, col
 
     # Get the next valid character index in `lines`.
-    def increment(lineno, col):
+    def increment(lineno: int, col: int) -> tuple[int, int]:
         col += 1
         lineno, col = next_valid_char(lineno, col)
         assert lineno < len(lines) and col < len(lines[lineno])
         return lineno, col
 
     # Get the next valid character at least on the next line
-    def nextline(lineno, col):
+    def nextline(lineno: int, col: int) -> tuple[int, int]:
         col = 0
         lineno += 1
         lineno, col = next_valid_char(lineno, col)
@@ -3906,6 +4303,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
             # -2 since end_lineno is 1-indexed and because we added an extra
             # bracket to `segment` when calling ast.parse
             cur_lineno = cast(int, expr.left.end_lineno) - 2
+            assert expr.left.end_col_offset is not None
             cur_col = normalize(cur_lineno, expr.left.end_col_offset)
             cur_lineno, cur_col = next_valid_char(cur_lineno, cur_col)
 
@@ -3938,12 +4336,14 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
             # subscript^^^^^^^^^^^^^^^^^^^^
             # find left bracket (first '[' after value)
             left_lineno = cast(int, expr.value.end_lineno) - 2
+            assert expr.value.end_col_offset is not None
             left_col = normalize(left_lineno, expr.value.end_col_offset)
             left_lineno, left_col = next_valid_char(left_lineno, left_col)
             while lines[left_lineno][left_col] != "[":
                 left_lineno, left_col = increment(left_lineno, left_col)
             # find right bracket (final character of expression)
             right_lineno = cast(int, expr.end_lineno) - 2
+            assert expr.end_col_offset is not None
             right_col = normalize(right_lineno, expr.end_col_offset)
             return _Anchors(left_lineno, left_col, right_lineno, right_col)
         elif isinstance(expr, ast.Call):
@@ -3952,12 +4352,14 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
             # call^^^^^^^^^^^^^^^^^^^^^^^^
             # find left bracket (first '(' after func)
             left_lineno = cast(int, expr.func.end_lineno) - 2
+            assert expr.func.end_col_offset is not None
             left_col = normalize(left_lineno, expr.func.end_col_offset)
             left_lineno, left_col = next_valid_char(left_lineno, left_col)
             while lines[left_lineno][left_col] != "(":
                 left_lineno, left_col = increment(left_lineno, left_col)
             # find right bracket (final character of expression)
             right_lineno = cast(int, expr.end_lineno) - 2
+            assert expr.end_col_offset is not None
             right_col = normalize(right_lineno, expr.end_col_offset)
             return _Anchors(left_lineno, left_col, right_lineno, right_col)
 
@@ -4096,14 +4498,14 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
     return result
 
 
-def get_static_address_type(t):
+def get_static_address_type(t: Any) -> Any:
     if isinstance(t, torch.Tensor):
         return getattr(t, "_dynamo_static_input_type", None)
 
     return None
 
 
-def is_rng_state_getter_or_setter(value):
+def is_rng_state_getter_or_setter(value: Any) -> bool:
     getters = (
         # The following two functions are not identical, so don't remove anyone!
         torch._C.Generator.get_state,
@@ -4120,7 +4522,7 @@ def is_rng_state_getter_or_setter(value):
     return value in (*setters, *getters)
 
 
-def is_tensor_base_attr_getter(value):
+def is_tensor_base_attr_getter(value: Any) -> bool:
     return (
         isinstance(value, types.MethodWrapperType)
         and value.__name__ == "__get__"
@@ -4128,7 +4530,7 @@ def is_tensor_base_attr_getter(value):
     )
 
 
-def is_tensor_getset_descriptor(name):
+def is_tensor_getset_descriptor(name: str) -> bool:
     try:
         attr = inspect.getattr_static(torch.Tensor, name)
         return type(attr) is types.GetSetDescriptorType
@@ -4136,11 +4538,11 @@ def is_tensor_getset_descriptor(name):
         return False
 
 
-def is_torch_function_object(value):
+def is_torch_function_object(value: Any) -> bool:
     return hasattr(value, "__torch_function__")
 
 
-def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool:
+def has_torch_function(vt: VariableTracker) -> bool:
     # This emulates
     # https://github.com/pytorch/pytorch/blob/8d81806211bc3c0ee6c2ef235017bacf1d775a85/torch/csrc/utils/disable_torch_function.cpp#L315-L323
     from torch._dynamo.variables import UserDefinedObjectVariable
@@ -4170,7 +4572,9 @@ def has_torch_function(vt: torch._dynamo.variables.base.VariableTracker) -> bool
 
 
 # see note [Tensor Fakification and Symbol Caching]
-def to_fake_tensor(t, fake_mode):
+def to_fake_tensor(
+    t: torch.Tensor, fake_mode: torch._subclasses.fake_tensor.FakeTensorMode
+) -> Any:
     symbolic_context = None
     source = None
     if tracing_context := torch._guards.TracingContext.try_get():
@@ -4184,7 +4588,7 @@ def to_fake_tensor(t, fake_mode):
 
 
 # NB: this works for both classes and instances
-def is_frozen_dataclass(value):
+def is_frozen_dataclass(value: Any) -> bool:
     return (
         not object_has_getattribute(value)
         and not class_has_getattribute(value)
@@ -4195,7 +4599,7 @@ def is_frozen_dataclass(value):
     )
 
 
-def get_first_attr(obj, *attrs):
+def get_first_attr(obj: Any, *attrs: str) -> Any:
     """
     Return the first available attribute or throw an exception if none is present.
     """
@@ -4207,13 +4611,15 @@ def get_first_attr(obj, *attrs):
 
 
 @contextlib.contextmanager
-def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
+def maybe_enable_compiled_autograd(
+    should_enable: bool, fullgraph: bool = True, dynamic: bool = True
+) -> Generator[Any, None, None]:
     if not should_enable:
         yield
     else:
 
-        def compiler_fn(gm):
-            def inner_compiler(gm_, example_inputs_):
+        def compiler_fn(gm: Any) -> Any:
+            def inner_compiler(gm_: Any, example_inputs_: Any) -> Any:
                 torch._dynamo.utils.counters["compiled_autograd"]["compiles"] += 1
                 return torch._inductor.compile(gm_, example_inputs_)
 
@@ -4225,7 +4631,7 @@ def maybe_enable_compiled_autograd(should_enable, fullgraph=True, dynamic=True):
             yield ctx
 
 
-def invalid_removeable_handle():
+def invalid_removeable_handle() -> RemovableHandle:
     # need a subclass so weakref works
     class Invalid(dict):  # type: ignore[type-arg]
         pass
@@ -4237,7 +4643,7 @@ def invalid_removeable_handle():
 # Attribute changes to the original object/proxy will be reflected in the other.
 # This is useful for cases where we want a keep-alive reference to a module without increasing
 # its reference count.
-def nn_module_proxy(mod):
+def nn_module_proxy(mod: Any) -> Any:
     if not isinstance(mod, torch.nn.Module):
         return mod
     if isinstance(mod, torch.fx.GraphModule):
@@ -4249,17 +4655,22 @@ def nn_module_proxy(mod):
 
 
 class GmWrapper(torch.nn.Module):
-    def __init__(self, gm, unflatten_fn):
+    def __init__(
+        self, gm: torch.fx.GraphModule, unflatten_fn: Callable[[list[Any]], Any]
+    ) -> None:
         super().__init__()
         self.gm = gm
         self.unflatten_fn = unflatten_fn
 
-    def forward(self, *args):
+    def forward(self, *args: Any) -> Any:
+        # pyrefly: ignore [annotation-mismatch, redefinition]
         args: list[Any] = list(args)
         return self.gm(*self.unflatten_fn(args))
 
 
-def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
+def flatten_graph_inputs(
+    gm: torch.fx.GraphModule, inputs: Any, compile_gm: Callable[[Any, Any], Any]
+) -> Callable[..., Any]:
     """
     Mutate inputs so that they are flat and wrap gm such that it
     accepts those inputs.  This is needed for graphs that take
@@ -4278,10 +4689,10 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         assert isinstance(inputs[0], list)
         boxed_inputs_count = len(inputs[0])
 
-        def flatten_fn(args):
+        def flatten_fn(args: Any) -> Any:
             return args[0] + list(args[1:])
 
-        def unflatten_fn(flat_args):
+        def unflatten_fn(flat_args: Any) -> Any:
             return (flat_args[:boxed_inputs_count], *flat_args[boxed_inputs_count:])
 
         compiled_fn = compile_gm(GmWrapper(gm, unflatten_fn), flatten_fn(inputs))
@@ -4293,7 +4704,7 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
         # note this doesn't check the spec, assuming it is the same
         flatten_fn = pytree.arg_tree_leaves
 
-    def wrapper(*args):
+    def wrapper(*args: Any) -> Any:
         flat_args = flatten_fn(args)
 
         # flat_args is a new list, so we need to clear references from the old list
@@ -4306,18 +4717,18 @@ def flatten_graph_inputs(gm: torch.fx.GraphModule, inputs, compile_gm):
     return wrapper
 
 
-def get_locals_to_steal(maybe_gm):
+def get_locals_to_steal(maybe_gm: Any) -> list[Any]:
     if not isinstance(maybe_gm, torch.fx.GraphModule) or not hasattr(maybe_gm, "meta"):
         return []
     return maybe_gm.meta.get("locals_to_steal", [])
 
 
-def set_locals_to_steal(gm, locals_to_steal):
+def set_locals_to_steal(gm: torch.fx.GraphModule, locals_to_steal: list[Any]) -> None:
     gm.meta["locals_to_steal"] = locals_to_steal
 
 
 class Lit:
-    def __init__(self, s):
+    def __init__(self, s: str) -> None:
         self.s = s
 
     def __repr__(self) -> str:
@@ -4327,7 +4738,7 @@ class Lit:
 warn_once_cache: set[str] = set()
 
 
-def warn_once(msg, stacklevel=1):
+def warn_once(msg: str, stacklevel: int = 1) -> None:
     # Dynamo causes all warnings.warn (in user code and in Dynamo code) to print all the time.
     # https://github.com/pytorch/pytorch/issues/128427.
     # warn_once is a workaround: if the msg has been warned on before, then we will not
@@ -4339,14 +4750,14 @@ def warn_once(msg, stacklevel=1):
     warnings.warn(msg, stacklevel=stacklevel + 1)
 
 
-def strip_color_from_string(text):
+def strip_color_from_string(text: str) -> str:
     # This regular expression matches ANSI escape codes
     ansi_escape = re.compile(r"\x1B[@-_][0-?]*[ -/]*[@-~]")
     return ansi_escape.sub("", text)
 
 
 @contextlib.contextmanager
-def _disable_saved_tensors_hooks_during_tracing():
+def _disable_saved_tensors_hooks_during_tracing() -> Generator[None, None, None]:
     # See NOTE: [Deferring tensor pack/unpack hooks until runtime]
     try:
         prior = torch._C._autograd._saved_tensors_hooks_set_tracing(True)
@@ -4355,22 +4766,22 @@ def _disable_saved_tensors_hooks_during_tracing():
         torch._C._autograd._saved_tensors_hooks_set_tracing(prior)
 
 
-def is_parameter_freezing():
+def is_parameter_freezing() -> bool:
     return torch._inductor.config.freezing and not torch.is_grad_enabled()
 
 
-def get_torch_function_mode_stack():
+def get_torch_function_mode_stack() -> list[Any]:
     return [
         get_torch_function_mode_stack_at(i) for i in range(_len_torch_function_stack())
     ]
 
 
-def get_torch_function_mode_stack_at(ind):
+def get_torch_function_mode_stack_at(ind: int) -> Any:
     assert ind < _len_torch_function_stack() and ind >= 0
     return torch._C._get_function_stack_at(ind)
 
 
-def set_torch_function_mode_stack(stack):
+def set_torch_function_mode_stack(stack: list[Any]) -> None:
     for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
@@ -4378,17 +4789,21 @@ def set_torch_function_mode_stack(stack):
         _push_on_torch_function_stack(mode)
 
 
-def clear_torch_function_mode_stack():
+def clear_torch_function_mode_stack() -> None:
     for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
 
+def get_current_stream(device: torch.device) -> torch.Stream:
+    return torch.accelerator.current_stream(device)
+
+
 # call from C dynamo in order to inspect values in pdb
-def _breakpoint_for_c_dynamo(*args):
+def _breakpoint_for_c_dynamo(*args: Any) -> None:
     breakpoint()
 
 
-def verify_guard_fn_signature(value):
+def verify_guard_fn_signature(value: Any) -> None:
     fn = value.__metadata_guard__
     sig = inspect.signature(fn)
     if len(sig.parameters) != 2:
@@ -4405,7 +4820,7 @@ def verify_guard_fn_signature(value):
         )
 
 
-def does_not_override_dict_iter_methods(user_cls):
+def does_not_override_dict_iter_methods(user_cls: Any) -> bool:
     return (
         user_cls.items in (dict.items, OrderedDict.items)
         and user_cls.values in (dict.values, OrderedDict.values)
@@ -4414,43 +4829,27 @@ def does_not_override_dict_iter_methods(user_cls):
     )
 
 
-# Helper functions below are to prevent __torch_function__
-# calls from happening in the middle of __torch_function__
-# compiled bytecode
-# They will be skipped which is the desired result
-def call_size(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.size(i)
-
-    return fn(x, i)
+# Helper functions below are to prevent TorchDynamo to prevent tracing of
+# __torch_function__ calls triggered on tensor properties in the pre graph
+# bytecode.
+@torch._disable_dynamo
+def call_size(x: Any, i: int) -> int:
+    return x.size(i)
 
 
-def call_stride(x, i):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x, i):
-        return x.stride(i)
-
-    return fn(x, i)
+@torch._disable_dynamo
+def call_stride(x: Any, i: int) -> int:
+    return x.stride(i)
 
 
-def call_storage_offset(x):
-    @torch._dynamo.disable(
-        recursive=True, reason="__torch_function__ tracing helper function"
-    )
-    def fn(x):
-        return x.storage_offset()
-
-    return fn(x)
+@torch._disable_dynamo
+def call_storage_offset(x: Any) -> int:
+    return x.storage_offset()
 
 
 # Helper function to extract relevant parts of a tensor's __dict__ to store in node meta.
 # To avoid ref cycles, it's important that no tensors are present here, so leave those out.
-def _extract_tensor_dict(t):
+def _extract_tensor_dict(t: torch.Tensor) -> dict[str, Any]:
     KEYS_TO_COPY = [
         "_dynamo_static_input_type",
         "tag",
@@ -4463,21 +4862,12 @@ def _extract_tensor_dict(t):
     return tensor_dict
 
 
-# This is useful for reconstructing within the Dynamo graph the non-graph-input objects
-# whose lifetime is governed by the user.
-# e.g. torch.cuda.Event is a prime example.
-user_obj_id_to_weakref: dict[int, weakref.ReferenceType[object]] = {}
+def build_stream(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Stream:
+    return torch._C.Stream(*args, **kwargs)
 
 
-def get_user_object_from_id(obj_id):
-    obj = user_obj_id_to_weakref[obj_id]()
-    assert obj is not None, "User object is no longer alive"
-    return obj
-
-
-def store_user_object_weakref(obj):
-    obj_id = id(obj)
-    user_obj_id_to_weakref[obj_id] = weakref.ref(obj)
+def build_event(args: tuple[Any], kwargs: dict[Any, Any]) -> torch.Event:
+    return torch._C.Event(*args, **kwargs)
 
 
 class CompileTimeInstructionCounter:
@@ -4508,7 +4898,7 @@ class CompileTimeInstructionCounter:
 
     @classmethod
     @contextmanager
-    def record(cls):
+    def record(cls) -> Generator[None, None, None]:
         try:
             if config.record_compile_time_instruction_count:
                 cls.start()
@@ -4518,7 +4908,12 @@ class CompileTimeInstructionCounter:
                 cls.end()
 
 
-def set_feature_use(feature: str, usage: bool):
+class CompileCounterInt(int):
+    def __add__(self, other: Any) -> CompileCounterInt:
+        return CompileCounterInt(super().__add__(other))
+
+
+def set_feature_use(feature: str, usage: bool) -> None:
     """
     Records whether we are using a feature
     Generally a feature is a JK.
@@ -4536,7 +4931,7 @@ _ddp_optimization_mode: tuple[str, ...] = (
 )
 
 
-def get_optimize_ddp_mode():
+def get_optimize_ddp_mode() -> str:
     optimize_ddp = config.optimize_ddp
     if isinstance(optimize_ddp, bool):
         mode = "ddp_optimizer" if optimize_ddp else "no_optimization"
@@ -4589,3 +4984,62 @@ def maybe_disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
             yield
     else:
         yield
+
+
+def is_node_meta_valid(node: Optional[torch.fx.Node]) -> bool:
+    return node is None or "example_value" in node.meta or "val" in node.meta
+
+
+# If True, enforce fullgraph=True - raise errors on graph break
+_error_on_graph_break = False
+
+
+def _get_error_on_graph_break() -> bool:
+    return _error_on_graph_break
+
+
+def _set_error_on_graph_break(value: bool) -> None:
+    global _error_on_graph_break
+    _error_on_graph_break = value
+
+
+@torch._disable_dynamo
+def record_pregraph_bytecode_enter() -> AbstractContextManager[None]:
+    cm: AbstractContextManager[None] = (
+        torch._C._profiler._RecordFunctionFast("Pregraph bytecode")
+        if torch.autograd.profiler._is_profiler_enabled
+        else contextlib.nullcontext()
+    )
+    cm.__enter__()
+    return cm
+
+
+@torch._disable_dynamo
+def record_pregraph_bytecode_exit(cm: AbstractContextManager[None]) -> None:
+    cm.__exit__(None, None, None)
+
+
+# Returns a set of code objects present traced in the current TracingContext, or None
+# if there is no current TracingContext.
+def get_traced_code() -> Optional[list[CodeType]]:
+    from torch._guards import TracingContext
+
+    return TracingContext.get_traced_code()
+
+
+def raise_on_overridden_hash(obj: Any, vt: VariableTracker) -> None:
+    from . import graph_break_hints
+    from .exc import unimplemented
+
+    is_overridden = type(obj).__dict__.get("__hash__", False)
+
+    if is_overridden:
+        unimplemented(
+            gb_type="User-defined object with overridden __hash__",
+            context=f"hashing object of type={type(obj)} and variable tracker {vt}",
+            explanation=f"Found a user-defined object {vt} with overridden __hash__ when attempting to hash it",
+            hints=[
+                "Dynamo does not support hashing user-defined objects with overridden __hash__",
+                *graph_break_hints.SUPPORTABLE,
+            ],
+        )

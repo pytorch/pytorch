@@ -16,7 +16,7 @@ from torch.testing._internal.common_quantization import (
     _make_conv_test_input,
 )
 from torch.testing._internal.common_quantized import override_quantized_engine
-from torch.testing._internal.common_utils import IS_PPC
+from torch.testing._internal.common_utils import raise_on_run_directly, IS_PPC
 
 class TestQuantizedFunctionalOps(QuantizationTestCase):
     def test_relu_api(self):
@@ -235,3 +235,6 @@ class TestQuantizedFunctionalOps(QuantizationTestCase):
         out_exp = torch.quantize_per_tensor(F.grid_sample(X, grid), scale=scale, zero_point=zero_point, dtype=torch.quint8)
         np.testing.assert_array_almost_equal(
             out.int_repr().numpy(), out_exp.int_repr().numpy(), decimal=0)
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

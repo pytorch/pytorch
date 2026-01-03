@@ -2,7 +2,6 @@
 import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
-from typing import Optional, Union
 
 import torch
 import torch.distributed as dist
@@ -23,7 +22,7 @@ class ModelAverager(ABC):
                        will be used. (default: ``None``)
     """
 
-    def __init__(self, process_group: Optional[dist.ProcessGroup] = None):
+    def __init__(self, process_group: dist.ProcessGroup | None = None):
         self.process_group = (
             process_group if process_group is not None else _not_none(dist.group.WORLD)
         )
@@ -88,7 +87,7 @@ class PeriodicModelAverager(ModelAverager):
     """
 
     def __init__(
-        self, period, warmup_steps=0, process_group: Optional[dist.ProcessGroup] = None
+        self, period, warmup_steps=0, process_group: dist.ProcessGroup | None = None
     ):
         super().__init__(process_group)
         if warmup_steps < 0:
@@ -101,15 +100,14 @@ class PeriodicModelAverager(ModelAverager):
                 "When period is 1, no need to use model averaging because the communication cost "
                 "of all-reducing parameters will be no less than the cost of all-reducing gradients "
                 "by DistributedDataParallel in the backward pass. Therefore, only "
-                "DistributedDataParallel should be used for this case."
+                "DistributedDataParallel should be used for this case.",
+                stacklevel=2,
             )
         self.period = period
 
     def average_parameters(
         self,
-        params: Union[
-            Iterable[torch.nn.Parameter], Iterable[dict[str, torch.nn.Parameter]]
-        ],
+        params: Iterable[torch.nn.Parameter] | Iterable[dict[str, torch.nn.Parameter]],
     ):
         """
         Averages parameters or parameter groups of an optimizer if ``step`` is no less than ``warmup_steps``.

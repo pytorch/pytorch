@@ -3,12 +3,14 @@ import importlib
 import io
 import pickle
 from abc import abstractmethod
-from typing import Any, Callable, NewType, Optional, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
 
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import TracingContext
+from torch._inductor.standalone_compile import AOTCompiledArtifact
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode, Tensor
 from torch._subclasses.meta_utils import (
     MetaConverter,
@@ -23,14 +25,36 @@ from torch.utils._mode_utils import no_dispatch
 _SymNodeT = TypeVar("_SymNodeT", torch.SymInt, torch.SymFloat)
 
 
+def _ops_filter_safe(name: str) -> bool:
+    """
+    An ops filter which allows pickle-safe ops. Pickle-safe ops are built-in
+    ones where it will be possible to unpickle on any machine which has PyTorch.
+    """
+    # TODO: This list is pretty pessimistic right now. What's the full list?
+    return name.startswith(
+        (
+            "torch.ops.aten",
+            "torch.ops.fbgemm",
+        )
+    )
+
+
+@dataclasses.dataclass
+class Options:
+    # A filter for which ops will cause the pickler to raise a
+    # BypassFxGraphCache exception. If None then all ops are allowed.
+    ops_filter: Optional[Callable[[str], bool]] = _ops_filter_safe
+
+
 class GraphPickler(pickle.Pickler):
     """
     GraphPickler is a Pickler which helps pickling fx graph - in particular
     GraphModule.
     """
 
-    def __init__(self, file: io.BytesIO) -> None:
+    def __init__(self, file: io.BytesIO, options: Optional[Options] = None) -> None:
         super().__init__(file)
+        self.options = options or Options()
 
         # This abomination is so we can pass external decoding state to the
         # unpickler functions. We serialize _unpickle_state as a persistent
@@ -43,6 +67,7 @@ class GraphPickler(pickle.Pickler):
         self._meta_tensor_describer = MetaTensorDescriber(copy_data=False)
 
     @override
+    # pyrefly: ignore [bad-override]
     def reducer_override(
         self, obj: object
     ) -> tuple[Callable[..., Any], tuple[Any, ...]]:
@@ -93,12 +118,12 @@ class GraphPickler(pickle.Pickler):
             return None
 
     @classmethod
-    def dumps(cls, obj: object) -> bytes:
+    def dumps(cls, obj: object, options: Optional[Options] = None) -> bytes:
         """
         Pickle an object.
         """
         with io.BytesIO() as stream:
-            pickler = cls(stream)
+            pickler = cls(stream, options)
             pickler.dump(obj)
             return stream.getvalue()
 
@@ -179,6 +204,7 @@ class _SymNodePickleData:
     ]:
         args = (cls(obj.node), pickler._unpickle_state)
         if isinstance(obj, torch.SymInt):
+            # pyrefly: ignore [bad-return]
             return _SymNodePickleData.unpickle_sym_int, args
         else:
             raise NotImplementedError(f"Unhandled SymNode type {type(obj)}")
@@ -190,8 +216,6 @@ class _SymNodePickleData:
         self.hint = node._hint
 
     def _to_sym_node(self) -> SymNode:
-        from torch.fx.experimental.sym_node import SymNode
-
         assert self.shape_env is not None
         return SymNode(self.expr, self.shape_env, self.pytype, self.hint)
 
@@ -231,9 +255,9 @@ class _TensorPickleData:
         for k in MetaTensorDesc._UNSERIALIZABLE:
             if k in ("fake_mode", "view_func"):
                 continue
-            assert (
-                getattr(self.metadata, k) is None
-            ), f"not None: {k}: {getattr(self.metadata, k)}"
+            assert getattr(self.metadata, k) is None, (
+                f"not None: {k}: {getattr(self.metadata, k)}"
+            )
 
     def unpickle(self, unpickle_state: _UnpickleState) -> FakeTensor:
         # TODO: make common w/ _output_from_cache_entry() in fake_tensor.py?
@@ -242,6 +266,14 @@ class _TensorPickleData:
             fake_mode=unpickle_state.fake_mode,
         )
 
+        # also need to set the fake_mode on the base of a tensor if it's a view
+        if metadata.is_view and metadata.base is not None:
+            new_base = dataclasses.replace(
+                metadata.base,
+                fake_mode=unpickle_state.fake_mode,
+            )
+            metadata = dataclasses.replace(metadata, base=new_base)
+
         def with_fake(
             make_meta_t: Callable[[], torch.Tensor], device: Union[torch.device, str]
         ) -> FakeTensor:
@@ -249,6 +281,7 @@ class _TensorPickleData:
                 return FakeTensor(
                     unpickle_state.fake_mode,
                     make_meta_t(),
+                    # pyrefly: ignore [bad-argument-type]
                     device,
                 )
 
@@ -301,7 +334,9 @@ class _TorchNumpyPickleData:
         if not (name := getattr(np, "__name__", None)):
             return None
 
+        # pyrefly: ignore [unbound-name]
         assert np == getattr(importlib.import_module(mod), name)
+        # pyrefly: ignore [unbound-name]
         return cls(mod, name)
 
 
@@ -314,11 +349,11 @@ class _GraphModulePickleData:
         tuple[Self, _UnpickleStateToken],
     ]:
         return cls.unpickle, (
-            cls(obj),
+            cls(obj, pickler.options),
             pickler._unpickle_state,
         )
 
-    def __init__(self, gm: torch.fx.GraphModule) -> None:
+    def __init__(self, gm: torch.fx.GraphModule, options: Options) -> None:
         # Need to do this to ensure the code is created for later pickling.
         if isinstance(gm, torch.fx._lazy_graph_module._LazyGraphModule):
             _python_code = gm._real_recompile()
@@ -326,7 +361,7 @@ class _GraphModulePickleData:
             _python_code = gm.recompile()
         self.gm_dict = gm.__dict__.copy()
         del self.gm_dict["_graph"]
-        self.graph = _GraphPickleData(gm._graph)
+        self.graph = _GraphPickleData(gm._graph, options)
 
     def unpickle(self, unpickle_state: _UnpickleState) -> torch.fx.GraphModule:
         gm = torch.fx.GraphModule.__new__(torch.fx.GraphModule)
@@ -337,7 +372,10 @@ class _GraphModulePickleData:
 
 class _NodePickleData:
     def __init__(
-        self, node: torch.fx.Node, mapping: dict[torch.fx.Node, "_NodePickleData"]
+        self,
+        node: torch.fx.Node,
+        mapping: dict[torch.fx.Node, "_NodePickleData"],
+        options: Options,
     ) -> None:
         self.args = pytree.tree_map_only(torch.fx.Node, lambda n: mapping[n], node.args)
         self.kwargs = pytree.tree_map_only(
@@ -346,7 +384,7 @@ class _NodePickleData:
         # -- self.graph = node.graph
         self.name = node.name
         self.op = node.op
-        self.target = _OpPickleData.pickle(node.target)
+        self.target = _OpPickleData.pickle(node.target, options)
         # self.input_nodes = node._input_nodes
         # self.users = node.users
         self.type = node.type
@@ -377,25 +415,29 @@ class _OpPickleData:
     def reduce_helper(
         cls, pickler: GraphPickler, op: object
     ) -> tuple[Callable[[_UnpickleState], object], tuple[_UnpickleStateToken]]:
-        result = cls.pickle(op)
+        result = cls.pickle(op, pickler.options)
         return (result.unpickle, (pickler._unpickle_state,))
 
     @classmethod
-    def pickle(cls, op: object) -> "_OpPickleData":
+    def pickle(cls, op: object, options: Options) -> "_OpPickleData":
         if isinstance(op, str):
             return _OpStrPickleData(op)
 
+        if isinstance(getattr(op, "__wrapped__", None), AOTCompiledArtifact):
+            assert hasattr(op, "__wrapped__")
+            artifact = op.__wrapped__
+            assert isinstance(artifact, AOTCompiledArtifact)
+            return _OpPrecompiledPickleData(artifact)
+
         name = torch.fx.Node._pretty_print_target(op)
+
         if isinstance(op, torch._ops.OpOverload):
-            return cls._pickle_op(name, _OpOverloadPickleData)
+            return cls._pickle_op(name, _OpOverloadPickleData, options)
         elif isinstance(op, torch._ops.OpOverloadPacket):
-            return cls._pickle_op(name, _OpOverloadPacketPickleData)
-        elif name.startswith(("builtins.", "math.", "torch.")):
+            return cls._pickle_op(name, _OpOverloadPacketPickleData, options)
+        elif name.startswith(_OpFunctionPickleData.SUPPORTED_ROOTS):
             root, detail = name.split(".", 1)
-            return _OpBuiltinPickleData(root, detail)
-        elif name.startswith("operator."):
-            _, detail = name.split(".", 1)
-            return _OpOperatorPickleData(detail)
+            return _OpFunctionPickleData(root, detail)
         else:
             # TODO: raise a BypassFxGraphCache so we will just bypass this one...
             raise NotImplementedError(f"TARGET: {type(op)} {op} {name}")
@@ -406,10 +448,9 @@ class _OpPickleData:
         datacls: Union[
             type["_OpOverloadPickleData"], type["_OpOverloadPacketPickleData"]
         ],
+        options: Options,
     ) -> "_OpPickleData":
-        if not name.startswith(
-            ("torch.ops.aten", "torch.ops.fbgemm")
-        ):  # TODO: What's the full list?
+        if (ops_filter := options.ops_filter) and not ops_filter(name):
             from torch._inductor.codecache import BypassFxGraphCache
 
             raise BypassFxGraphCache(f"Unable to pickle non-standard op: {name}")
@@ -470,7 +511,31 @@ class _OpOverloadPacketPickleData(_OpPickleData):
         return obj
 
 
-class _OpBuiltinPickleData(_OpPickleData):
+class _OpPrecompiledPickleData(_OpPickleData):
+    def __init__(self, artifact: AOTCompiledArtifact) -> None:
+        self.contents = artifact.serialize()
+
+    def unpickle(self, unpickle_state: _UnpickleState) -> object:
+        precompiled_artifact = AOTCompiledArtifact.deserialize(self.contents)
+        import functools
+
+        @functools.wraps(precompiled_artifact)
+        def wrapped(*args: Any) -> Any:
+            return precompiled_artifact(*args)
+
+        return wrapped
+
+
+class _OpFunctionPickleData(_OpPickleData):
+    """
+    Supports pickling a set of standard/common functions
+    These must be prefixed with the full namespace in order to properly
+    be pickled (i.e `einops.rearrange` and not `from einops import rearrange`)
+    """
+
+    # Static variable listing supported root names
+    SUPPORTED_ROOTS = ("builtins.", "math.", "torch.", "operator.", "einops.")
+
     def __init__(self, root: str, name: str) -> None:
         self.root = root
         self.name = name
@@ -484,28 +549,26 @@ class _OpBuiltinPickleData(_OpPickleData):
             return self._getattr_by_name(math, self.name)
         elif self.root == "torch":
             return self._getattr_by_name(torch, self.name)
+        elif self.root == "operator":
+            import operator
+
+            return self._getattr_by_name(operator, self.name)
+        elif self.root == "einops":
+            import einops
+
+            return self._getattr_by_name(einops, self.name)
         else:
             raise NotImplementedError
 
 
-class _OpOperatorPickleData(_OpPickleData):
-    def __init__(self, name: str) -> None:
-        self.name = name
-
-    def unpickle(self, unpickle_state: _UnpickleState) -> object:
-        import operator
-
-        return self._getattr_by_name(operator, self.name)
-
-
 class _GraphPickleData:
-    def __init__(self, graph: torch.fx.Graph) -> None:
+    def __init__(self, graph: torch.fx.Graph, options: Options) -> None:
         self.tracer_cls = graph._tracer_cls
         self.tracer_extras = graph._tracer_extras
 
         nodes: dict[torch.fx.Node, _NodePickleData] = {}
         for node in graph.nodes:
-            nodes[node] = _NodePickleData(node, nodes)
+            nodes[node] = _NodePickleData(node, nodes, options)
         self.nodes = tuple(nodes.values())
 
         # Unpickled variables:

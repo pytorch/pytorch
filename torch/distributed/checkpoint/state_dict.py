@@ -3,10 +3,10 @@ import contextlib
 import functools
 import gc
 import warnings
-from collections.abc import Generator, Iterable
+from collections.abc import Callable, Generator, Iterable
 from dataclasses import asdict, dataclass, field
 from itertools import chain
-from typing import Any, Callable, cast, no_type_check, Optional, Union
+from typing import Any, cast, no_type_check, Union
 
 import torch
 import torch.distributed as dist
@@ -72,7 +72,7 @@ ValueType = Union[
 ]
 DictValueType = dict[str, ValueType]
 ListDictValueType = list[DictValueType]
-OptimizerStateType = dict[str, Union[DictValueType, ListDictValueType]]
+OptimizerStateType = dict[str, DictValueType | ListDictValueType]
 
 
 _patched_state_dict: set[Callable] = set()
@@ -140,12 +140,12 @@ class StateDictOptions:
 @dataclass
 class _StateDictInfo(StateDictOptions):
     fqn_param_mapping: dict[
-        Union[str, torch.Tensor],
-        Union[FQNS_T, torch.Tensor],
+        str | torch.Tensor,
+        FQNS_T | torch.Tensor,
     ] = field(default_factory=dict)
     shared_params_mapping: dict[
-        Union[str, torch.Tensor],
-        Union[FQNS_T, torch.Tensor],
+        str | torch.Tensor,
+        FQNS_T | torch.Tensor,
     ] = field(default_factory=dict)
     submodule_prefixes: set[str] = field(default_factory=set)
     handle_model: bool = True
@@ -186,7 +186,8 @@ def _get_fqns(
     curr_obj = model
     for i, curr_obj_name in enumerate(obj_names):
         if isinstance(curr_obj, DDP):
-            assert curr_obj_name == "module"
+            if curr_obj_name != "module":
+                raise AssertionError(f"Expected 'module', got '{curr_obj_name}'")
             curr_obj = curr_obj.module
             if not skip_ddp_prefix:
                 fqn_obj_names.append(curr_obj_name)
@@ -199,15 +200,17 @@ def _get_fqns(
                 return {f"{prefix}{fqn}" for fqn in flat_param._fqns}
             curr_obj = getattr(curr_obj, FSDP_WRAPPED_MODULE)
             if curr_obj_name != FSDP_WRAPPED_MODULE:
+                # pyrefly: ignore [bad-argument-type]
                 fqn_obj_names.append(curr_obj_name)
                 curr_obj = getattr(curr_obj, curr_obj_name)
         elif isinstance(curr_obj, torch._dynamo.eval_frame.OptimizedModule):
-            assert curr_obj_name == "_orig_mod"
+            if curr_obj_name != "_orig_mod":
+                raise AssertionError(f"Expected '_orig_mod', got '{curr_obj_name}'")
             curr_obj = curr_obj._orig_mod
             if not skip_compiler_prefix:
                 fqn_obj_names.append(curr_obj_name)
         else:
-            # In some modeuls, _fqn_modifiers would not shown in the state_dict keys,
+            # In some modules, _fqn_modifiers would not shown in the state_dict keys,
             # skip them in the fqn to ensure load stat dict successfully for them.
             if hasattr(curr_obj, dsd_fqn_modifiers):
                 if removed_fqn := getattr(curr_obj, dsd_fqn_modifiers)().get(
@@ -215,6 +218,7 @@ def _get_fqns(
                 ):
                     if hasattr(curr_obj, removed_fqn):
                         curr_obj = getattr(curr_obj, removed_fqn)
+            # pyrefly: ignore [bad-argument-type]
             fqn_obj_names.append(curr_obj_name)
             if curr_obj_name == nn.modules.module._EXTRA_STATE_KEY_SUFFIX:
                 if i != len(obj_names) - 1:
@@ -274,8 +278,8 @@ def _verify_options(
     optims: tuple[torch.optim.Optimizer, ...],
     optim_only: bool,
     *,
-    submodules: Optional[set[nn.Module]] = None,
-    options: Optional[StateDictOptions] = None,
+    submodules: set[nn.Module] | None = None,
+    options: StateDictOptions | None = None,
 ) -> _StateDictInfo:
     """
     Verify the model and options passed by the user and generates _StateDictInfo.
@@ -286,6 +290,7 @@ def _verify_options(
             "will be removed in 2.5. This feature can be achieved by manually "
             "filtering out the state_dict returned from get_state_dict.",
             FutureWarning,
+            stacklevel=2,
         )
     if optim_only and not optims:
         raise RuntimeError(
@@ -294,18 +299,14 @@ def _verify_options(
 
     options = options or StateDictOptions()
 
-    fqn_param_mapping: dict[
-        Union[str, torch.Tensor], Union[set[str], torch.Tensor]
-    ] = {}
-    shared_params_mapping: dict[
-        Union[str, torch.Tensor], Union[set[str], torch.Tensor]
-    ] = {}
+    fqn_param_mapping: dict[str | torch.Tensor, set[str] | torch.Tensor] = {}
+    shared_params_mapping: dict[str | torch.Tensor, set[str] | torch.Tensor] = {}
     for name, param in _iterate_valid_model_state(model):
         if isinstance(param, _EXTRA_STATE):
             continue
 
         fqns = _get_fqns(model, name)
-        fqn = fqn_param_mapping.get(param, None)
+        fqn = fqn_param_mapping.get(param)
         if fqn is not None:
             cast(set[str], fqn_param_mapping[param]).update(fqns)
             shared_params_mapping[param] = fqn_param_mapping[param]
@@ -327,7 +328,8 @@ def _verify_options(
             if module not in submodules:
                 continue
             fqns = _get_fqns(model, name)
-            assert len(fqns) == 1, "Submodule FQN should only have 1 instance"
+            if len(fqns) != 1:
+                raise AssertionError("Submodule FQN should only have 1 instance")
             submodule_prefixes.update(f"{fqn}." for fqn in fqns)
 
     if options.broadcast_from_rank0 and not options.full_state_dict:
@@ -406,7 +408,8 @@ def _verify_state_dict(
 ) -> None:
     for module in info.fsdp_modules:
         fsdp_state = _get_module_fsdp_state_if_fully_sharded_module(module)
-        assert fsdp_state is not None, "Expected a fsdp_state with a fsdp module."
+        if fsdp_state is None:
+            raise AssertionError("Expected a fsdp_state with a fsdp module.")
 
     # Verify if the model_state_dict and optim_state_dict are valid. This API
     # should give the users an explicit error message to debug or report.
@@ -436,7 +439,7 @@ def _verify_state_dict(
                 f"or load but optim state_dict is empty. {optim_state_dict}"
             )
 
-    for key in model_state_dict.keys():
+    for key in model_state_dict:
         if _FLAT_PARAM in key:
             raise RuntimeError(
                 f"{key} contains {_FLAT_PARAM}. This can happen if the model "
@@ -444,7 +447,7 @@ def _verify_state_dict(
             )
 
 
-def _state_dict_fn(obj: Union[nn.Module, torch.optim.Optimizer], api: str) -> Callable:
+def _state_dict_fn(obj: nn.Module | torch.optim.Optimizer, api: str) -> Callable:
     call = getattr(obj, api)
     if call in _patched_state_dict:
         call = functools.partial(getattr(obj.__class__, api), self=obj)
@@ -481,7 +484,10 @@ def _get_model_state_dict(
 
     for key in list(state_dict.keys()):
         fqns = _get_fqns(model, key)
-        assert len(fqns) == 1, (key, fqns)
+        if len(fqns) != 1:
+            raise AssertionError(
+                f"Expected 1 FQN for key '{key}', got {len(fqns)}: {fqns}"
+            )
         fqn = next(iter(fqns))
         if fqn != key:
             # As we only support FSDP, DDP, and TP, the only cases are
@@ -511,7 +517,7 @@ def _get_model_state_dict(
     if info.submodule_prefixes:
         new_state_dict: dict[str, ValueType] = {}
         # TODO: make this faster.
-        for fqn in state_dict.keys():
+        for fqn in state_dict:
             for prefix in info.submodule_prefixes:
                 if not fqn.startswith(prefix):
                     continue
@@ -529,10 +535,6 @@ def _get_model_state_dict(
             fqns = _get_fqns(model, key)
             for fqn in fqns:
                 state_dict.pop(fqn)
-
-    for key, p in list(state_dict.items()):
-        if torch.is_tensor(p) and p.is_meta:
-            state_dict.pop(key)
 
     return _maybe_full_or_cpu_state_dict(state_dict, info)
 
@@ -572,7 +574,7 @@ def _load_model_state_dict(
     assign = False
     if info.broadcast_from_rank0 or info.full_state_dict:
         devices = set()
-        for key, value in local_state_dict.items():
+        for value in local_state_dict.values():
             if torch.is_tensor(value) and value.dim() > 0:
                 devices.add(value.device)
         # In lora state_dict, there could be multiple devices, with meta device inside.
@@ -663,7 +665,7 @@ def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> dict[str, Value
                 "step": 10, "exp_avg": SomeTensor, "exp_avg_sq": SomeTensor
             },
         },
-        "param_group": [
+        "param_groups": [
             {
                 "lr": 0.0,
                 "betas": (0.9, 0.95), ...,
@@ -680,35 +682,69 @@ def _flatten_optim_state_dict(state_dict: OptimizerStateType) -> dict[str, Value
         "state.layer2.weight.exp_avg": SomeTensor,
         "state.layer1.weight.exp_avg_sq": SomeTensor,
         "state.layer2.weight.exp_avg_sq": SomeTensor,
-        "param_group.layer1.weight.lr" : 0.1,
-        "param_group.layer2.weight.lr" : 0.1,
-        "param_group.layer1.weight.betas" : (0.9, 0.95),
-        "param_group.layer2.weight.betas" : (0.9, 0.95),
+        "param_groups.layer1.weight.lr": 0.1,
+        "param_groups.layer2.weight.lr": 0.1,
+        "param_groups.layer1.weight.betas": (0.9, 0.95),
+        "param_groups.layer2.weight.betas": (0.9, 0.95),
     }
 
-    Note that if any of the value is a container, like the betas in the example,
-    this API won't flattent it.
+    The "state" section supports arbitrary levels of nesting for optimizers like Shampoo.
     """
 
+    def _flatten_state_nested_dict(
+        nested_dict: dict[str, Any], prefix: str
+    ) -> dict[str, ValueType]:
+        """
+        Recursively flatten a nested dictionary with dot-separated keys.
+
+        Args:
+            nested_dict: The dictionary to flatten
+            prefix: The prefix to prepend to all keys
+
+        Returns:
+            Flattened dictionary with dot-separated keys
+        """
+        flattened: dict[str, ValueType] = {}
+
+        for key, value in nested_dict.items():
+            # Convert all keys to strings for flattening
+            str_key = str(key)
+            full_key = f"{prefix}.{str_key}" if prefix else str_key
+
+            if isinstance(value, dict):
+                # Recursively flatten nested dictionaries
+                flattened.update(_flatten_state_nested_dict(value, full_key))
+            else:
+                # Base case: store the value with the flattened key
+                _raise_if_type_not_supported(value)
+                flattened[full_key] = value
+
+        return flattened
+
     def _raise_if_type_not_supported(v):
-        if not isinstance(v, (torch.Tensor, int, float)):
+        if not isinstance(v, (torch.Tensor, int, float, dict)):
             raise NotImplementedError(
                 "Flattening optimizer state_dict only supports "
-                "tensor, int, float states now. "
+                "tensor, int, float, dict states now. "
                 f"Type is {type(v)}."
             )
 
     ret: dict[str, ValueType] = {}
-    for fqn, state in cast(DictValueType, state_dict[_STATE]).items():
-        for k, v in cast(DictValueType, state).items():
-            _raise_if_type_not_supported(v)
-            ret[f"{_STATE}.{fqn}.{k}"] = v
 
+    # Handle the "state" section with recursive flattening
+    for fqn, state in cast(DictValueType, state_dict[_STATE]).items():
+        state_prefix = f"{_STATE}.{fqn}"
+        ret.update(
+            _flatten_state_nested_dict(cast(dict[str, Any], state), state_prefix)
+        )
+
+    # Handle the "param_groups" section with two-level flattening
     for param_group in cast(ListDictValueType, state_dict[_PG]):
         fqns = param_group.pop(_PARAMS)
         for fqn in cast(list[str], fqns):
             for k, v in param_group.items():
                 ret[f"{_PG}.{fqn}.{k}"] = v
+
     return ret
 
 
@@ -719,8 +755,60 @@ def _unflatten_optim_state_dict(
 ) -> OptimizerStateType:
     """
     This API unflattens the state_dict generated by _flatten_optim_state_dict().
+    Supports arbitrary levels of nesting in the state section through recursive reconstruction.
+
     See the docstring of _flatten_optim_state_dict() for more detail.
     """
+
+    def _reconstruct_nested_dict(
+        flattened_key: str, flattened_dict: dict[str, ValueType]
+    ) -> dict[str, ValueType]:
+        """
+        Reconstructs a potentially nested value from flattened keys.
+        For non-nested values, returns the value directly.
+        For nested values, reconstructs the nested structure with string keys.
+        """
+
+        # Create the prefix to search for nested keys
+        # e.g., if flattened_key is "state.layer1.weight", prefix becomes "state.layer1.weight."
+        prefix = f"{flattened_key}."
+        # Initialize an empty dictionary to build our nested structure
+        nested_dict: dict[str, Any] = {}
+
+        # Iterate through all keys in the flattened dictionary
+        for key, value in flattened_dict.items():
+            # Check if this key is nested under our target key
+            # e.g., "state.layer1.weight.exp_avg" starts with "state.layer1.weight."
+            if not key.startswith(prefix):
+                # Skip keys that don't belong to this nested structure
+                continue
+
+            # Remove the prefix to get just the nested part
+            # e.g., "state.layer1.weight.exp_avg" -> "exp_avg"
+            remaining_key = key[len(prefix) :]
+            # Split the remaining key into parts to build the nested structure
+            # e.g., "step" -> ["step"] or "momentum_buffer" -> ["momentum_buffer"]
+            parts = remaining_key.split(".")
+            # Start at the root of our new nested dictionary
+            current = nested_dict
+
+            # Navigate through or create the nested dictionary structure
+            # For each part except the last one (which will hold the value)
+            for part in parts[:-1]:
+                # Create the nested dictionary if it doesn't exist yet
+                if part not in current:
+                    current[part] = {}
+                # Move deeper into the nested structure
+                assert isinstance(current[part], dict)
+                current = current[part]
+
+            # Set the value at the final level using the last part as the key
+            # e.g., current["exp_avg"] = tensor(...)
+            current[parts[-1]] = value
+
+        # Return the reconstructed nested dictionary (empty dict if no keys matched at all)
+        return nested_dict
+
     state: DictValueType = {}
     pg_state: ListDictValueType = []
     return_osd: OptimizerStateType = {_STATE: state, _PG: pg_state}
@@ -734,7 +822,7 @@ def _unflatten_optim_state_dict(
                 # the state_dict.
                 if fqn in info.shared_params_mapping:
                     in_params = False
-                    for k in param_group.keys():
+                    for k in param_group:
                         if k == _PARAMS:
                             continue
                         flatten_key = f"{_PG}.{fqn}.{k}"
@@ -748,18 +836,35 @@ def _unflatten_optim_state_dict(
                     continue
 
                 params = pg_state[-1][_PARAMS]
-                assert isinstance(params, list)  # typing
+                if not isinstance(params, list):
+                    raise AssertionError(f"Expected list, got {type(params)}")
                 params.append(fqn)
+
+                # Only add state if param requires grad
                 if not param.requires_grad:
                     continue
+
+                # Reconstruct state for this parameter
                 state[fqn] = {}
-                for state_name in optim.state[param].keys():
-                    cast(DictValueType, state[fqn])[state_name] = state_dict[
-                        f"{_STATE}.{fqn}.{state_name}"
-                    ]
+                for state_name in optim.state[param]:
+                    flattened_state_key = f"{_STATE}.{fqn}.{state_name}"
+
+                    if flattened_state_key not in state_dict:
+                        # Try to reconstruct the value
+                        reconstructed_value = _reconstruct_nested_dict(
+                            flattened_state_key, state_dict
+                        )
+                        cast(DictValueType, state[fqn])[state_name] = (
+                            reconstructed_value
+                        )
+                    else:
+                        # Existing keys mean no nesting, directly use the value.
+                        cast(DictValueType, state[fqn])[state_name] = state_dict[
+                            flattened_state_key
+                        ]
 
         first_param_fqn = cast(list[str], pg_state[-1][_PARAMS])[0]
-        for k in param_group.keys():
+        for k in param_group:
             if k == _PARAMS:
                 continue
             value = state_dict[f"{_PG}.{first_param_fqn}.{k}"]
@@ -795,7 +900,7 @@ def _get_optim_state_dict(
             # We need to specially handle FlatParameter FSDP as
             # FlatParameter FSDP converts the FQNs.
             # There are no easy ways to do this conversion systematically.
-            # We can only use a string replacment without correctness check.
+            # We can only use a string replacement without correctness check.
             if not osd:
                 continue
             for k in list(osd[_STATE].keys()):
@@ -810,7 +915,10 @@ def _get_optim_state_dict(
             fqn_pid_mapping = {}
             for key, param in model.named_parameters():
                 fqns = _get_fqns(model, key)
-                assert len(fqns) == 1
+                if len(fqns) != 1:
+                    raise AssertionError(
+                        f"Expected 1 FQN for key '{key}', got {len(fqns)}"
+                    )
                 fqn = next(iter(fqns))
                 if param not in param_pid_mapping:
                     continue
@@ -818,8 +926,11 @@ def _get_optim_state_dict(
                 fqn_pid_mapping[fqn] = pid
                 fqn_pid_mapping[pid] = fqn
 
+            # Only convert top-level parameter IDs to FQNs, preserve nested key types
             for key in list(osd[_STATE].keys()):
                 fqn = fqn_pid_mapping[key]
+                # Move the entire state dict value (which may contain nested integer keys)
+                # without modifying its internal structure
                 osd[_STATE][fqn] = osd[_STATE].pop(key)
 
             for group in osd[_PG]:
@@ -865,9 +976,7 @@ def _split_optim_state_dict(
     return_osd: OptimizerStateType = {_STATE: state, _PG: pg_state}
     pg_mapping: dict[int, int] = {}
 
-    if all(
-        isinstance(k, int) for k in cast(DictValueType, optim_state_dict[_STATE]).keys()
-    ):
+    if all(isinstance(k, int) for k in cast(DictValueType, optim_state_dict[_STATE])):
         return optim_state_dict
 
     for param_group in optim.param_groups:
@@ -888,10 +997,18 @@ def _split_optim_state_dict(
                     continue
 
                 params = pg_state[-1][_PARAMS]
-                assert isinstance(params, list)
+                if not isinstance(params, list):
+                    raise AssertionError(f"Expected list, got {type(params)}")
                 params.append(fqn)
                 if param.requires_grad:
-                    state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
+                    if fqn in cast(DictValueType, optim_state_dict[_STATE]):
+                        state[fqn] = cast(DictValueType, optim_state_dict[_STATE])[fqn]
+                    elif info.strict:
+                        raise RuntimeError(
+                            f"Missing optimizer state for parameter '{fqn}' in checkpoint. "
+                            "The parameter requires gradients but has no saved optimizer state. "
+                            "To load anyway, use StateDictOptions(strict=False)."
+                        )
                 for loaded_param_group in cast(
                     ListDictValueType, optim_state_dict[_PG]
                 ):
@@ -967,7 +1084,10 @@ def _load_optim_state_dict(
                 if fqns == fqns_with_compiler:
                     continue
 
-                assert len(fqns) == 1
+                if len(fqns) != 1:
+                    raise AssertionError(
+                        f"Expected 1 FQN for '{original_fqn}', got {len(fqns)}"
+                    )
                 fqn = fqns.pop()
                 fqn_with_compiler = fqns_with_compiler.pop()
                 for g in optim_state_dict[_PG]:
@@ -1001,7 +1121,8 @@ def _load_optim_state_dict(
                 return t
 
             _ = tree_map_only(torch.Tensor, _device, local_state_dict)
-            assert device is not None
+            if device is None:
+                raise AssertionError("Expected device to be set")
             flatten_osd, osd_mapping = _flatten_state_dict(optim_state_dict)
             flatten_local_osd, local_osd_mapping = _flatten_state_dict(local_state_dict)
             if info.broadcast_from_rank0:
@@ -1012,9 +1133,12 @@ def _load_optim_state_dict(
             # dissimilar parameters in comparison to optim_state_dict. This is achieved by
             # incorporating differential parameters within local, which may result in optim
             # having additional parameters ultimately.
-            for optim_key in flatten_osd.keys():
+            for optim_key in flatten_osd:
                 if optim_key not in flatten_local_osd:
-                    assert optim_key in osd_mapping
+                    if optim_key not in osd_mapping:
+                        raise AssertionError(
+                            f"Expected key '{optim_key}' in osd_mapping"
+                        )
                     flatten_local_osd[optim_key] = flatten_osd[optim_key]
                     local_osd_mapping[optim_key] = osd_mapping[optim_key]
             optim_state_dict = _unflatten_state_dict(
@@ -1033,8 +1157,8 @@ def _load_optim_state_dict(
 def get_model_state_dict(
     model: nn.Module,
     *,
-    submodules: Optional[set[nn.Module]] = None,
-    options: Optional[StateDictOptions] = None,
+    submodules: set[nn.Module] | None = None,
+    options: StateDictOptions | None = None,
 ) -> dict[str, ValueType]:
     """
     Return the model state_dict of ``model``.
@@ -1069,10 +1193,10 @@ def get_model_state_dict(
 
 def get_optimizer_state_dict(
     model: nn.Module,
-    optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
+    optimizers: torch.optim.Optimizer | Iterable[torch.optim.Optimizer],
     *,
-    submodules: Optional[set[nn.Module]] = None,
-    options: Optional[StateDictOptions] = None,
+    submodules: set[nn.Module] | None = None,
+    options: StateDictOptions | None = None,
 ) -> OptimizerStateType:
     """
     Return the combined state_dict for optimizers.
@@ -1114,10 +1238,10 @@ def get_optimizer_state_dict(
 
 def get_state_dict(
     model: nn.Module,
-    optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
+    optimizers: torch.optim.Optimizer | Iterable[torch.optim.Optimizer],
     *,
-    submodules: Optional[set[nn.Module]] = None,
-    options: Optional[StateDictOptions] = None,
+    submodules: set[nn.Module] | None = None,
+    options: StateDictOptions | None = None,
 ) -> tuple[dict[str, ValueType], OptimizerStateType]:
     """
     Return the model state_dict and optimizers state_dict.
@@ -1205,7 +1329,7 @@ def get_state_dict(
 
 def _unflatten_model_state_dict(
     model: nn.Module,
-    state_dict: Union[dict[nn.Module, dict[str, ValueType]], dict[str, ValueType]],
+    state_dict: dict[nn.Module, dict[str, ValueType]] | dict[str, ValueType],
 ) -> dict[str, ValueType]:
     if not state_dict:
         return {}
@@ -1217,6 +1341,7 @@ def _unflatten_model_state_dict(
             "feature, please preprocessing the model_state_dict to achieve the "
             "same functionality.",
             FutureWarning,
+            stacklevel=2,
         )
         cast_state_dict = cast(dict[nn.Module, dict[str, ValueType]], state_dict)
         new_state_dict: dict[str, ValueType] = {}
@@ -1226,7 +1351,10 @@ def _unflatten_model_state_dict(
                     continue
 
                 fqns = _get_fqns(model, name)
-                assert len(fqns) == 1, "FQNs for a submodule should only have 1 element"
+                if len(fqns) != 1:
+                    raise AssertionError(
+                        "FQNs for a submodule should only have 1 element"
+                    )
                 prefix = f"{next(iter(fqns))}."
                 new_state_dict.update(
                     {prefix + subfqn: value for subfqn, value in sub_state_dict.items()}
@@ -1240,7 +1368,7 @@ def set_model_state_dict(
     model: nn.Module,
     model_state_dict: dict[str, ValueType],
     *,
-    options: Optional[StateDictOptions] = None,
+    options: StateDictOptions | None = None,
 ) -> _IncompatibleKeys:
     """Load the model state_dict.
 
@@ -1277,10 +1405,10 @@ def set_model_state_dict(
 
 def set_optimizer_state_dict(
     model: nn.Module,
-    optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
+    optimizers: torch.optim.Optimizer | Iterable[torch.optim.Optimizer],
     optim_state_dict: OptimizerStateType,
     *,
-    options: Optional[StateDictOptions] = None,
+    options: StateDictOptions | None = None,
 ) -> None:
     """Load the optimizers state_dict.
 
@@ -1320,11 +1448,11 @@ def set_optimizer_state_dict(
 
 def set_state_dict(
     model: nn.Module,
-    optimizers: Union[torch.optim.Optimizer, Iterable[torch.optim.Optimizer]],
+    optimizers: torch.optim.Optimizer | Iterable[torch.optim.Optimizer],
     *,
     model_state_dict: dict[str, ValueType],
     optim_state_dict: OptimizerStateType,
-    options: Optional[StateDictOptions] = None,
+    options: StateDictOptions | None = None,
 ) -> _IncompatibleKeys:
     """Load the model state_dict and optimizers state_dict.
 
@@ -1388,7 +1516,7 @@ def set_state_dict(
 def _patch_model_state_dict(
     model: nn.Module,
     *,
-    options: Optional[StateDictOptions] = None,
+    options: StateDictOptions | None = None,
 ) -> None:
     """Patch the ``state_dict`` and ``load_state_dict`` attributes of ``model``.
 
@@ -1444,7 +1572,7 @@ def _patch_optimizer_state_dict(
     model: nn.Module,
     *,
     optimizers: tuple[torch.optim.Optimizer, ...],
-    options: Optional[StateDictOptions] = None,
+    options: StateDictOptions | None = None,
 ) -> None:
     """Patch the ``state_dict`` and ``load_state_dict`` attributes of ``optimizers``.
 

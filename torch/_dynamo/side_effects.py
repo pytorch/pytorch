@@ -1,17 +1,39 @@
-# mypy: allow-untyped-defs
+"""
+Side effect tracking and management for TorchDynamo's compilation system.
+
+This module provides infrastructure for tracking and managing side effects that occur
+during symbolic execution, including:
+
+- Tracking mutations to objects, attributes, and variables
+- Managing context changes (cell variables, global namespace modifications)
+- Handling aliasing and object identity preservation
+- Managing stack frame state and local variable changes
+- Tracking function calls with side effects
+
+Key classes:
+- SideEffects: Main container for tracking all side effects during execution
+- MutableSideEffects: Specialization for mutable object tracking
+- AttributeMutation/ValueMutation: Track specific types of mutations
+- Various specialized side effect classes for different scenarios
+
+The side effect system ensures that mutations performed during symbolic execution
+are properly replayed during runtime, maintaining the correctness of compiled code
+while enabling optimizations where safe.
+"""
 
 import collections
 import contextlib
 import inspect
 import warnings
 import weakref
-from collections.abc import MutableMapping
+from collections.abc import Generator, MutableMapping
 from types import CellType
 from typing import Any, Optional, TYPE_CHECKING
 
 import torch.nn
+from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
-from . import graph_break_hints, utils, variables
+from . import config, graph_break_hints, utils, variables
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
@@ -19,8 +41,8 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented_v2
-from .source import GlobalSource, LocalCellSource, LocalSource, Source
+from .exc import unimplemented
+from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
@@ -35,21 +57,25 @@ from .variables.user_defined import FrozenDataClassVariable
 
 
 if TYPE_CHECKING:
-    from torch._dynamo.symbolic_convert import InstructionTranslator
+    from torch._dynamo.output_graph import OutputGraph
+    from torch._dynamo.symbolic_convert import InstructionTranslatorBase
+    from torch._dynamo.variables.lists import ListVariable
 
 
-def _manual_dict_setitem(dict_from, dict_to, mro_index):
+def _manual_dict_setitem(
+    dict_from: dict[Any, Any], dict_to: dict[Any, Any], mro_index: int
+) -> None:
     # Carefully calls the dict or OrderedDict `clear` or `__setitem__`. We have
     # to be careful because we don't want to trigger the user defined object
     # setitem or clear. The mro_index is used to find the dict/OrderedDict from
     # the class mro.
     dict_class = type(dict_to).__mro__[mro_index]
-    dict_class.clear(dict_to)
+    dict_class.clear(dict_to)  # type: ignore[attr-defined]
     for k, v in dict_from.items():
-        dict_class.__setitem__(dict_to, k, v)
+        dict_class.__setitem__(dict_to, k, v)  # type: ignore[index]
 
 
-def _manual_list_update(list_from, list_to):
+def _manual_list_update(list_from: list[Any], list_to: list[Any]) -> None:
     list.clear(list_to)
     list.extend(list_to, list_from)
 
@@ -80,13 +106,27 @@ class SideEffects:
 
     def __init__(
         self,
-        output_graph,
-        id_to_variable=None,
-        store_attr_mutations=None,
-        keepalive=None,
-        save_for_backward=None,
-        tensor_hooks=None,
-    ):
+        output_graph: "OutputGraph",
+        id_to_variable: Optional[dict[int, VariableTracker]] = None,
+        store_attr_mutations: Optional[
+            dict[VariableTracker, dict[str, VariableTracker]]
+        ] = None,
+        keepalive: Optional[list[Any]] = None,
+        save_for_backward: Optional[
+            list[tuple[AutogradFunctionContextVariable, list[VariableTracker]]]
+        ] = None,
+        tensor_hooks: Optional[
+            dict[
+                int,
+                tuple[
+                    "variables.TensorVariable",
+                    VariableTracker,
+                    "variables.RemovableHandleVariable",
+                    str,
+                ],
+            ]
+        ] = None,
+    ) -> None:
         super().__init__()
         self.output_graph_weakref = weakref.ref(output_graph)
         self.id_to_variable = id_to_variable or {}
@@ -99,7 +139,26 @@ class SideEffects:
         self._has_existing_dict_mutation = False
         # Track Compiled Autograd final callbacks that must be called at the end of Compiled Autograd backward graph.
         # Only applicable if this graph is created from Dynamo tracing in Compiled Autograd.
-        self.ca_final_callbacks_var = None
+        self.ca_final_callbacks_var: Optional[ListVariable] = None
+
+        # Tracks VariableTracker objects whose mutations can be skipped.
+        # For normal mutated variables, Dynamo generates code to replay/reconstruct
+        # the mutations after graph execution. However, variables in this set have
+        # their mutations ignored - the mutations happen during
+        # execution but don't need to be replayed in the generated code.
+        # Used for temporary mutations in contexts like torch.func.functional_call,
+        # where module parameters/buffers are modified but later restored.
+        self.ignore_mutation_on_these_variables: set[VariableTracker] = set()
+
+    def ignore_mutations_on(self, var: VariableTracker) -> None:
+        """Mutations to this variable will be executed but not not tracked,
+        typically used for temporary mutations that are later restored."""
+        self.ignore_mutation_on_these_variables.add(var)
+
+    def stop_ignoring_mutations_on(self, var: VariableTracker) -> None:
+        """Remove a variable from the skip mutation set, restoring normal mutation tracking."""
+        if var in self.ignore_mutation_on_these_variables:
+            self.ignore_mutation_on_these_variables.remove(var)
 
     def __eq__(self, other: object) -> bool:
         assert isinstance(other, SideEffects)
@@ -133,10 +192,12 @@ class SideEffects:
         else:
             return None
 
-    def clone(self):
+    def clone(self) -> "SideEffects":
         """Create a shallow copy"""
+        ref = self.output_graph_weakref()
+        assert ref is not None
         return self.__class__(
-            output_graph=self.output_graph_weakref(),
+            output_graph=ref,
             id_to_variable=dict(self.id_to_variable),
             store_attr_mutations={
                 k: dict(v) for k, v in self.store_attr_mutations.items()
@@ -146,67 +207,95 @@ class SideEffects:
             tensor_hooks=self.tensor_hooks,
         )
 
-    def __contains__(self, item):
+    def __contains__(self, item: Any) -> bool:
         return id(item) in self.id_to_variable
 
-    def __getitem__(self, item):
+    def __getitem__(self, item: Any) -> VariableTracker:
         return self.id_to_variable[id(item)]
 
-    def should_allow_side_effects_under_checkpoint(self):
+    def should_allow_externally_visible_side_effects_in_subtracer(self) -> bool:
         output_graph = self.output_graph_weakref()
-        return (
+        return bool(
             output_graph
-            and output_graph.current_tx.output.current_tracer.under_activation_checkpoint
-            and output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
+            and output_graph.current_tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
         )
 
-    def is_reconstructing_generator(self):
+    def should_allow_side_effects_in_hop(self) -> bool:
+        output_graph = self.output_graph_weakref()
+        return bool(
+            output_graph
+            and output_graph.current_tx.output.current_tracer.allow_side_effects_in_hop
+        )
+
+    def is_reconstructing_generator(self) -> bool:
         output_graph = self.output_graph_weakref()
 
-        return (
+        return bool(
             output_graph
             and output_graph.current_tx.output.current_tracer.is_reconstructing_generator
         )
 
-    def check_allowed_side_effect(self, item):
+    def check_allowed_side_effect(self, item: VariableTracker) -> bool:
         from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
         # People do things like self.dim = dim inside autograd.Function.
         # These are benign.
         if isinstance(item, AutogradFunctionContextVariable):
             return True
-        if self.should_allow_side_effects_under_checkpoint():
+        if self.should_allow_externally_visible_side_effects_in_subtracer():
+            return True
+        if self.should_allow_side_effects_in_hop():
             return True
         if self.is_reconstructing_generator():
             # This is missing the case where one mutates a tensor. See
             # test_generator.py::test_reconstruct_generator_tensor_mutation
-            raise SideEffectsError(
-                "Cannot reconstruct a generator with variable mutations. "
+            unimplemented(
+                gb_type="Generator reconstruction with mutations",
+                context=f"mutating object: {item}",
+                explanation="Cannot reconstruct a generator with variable mutations. "
                 "Dynamo needs to fully exhaust the generator, which may cause "
-                "unintended variable modifications."
+                "unintended variable modifications.",
+                hints=[
+                    "Remove mutations from the generator.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
             )
+        assert item.mutation_type is not None
         if not is_side_effect_safe(item.mutation_type):
-            # TODO plumb HOP information here
-            unimplemented_v2(
-                gb_type="HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
-                context="",
-                explanation="This is not supported.",
-                hints=[],
+            unimplemented(
+                gb_type="HOP: Unsafe side effect",
+                context=f"Attempted to mutate {item}",
+                explanation="Mutating a variable from outside the scope of this HOP is not supported.",
+                hints=[
+                    "If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a "
+                    "side effect in forward method. Eager activation checkpointing replays that side-effect while "
+                    "recomputing the forward in the backward. If you are ok with side-effect not replayed in the "
+                    "backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`",
+                ],
             )
+        return False
 
-    def store_attr(self, item: VariableTracker, name: str, value: VariableTracker):
+    def store_attr(
+        self, item: VariableTracker, name: str, value: VariableTracker
+    ) -> None:
         assert self.is_attribute_mutation(item)
         self.check_allowed_side_effect(item)
         if item not in self.store_attr_mutations:
             self.store_attr_mutations[item] = {}
         self.store_attr_mutations[item][name] = value
 
-    def load_attr(self, item, name, deleted_ok=False, check=False):
+    def load_attr(
+        self,
+        item: VariableTracker,
+        name: str,
+        deleted_ok: bool = False,
+        check: bool = False,
+    ) -> VariableTracker:
         if check:
             assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempted to read a deleted variable",
                 context=f"item: {item}, name: {name}",
                 explanation="",
@@ -214,9 +303,9 @@ class SideEffects:
             )
         return result
 
-    def store_cell(self, cellvar, value):
+    def store_cell(self, cellvar: VariableTracker, value: VariableTracker) -> None:
         if cellvar.is_immutable():
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Write to immutable cell",
                 context=f"cellvar: {cellvar}, value: {value}",
                 explanation="Dynamo doesn't support writing to immutable/sourceless cell variables.",
@@ -226,53 +315,58 @@ class SideEffects:
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(cellvar, "cell_contents", value)
 
-    def load_cell(self, cellvar):
+    def load_cell(self, cellvar: VariableTracker) -> VariableTracker:
         assert isinstance(cellvar, variables.CellVariable)
         if self.has_pending_mutation_of_attr(cellvar, "cell_contents"):
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
             return cellvar.pre_existing_contents
-        unimplemented_v2(
+        unimplemented(
             gb_type="Read uninitialized cell",
             context=str(cellvar),
             explanation="Attempted to read a cell variable that has not been populated yet.",
             hints=[*graph_break_hints.USER_ERROR],
         )
 
-    def load_global(self, gvar: VariableTracker, name: str):
+    def load_global(self, gvar: VariableTracker, name: str) -> VariableTracker:
         assert isinstance(gvar, variables.VariableTracker)
         return self.load_attr(gvar, name)
 
-    def store_global(self, gvar: VariableTracker, name: str, value: VariableTracker):
+    def store_global(
+        self, gvar: VariableTracker, name: str, value: VariableTracker
+    ) -> None:
         assert isinstance(gvar, variables.VariableTracker)
         assert isinstance(value, variables.VariableTracker)
         self.store_attr(gvar, name, value)
 
     @staticmethod
-    def cls_supports_mutation_side_effects(cls):
+    def cls_supports_mutation_side_effects(cls: type) -> bool:
         return inspect.getattr_static(cls, "__getattribute__", None) in (
             object.__getattribute__,
             dict.__getattribute__,
+            set.__getattribute__,
+            frozenset.__getattribute__,
             int.__getattribute__,
             str.__getattribute__,
             list.__getattribute__,
+            tuple.__getattribute__,
             BaseException.__getattribute__,
         )
 
-    def is_attribute_mutation(self, item):
+    def is_attribute_mutation(self, item: VariableTracker) -> bool:
         return isinstance(item.mutation_type, AttributeMutation)
 
-    def has_pending_mutation(self, item):
+    def has_pending_mutation(self, item: VariableTracker) -> bool:
         return self.is_attribute_mutation(item) and bool(
             self.store_attr_mutations.get(item)
         )
 
-    def has_pending_mutation_of_attr(self, item, name):
+    def has_pending_mutation_of_attr(self, item: VariableTracker, name: str) -> bool:
         return self.is_attribute_mutation(
             item
         ) and name in self.store_attr_mutations.get(item, ())
 
-    def is_modified(self, item):
+    def is_modified(self, item: VariableTracker) -> bool:
         if item.is_immutable():
             return False
         if isinstance(item.mutation_type, (AttributeMutationNew, ValueMutationNew)):
@@ -286,15 +380,15 @@ class SideEffects:
 
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
-
-        return item.mutation_type.is_modified
+        assert item.mutation_type is not None
+        return item.mutation_type.is_modified  # type: ignore[attr-defined]
 
     def _track_obj(
         self,
         item: Any,
         variable: VariableTracker,
-        mutation_type_cls=ValueMutationExisting,
-    ):
+        mutation_type_cls: type = ValueMutationExisting,
+    ) -> VariableTracker:
         """Start tracking an existing or new variable for mutation"""
         if id(item) in self.id_to_variable:
             raise AssertionError(
@@ -316,7 +410,9 @@ class SideEffects:
         self,
         item: Any,
         variable: VariableTracker,
-    ):
+    ) -> VariableTracker:
+        # TODO: Modify this API so that we preserve type info of
+        # variable
         return self._track_obj(
             item,
             variable,
@@ -325,11 +421,11 @@ class SideEffects:
 
     def track_object_new(
         self,
-        cls_source: Source,
+        cls_source: Source | None,
         user_cls: Any,
         variable_cls: Any,
-        options,
-    ):
+        options: dict[str, Any],
+    ) -> VariableTracker:
         if user_cls is torch.autograd.function.FunctionCtx:
             with warnings.catch_warnings(record=True):
                 obj = torch.autograd.Function()
@@ -344,7 +440,7 @@ class SideEffects:
         self.keepalive.append(obj)
         return variable
 
-    def get_variable_cls(self, user_cls):
+    def get_variable_cls(self, user_cls: type) -> type:
         from torch.overrides import TorchFunctionMode
 
         from .variables.ctx_manager import GenericContextWrappingVariable
@@ -368,6 +464,8 @@ class SideEffects:
             variable_cls = variables.UnspecializedNNModuleVariable
         elif issubclass(user_cls, (dict, collections.OrderedDict)):
             variable_cls = variables.UserDefinedDictVariable
+        elif issubclass(user_cls, (set, frozenset)):
+            variable_cls = variables.UserDefinedSetVariable
         elif issubclass(user_cls, tuple):
             variable_cls = variables.UserDefinedTupleVariable
         elif issubclass(user_cls, list):
@@ -383,11 +481,11 @@ class SideEffects:
 
     def get_example_value(
         self,
-        base_cls_vt,
-        cls_vt,
-        init_args,
-    ):
-        user_cls = cls_vt.value
+        base_cls_vt: VariableTracker,
+        cls_vt: VariableTracker,
+        init_args: list[VariableTracker],
+    ) -> Any:
+        user_cls = cls_vt.value  # type: ignore[attr-defined]
         if issubclass(user_cls, torch.nn.Module):
             # TODO(anijain2305) - Is it possible to remove this specialization?
             obj = nn_module_new(user_cls)
@@ -414,10 +512,10 @@ class SideEffects:
 
     def track_new_user_defined_object(
         self,
-        base_cls_vt,
-        cls_vt,
-        init_args,
-    ):
+        base_cls_vt: VariableTracker,
+        cls_vt: VariableTracker,
+        init_args: list[VariableTracker],
+    ) -> VariableTracker:
         """
         Creates a UserDefinedObjectVariable (or its subclass) variable tracker
         and mark it for attribute mutation tracking.
@@ -427,7 +525,7 @@ class SideEffects:
             base_cls_vt.__new__(user_cls, *init_args)
         """
         cls_source = cls_vt.source
-        user_cls = cls_vt.value
+        user_cls = cls_vt.value  # type: ignore[attr-defined]
         variable_cls = self.get_variable_cls(user_cls)
         obj = self.get_example_value(base_cls_vt, cls_vt, init_args)
 
@@ -444,7 +542,7 @@ class SideEffects:
 
     def track_cell_new(
         self,
-    ):
+    ) -> VariableTracker:
         obj = object()
         variable = variables.CellVariable(
             mutation_type=AttributeMutationNew(),
@@ -455,7 +553,7 @@ class SideEffects:
 
     def track_cell_existing(
         self, source: Optional[Source], cell: CellType, contents: VariableTracker
-    ):
+    ) -> VariableTracker:
         variable = variables.CellVariable(
             # We don't support mutation to cell without source because we need
             # source to properly codegen the mutations.
@@ -467,7 +565,7 @@ class SideEffects:
         self.keepalive.append(cell)
         return variable
 
-    def track_global_existing(self, source: Source, item: Any):
+    def track_global_existing(self, source: Source, item: Any) -> VariableTracker:
         variable = variables.NewGlobalVariable(
             mutation_type=AttributeMutationExisting(),
             source=source,
@@ -476,11 +574,15 @@ class SideEffects:
         self.keepalive.append(item)
         return variable
 
-    def track_save_for_backward(self, ctx, args):
+    def track_save_for_backward(
+        self, ctx: VariableTracker, args: list[VariableTracker]
+    ) -> None:
         assert isinstance(ctx, variables.AutogradFunctionContextVariable)
         self.save_for_backward.append((ctx, args))
 
-    def track_tensor_variables_from_runahead_side_effects(self, other):
+    def track_runahead_tensor_and_symvar_side_effects(
+        self, other: "SideEffects"
+    ) -> None:
         # In higher order ops we want to keep track of tensors seen in the
         # speculate_subgraph so that we don't lift them again as a new input in
         # other speculate_subgraph or in the root tracer.
@@ -488,16 +590,16 @@ class SideEffects:
             other_id = id(other_item)
             other_variable = other.id_to_variable[other_id]
             if other_id not in self.id_to_variable and isinstance(
-                other_variable, variables.TensorVariable
+                other_variable, (variables.TensorVariable, variables.SymNodeVariable)
             ):
                 self.track_object_existing(other_item, other_variable)
 
-    def prune_dead_object_new(self, tx):
+    def prune_dead_object_new(self, tx: "InstructionTranslatorBase") -> None:
         # Avoid VT cycles from e.g., recursive function.
         visited: set[VariableTracker] = set()
         live_new_objects: set[VariableTracker] = set()
 
-        def visit(var: VariableTracker):
+        def visit(var: VariableTracker) -> None:
             if var in visited:
                 return
             visited.add(var)
@@ -513,7 +615,7 @@ class SideEffects:
                     self.store_attr_mutations[var],
                 )
 
-        def is_live(var: VariableTracker):
+        def is_live(var: VariableTracker) -> bool:
             if isinstance(var.mutation_type, AttributeMutationNew):
                 return var in live_new_objects
             return True
@@ -527,16 +629,27 @@ class SideEffects:
         # The only live side effects come from returns (tx.stack), any intermediates
         # during a graph break (tx.symbolic_locals), and mutation on pre-existing variables.
         # Recursively visit Variables and see if any of them have been mutated.
+        init_live_vars = []
+        # gather stack/symbolic_locals for all tx's up the chain
+        cur_tx: Optional[InstructionTranslatorBase] = tx
+        while cur_tx is not None:
+            init_live_vars.extend([cur_tx.stack, cur_tx.symbolic_locals])
+            if cur_tx.parent is not None:
+                # for non-root tx'es, also keep the cells/freevars alive so they get codegen'd properly
+                # TODO see if we could prune dead cells - cell pruning information needs to be forwarded
+                # to the resume function creation as well.
+                assert cur_tx.post_prune_cell_and_freevars is not None
+                init_live_vars.append(cur_tx.post_prune_cell_and_freevars)
+            cur_tx = cur_tx.parent
         VariableTracker.visit(
             visit,
             # TODO track from all possible sources.
-            (
-                tx.stack,
-                tx.symbolic_locals,
+            init_live_vars
+            + [
                 pre_existing_vars,
                 tx.output.backward_state,
                 self.tensor_hooks,
-            ),
+            ],
         )
         # Manually release the self-referential function, which indirectly
         # captures certain `VariableTracker` and affects parts of PT test/logic
@@ -556,7 +669,10 @@ class SideEffects:
             k: v for k, v in self.store_attr_mutations.items() if is_live(k)
         }
 
-    def mutation(self, var):
+    def mutation(self, var: VariableTracker) -> None:
+        if var in self.ignore_mutation_on_these_variables:
+            return
+
         self.check_allowed_side_effect(var)
         if isinstance(var.mutation_type, ValueMutationExisting):
             var.mutation_type.is_modified = True
@@ -567,13 +683,13 @@ class SideEffects:
         ):
             self._has_existing_dict_mutation = True
 
-    def has_existing_dict_mutation(self):
+    def has_existing_dict_mutation(self) -> bool:
         return self._has_existing_dict_mutation
 
-    def _get_modified_vars(self):
+    def _get_modified_vars(self) -> list[VariableTracker]:
         return [var for var in self.id_to_variable.values() if self.is_modified(var)]
 
-    def codegen_save_tempvars(self, cg: PyCodegen):
+    def codegen_save_tempvars(self, cg: PyCodegen) -> None:
         # We must codegen modified VT to their source by default, so that
         # mutation and aliasing are properly accounted for.
         #
@@ -596,10 +712,11 @@ class SideEffects:
                     )
                     cg.extend_output(create_call_function(0, False))
                     cg.add_cache(var)
-                    var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                    var.source = TempLocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
                 elif var.source is None:
+                    # pyrefly: ignore [bad-assignment]
                     var.source = LocalCellSource(var.local_name)
-            elif isinstance(var, variables.TensorVariable):
+            elif var.is_tensor():
                 # NOTE: for historical reasons we never assigned local sources
                 # to newly constructed tensor object, so we keep it that way.
                 # They are always loaded from output of the fx graph, so one can
@@ -620,9 +737,9 @@ class SideEffects:
                     # `add_cache` generates STORE and consumes TOS, but we never
                     # cleared it. TODO move this call into `add_cache`
                     cg.clear_tos()
-                    var.source = LocalSource(cg.tempvars[var])
+                    var.source = TempLocalSource(cg.tempvars[var])
             elif isinstance(var, variables.AutogradFunctionContextVariable):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="AutogradFunctionContextVariable escaped Dynamo-traced region",
                     context="",
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
@@ -633,7 +750,8 @@ class SideEffects:
                 # base_cls.__new__(user_cls, *args)
                 if isinstance(var, variables.UserDefinedObjectVariable):
 
-                    def load_new_method():
+                    def load_new_method() -> None:
+                        # pyrefly: ignore [missing-attribute]
                         assert var.base_cls_vt is not None
                         cg(var.base_cls_vt)  # type: ignore[attr-defined]
                         cg.extend_output([cg.create_load_attr("__new__")])
@@ -643,17 +761,18 @@ class SideEffects:
                     cg.add_push_null(
                         lambda: cg.load_import_from(utils.__name__, "object_new")
                     )
+                assert var.mutation_type.cls_source is not None
                 cg(var.mutation_type.cls_source)
 
                 # Generate the args to the __new__ method
-                for arg in var.init_args:
+                for arg in var.init_args:  # type: ignore[attr-defined]
                     cg(arg)
 
                 # Call the __new__ method
-                cg.extend_output(create_call_function(1 + len(var.init_args), False))
+                cg.extend_output(create_call_function(1 + len(var.init_args), False))  # type: ignore[attr-defined]
 
                 cg.add_cache(var)
-                var.source = LocalSource(cg.tempvars[var])
+                var.source = TempLocalSource(cg.tempvars[var])
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
@@ -667,8 +786,14 @@ class SideEffects:
                 ]
             )
 
-    def register_hook(self, tensor, hook, handle, name):
-        assert isinstance(tensor, variables.TensorVariable)
+    def register_hook(
+        self,
+        tensor: "variables.TensorVariable",
+        hook: VariableTracker,
+        handle: "variables.RemovableHandleVariable",
+        name: str,
+    ) -> None:
+        assert tensor.is_tensor()
         assert isinstance(hook, variables.VariableTracker)
         assert (
             isinstance(handle, variables.RemovableHandleVariable)
@@ -683,10 +808,10 @@ class SideEffects:
         assert not handle.idx
         handle.idx = idx
 
-    def remove_hook(self, idx):
+    def remove_hook(self, idx: int) -> None:
         del self.tensor_hooks[idx]
 
-    def codegen_hooks(self, cg):
+    def codegen_hooks(self, cg: PyCodegen) -> None:
         for (
             tensor,
             hook,
@@ -728,7 +853,7 @@ class SideEffects:
             # - The handle's exact user-specified name, "user_code_variable_name", is discerned and associated during STORE_FAST.
             assert tensor.source, "Hooks on non input tensors NYI - should not get here"
 
-            def gen_fn():
+            def gen_fn() -> None:
                 cg(tensor)
                 cg.extend_output([cg.create_load_attr(name)])
 
@@ -740,18 +865,24 @@ class SideEffects:
             # be associated with the return value of register_hook().  This consumes the top of stack.
             cg.add_cache(handle)
 
-    def get_ca_final_callbacks_var(self):
+    def get_ca_final_callbacks_var(self) -> "variables.ListVariable":
         from .variables.base import ValueMutationNew
 
         if self.ca_final_callbacks_var is None:
             self.ca_final_callbacks_var = variables.ListVariable(
                 [], mutation_type=ValueMutationNew()
             )
+
         return self.ca_final_callbacks_var
 
-    def codegen_update_mutated(self, cg: PyCodegen):
+    def codegen_update_mutated(self, cg: PyCodegen) -> None:
         suffixes = []
         for var in self._get_modified_vars():
+            # When replay_side_effects=False, only update variables with TempLocalSource
+            if not config.replay_side_effects and not isinstance(
+                var.source, TempLocalSource
+            ):
+                continue
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)  # Don't codegen via source
@@ -767,11 +898,8 @@ class SideEffects:
             elif isinstance(var, variables.lists.DequeVariable):
                 # For limited maxlen, the order of operations matter for side
                 # effect, but we currently don't track the order, so no support.
-                if not (
-                    isinstance(var.maxlen, variables.ConstantVariable)
-                    and var.maxlen.value is None
-                ):
-                    unimplemented_v2(
+                if not var.maxlen.is_constant_none():
+                    unimplemented(
                         gb_type="Side effect on existing deque with limited maxlen",
                         context="",
                         explanation="This is not supported.",
@@ -872,7 +1000,9 @@ class SideEffects:
 
             elif self.is_attribute_mutation(var):
                 if isinstance(
-                    var, variables.UserDefinedDictVariable
+                    var,
+                    variables.UserDefinedDictVariable,
+                    # pyrefly: ignore [bad-argument-type]
                 ) and self.is_modified(var._dict_vt):
                     # Do dict related update manually here. The store_attr
                     # mutations will be applied later.
@@ -905,6 +1035,7 @@ class SideEffects:
                         ]
                     )
 
+                    # pyrefly: ignore [bad-argument-type]
                     cg(var._dict_vt, allow_cache=False)  # Don't codegen via source
                     cg.extend_output(
                         [
@@ -925,7 +1056,9 @@ class SideEffects:
                         ]
                     )
                 elif isinstance(
-                    var, variables.UserDefinedListVariable
+                    var,
+                    variables.UserDefinedListVariable,
+                    # pyrefly: ignore [bad-argument-type]
                 ) and self.is_modified(var._list_vt):
                     # Update the list to the updated items. Be careful in
                     # calling the list methods and not the overridden methods.
@@ -942,6 +1075,7 @@ class SideEffects:
                         ]
                     )
 
+                    # pyrefly: ignore [bad-argument-type]
                     cg(var._list_vt, allow_cache=False)  # Don't codegen via source
                     cg.extend_output(
                         [
@@ -997,6 +1131,23 @@ class SideEffects:
                             suffixes.append(
                                 [create_instruction("DELETE_ATTR", argval=name)]
                             )
+                    elif isinstance(
+                        var, variables.UserDefinedObjectVariable
+                    ) and var.should_skip_descriptor_setter(name):
+                        cg.add_push_null(
+                            lambda: cg.load_import_from(
+                                utils.__name__, "object_setattr_ignore_descriptor"
+                            )
+                        )
+                        cg(var.source)  # type: ignore[attr-defined]
+                        cg(variables.ConstantVariable(name))
+                        cg(value)
+                        suffixes.append(
+                            [
+                                *create_call_function(3, False),
+                                create_instruction("POP_TOP"),
+                            ]
+                        )
                     elif (
                         isinstance(var, variables.UserDefinedObjectVariable)
                         and var.needs_slow_setattr()
@@ -1025,7 +1176,7 @@ class SideEffects:
                     cg.pop_top()
             elif isinstance(var, variables.RandomVariable):
                 # set correct random seed state
-                def gen_fn():
+                def gen_fn() -> None:
                     cg(var.source)  # type: ignore[attr-defined]
                     cg.load_attr("setstate")
 
@@ -1045,7 +1196,7 @@ class SideEffects:
         for suffix in reversed(suffixes):
             cg.extend_output(suffix)
 
-    def is_empty(self):
+    def is_empty(self) -> bool:
         return not (
             any(map(self.is_modified, self.id_to_variable.values()))
             or self.tensor_hooks
@@ -1053,24 +1204,45 @@ class SideEffects:
             or self.tensor_hooks
         )
 
-    def clear(self):
+    def clear(self) -> None:
         self.keepalive.clear()
         self.id_to_variable.clear()
 
 
 @contextlib.contextmanager
-def allow_side_effects_under_checkpoint(tx: "InstructionTranslator"):
-    assert tx.output.current_tracer.under_activation_checkpoint
-    orig_val = tx.output.current_tracer.allow_side_effects_under_checkpoint
+def allow_side_effects_in_hop(
+    tx: "InstructionTranslatorBase",
+) -> Generator[None, None, None]:
+    """Context manager to temporarily allow side effects with extra outputs.
+
+    This is used for special cases (like FSDP functions) that need to perform
+    side effects even when the general policy is to disallow them.
+    """
+    orig_val = tx.output.current_tracer.allow_side_effects_in_hop
     try:
-        tx.output.current_tracer.allow_side_effects_under_checkpoint = True
+        tx.output.current_tracer.allow_side_effects_in_hop = True
         yield
     finally:
-        tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val
+        tx.output.current_tracer.allow_side_effects_in_hop = orig_val
 
 
 @contextlib.contextmanager
-def disallow_side_effects_in_generator(tx: "InstructionTranslator"):
+def allow_externally_visible_side_effects_in_subtracer(
+    tx: "InstructionTranslatorBase",
+) -> Generator[None, None, None]:
+    orig_val = tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+    try:
+        tx.output.current_tracer.unsafe_allow_externally_visible_side_effects = True
+        tx.output.current_tracer.traced_with_externally_visible_side_effects = True
+        yield
+    finally:
+        tx.output.current_tracer.unsafe_allow_externally_visible_side_effects = orig_val
+
+
+@contextlib.contextmanager
+def disallow_side_effects_in_generator(
+    tx: "InstructionTranslatorBase",
+) -> Generator[None, None, None]:
     orig_val = tx.output.current_tracer.is_reconstructing_generator
     try:
         tx.output.current_tracer.is_reconstructing_generator = True

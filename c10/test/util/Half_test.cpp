@@ -19,8 +19,7 @@ float halfbits2float(unsigned short h) {
     exponent = 0xff;
   } else if (!exponent) { /* Denorm or Zero */
     if (mantissa) {
-      // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-      unsigned int msb;
+      unsigned int msb = 0;
       exponent = 0x71;
       do {
         msb = (mantissa & 0x400000);
@@ -97,10 +96,10 @@ TEST(HalfConversionTest, TestPorableConversion) {
   for (auto x : inputs) {
     auto target = c10::detail::fp16_ieee_to_fp32_value(x);
     EXPECT_EQ(halfbits2float(x), target)
-        << "Test failed for uint16 to float " << x << "\n";
+        << "Test failed for uint16 to float " << x << '\n';
     EXPECT_EQ(
         float2halfbits(target), c10::detail::fp16_ieee_from_fp32_value(target))
-        << "Test failed for float to uint16" << target << "\n";
+        << "Test failed for float to uint16" << target << '\n';
   }
 }
 

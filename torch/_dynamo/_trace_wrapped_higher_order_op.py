@@ -49,53 +49,53 @@ Tensor = torch.Tensor
 __all__ = ["trace_wrapped"]
 
 
-if not torch._running_with_deploy():
-    # torch.library.custom_op does not work with torch.deploy/multipy
+@torch.library.custom_op("flex_lib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
+def zeros_and_scatter(
+    shape: list[int],
+    indices: list[Tensor],
+    vals: Tensor,
+) -> Tensor:
+    """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
+    grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
+    return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
-    @torch.library.custom_op("flex_lib::zeros_and_scatter", mutates_args=())  # type: ignore[misc]
-    def zeros_and_scatter(
-        shape: list[int],
-        indices: list[Tensor],
-        vals: Tensor,
-    ) -> Tensor:
-        """Custom Op so that we can register a custom lowering for the new_output + scatter in the backwards pass"""
-        grad = torch.zeros(shape, device=vals.device, dtype=vals.dtype)
-        return torch.ops.aten.index_put(grad, indices, vals, accumulate=True)
 
-    @zeros_and_scatter.register_fake  # type: ignore[misc]
-    def _(
-        shape: list[int],
-        indices: list[Tensor],
-        vals: Tensor,
-    ) -> Tensor:
-        return vals.new_empty(shape)
+@zeros_and_scatter.register_fake  # type: ignore[misc]
+def _(
+    shape: list[int],
+    indices: list[Tensor],
+    vals: Tensor,
+) -> Tensor:
+    return vals.new_empty(shape)
 
-    @zeros_and_scatter.register_vmap  # type: ignore[misc]
-    def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
-        """The batching rule is special in that it returns a tensor that is not batched"""
-        indices_indims = indims[1]
-        expanded_indices = []
-        for idx, idx_indim in zip(indices, indices_indims):
-            # The index is not a being batched, we should unsqueeze and expand to val
-            if idx_indim is None:
-                expanded_indices.append(idx.expand(value.shape))
-            else:
-                # the index is being part of the vmap batch, it should be the same size as val
-                assert idx.shape == value.shape
-                expanded_indices.append(idx)
 
-        out = torch.ops.flex_lib.zeros_and_scatter(
-            shape,
-            expanded_indices,
-            value,
-        )
-        return out, None
+@zeros_and_scatter.register_vmap  # type: ignore[misc]
+def _(info, indims, shape, indices, value):  # type: ignore[no-untyped-def]
+    """The batching rule is special in that it returns a tensor that is not batched"""
+    indices_indims = indims[1]
+    expanded_indices = []
+    for idx, idx_indim in zip(indices, indices_indims):
+        # The index is not a being batched, we should unsqueeze and expand to val
+        if idx_indim is None:
+            expanded_indices.append(idx.expand(value.shape))
+        else:
+            # the index is being part of the vmap batch, it should be the same size as val
+            assert idx.shape == value.shape
+            expanded_indices.append(idx)
+
+    out = torch.ops.flex_lib.zeros_and_scatter(
+        shape,
+        expanded_indices,
+        value,
+    )
+    return out, None
 
 
 class ModIndex(torch.autograd.Function):
     generate_vmap_rule = True
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(x: Tensor, indices: list[Tensor]) -> Tensor:
         return torch.ops.aten.index(x, indices)
 
@@ -117,6 +117,11 @@ class ModIndex(torch.autograd.Function):
             None,
         )
 
+    @classmethod
+    @torch._export.wrappers.allow_in_pre_dispatch_graph
+    def apply(cls, *args, **kwargs):  # type: ignore[no-untyped-def]
+        return super().apply(*args, **kwargs)
+
 
 mod_index = ModIndex.apply
 
@@ -135,7 +140,7 @@ class TransformGetItemToIndex(TorchFunctionMode):
         args: tuple[object, ...] = (),
         kwargs: Optional[dict[str, object]] = None,
     ) -> object:
-        if func == torch.Tensor.__getitem__:
+        if func is torch.Tensor.__getitem__:
             index_args = pytree.tree_leaves(args[1])
             if all(isinstance(x, torch.Tensor) for x in index_args):
                 return mod_index(args[0], index_args)
@@ -152,6 +157,7 @@ class TraceWrapped(HigherOrderOperator):
         super().__init__("trace_wrapped")
 
     def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(*args, **kwargs)
 
 
@@ -238,6 +244,7 @@ def _trace_wrapped_functionalized(ctx: Any, *args: Any, **kwargs: Any) -> Any:
 
 def autograd_function_backward_rewritten(original_backward: Any) -> Any:
     def new_backward(ctx: Any, *grads: Any) -> Any:
+        # pyrefly: ignore [bad-assignment]
         grads = [g.contiguous() for g in grads]
         return original_backward(ctx, *grads)
 

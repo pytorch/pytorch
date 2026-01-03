@@ -19,7 +19,7 @@ TransformerEncoderLayerImpl::TransformerEncoderLayerImpl(
 
 void TransformerEncoderLayerImpl::reset() {
   // NOTE: reset() is for initializing the model only, calling reset() after the
-  // model is created will throw exceptionss. Call reset_parameter() if the
+  // model is created will throw exceptions. Call reset_parameter() if the
   // created model needs a reset
 
   self_attn = this->register_module(
@@ -145,7 +145,7 @@ void TransformerDecoderLayerImpl::reset_parameters() {
   multihead_attn->_reset_parameters();
 
   linear1->reset_parameters();
-  // dropout->reset_paramteres();
+  // dropout->reset_parameters();
   linear2->reset_parameters();
 
   norm1->reset_parameters();
@@ -153,7 +153,7 @@ void TransformerDecoderLayerImpl::reset_parameters() {
   norm3->reset_parameters();
   // dropout1->reset_parameters();
   // dropout2->reset_parameters();
-  // dropout3->reset_paramteres();
+  // dropout3->reset_parameters();
 }
 
 /// Pass the inputs (and mask) through the decoder layer.

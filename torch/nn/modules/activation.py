@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -89,9 +88,15 @@ class Threshold(Module):
         # TODO: check in THNN (if inplace == True, then assert value <= threshold)
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.threshold(input, self.threshold, self.value, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"threshold={self.threshold}, value={self.value}{inplace_str}"
 
@@ -127,14 +132,20 @@ class ReLU(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.relu(input, inplace=self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = "inplace=True" if self.inplace else ""
         return inplace_str
 
@@ -185,16 +196,22 @@ class RReLU(Module):
 
     def __init__(
         self, lower: float = 1.0 / 8, upper: float = 1.0 / 3, inplace: bool = False
-    ):
+    ) -> None:
         super().__init__()
         self.lower = lower
         self.upper = upper
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.rrelu(input, self.lower, self.upper, self.training, self.inplace)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"lower={self.lower}, upper={self.upper}{inplace_str}"
 
@@ -243,8 +260,8 @@ class Hardtanh(Module):
         min_val: float = -1.0,
         max_val: float = 1.0,
         inplace: bool = False,
-        min_value: Optional[float] = None,
-        max_value: Optional[float] = None,
+        min_value: float | None = None,
+        max_value: float | None = None,
     ) -> None:
         super().__init__()
         if min_value is not None:
@@ -265,12 +282,21 @@ class Hardtanh(Module):
         self.min_val = min_val
         self.max_val = max_val
         self.inplace = inplace
-        assert self.max_val > self.min_val
+        if self.max_val <= self.min_val:
+            raise AssertionError(
+                f"max_val ({self.max_val}) must be greater than min_val ({self.min_val})"
+            )
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.hardtanh(input, self.min_val, self.max_val, self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"min_val={self.min_val}, max_val={self.max_val}{inplace_str}"
 
@@ -297,10 +323,13 @@ class ReLU6(Hardtanh):
         >>> output = m(input)
     """
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__(0.0, 6.0, inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = "inplace=True" if self.inplace else ""
         return inplace_str
 
@@ -326,6 +355,9 @@ class Sigmoid(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return torch.sigmoid(input)
 
 
@@ -366,6 +398,9 @@ class Hardsigmoid(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.hardsigmoid(input, self.inplace)
 
 
@@ -391,6 +426,9 @@ class Tanh(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return torch.tanh(input)
 
 
@@ -426,14 +464,20 @@ class SiLU(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.silu(input, inplace=self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = "inplace=True" if self.inplace else ""
         return inplace_str
 
@@ -465,14 +509,20 @@ class Mish(Module):
     __constants__ = ["inplace"]
     inplace: bool
 
-    def __init__(self, inplace: bool = False):
+    def __init__(self, inplace: bool = False) -> None:
         super().__init__()
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.mish(input, inplace=self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = "inplace=True" if self.inplace else ""
         return inplace_str
 
@@ -516,6 +566,9 @@ class Hardswish(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.hardswish(input, self.inplace)
 
 
@@ -560,9 +613,15 @@ class ELU(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.elu(input, self.alpha, self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"alpha={self.alpha}{inplace_str}"
 
@@ -605,9 +664,15 @@ class CELU(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.celu(input, self.alpha, self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"alpha={self.alpha}{inplace_str}"
 
@@ -655,9 +720,15 @@ class SELU(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.selu(input, self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = "inplace=True" if self.inplace else ""
         return inplace_str
 
@@ -693,9 +764,15 @@ class GLU(Module):
         self.dim = dim
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.glu(input, self.dim)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"dim={self.dim}"
 
 
@@ -735,9 +812,15 @@ class GELU(Module):
         self.approximate = approximate
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.gelu(input, approximate=self.approximate)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"approximate={repr(self.approximate)}"
 
 
@@ -778,9 +861,15 @@ class Hardshrink(Module):
         self.lambd = lambd
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Run forward pass.
+        """
         return F.hardshrink(input, self.lambd)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"{self.lambd}"
 
 
@@ -829,9 +918,15 @@ class LeakyReLU(Module):
         self.inplace = inplace
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Run forward pass.
+        """
         return F.leaky_relu(input, self.negative_slope, self.inplace)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         inplace_str = ", inplace=True" if self.inplace else ""
         return f"negative_slope={self.negative_slope}{inplace_str}"
 
@@ -856,6 +951,9 @@ class LogSigmoid(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Run forward pass.
+        """
         return F.logsigmoid(input)
 
 
@@ -898,9 +996,15 @@ class Softplus(Module):
         self.threshold = threshold
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Run forward pass.
+        """
         return F.softplus(input, self.beta, self.threshold)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"beta={self.beta}, threshold={self.threshold}"
 
 
@@ -939,13 +1043,19 @@ class Softshrink(Module):
         self.lambd = lambd
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Run forward pass.
+        """
         return F.softshrink(input, self.lambd)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return str(self.lambd)
 
 
-def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
+def _check_arg_device(x: torch.Tensor | None) -> bool:
     if x is not None:
         return x.device.type in [
             "cpu",
@@ -955,7 +1065,7 @@ def _check_arg_device(x: Optional[torch.Tensor]) -> bool:
     return True
 
 
-def _arg_requires_grad(x: Optional[torch.Tensor]) -> bool:
+def _arg_requires_grad(x: torch.Tensor | None) -> bool:
     if x is not None:
         return x.requires_grad
     return False
@@ -966,9 +1076,13 @@ def _is_make_fx_tracing():
         torch_dispatch_mode_stack = (
             torch.utils._python_dispatch._get_current_dispatch_mode_stack()
         )
-        return any(
-            type(x) == torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode
-            for x in torch_dispatch_mode_stack
+        # this can be triggered when dynamo inlining the module too.
+        return (
+            any(
+                type(x) is torch.fx.experimental.proxy_tensor.ProxyTorchDispatchMode
+                for x in torch_dispatch_mode_stack
+            )
+            or torch.compiler.is_exporting()
         )
     else:
         return False
@@ -977,13 +1091,14 @@ def _is_make_fx_tracing():
 class MultiheadAttention(Module):
     r"""Allows the model to jointly attend to information from different representation subspaces.
 
-    .. note::
-        See `this tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
-        for an in depth discussion of the performant building blocks PyTorch offers for building your own
-        transformer layers.
-
-    Method described in the paper:
-    `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_.
+    This MultiheadAttention layer implements the original architecture described
+    in the `Attention Is All You Need <https://arxiv.org/abs/1706.03762>`_ paper. The
+    intent of this layer is as a reference implementation for foundational understanding
+    and thus it contains only limited features relative to newer architectures.
+    Given the fast pace of innovation in transformer-like architectures, we recommend
+    exploring this `tutorial <https://pytorch.org/tutorials/intermediate/transformer_building_blocks.html>`_
+    to build efficient layers from building blocks in core or using higher
+    level libraries from the `PyTorch Ecosystem <https://landscape.pytorch.org/>`_.
 
     Multi-Head Attention is defined as:
 
@@ -1043,8 +1158,8 @@ class MultiheadAttention(Module):
     """
 
     __constants__ = ["batch_first"]
-    bias_k: Optional[torch.Tensor]
-    bias_v: Optional[torch.Tensor]
+    bias_k: torch.Tensor | None
+    bias_v: torch.Tensor | None
 
     def __init__(
         self,
@@ -1076,9 +1191,8 @@ class MultiheadAttention(Module):
         self.dropout = dropout
         self.batch_first = batch_first
         self.head_dim = embed_dim // num_heads
-        assert (
-            self.head_dim * num_heads == self.embed_dim
-        ), "embed_dim must be divisible by num_heads"
+        if self.head_dim * num_heads != self.embed_dim:
+            raise AssertionError("embed_dim must be divisible by num_heads")
 
         if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(
@@ -1117,7 +1231,7 @@ class MultiheadAttention(Module):
 
         self._reset_parameters()
 
-    def _reset_parameters(self):
+    def _reset_parameters(self) -> None:
         if self._qkv_same_embed_dim:
             xavier_uniform_(self.in_proj_weight)
         else:
@@ -1145,12 +1259,12 @@ class MultiheadAttention(Module):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        key_padding_mask: Optional[Tensor] = None,
+        key_padding_mask: Tensor | None = None,
         need_weights: bool = True,
-        attn_mask: Optional[Tensor] = None,
+        attn_mask: Tensor | None = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Tensor | None]:
         r"""Compute attention outputs using query, key, and value embeddings.
 
             Supports optional parameters for padding, masks and attention weights.
@@ -1275,8 +1389,10 @@ class MultiheadAttention(Module):
         elif query.is_nested and (
             key_padding_mask is not None or attn_mask is not None
         ):
-            why_not_fast_path = "supplying both src_key_padding_mask and src_mask at the same time \
+            why_not_fast_path = (
+                "supplying both src_key_padding_mask and src_mask at the same time \
                                  is not supported with NestedTensor input"
+            )
         elif torch.is_autocast_enabled():
             why_not_fast_path = "autocast is enabled"
 
@@ -1331,10 +1447,11 @@ class MultiheadAttention(Module):
                     )
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
-        assert not any_nested, (
-            "MultiheadAttention does not support NestedTensor outside of its fast path. "
-            + f"The fast path was not hit because {why_not_fast_path}"
-        )
+        if any_nested:
+            raise AssertionError(
+                "MultiheadAttention does not support NestedTensor outside of its fast path. "
+                + f"The fast path was not hit because {why_not_fast_path}"
+            )
 
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property
@@ -1402,10 +1519,10 @@ class MultiheadAttention(Module):
 
     def merge_masks(
         self,
-        attn_mask: Optional[Tensor],
-        key_padding_mask: Optional[Tensor],
+        attn_mask: Tensor | None,
+        key_padding_mask: Tensor | None,
         query: Tensor,
-    ) -> tuple[Optional[Tensor], Optional[int]]:
+    ) -> tuple[Tensor | None, int | None]:
         r"""Determine mask type and combine masks if necessary.
 
         If only one mask is provided, that mask
@@ -1420,8 +1537,8 @@ class MultiheadAttention(Module):
             merged_mask: merged mask
             mask_type: merged mask type (0, 1, or 2)
         """
-        mask_type: Optional[int] = None
-        merged_mask: Optional[Tensor] = None
+        mask_type: int | None = None
+        merged_mask: Tensor | None = None
 
         if key_padding_mask is not None:
             mask_type = 1
@@ -1514,13 +1631,22 @@ class PReLU(Module):
         self.weight = Parameter(torch.empty(num_parameters, **factory_kwargs))
         self.reset_parameters()
 
-    def reset_parameters(self):
+    def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in ``__init__``.
+        """
         torch.nn.init.constant_(self.weight, self.init)
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.prelu(input, self.weight)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"num_parameters={self.num_parameters}"
 
 
@@ -1544,6 +1670,9 @@ class Softsign(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.softsign(input)
 
 
@@ -1567,6 +1696,9 @@ class Tanhshrink(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.tanhshrink(input)
 
 
@@ -1602,9 +1734,9 @@ class Softmin(Module):
     """
 
     __constants__ = ["dim"]
-    dim: Optional[int]
+    dim: int | None
 
-    def __init__(self, dim: Optional[int] = None) -> None:
+    def __init__(self, dim: int | None = None) -> None:
         super().__init__()
         self.dim = dim
 
@@ -1614,9 +1746,15 @@ class Softmin(Module):
             self.dim = None
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.softmin(input, self.dim, _stacklevel=5)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"dim={self.dim}"
 
 
@@ -1661,9 +1799,9 @@ class Softmax(Module):
     """
 
     __constants__ = ["dim"]
-    dim: Optional[int]
+    dim: int | None
 
-    def __init__(self, dim: Optional[int] = None) -> None:
+    def __init__(self, dim: int | None = None) -> None:
         super().__init__()
         self.dim = dim
 
@@ -1673,9 +1811,15 @@ class Softmax(Module):
             self.dim = None
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.softmax(input, self.dim, _stacklevel=5)
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"dim={self.dim}"
 
 
@@ -1702,6 +1846,9 @@ class Softmax2d(Module):
     """
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         if input.dim() not in (3, 4):
             raise ValueError(
                 f"Softmax2d: expected input to be 3D or 4D, got {input.dim()}D instead"
@@ -1737,9 +1884,9 @@ class LogSoftmax(Module):
     """
 
     __constants__ = ["dim"]
-    dim: Optional[int]
+    dim: int | None
 
-    def __init__(self, dim: Optional[int] = None) -> None:
+    def __init__(self, dim: int | None = None) -> None:
         super().__init__()
         self.dim = dim
 
@@ -1749,7 +1896,13 @@ class LogSoftmax(Module):
             self.dim = None
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return F.log_softmax(input, self.dim, _stacklevel=5)
 
-    def extra_repr(self):
+    def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         return f"dim={self.dim}"

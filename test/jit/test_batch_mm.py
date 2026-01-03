@@ -2,24 +2,19 @@
 
 import torch
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestBatchMM(JitTestCase):
     @staticmethod
     def _get_test_tensors(n: int):
         return [
-            torch.tensor([[1 + x, 2 + x, 3 + x], [4 + x, 5 + x, 6 + x]])
-            if x % 2 == 0
-            else torch.tensor([[1 + x, 2 + x], [3 + x, 4 + x], [5 + x, 6 + x]])
+            (
+                torch.tensor([[1 + x, 2 + x, 3 + x], [4 + x, 5 + x, 6 + x]])
+                if x % 2 == 0
+                else torch.tensor([[1 + x, 2 + x], [3 + x, 4 + x], [5 + x, 6 + x]])
+            )
             for x in range(n)
         ]
 
@@ -288,3 +283,7 @@ class TestBatchMM(JitTestCase):
         FileCheck().check_count("aten::mm", 10, exactly=True).check_not(
             "prim::MMBatchSide"
         ).run(test_batch_mm.graph)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

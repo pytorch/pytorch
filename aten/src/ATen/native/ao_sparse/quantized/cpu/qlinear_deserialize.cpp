@@ -106,7 +106,7 @@ c10::intrusive_ptr<LinearPackedParamsBase> PackedLinearWeight::deserialize(
         std::get<weight_scales_index>(serialized),
         weight_zero_points,
         0, // The output channel axis is 0
-        device(c10::kCPU).dtype(c10::kQInt8));
+        at::device(c10::kCPU).dtype(c10::kQInt8));
   }
 
   const at::Tensor loaded_weight_values =

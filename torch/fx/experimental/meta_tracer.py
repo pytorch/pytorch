@@ -2,7 +2,8 @@
 import builtins
 import functools
 import warnings
-from typing import Any, Callable, Optional, Union
+from collections.abc import Callable
+from typing import Any, Optional, Union
 
 import torch
 import torch.fx
@@ -126,7 +127,7 @@ class MetaAttribute(MetaProxy):
         self._node = None
 
     @property
-    def node(self):
+    def node(self):  # type: ignore[override]
         # the node for attributes is added lazily, since most will just be method calls
         # which do not rely on the getitem call
         if self._node is None:
@@ -171,7 +172,14 @@ class MetaTracer(torch.fx.Tracer):
         proxy_factory_fn=None,
     ):
         rv = super().create_proxy(
-            kind, target, args, kwargs, name, type_expr, proxy_factory_fn
+            kind,
+            target,
+            args,
+            kwargs,
+            name,
+            type_expr,
+            # pyrefly: ignore [bad-argument-type]
+            proxy_factory_fn,
         )
 
         if kind == "placeholder" and target in self.meta_args:
@@ -193,6 +201,7 @@ class MetaTracer(torch.fx.Tracer):
 
             if kind == "call_function":
                 meta_target = manual_meta_overrides.get(target, target)
+                # pyrefly: ignore [not-callable]
                 meta_out = meta_target(*args_metas, **kwargs_metas)
             elif kind == "call_method":
                 meta_target = getattr(args_metas[0], target)  # type: ignore[index]

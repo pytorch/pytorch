@@ -3,11 +3,10 @@
 set -uex -o pipefail
 
 PYTHON_DOWNLOAD_URL=https://www.python.org/ftp/python
-PYTHON_DOWNLOAD_GITHUB_BRANCH=https://github.com/python/cpython/archive/refs/heads
 GET_PIP_URL=https://bootstrap.pypa.io/get-pip.py
 
 # Python versions to be installed in /opt/$VERSION_NO
-CPYTHON_VERSIONS=${CPYTHON_VERSIONS:-"3.9.0 3.10.1 3.11.0 3.12.0 3.13.0 3.13.0t"}
+CPYTHON_VERSIONS=${CPYTHON_VERSIONS:-"3.9.0 3.10.1 3.11.0 3.12.0 3.13.0 3.13.0t 3.14.0 3.14.0t"}
 
 function check_var {
     if [ -z "$1" ]; then
@@ -24,9 +23,8 @@ function do_cpython_build {
     tar -xzf Python-$py_ver.tgz
 
     local additional_flags=""
-    if [ "$py_ver" == "3.13.0t" ]; then
+    if [[ "$py_ver" == *"t" ]]; then
         additional_flags=" --disable-gil"
-        mv cpython-3.13/ cpython-3.13t/
     fi
 
     pushd $py_folder
@@ -68,32 +66,25 @@ function do_cpython_build {
         ln -s pip3 ${prefix}/bin/pip
     fi
     # install setuptools since python 3.12 is required to use distutils
-    ${prefix}/bin/pip install wheel==0.34.2 setuptools==68.2.2
-    local abi_tag=$(${prefix}/bin/python -c "from wheel.pep425tags import get_abbr_impl, get_impl_ver, get_abi_tag; print('{0}{1}-{2}'.format(get_abbr_impl(), get_impl_ver(), get_abi_tag()))")
+    # packaging is needed to create symlink since wheel no longer provides needed information
+    ${prefix}/bin/pip install packaging==25.0 wheel==0.45.1 setuptools==80.9.0
+    local abi_tag=$(${prefix}/bin/python -c "from packaging.tags import interpreter_name, interpreter_version; import sysconfig ; from sysconfig import get_config_var; print('{0}{1}-{0}{1}{2}'.format(interpreter_name(), interpreter_version(), 't' if sysconfig.get_config_var('Py_GIL_DISABLED') else ''))")
     ln -sf ${prefix} /opt/python/${abi_tag}
 }
 
 function build_cpython {
     local py_ver=$1
     check_var $py_ver
-    check_var $PYTHON_DOWNLOAD_URL
-    local py_ver_folder=$py_ver
+    local py_suffix=$py_ver
+    local py_folder=$py_ver
 
-    if [ "$py_ver" = "3.13.0t" ]; then
-        PY_VER_SHORT="3.13"
-        PYT_VER_SHORT="3.13t"
-        check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
-        wget $PYTHON_DOWNLOAD_GITHUB_BRANCH/$PY_VER_SHORT.tar.gz -O Python-$py_ver.tgz
-        do_cpython_build $py_ver cpython-$PYT_VER_SHORT
-    elif [ "$py_ver" = "3.13.0" ]; then
-        PY_VER_SHORT="3.13"
-        check_var $PYTHON_DOWNLOAD_GITHUB_BRANCH
-        wget $PYTHON_DOWNLOAD_GITHUB_BRANCH/$PY_VER_SHORT.tar.gz -O Python-$py_ver.tgz
-        do_cpython_build $py_ver cpython-$PY_VER_SHORT
-    else
-        wget -q $PYTHON_DOWNLOAD_URL/$py_ver_folder/Python-$py_ver.tgz
-        do_cpython_build $py_ver Python-$py_ver
+    # Special handling for nogil
+    if [[ "${py_ver}" == *"t" ]]; then
+        py_suffix=${py_ver::-1}
+        py_folder=$py_suffix
     fi
+    wget -q $PYTHON_DOWNLOAD_URL/$py_folder/Python-$py_suffix.tgz -O Python-$py_ver.tgz
+    do_cpython_build $py_ver Python-$py_suffix
 
     rm -f Python-$py_ver.tgz
 }

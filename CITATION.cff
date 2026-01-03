@@ -113,4 +113,4 @@ preferred-citation:
   publisher:
     name: ACM
   doi: "10.1145/3620665.3640366"
-  url: "https://pytorch.org/assets/pytorch2-2.pdf"
+  url: "https://docs.pytorch.org/assets/pytorch2-2.pdf"

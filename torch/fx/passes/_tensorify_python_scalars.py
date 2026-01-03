@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import Any, Union
+from typing import Any, TYPE_CHECKING, Union
 
 from sympy import Integer, Number, Symbol
 from sympy.logic.boolalg import BooleanAtom
@@ -13,16 +13,14 @@ from torch._dynamo.exc import TensorifyScalarRestartAnalysis
 from torch._dynamo.symbolic_convert import TensorifyState
 from torch._dynamo.utils import get_metrics_context
 from torch._prims_common import get_computation_dtype
-from torch._subclasses import fake_tensor  # noqa: TCH001
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._utils_internal import justknobs_check
 from torch.fx._utils import lazy_format_graph_code
-from torch.fx.experimental.symbolic_shapes import (  # noqa: TCH001
+from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
     has_free_symbols,
     ShapeEnv,
 )
-from torch.fx.graph_module import GraphModule  # noqa: TCH001
 
 # TODO: refactor
 from torch.fx.passes.runtime_assert import _get_sym_val
@@ -32,10 +30,15 @@ from torch.utils._sympy.reference import TensorReferenceAnalysis
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 
+if TYPE_CHECKING:
+    from torch._subclasses import fake_tensor
+    from torch.fx.graph_module import GraphModule
+
+
 __all__: list[str] = []
 
 log = logging.getLogger(__name__)
-graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
+graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code_verbose")
 
 # The general shape of this transformation is to look for Tensor operations
 # that take a backed SymFloat as an argument, and then redo them as tensor
@@ -64,8 +67,8 @@ graph_code_log = torch._logging.getArtifactLogger(__name__, "graph_code")
 # manage to eliminate all float compute, this ends up being equivalent, but
 # there is a critical difference when some floats cannot be eliminated: when
 # we call item() on them, what should it's SymFloat be? Ideally, it would
-# be the same backed SymFloat we had before. But without symbolic expresssion
-# propogation on tensor quantities, repropagating would instead give you an
+# be the same backed SymFloat we had before. But without symbolic expression
+# propagation on tensor quantities, repropagating would instead give you an
 # unbacked SymFloat. Maybe it is a good idea to implement symbolic propagation
 # on 0d scalar tensors, but I decided to go for something simpler to start.
 #
@@ -164,9 +167,13 @@ def tensorify_python_scalars(
                 c = float(expr)
 
             node = graph.call_function(
-                torch.ops.aten.scalar_tensor.default, (c,), {"dtype": dtype}
+                torch.ops.aten.scalar_tensor.default,
+                # pyrefly: ignore [unbound-name]
+                (c,),
+                {"dtype": dtype},
             )
             with fake_mode:
+                # pyrefly: ignore [unbound-name]
                 node.meta["val"] = torch.ops.aten.scalar_tensor.default(c, dtype=dtype)
             expr_to_tensor_proxy[expr] = MetaProxy(
                 node,
@@ -190,6 +197,7 @@ def tensorify_python_scalars(
 
         return expr_to_tensor_proxy[expr]
 
+    failed_tensorify_ops: set[str] = set()
     nodes = list(graph.nodes)
     for i, node in enumerate(nodes[:-1]):
         with graph.inserting_before(
@@ -202,29 +210,43 @@ def tensorify_python_scalars(
                 and node.target is torch.ops.aten._local_scalar_dense.default
             ):
                 dtype = node.args[0].meta["val"].dtype
-                if dtype != torch.float64:
-                    continue
 
                 assert isinstance(node.args[0], fx.Node), node.args[0]
 
                 s = node.meta["val"].node.expr
-                expr_to_tensor_proxy[s] = MetaProxy(
-                    node.args[0], tracer=tracer, fake_mode=fake_mode
-                )
+
                 expr_to_sym_proxy[s] = MetaProxy(
                     node, tracer=tracer, fake_mode=fake_mode
                 )
+
+                # only tensorify if the dtype is floating point
+                if not dtype.is_floating_point:
+                    continue
+
+                expr_to_tensor_proxy[s] = MetaProxy(
+                    node.args[0], tracer=tracer, fake_mode=fake_mode
+                )
+                # Upcast the float tensor to torch.float64 to avoid precision problem
+                expr_to_tensor_proxy[s] = torch.ops.prims.convert_element_type.default(
+                    expr_to_tensor_proxy[s], torch.float64
+                )
+
+            # pyrefly: ignore [bad-argument-type]
             elif (sym_expr := _get_sym_val(node)) is not None:
                 if sym_expr not in expr_to_sym_proxy and not isinstance(
                     sym_expr, (sympy.Number, sympy.logic.boolalg.BooleanAtom)
                 ):
                     expr_to_sym_proxy[sym_expr] = MetaProxy(
-                        node, tracer=tracer, fake_mode=fake_mode
+                        # pyrefly: ignore [bad-argument-type]
+                        node,
+                        tracer=tracer,
+                        fake_mode=fake_mode,
                     )
 
             # Specialize all dimensions that contain symfloats. Here's
             # an example test that requires this:
             # PYTORCH_OPINFO_SAMPLE_INPUT_INDEX=4 python test/inductor/test_torchinductor_opinfo.py TestInductorOpInfoCUDA.test_comprehensive_nn_functional_interpolate_bicubic_cuda_float32 # noqa: B950
+            # pyrefly: ignore [missing-attribute]
             val = node.meta.get("val")
             if isinstance(val, FakeTensor):
                 for dim in val.shape:
@@ -243,13 +265,17 @@ def tensorify_python_scalars(
                                 should_restart = True
 
             # Look for functions to convert
+            # pyrefly: ignore [missing-attribute]
             if node.op == "call_function" and (
+                # pyrefly: ignore [missing-attribute]
                 replacement_op := SUPPORTED_OPS.get(node.target)
             ):
                 args: list[Any] = []
                 transform = False
+                # pyrefly: ignore [missing-attribute]
                 compute_dtype = get_computation_dtype(node.meta["val"].dtype)
 
+                # pyrefly: ignore [missing-attribute]
                 for a in node.args:
                     if (
                         isinstance(a, fx.Node)
@@ -286,6 +312,7 @@ def tensorify_python_scalars(
                 if transform:
                     replacement_proxy = replacement_op(*args)
 
+                    # pyrefly: ignore [missing-attribute]
                     if compute_dtype != node.meta["val"].dtype:
                         replacement_proxy = (
                             torch.ops.prims.convert_element_type.default(
@@ -294,7 +321,9 @@ def tensorify_python_scalars(
                             )
                         )
 
+                    # pyrefly: ignore [missing-attribute]
                     node.replace_all_uses_with(replacement_proxy.node)
+                    # pyrefly: ignore [bad-argument-type]
                     graph.erase_node(node)
 
                     metrics_context = get_metrics_context()
@@ -302,8 +331,18 @@ def tensorify_python_scalars(
                         metrics_context.set(
                             "tensorify_float_success", True, overwrite=True
                         )
-
-    failed_tensorify_ops: set[str] = set()
+            else:
+                # pyrefly: ignore [missing-attribute]
+                for a in node.args:
+                    if (
+                        isinstance(a, fx.Node)
+                        and "val" in a.meta
+                        and isinstance(zf := a.meta["val"], torch.SymFloat)
+                    ):
+                        # pyrefly: ignore [missing-attribute]
+                        failed_tensorify_ops.update(str(node.target))
+                        # pyrefly: ignore [missing-attribute]
+                        log.info("Failed to tensorify %s", str(node.target))
 
     # Now do one more pass that specializes all symfloats we didn't manage
     # to tensorify away.
@@ -332,15 +371,13 @@ def tensorify_python_scalars(
                     #
                     # It's better to guard on zf // 2 == 2.0 than zf == 5.0
 
-                    failed_tensorify_ops.update(str(key) for key in node.users.keys())
-
                     node.replace_all_uses_with(guard_scalar(val))
                     graph.erase_node(node)
 
     # Sometimes by the time we get to tensorify, there have already been
     # specializations, eg. in python_arg_parser.h. In these cases,
     # placeholder nodes no longer have a reference to their original
-    # symfloat and thus we need to deduce specializations have happend
+    # symfloat and thus we need to deduce specializations have happened
     # via shape_env.replacements. NB: there's an important invariant here
     # that symfloats keep consistent names across restarts.
     for k, v in shape_env.var_to_val.items():

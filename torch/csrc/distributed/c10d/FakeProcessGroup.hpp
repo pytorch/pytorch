@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/distributed/c10d/Backend.hpp>
+#include <torch/csrc/utils.h>
 
 namespace c10d {
 
@@ -20,23 +21,48 @@ class FakeWork : public Work {
 
 class FakeProcessGroup : public Backend {
  public:
-  FakeProcessGroup(int rank, int size) : Backend(rank, size) {}
+  struct Options : Backend::Options {
+    explicit Options() : Backend::Options("fake") {}
+
+    int fake_option = 0;
+    bool error_on_collective = false;
+  };
+
+  // Static factory method for official APIs
+  static c10::intrusive_ptr<FakeProcessGroup> _create_internal(
+      int rank,
+      int size,
+      c10::intrusive_ptr<Options> options = c10::make_intrusive<Options>()) {
+    return c10::make_intrusive<FakeProcessGroup>(
+        rank, size, std::move(options));
+  }
+
+  const std::string getBackendName() const override {
+    return "fake";
+  }
+
+  c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
+    return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+  }
 
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> allreduce(
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceOptions& /* opts */ = AllreduceOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> allreduce_sparse(
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceOptions& /* opts */ = AllreduceOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -44,12 +70,14 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& /* tensors */,
       const AllreduceCoalescedOptions& /* opts */ =
           AllreduceCoalescedOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> reduce(
       std::vector<at::Tensor>& /* tensors */,
       const ReduceOptions& /* opts */ = ReduceOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -67,6 +95,7 @@ class FakeProcessGroup : public Backend {
       std::vector<std::vector<at::Tensor>>& outputTensors,
       std::vector<at::Tensor>& inputTensors,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
+    checkCollectiveError();
     for (auto& tensor : outputTensors[0]) {
       tensor.copy_(inputTensors[0]);
     }
@@ -77,6 +106,7 @@ class FakeProcessGroup : public Backend {
       at::Tensor& outputBuffer,
       at::Tensor& inputBuffer,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
+    checkCollectiveError();
     auto chunks = outputBuffer.chunk(size_);
     for (auto& tensor : chunks) {
       tensor.copy_(inputBuffer);
@@ -88,6 +118,7 @@ class FakeProcessGroup : public Backend {
       std::vector<std::vector<at::Tensor>>& /* outputTensorLists */,
       std::vector<at::Tensor>& /* inputTensors */,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -95,6 +126,7 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& outputs,
       std::vector<at::Tensor>& inputs,
       const AllgatherOptions& /* opts */ = AllgatherOptions()) override {
+    checkCollectiveError();
     for (size_t i = 0; i < outputs.size(); ++i) {
       auto chunks = outputs[i].chunk(size_);
       for (auto& chunk : chunks) {
@@ -108,6 +140,7 @@ class FakeProcessGroup : public Backend {
       std::vector<std::vector<at::Tensor>>& /* outputTensors */,
       std::vector<at::Tensor>& /* inputTensors */,
       const GatherOptions& /* opts */ = GatherOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -115,6 +148,7 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<std::vector<at::Tensor>>& /* inputTensors */,
       const ScatterOptions& /* opts */ = ScatterOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -123,6 +157,7 @@ class FakeProcessGroup : public Backend {
       std::vector<std::vector<at::Tensor>>& /* inputTensors */,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -131,6 +166,7 @@ class FakeProcessGroup : public Backend {
       at::Tensor& /* inputBuffer */,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -139,6 +175,7 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& /* inputs */,
       const ReduceScatterOptions& /* opts */ =
           ReduceScatterOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -148,6 +185,7 @@ class FakeProcessGroup : public Backend {
       std::vector<int64_t>& /* outputSplitSizes */,
       std::vector<int64_t>& /* inputSplitSizes */,
       const AllToAllOptions& /* opts */ = AllToAllOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -155,6 +193,7 @@ class FakeProcessGroup : public Backend {
       std::vector<at::Tensor>& /* outputTensors */,
       std::vector<at::Tensor>& /* inputTensors */,
       const AllToAllOptions& opts = AllToAllOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
@@ -183,16 +222,31 @@ class FakeProcessGroup : public Backend {
   }
 
   c10::intrusive_ptr<Work> endCoalescing(OpType /* optype */) {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> endCoalescing() override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
   }
 
   c10::intrusive_ptr<Work> barrier(
       const BarrierOptions& /* opts */ = BarrierOptions()) override {
+    checkCollectiveError();
     return c10::make_intrusive<FakeWork>();
+  }
+
+  // Private constructor used by official APIs
+  FakeProcessGroup(int rank, int size, c10::intrusive_ptr<Options> options)
+      : Backend(rank, size), options_(std::move(options)) {}
+  c10::intrusive_ptr<Options> options_;
+
+ private:
+  void checkCollectiveError() {
+    TORCH_CHECK(
+        !options_ || !options_->error_on_collective,
+        "FakeProcessGroup collective operation error (error_on_collective=true)");
   }
 };
 

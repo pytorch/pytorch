@@ -30,7 +30,7 @@ from torch.testing._internal.common_utils import (
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 TEST_REPEATS = 30
 HAS_SHM_FILES = os.path.isdir("/dev/shm")
@@ -58,7 +58,7 @@ class SubProcess(mp.Process):
 
 
 def _test_cuda_ipc_deadlock_actor(queue, iterations):
-    for i in range(iterations):
+    for _ in range(iterations):
         if not queue.empty():
             queue.get()
         time.sleep(0.01)
@@ -66,7 +66,7 @@ def _test_cuda_ipc_deadlock_actor(queue, iterations):
 
 def _test_cuda_ipc_deadlock_learner(queue, iterations):
     net = torch.nn.LSTM(1, 1).cuda()
-    for i in range(iterations):
+    for _ in range(iterations):
         if not queue.full():
             queue.put(copy.deepcopy(net.state_dict()))
         time.sleep(0.01)
@@ -98,9 +98,47 @@ def send_and_delete_tensors(queue, event, device, dtype, count, size=5):
     event.wait()
 
 
+def send_tensor_with_untyped_storage(queue, event):
+    tensors = torch.ones(2, device="cuda").chunk(2, dim=0)
+    specs = []
+    for tensor in tensors:
+        storage = tensor.untyped_storage()
+        (
+            storage_device,
+            storage_handle,
+            storage_size_bytes,
+            storage_offset_bytes,
+            ref_counter_handle,
+            ref_counter_offset,
+            event_handle,
+            event_sync_required,
+        ) = storage._share_cuda_()
+        specs.append(
+            {
+                "tensor_cls": type(tensor),
+                "tensor_size": tensor.shape,
+                "tensor_stride": tensor.stride(),
+                "tensor_offset": tensor.storage_offset(),
+                "dtype": tensor.dtype,
+                "requires_grad": tensor.requires_grad,
+                "storage_cls": type(storage),
+                "storage_device": storage_device,
+                "storage_handle": storage_handle,
+                "storage_size_bytes": storage_size_bytes,
+                "storage_offset_bytes": storage_offset_bytes,
+                "ref_counter_handle": ref_counter_handle,
+                "ref_counter_offset": ref_counter_offset,
+                "event_handle": event_handle,
+                "event_sync_required": event_sync_required,
+            }
+        )
+    queue.put(specs)
+    event.wait()
+
+
 def receive_and_send_sum(queue, out_queue, event, device, dtype, count, size=5):
     s = torch.full([size], 0, device=device, dtype=dtype)
-    for i in range(count):
+    for _ in range(count):
         t = queue.get()
         s += t
     out_queue.put(s)
@@ -108,7 +146,7 @@ def receive_and_send_sum(queue, out_queue, event, device, dtype, count, size=5):
 
 
 def receive_and_send(queue, out_queue, event, count):
-    for i in range(count):
+    for _ in range(count):
         t = queue.get()
         out_queue.put(t.clone())
     event.wait()
@@ -173,9 +211,9 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     is_ok &= var.grad is None
     is_ok &= not var._backward_hooks
     if is_parameter:
-        is_ok &= type(var) == Parameter
+        is_ok &= type(var) is Parameter
     else:
-        is_ok &= type(var) == torch.Tensor
+        is_ok &= type(var) is torch.Tensor
     var._grad = torch.ones(5, 5, device=device)
 
     queue.put(is_ok)
@@ -629,6 +667,27 @@ if __name__ == "__main__":
 """
         )
         self.assertRegex(stderr, "Cannot re-initialize CUDA in forked subprocess.")
+
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_rebuild_cuda_tensor(self):
+        ctx = mp.get_context("spawn")
+        queue = ctx.Queue()
+        event = ctx.Event()
+
+        proc = ctx.Process(
+            target=send_tensor_with_untyped_storage,
+            args=(queue, event),
+        )
+        proc.start()
+
+        specs = queue.get()
+        tensors = []
+        for spec in specs:
+            tensors.append(mp.reductions.rebuild_cuda_tensor(**spec))
+        self.assertEqual(tensors, [1, 1])
+
+        del tensors, spec
+        event.set()
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_event(self):

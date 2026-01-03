@@ -1,6 +1,6 @@
 import os
 import sys
-from typing import Callable, Optional
+from collections.abc import Callable
 
 import torch
 from torch.types import Storage
@@ -106,7 +106,7 @@ class GdsFile:
         self.filename = filename
         self.flags = flags
         self.fd = os.open(filename, flags | os.O_DIRECT)  # type: ignore[attr-defined]
-        self.handle: Optional[int] = None
+        self.handle: int | None = None
         self.register_handle()
 
     def __del__(self) -> None:
@@ -119,9 +119,9 @@ class GdsFile:
 
         This is a wrapper around ``cuFileHandleRegister``.
         """
-        assert (
-            self.handle is None
-        ), "Cannot register a handle that is already registered."
+        assert self.handle is None, (
+            "Cannot register a handle that is already registered."
+        )
         self.handle = torch._C._gds_register_handle(self.fd)
 
     def deregister_handle(self) -> None:
@@ -129,9 +129,9 @@ class GdsFile:
 
         This is a wrapper around ``cuFileHandleDeregister``.
         """
-        assert (
-            self.handle is not None
-        ), "Cannot deregister a handle that is not registered."
+        assert self.handle is not None, (
+            "Cannot deregister a handle that is not registered."
+        )
         torch._C._gds_deregister_handle(self.handle)
         self.handle = None
 
@@ -145,9 +145,9 @@ class GdsFile:
             storage (Storage): Storage to load data into.
             offset (int, optional): Offset into the file to start loading from. (Default: 0)
         """
-        assert (
-            self.handle is not None
-        ), "Cannot load data from a file that is not registered."
+        assert self.handle is not None, (
+            "Cannot load data from a file that is not registered."
+        )
         torch._C._gds_load_storage(self.handle, storage, offset)
 
     def save_storage(self, storage: Storage, offset: int = 0) -> None:
@@ -160,7 +160,7 @@ class GdsFile:
             storage (Storage): Storage to save data from.
             offset (int, optional): Offset into the file to start saving to. (Default: 0)
         """
-        assert (
-            self.handle is not None
-        ), "Cannot save data to a file that is not registered."
+        assert self.handle is not None, (
+            "Cannot save data to a file that is not registered."
+        )
         torch._C._gds_save_storage(self.handle, storage, offset)

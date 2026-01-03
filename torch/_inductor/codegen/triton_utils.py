@@ -4,6 +4,7 @@ from typing import Any, Optional
 import sympy
 
 import torch
+from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper
@@ -36,24 +37,24 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
         # TODO: Remove fp8 special handling when Triton supports PyTorch fp8 dtypes.
         # Related PR: https://github.com/triton-lang/triton/pull/2279/
         if arg.dtype == torch.float8_e4m3fn:
-            tye = "*fp8e4nv"
+            typ = "*fp8e4nv"
         elif arg.dtype == torch.float8_e5m2:
-            tye = "*fp8e5"
+            typ = "*fp8e5"
         elif arg.dtype == torch.float8_e4m3fnuz:
-            tye = "*fp8e4b8"
+            typ = "*fp8e4b8"
         elif arg.dtype == torch.float8_e5m2fnuz:
-            tye = "*fp8e5b16"
+            typ = "*fp8e5b16"
         else:
-            tye = _type_of(arg.dtype)
+            typ = _type_of(arg.dtype)
         if should_unwrap_unspec_arg(arg.buffer):
             # had unwrapped 0d tensor as scalar
-            new_tye = tye.lstrip("*")
-            if new_tye in ["fp16", "bf16"]:
+            new_typ = typ.lstrip("*")
+            if new_typ in ["fp16", "bf16"]:
                 return "fp32"
             else:
-                return new_tye
+                return new_typ
         else:
-            return tye
+            return typ
     if isinstance(arg, SizeArg):
         if arg.expr is None:
             if triton_version_uses_attrs_dict():
@@ -71,6 +72,12 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
             return "fp32"
+        elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
+            arg.expr, (SymT.UNBACKED_FLOAT)
+        ):
+            return "fp32"
+        elif isinstance(arg.expr, bool):
+            return "i1"
 
         # if this is a integer
         if size_dtype == "tl.int32":
@@ -81,7 +88,7 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             # no hint: we'll see if we know that this is a 32-bit int, and guard if possible.
             int_max = torch.iinfo(torch.int32).max
             if expr_fits_within_32bit(arg.expr):
-                V.graph.sizevars.guard_leq(arg.expr, int_max)
+                V.graph.sizevars.check_leq(arg.expr, int_max)
                 return "i32"
             else:
                 return "i64"
@@ -90,7 +97,15 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
     if isinstance(arg, WorkspaceArg):
         return _type_of(arg.dtype)
     if isinstance(arg, TMADescriptorArg):
-        return "nvTmaDesc"
+        if arg.api_type == "experimental":
+            return "nvTmaDesc"
+        else:
+            # https://github.com/triton-lang/triton/blob/9695baed9b46cf957e08b157bb4133f4a4b331c5/python/triton/runtime/jit.py#L360-L363
+            assert arg.api_type == "stable"
+            assert arg.block_shape is not None
+            assert arg.dtype is not None
+            inner = _type_of(arg.dtype)[1:]  # strip the `*`: *fp32 -> fp32
+            return f"tensordesc<{inner}{list(arg.block_shape)}>"
     if isinstance(arg, ConstexprArg):
         return "constexpr"
     raise NotImplementedError(f"unhandled {type(arg)}: {arg}")
@@ -111,11 +126,34 @@ def signature_to_meta(
     size_dtype: Optional[str],
     argdefs: list[ArgName],
     indices: Optional[list[int]] = None,
+    is_template: bool = False,
 ) -> dict[str, str]:
     if indices is None:
         indices = list(range(len(signature)))
+
+    def _decide_tl_dtype(arg):
+        # Even if the ks0 symbol itself is within tl.int32 range, it's
+        # risky to use tl.int32 dtype since we may have ks0*ks1 later
+        # for kernels like torch.mean when dynamic shape is enabled.
+        #
+        # Check config.triton.use_block_ptr, since Triton block pointer
+        # does not support 64bit indexing:
+        # https://gist.github.com/shunting314/6a41c776171720ce4561f202dcde0ad6
+        #
+        # If the triton metadata is for a template, don't use tl.int64 index.
+        # Templates like flex attention/decoding uses block pointers which
+        # does not support 64 bit indexing.
+        if (
+            not config.triton.use_block_ptr
+            and not is_template
+            and isinstance(arg, SizeArg)
+            and arg.name.startswith("ks")
+        ):
+            return "tl.int64"
+        return size_dtype
+
     return {
-        argdefs[i].name: signature_of(arg, size_dtype=size_dtype)
+        argdefs[i].name: signature_of(arg, size_dtype=_decide_tl_dtype(arg))
         for i, arg in zip(indices, signature)
     }
 
@@ -223,4 +261,5 @@ def config_of(
 
     equal_to_1 = equal_1_arg_indices(args, indices=indices)
 
+    # pyrefly: ignore [bad-argument-type]
     return AttrsDescriptorWrapper(divisible_by_16, equal_to_1)

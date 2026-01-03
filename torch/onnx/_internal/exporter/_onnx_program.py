@@ -13,7 +13,8 @@ import os
 import tempfile
 import textwrap
 import warnings
-from typing import Any, Callable, TYPE_CHECKING
+from collections.abc import Callable, Sequence
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.onnx._internal._lazy_import import onnx, onnxscript_apis, onnxscript_ir as ir
@@ -25,8 +26,7 @@ from torch.utils import _pytree
 # because ONNXProgram is exposed to the public API
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
-
+    import numpy as np
     import onnxruntime as ort
 
 _LARGE_MODEL_THRESHOLD = 1536 * 1024 * 1024  # 1536MB
@@ -81,7 +81,7 @@ def _set_graph_outputs(
         graph: The graph to set the outputs for.
         outputs: The outputs to set.
     """
-    original_outputs = graph.outputs.copy()
+    original_outputs = list(graph.outputs)
     graph.outputs.clear()
     graph.outputs.extend(outputs)
     try:
@@ -102,7 +102,7 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
     Returns:
         A dictionary mapping names to values.
     """
-    values = {}
+    values: dict[str, ir.Value] = {}
     values.update(graph.initializers)
     # The names of the values can be None or "", which we need to exclude
     for input in graph.inputs:
@@ -117,31 +117,69 @@ def _create_value_mapping(graph: ir.Graph) -> dict[str, ir.Value]:
     return values
 
 
-def _to_ort_value(tensor: torch.Tensor) -> ort.OrtValue:
+def _to_numpy_array(input: torch.Tensor | int | float | str | bool) -> np.ndarray:
+    if isinstance(input, (int, float, str, bool)):
+        return ir.tensor(input).numpy()
+
+    from torch.onnx._internal.exporter import _core
+
+    return _core.TorchTensor(input).numpy()
+
+
+def _from_numpy_array(array: np.ndarray) -> torch.Tensor:
+    """Convert a NumPy array to a PyTorch tensor."""
+    import ml_dtypes  # type: ignore[import-not-found]
+    import numpy as np
+
+    if array.dtype == ml_dtypes.bfloat16:
+        return torch.from_numpy(array.view(np.uint16)).view(torch.bfloat16)
+    if array.dtype == ml_dtypes.float8_e4m3fn:
+        return torch.from_numpy(array.view(np.uint8)).view(torch.float8_e4m3fn)
+    if array.dtype == ml_dtypes.float8_e4m3fnuz:
+        return torch.from_numpy(array.view(np.uint8)).view(torch.float8_e4m3fnuz)
+    if array.dtype == ml_dtypes.float8_e5m2:
+        return torch.from_numpy(array.view(np.uint8)).view(torch.float8_e5m2)
+    if array.dtype == ml_dtypes.float8_e5m2fnuz:
+        return torch.from_numpy(array.view(np.uint8)).view(torch.float8_e5m2fnuz)
+    return torch.from_numpy(array)
+
+
+def _to_ort_value(input: torch.Tensor | int | float | str | bool) -> ort.OrtValue:
     """Convert a PyTorch tensor to an ONNX Runtime OrtValue."""
+    import numpy as np
     import onnxruntime as ort
 
     from torch.onnx._internal.exporter import _core
 
-    if tensor.dtype == torch.bfloat16 or tensor.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:
+    if isinstance(input, (int, float, str, bool)):
+        # Convert scalar values to OrtValue
+        dtype_mapping = {
+            int: np.int64,
+            float: np.float32,
+        }
+        # pyrefly: ignore [no-matching-overload]
+        dtype = dtype_mapping.get(type(input))
+        return ort.OrtValue.ortvalue_from_numpy(np.array(input, dtype=dtype))
+
+    if input.dtype == torch.bfloat16 or input.dtype in _NP_UNSUPPORTED_DTYPES_8BIT:
         if hasattr(ort.OrtValue, "ortvalue_from_numpy_with_onnx_type"):
             # This requires ONNX Runtime 1.21 or newer
-            if tensor.dtype == torch.bfloat16:
+            if input.dtype == torch.bfloat16:
                 uint_type = torch.uint16
             else:
                 uint_type = torch.uint8
-            onnx_type = _core.torch_dtype_to_onnx_dtype(tensor.dtype)
+            onnx_type = _core.torch_dtype_to_onnx_dtype(input.dtype)
             # Make tensor contiguous to ensure view() works
-            tensor = tensor.contiguous()
+            input = input.contiguous()
             return ort.OrtValue.ortvalue_from_numpy_with_onnx_type(
-                tensor.view(uint_type).numpy(force=True), onnx_element_type=onnx_type
+                input.view(uint_type).numpy(force=True), onnx_element_type=onnx_type
             )
         raise RuntimeError(
-            f"Failed to convert tensor of type '{tensor.dtype}' to OrtValue. "
+            f"Failed to convert tensor of type '{input.dtype}' to OrtValue. "
             "Please ensure that ONNX Runtime is built with DLPack support or is the latest version"
         )
     # TODO(#151064): Use dlpack when ORT properly supports it
-    return ort.OrtValue.ortvalue_from_numpy(tensor.numpy(force=True))
+    return ort.OrtValue.ortvalue_from_numpy(input.numpy(force=True))
 
 
 def _from_ort_value(value: ort.OrtValue) -> torch.Tensor:
@@ -173,7 +211,7 @@ class ONNXProgram:
 
     def __init__(
         self, model: ir.Model, exported_program: torch.export.ExportedProgram | None
-    ):
+    ) -> None:
         """Initialize the ONNX program with the specified model and exported program.
         Args:
             model: The ONNX model.
@@ -208,7 +246,6 @@ ONNXProgram(
 
         assert self._inference_session is not None
 
-        # We don't expect non-tensor as inputs
         ort_input = {
             k.name: _to_ort_value(v)
             for k, v in zip(self.model.graph.inputs, flatten_args)
@@ -216,11 +253,27 @@ ONNXProgram(
         run_options = ort.RunOptions()
         run_options.log_severity_level = 3  # 3: Error
         logger.debug("Running the inference session with %s arguments.", len(ort_input))
+        # pyrefly: ignore [missing-attribute]
         outputs = self._inference_session.run_with_ort_values(
             None, ort_input, run_options=run_options
         )
         logger.debug("Inference session run completed.")
         return tuple(_from_ort_value(output) for output in outputs)
+
+    def call_reference(self, *args, **kwargs) -> Sequence[torch.Tensor]:
+        """Run the ONNX model using the reference backend."""
+        import onnx.reference
+
+        evaluator = onnx.reference.ReferenceEvaluator(self.model_proto)
+
+        flatten_args = _process_args(args, kwargs)
+        ref_input = {
+            k.name: _to_numpy_array(v)
+            for k, v in zip(self.model.graph.inputs, flatten_args)
+        }
+        outputs = evaluator.run(None, ref_input)  # type: ignore[arg-type]
+        assert isinstance(outputs, Sequence)
+        return tuple(_from_numpy_array(output) for output in outputs)
 
     def compute_values(
         self, value_names: Sequence[str], args=(), kwargs=None
@@ -274,7 +327,7 @@ ONNXProgram(
         include_initializers: bool = True,
         keep_initializers_as_inputs: bool = False,
         external_data: bool | None = None,
-    ):
+    ) -> None:
         """Save the ONNX model to the specified destination.
 
         When ``external_data`` is ``True`` or the model is larger than 2GB,
@@ -414,7 +467,6 @@ def _process_args(args, kwargs) -> tuple[torch.Tensor, ...]:
     """Process input arguments for the ONNX model."""
     args = _flatten_inputs(args, kwargs)
     args = _remove_none_from_inputs(args)
-    args = _remove_non_tensor(args)
     args = _convert_complex_to_real_representation(args)
     return args
 
@@ -426,47 +478,6 @@ def _flatten_inputs(model_args, model_kwargs):
 
 def _remove_none_from_inputs(model_args):
     return tuple(arg for arg in model_args if arg is not None)
-
-
-def _remove_non_tensor(model_args):
-    """Remove the non-tensor input arguments.
-
-    Dynamo does not support non-tensor input arguments (https://github.com/pytorch/pytorch/issues/99534).
-
-    Specifically, it does put the input into graph with an empty node, but consumed by no ones.
-    The concrete value is embedded into the graph as a constant arg of a target node. Meta
-    suggests in this case that one should rewrite the model code to make it tensor if the
-    input value is supposed to change at runtime. We might need to further investigate
-    the feasibility of that suggestion.
-
-    For example,
-
-        def func(x, b=1.0):
-            y = x + b
-            z = y.relu()
-            return (y, z)
-
-        x = torch.randn(1, 1, 2, dtype=torch.float32)
-        gm_fun, _ = dynamo.export(func, x, b=8.0, aten_graph=True, tracing_mode="real")
-
-        # class GraphModule(torch.nn.Module):
-        #     def forward(self, x, b):
-        #         arg0: f32[1, 1, 2], arg1, = fx_pytree.tree_flatten_spec(([x, b], {}), self._in_spec)
-        #         # File: path/to/pytorch/test_constant_input.py:5, code: y = x + b
-        #         add_tensor: f32[1, 1, 2] = torch.ops.aten.add.Tensor(arg0, 8.0);  arg0 = None
-
-        #         # File: path/to/pytorch/test_constant_input.py:6, code: z = y.relu()
-        #         relu_default: f32[1, 1, 2] = torch.ops.aten.relu.default(add_tensor)
-        #         return pytree.tree_unflatten([add_tensor, relu_default], self._out_spec)
-
-    Empty torch.fx.Node input leading to a mismatched number of input with PyTorch, as
-    it's ignored in ONNX graph. Thus, we delete the useless input here.
-
-    """
-
-    return tuple(
-        arg for arg in model_args if not isinstance(arg, (int, float, bool, str))
-    )
 
 
 def _convert_complex_to_real_representation(model_args):

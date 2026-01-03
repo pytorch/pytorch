@@ -24,16 +24,11 @@ def gen_data(special_op_lists, analysis_name):
     all_ops = get_ops_for_key(None)
     composite_ops = get_ops_for_key("CompositeImplicitAutograd")
     noncomposite_ops = all_ops - composite_ops
+    with open("../../aten/src/ATen/native/native_functions.yaml") as f:
+        ops = yaml.load(f.read(), Loader=yaml.CLoader)
 
-    ops = yaml.load(
-        open("../../aten/src/ATen/native/native_functions.yaml").read(),
-        Loader=yaml.CLoader,
-    )
-
-    annotated_ops = {
-        a.strip(): b.strip() for a, b in list(csv.reader(open("annotated_ops")))
-    }
-    from collections import defaultdict
+    with open("annotated_ops") as f:
+        annotated_ops = {a.strip(): b.strip() for a, b in csv.reader(f)}
 
     uniq_ops = []
     uniq_names = set()

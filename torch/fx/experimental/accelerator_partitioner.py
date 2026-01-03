@@ -450,9 +450,9 @@ class Partitioner:
                         device = find_device_based_on_size(node)
                         occupied_devices.append(device)
                         # Update partition and its left mem size
-                        partition_to_left_mem_bytes[
-                            partition
-                        ] = device.available_mem_bytes
+                        partition_to_left_mem_bytes[partition] = (
+                            device.available_mem_bytes
+                        )
                         # Update available mem for the current partition
                         partition.logical_device_ids.append(device.logical_id)
                     else:
@@ -475,9 +475,9 @@ class Partitioner:
                             total_size_of_input_nodes = get_extra_size_of(
                                 node, partition.nodes
                             )
-                            partition_to_left_mem_bytes[
-                                partition
-                            ] = device.available_mem_bytes
+                            partition_to_left_mem_bytes[partition] = (
+                                device.available_mem_bytes
+                            )
                             partition.logical_device_ids.append(device.logical_id)
                     partition.add_node(node)
                     partition_to_left_mem_bytes[partition] -= total_size_of_input_nodes
@@ -509,9 +509,9 @@ class Partitioner:
             no_device_partitions,
         ) = get_device_partition_stats(self.partitions, self.devices)
 
-        assert (
-            len(no_device_partitions) == 0
-        ), f"Expect no_device_partitions has 0 device, but get {len(no_device_partitions)}"
+        assert len(no_device_partitions) == 0, (
+            f"Expect no_device_partitions has 0 device, but get {len(no_device_partitions)}"
+        )
 
         # Devices that hold partitions
         used_devices = [d for d in self.devices if len(device_to_partitions[d]) > 0]
@@ -581,7 +581,7 @@ class Partitioner:
                 break
             if node.op in {"placeholder", "get_attr"}:
                 continue
-            if node.target == operator.__getitem__:
+            if node.target is operator.__getitem__:
                 continue
             input_nodes: dict[Node, None] = {}
             map_arg(node.args, input_nodes.setdefault)
@@ -657,7 +657,10 @@ class Partitioner:
                 # Mark bfs level
                 get_bfs_level_partition(self.partitions)
                 find_combination, partitions = find_partition_to_combine_based_on_size(
-                    sorted_partitions, available_mem_bytes, partitions
+                    sorted_partitions,
+                    available_mem_bytes,
+                    # pyrefly: ignore [bad-argument-type]
+                    partitions,
                 )
             return
 
@@ -702,6 +705,7 @@ class Partitioner:
                 non_embedding_partitions.append(partition)
             if new_partition:
                 partition = self.create_partition()
+                # pyrefly: ignore [missing-attribute]
                 partition.left_mem_bytes = available_mem_bytes
                 return partition
             return None
@@ -997,6 +1001,7 @@ class Partitioner:
                     node, n1, p0, p1, node_to_latency_mapping, transfer_rate_per_sec
                 )
                 if cost < min_cost:
+                    # pyrefly: ignore [bad-assignment]
                     node_pair = [node, n1]
                     min_cost = cost
             return cost, node_pair  # type: ignore[possibly-undefined]

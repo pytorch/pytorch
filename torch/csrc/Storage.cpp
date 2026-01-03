@@ -23,6 +23,8 @@
 #include <c10/util/intrusive_ptr.h>
 #include <fmt/format.h>
 
+using torch::utils::PyObjectPreservation;
+
 template <>
 void THPPointer<c10::StorageImpl>::free() {
   if (ptr) {
@@ -32,265 +34,72 @@ void THPPointer<c10::StorageImpl>::free() {
 
 PyTypeObject* THPStorageClass = nullptr;
 
-PyObject* THPStorage_NewWithStorage(
-    PyTypeObject* type,
-    c10::Storage _storage,
-    c10::impl::PyInterpreterStatus status,
-    bool allow_preexisting_pyobj) {
-  TORCH_CHECK(
-      PyType_IsSubtype(type, &THPStorageType),
-      "Creating a Storage subclass from a class that does not inherit from ",
-      "Storage is not possible. Make sure your class inherits from Storage.");
-
-  auto maybe_pyobj = _storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
-      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  if (maybe_pyobj.has_value() && maybe_pyobj.value()) {
-    TORCH_CHECK(
-        allow_preexisting_pyobj,
-        "Creating a new Storage subclass ",
-        type->tp_name,
-        " but the raw Storage object is already associated to a python object ",
-        "of type ",
-        maybe_pyobj.value()->ob_type->tp_name);
-    PyObject* obj = *maybe_pyobj;
-    PyTypeObject* obj_type = Py_TYPE(obj);
-    TORCH_CHECK(
-        obj_type == type || PyType_IsSubtype(obj_type, type),
-        "Creating a new Storage subclass ",
-        type->tp_name,
-        " but the raw Storage object is already associated to a python object ",
-        "of type ",
-        maybe_pyobj.value()->ob_type->tp_name,
-        " which is not a subclass of the "
-        "requested type");
-    return THPStorage_Wrap(std::move(_storage));
-  }
-
+// Create a new Python Storage object, but don't set the pyobj slot on the
+// c10::Storage object.
+static PyObject* THPStorage_New(PyTypeObject* type, c10::Storage _storage) {
   PyObject* obj = type->tp_alloc(type, 0);
   TORCH_CHECK(obj, "Failed to allocate a ", type->tp_name, " object");
 
+  // Ensure that PyUnstable_TryIncref calls don't fail spuriously in
+  // free-threaded Python.
+  PyUnstable_EnableTryIncRef(obj);
+
   auto s = (THPStorage*)obj;
-
-  new (&s->cdata) c10::MaybeOwned<c10::Storage>();
-
-  s->cdata = c10::MaybeOwned<c10::Storage>::owned(std::move(_storage));
-
-  if (!c10::impl::HermeticPyObjectTLS::get_state()) {
-    s->is_hermetic = false;
-    const auto& storage = THPStorage_Unpack(s);
-    storage.unsafeGetStorageImpl()->pyobj_slot()->init_pyobj(
-        getPyInterpreter(), obj, status);
-  } else {
-    s->is_hermetic = true;
-  }
-
+  new (&s->cdata) c10::Storage(std::move(_storage));
   return obj;
 }
 
-// Wraps the c10::Storage with a storage PyObject
+// Create a new Python Storage object for a new c10::Storage, and set the
+// pyobj slot. The c10::Storage must not already have a pyobj set.
+PyObject* THPStorage_NewWithStorage(PyTypeObject* type, c10::Storage _storage) {
+  TORCH_CHECK(
+      type == THPStorageClass || PyType_IsSubtype(type, &THPStorageType),
+      "Creating a Storage subclass from a class that does not inherit from ",
+      "Storage is not possible. Make sure your class inherits from Storage.");
+  TORCH_INTERNAL_ASSERT(_storage.use_count() == 1);
+
+  c10::StorageImpl* storage_impl = _storage.unsafeGetStorageImpl();
+  PyObject* obj = THPStorage_New(type, std::move(_storage));
+  PyObjectPreservation::init_fresh_nonatomic(
+      storage_impl, storage_impl->pyobj_slot(), obj);
+  return obj;
+}
+
+// Returns a PyObject wrapper for the c10::Storage object. The existing
+// wrapper is returned if it already exists.
 PyObject* THPStorage_Wrap(c10::Storage storage) {
-  c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
   if (c10::impl::HermeticPyObjectTLS::get_state()) {
-    return THPStorage_NewWithStorage(
-        THPStorageClass,
-        std::move(storage),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+    return THPStorage_New(THPStorageClass, std::move(storage));
   }
+
+  c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
   c10::impl::PyObjectSlot* pyobj_slot = storage_impl->pyobj_slot();
 
-  // If the StorageImpl has a PyObject that is managed by a different
-  // interpreter than the current one, create a new StorageImpl that points to
-  // the same data and then create the Python storage from that.
-  // NOTE: This is only supposed to happen in MultiPy
-  if (pyobj_slot->has_pyobj_nonhermetic() &&
-      !pyobj_slot->check_interpreter(getPyInterpreter())) {
-    return THPStorage_NewWithStorage(
-        THPStorageClass,
-        c10::newStorageImplFromRefcountedDataPtr(storage),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+  PyObject* obj = pyobj_slot->load_pyobj();
+  if (obj) {
+    return Py_NewRef(obj);
   }
-  std::optional<PyObject*> maybe_pyobj = pyobj_slot->check_pyobj(
-      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  c10::impl::PyInterpreterStatus status =
-      c10::impl::PyInterpreterStatus::TAGGED_BY_US;
-  if (maybe_pyobj.has_value()) {
-    auto obj = *maybe_pyobj;
-    if (obj) {
-      TORCH_CHECK(
-          THPStorage_Check(obj),
-          "Expected a storage type, but got ",
-          Py_TYPE(obj)->tp_name);
 
-      if (pyobj_slot->owns_pyobj()) {
-        pyobj_slot->set_owns_pyobj(false);
-        reinterpret_cast<THPStorage*>(obj)->cdata =
-            c10::MaybeOwned<c10::Storage>::owned(std::move(storage));
-        return obj;
-      } else {
-        Py_INCREF(obj);
-        return obj;
-      }
-    }
-    status = c10::impl::PyInterpreterStatus::TAGGED_BY_US;
-  } else {
-    if (storage.use_count() <= 1) {
-      status = c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED;
-    } else {
-      status = c10::impl::PyInterpreterStatus::MAYBE_UNINITIALIZED;
-    }
+  obj = THPStorage_New(THPStorageClass, std::move(storage));
+  PyObject* wrapper =
+      PyObjectPreservation::init_once(storage_impl, pyobj_slot, obj);
+  if (wrapper != obj) {
+    // Another thread beat us to it
+    Py_DECREF(obj);
+    return Py_NewRef(wrapper);
   }
-  return THPStorage_NewWithStorage(THPStorageClass, std::move(storage), status);
+  return obj;
 }
 
-static bool THPStorage_isPreservable(THPStorage* self) {
-  if (self->cdata.unsafeIsBorrowed()) {
-    return false;
+static void THPStorage_dealloc(PyObject* self) {
+  THPStorage* _self = reinterpret_cast<THPStorage*>(self);
+  auto pyobj_slot = _self->cdata.unsafeGetStorageImpl()->pyobj_slot();
+  if (pyobj_slot->load_pyobj() == self) {
+    TORCH_INTERNAL_ASSERT(_self->cdata.use_count() == 1);
+    pyobj_slot->clear();
   }
-  auto const& storage = THPStorage_Unpack(self);
-
-  if (self->is_hermetic) {
-    return false;
-  }
-
-  if (storage.unsafeGetStorageImpl()->pyobj_slot()->check_pyobj(
-          getPyInterpreter(), /*ignore_hermetic_tls=*/true) !=
-      (PyObject*)self) {
-    return false;
-  }
-  if (storage.use_count() <= 1) {
-    return false;
-  }
-  return true;
-}
-
-static bool THPStorage_tryPreserve(THPStorage* self) {
-  if (!THPStorage_isPreservable(self)) {
-    return false;
-  }
-
-  const auto& storage = THPStorage_Unpack(self);
-  c10::StorageImpl* storage_impl = storage.unsafeGetStorageImpl();
-
-  auto maybe_pyobj = storage_impl->pyobj_slot()->check_pyobj(
-      getPyInterpreter(),
-      /*ignore_hermetic_tls=*/true);
-  // NOTE: It is possible to just set the PyObjectSlot here, but the point is
-  // that we should have already set PyObjectSlot when the storage PyObject was
-  // created.
-  TORCH_INTERNAL_ASSERT(
-      maybe_pyobj.has_value(),
-      "Trying to preserve a Python storage whose PyObjectSlot does not have a PyObject");
-
-  PyObject* pyobj = *maybe_pyobj;
-
-  TORCH_CHECK(
-      THPStorage_Check(pyobj),
-      "Expected a storage type, but got ",
-      Py_TYPE(pyobj)->tp_name);
-
-  TORCH_INTERNAL_ASSERT(
-      (void*)pyobj == (void*)self,
-      "Python storage and the PyObject in the internal PyObjectSlot are not at the same address");
-
-  TORCH_INTERNAL_ASSERT(!storage_impl->pyobj_slot()->owns_pyobj());
-
-  storage_impl->pyobj_slot()->set_owns_pyobj(true);
-  // When resurrecting, we MUST use _Py_NewReference and not Py_INCREF to
-  // ensure the PyObject is in a valid state
-  _Py_NewReference((PyObject*)self);
-
-  self->cdata = c10::MaybeOwned<c10::Storage>::borrowed(storage);
-  return true;
-}
-
-static void THPStorage_subclass_dealloc(PyObject* self) {
-  THPStorage* _self = (THPStorage*)self;
-
-  if (THPStorage_tryPreserve(_self)) {
-    return;
-  }
-
-  // Some subclass of StorageBase could be GC-tracked objects even
-  // though the base class is not
-  auto* type = Py_TYPE(self);
-  if (PyType_HasFeature(type, Py_TPFLAGS_HAVE_GC) != 0) {
-    PyObject_GC_UnTrack(self);
-  }
-
-  bool has_finalizer = type->tp_finalize || type->tp_del;
-
-  if (type->tp_finalize) {
-    PyObject_GC_Track(self);
-    if (PyObject_CallFinalizerFromDealloc(self) < 0) {
-      // The finalizer has resurrected the PyObject and there is a new Python
-      // reference to it, so we can just stop deallocating. Read about
-      // resurrection from `__del__` here:
-      // https://docs.python.org/3/reference/datamodel.html#object.__del__
-      return;
-    }
-    PyObject_GC_UnTrack(self);
-  }
-
-  // base test is unnecessary as THPStorae does not set this
-  if (type->tp_weaklistoffset) {
-    PyObject_ClearWeakRefs(self);
-  }
-
-  if (type->tp_del) {
-    PyObject_GC_Track(self);
-    type->tp_del(self);
-    if (Py_REFCNT(self) > 0) {
-      // Resurrected (see above comment about resurrection from `__del__`)
-      return;
-    }
-    PyObject_GC_UnTrack(self);
-  }
-
-  if (has_finalizer) {
-    /* New weakrefs could be created during the finalizer call.
-       If this occurs, clear them out without calling their
-       finalizers since they might rely on part of the object
-       being finalized that has already been destroyed. */
-    if (type->tp_weaklistoffset) {
-      /* Modeled after GET_WEAKREFS_LISTPTR() */
-      PyWeakReference** list =
-          (PyWeakReference**)PyObject_GET_WEAKREFS_LISTPTR(self);
-      while (*list)
-        _PyWeakref_ClearRef(*list);
-    }
-  }
-
-  // Clear slots
-  {
-    PyTypeObject* base = type;
-    while (base != &THPStorageType) {
-      if (Py_SIZE(base)) {
-        clear_slots(base, self);
-      }
-      base = base->tp_base;
-      TORCH_INTERNAL_ASSERT(base);
-    }
-  }
-
-  // Clear __dict__
-  if (C10_LIKELY(type->tp_dictoffset)) {
-    PyObject** dictptr = _PyObject_GetDictPtr(self);
-    if (dictptr != nullptr) {
-      PyObject* dict = *dictptr;
-      if (dict != nullptr) {
-        Py_DECREF(dict);
-        *dictptr = nullptr;
-      }
-    }
-  }
-
-  TORCH_INTERNAL_ASSERT(Py_TYPE(self) == type);
-
-  _self->cdata.~MaybeOwned<c10::Storage>();
+  _self->cdata.~Storage();
   Py_TYPE(_self)->tp_free(self);
-
-  TORCH_INTERNAL_ASSERT(type->tp_flags & Py_TPFLAGS_HEAPTYPE);
-  Py_DECREF(type);
 }
 
 static PyObject* THPStorage_pynew(
@@ -358,6 +167,7 @@ static PyObject* THPStorage_pynew(
       case at::DeviceType::Meta:
       case at::DeviceType::PrivateUse1:
       case at::DeviceType::MAIA:
+      case at::DeviceType::MTIA:
         allocator = c10::GetAllocator(device.type());
         break;
       default:
@@ -384,8 +194,7 @@ static PyObject* THPStorage_pynew(
             at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            device_opt),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+            device_opt));
 
     // torch.Storage(size, *, ...)
   } else if (r.idx == 1) {
@@ -398,8 +207,7 @@ static PyObject* THPStorage_pynew(
             at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            device_opt),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+            device_opt));
 
     // torch.Storage(sequence, *, ...)
   } else if (r.idx == 2) {
@@ -423,8 +231,7 @@ static PyObject* THPStorage_pynew(
             at::DataPtr(),
             allocator,
             /*resizable=*/true,
-            device_opt),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+            device_opt));
     THPObjectPtr item;
     try {
       const auto& storage = THPStorage_Unpack(self);
@@ -438,7 +245,7 @@ static PyObject* THPStorage_pynew(
           storage_set(storage, i, value);
         }
       }
-    } catch (const std::exception& e) {
+    } catch (const std::exception&) {
       TORCH_CHECK(
           THPStorageStr "(): tried to construct a storage from a sequence (",
           THPUtils_typename(sequence),
@@ -479,7 +286,7 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
       return nullptr;
     }
     uint8_t value = storage_get(storage, nindex);
-    return THPByteUtils_newReal(value);
+    return THPUtils_packUInt32(value);
     /* Slice index */
   } else if (PySlice_Check(index)) {
     Py_ssize_t start = 0, stop = 0, slicelength = 0, step = 0;
@@ -520,10 +327,8 @@ static PyObject* THPStorage_get(THPStorage* self, PyObject* index) {
         /* resizable */ false,
         device_opt);
 
-    PyObject* _ret = THPStorage_NewWithStorage(
-        Py_TYPE(self),
-        std::move(new_storage_impl),
-        c10::impl::PyInterpreterStatus::DEFINITELY_UNINITIALIZED);
+    PyObject* _ret =
+        THPStorage_NewWithStorage(Py_TYPE(self), std::move(new_storage_impl));
 
     return _ret;
   }
@@ -580,68 +385,17 @@ static int THPStorage_set(THPStorage* self, PyObject* index, PyObject* value) {
 }
 
 static PyMappingMethods THPStorage_mappingmethods = {
-    (lenfunc)THPStorage_length,
-    (binaryfunc)THPStorage_get,
-    (objobjargproc)THPStorage_set};
-
-struct THPStorageMeta {
-  PyHeapTypeObject base;
-};
-
-static int THPStorageMetaType_init(
-    PyObject* cls,
-    PyObject* args,
-    PyObject* kwargs);
-
-static PyTypeObject THPStorageMetaType = {
-    PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
-    "torch._C._StorageMeta", /* tp_name */
-    sizeof(THPStorageMeta), /* tp_basicsize */
-    0, /* tp_itemsize */
-    nullptr, /* tp_dealloc */
-    0, /* tp_vectorcall_offset */
-    nullptr, /* tp_getattr */
-    nullptr, /* tp_setattr */
-    nullptr, /* tp_reserved */
-    nullptr, /* tp_repr */
-    nullptr, /* tp_as_number */
-    nullptr, /* tp_as_sequence */
-    nullptr, /* tp_as_mapping */
-    nullptr, /* tp_hash  */
-    nullptr, /* tp_call */
-    nullptr, /* tp_str */
-    nullptr, /* tp_getattro */
-    nullptr, /* tp_setattro */
-    nullptr, /* tp_as_buffer */
-    // NOLINTNEXTLINE(misc-redundant-expression)
-    Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE, /* tp_flags */
-    nullptr, /* tp_doc */
-    nullptr, /* tp_traverse */
-    nullptr, /* tp_clear */
-    nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
-    nullptr, /* tp_iter */
-    nullptr, /* tp_iternext */
-    nullptr, /* tp_methods */
-    nullptr, /* tp_members */
-    nullptr, /* tp_getset */
-    DEFERRED_ADDRESS(&PyType_Type), /* tp_base */
-    nullptr, /* tp_dict */
-    nullptr, /* tp_descr_get */
-    nullptr, /* tp_descr_set */
-    0, /* tp_dictoffset */
-    THPStorageMetaType_init, /* tp_init */
-    nullptr, /* tp_alloc */
-    nullptr, /* tp_new */
-};
+    reinterpret_cast<lenfunc>(THPStorage_length),
+    reinterpret_cast<binaryfunc>(THPStorage_get),
+    reinterpret_cast<objobjargproc>(THPStorage_set)};
 
 // TODO: implement equality
 PyTypeObject THPStorageType = {
-    PyVarObject_HEAD_INIT(&THPStorageMetaType, 0)
+    PyVarObject_HEAD_INIT(DEFERRED_ADDRESS(&PyType_Type), 0)
     "torch._C.StorageBase", /* tp_name */
     sizeof(THPStorage), /* tp_basicsize */
     0, /* tp_itemsize */
-    nullptr, /* tp_dealloc */
+    THPStorage_dealloc, /* tp_dealloc */
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
@@ -680,14 +434,6 @@ PyTypeObject THPStorageType = {
     THPStorage_pynew, /* tp_new */
 };
 
-int THPStorageMetaType_init(PyObject* cls, PyObject* args, PyObject* kwargs) {
-  if (PyType_Type.tp_init(cls, args, kwargs) < 0) {
-    return -1;
-  }
-  ((PyTypeObject*)cls)->tp_dealloc = (destructor)THPStorage_subclass_dealloc;
-  return 0;
-}
-
 static PyObject* THPStorage_device(THPStorage* self, void* unused) {
   HANDLE_TH_ERRORS
   THPStorage_assertNotNull(self);
@@ -705,8 +451,16 @@ typedef PyObject* (*getter)(PyObject*, void*);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPStorage_properties[] = {
-    {"device", (getter)THPStorage_device, nullptr, nullptr, nullptr},
-    {"_cdata", (getter)THPStorage_get_cdata, nullptr, nullptr, nullptr},
+    {"device",
+     reinterpret_cast<getter>(THPStorage_device),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"_cdata",
+     reinterpret_cast<getter>(THPStorage_get_cdata),
+     nullptr,
+     nullptr,
+     nullptr},
     {nullptr}};
 
 bool THPStorage_init(PyObject* module) {
@@ -714,24 +468,19 @@ bool THPStorage_init(PyObject* module) {
   THPUtils_addPyMethodDefs(methods, THPStorage_getMethods());
   THPUtils_addPyMethodDefs(methods, THPStorage_getSharingMethods());
 
-  THPStorageMetaType.tp_base = &PyType_Type;
-  if (PyType_Ready(&THPStorageMetaType) < 0)
-    return false;
-  Py_INCREF(&THPStorageMetaType);
-  PyModule_AddObject(module, "_StorageMeta", (PyObject*)&THPStorageMetaType);
-
   THPStorageType.tp_methods = methods.data();
   THPStorageType.tp_getset = THPStorage_properties;
   if (PyType_Ready(&THPStorageType) < 0)
     return false;
   Py_INCREF(&THPStorageType);
-  PyModule_AddObject(module, "StorageBase", (PyObject*)&THPStorageType);
+  PyModule_AddObject(
+      module, "StorageBase", reinterpret_cast<PyObject*>(&THPStorageType));
   return true;
 }
 
 void THPStorage_postInit(PyObject* module) {
-  THPStorageClass =
-      (PyTypeObject*)PyObject_GetAttrString(module, "UntypedStorage");
+  THPStorageClass = reinterpret_cast<PyTypeObject*>(
+      PyObject_GetAttrString(module, "UntypedStorage"));
   if (!THPStorageClass)
     throw python_error();
 }
@@ -742,5 +491,5 @@ void THPStorage_assertNotNull(THPStorage* storage) {
 }
 
 void THPStorage_assertNotNull(PyObject* obj) {
-  THPStorage_assertNotNull((THPStorage*)obj);
+  THPStorage_assertNotNull(reinterpret_cast<THPStorage*>(obj));
 }

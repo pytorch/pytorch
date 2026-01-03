@@ -2,8 +2,9 @@
 import functools
 import operator
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Callable, TYPE_CHECKING
+from typing import TYPE_CHECKING
 
 import torch
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta

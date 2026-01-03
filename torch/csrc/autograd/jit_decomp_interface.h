@@ -41,10 +41,10 @@ struct TORCH_API JitDecompInterface {
 TORCH_API void setJitDecompImpl(JitDecompInterface* impl);
 TORCH_API JitDecompInterface* getJitDecompImpl();
 
-struct TORCH_API JitDecompRegisterer {
-  explicit JitDecompRegisterer(JitDecompInterface* impl) {
-    setJitDecompImpl(impl);
-  }
-};
+struct TORCH_API JitDecompRegisterer{explicit JitDecompRegisterer(
+    JitDecompInterface * impl){setJitDecompImpl(impl);
+} // namespace torch::autograd::impl
+}
+;
 
 } // namespace torch::autograd::impl

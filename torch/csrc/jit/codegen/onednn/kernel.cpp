@@ -1,7 +1,6 @@
 #include <torch/csrc/jit/codegen/onednn/graph_helper.h>
 #include <torch/csrc/jit/codegen/onednn/kernel.h>
 
-#include <ATen/core/functional.h>
 #include <torch/csrc/jit/jit_log.h>
 
 namespace torch::jit::fuser::onednn {
@@ -28,7 +27,7 @@ LlgaKernel::LlgaKernel(const Node* fusionNode)
   partition_ = partitions[0];
   nPartitionInputs_ = partition_.get_input_ports().size();
 #ifdef GRAPH_DEBUG_ENABLED
-  GRAPH_DEBUG("Initialized ", debugName(), "\n", graph_->toString());
+  GRAPH_DEBUG("Initialized ", debugName(), '\n', graph_->toString());
 #endif
 }
 
@@ -84,9 +83,9 @@ ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
   for (const auto i : c10::irange(nGraphInputs_)) {
     auto spec = ArgSpec(graph_->inputs()[i]).supplementTensorInfo(inputs[i]);
     initializedInputIds_.insert(spec.tid());
-    int64_t occurence = tensorIdToOccurence[spec.tid()];
-    inputSpecs.insert(inputSpecs.end(), occurence, spec);
-    runArgsIdx_.insert(runArgsIdx_.end(), occurence, i);
+    int64_t occurrence = tensorIdToOccurence[spec.tid()];
+    inputSpecs.insert(inputSpecs.end(), occurrence, spec);
+    runArgsIdx_.insert(runArgsIdx_.end(), occurrence, i);
   }
   GRAPH_DEBUG("Initializing constant input tensors");
   initializeConstantInputs();
@@ -127,18 +126,18 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
   for (const auto i : c10::irange(numInputs)) {
     auto spec = inputSpecs_[i];
     const auto& input = inputs[runArgsIdx_[i]];
-    runInputs.push_back(
-        {spec.logical_tensor(), Engine::getEngine(), input.data_ptr()});
+    runInputs.emplace_back(
+        spec.logical_tensor(), Engine::getEngine(), input.data_ptr());
   }
   auto numConstantInputs = constantInputs_.size();
   for (size_t i = 0; i < numConstantInputs; i++) {
     // constantInputSpecs are placed after graphInputSpecs
     auto constantInputSpecIdx = nGraphInputs_ + i;
     auto constantInputSpec = inputSpecs_[constantInputSpecIdx];
-    runInputs.push_back(
-        {constantLogicalTensors_[i],
-         Engine::getEngine(),
-         constantInputs_[i].data_ptr()});
+    runInputs.emplace_back(
+        constantLogicalTensors_[i],
+        Engine::getEngine(),
+        constantInputs_[i].data_ptr());
   }
 
   for (const auto i : c10::irange(nOutputs_)) {
@@ -175,10 +174,8 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
           }
         }
         outputs.push_back(inputTensor);
-        runOutputs.push_back(
-            {spec.logical_tensor(),
-             Engine::getEngine(),
-             inputTensor.data_ptr()});
+        runOutputs.emplace_back(
+            spec.logical_tensor(), Engine::getEngine(), inputTensor.data_ptr());
         return std::make_tuple(runInputs, runOutputs);
       }
     }
@@ -198,8 +195,8 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
 #endif
       auto tensor = at::empty_strided(spec.sizes(), spec.strides(), opt);
       outputs.push_back(tensor);
-      runOutputs.push_back(
-          {spec.logical_tensor(), Engine::getEngine(), tensor.data_ptr()});
+      runOutputs.emplace_back(
+          spec.logical_tensor(), Engine::getEngine(), tensor.data_ptr());
     }
   }
 
@@ -243,7 +240,7 @@ compiled_partition LlgaKernel::compile(const partition& partition) {
 
 void LlgaKernel::run(Stack& stack) {
 #ifdef GRAPH_DEBUG_ENABLED
-  GRAPH_DEBUG("In ", debugName(), "\n");
+  GRAPH_DEBUG("In ", debugName(), '\n');
 #endif
 
   // Grab input values from stack

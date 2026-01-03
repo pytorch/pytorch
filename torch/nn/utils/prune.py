@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 r"""Pruning methods."""
+
 import numbers
 from abc import ABC, abstractmethod
 from collections.abc import Iterable
@@ -63,9 +64,10 @@ class BasePruningMethod(ABC):
         """
         # to carry out the multiplication, the mask needs to have been computed,
         # so the pruning method must know what tensor it's operating on
-        assert (
-            self._tensor_name is not None
-        ), f"Module {module} has to be pruned"  # this gets set in apply()
+        if self._tensor_name is None:
+            raise AssertionError(
+                f"Module {module} has to be pruned"
+            )  # this gets set in apply()
         mask = getattr(module, self._tensor_name + "_mask")
         orig = getattr(module, self._tensor_name + "_orig")
         pruned_tensor = mask.to(dtype=orig.dtype) * orig
@@ -109,10 +111,11 @@ class BasePruningMethod(ABC):
                     old_method = hook
                     hooks_to_remove.append(k)
                     found += 1
-            assert (
-                found <= 1
-            ), f"Avoid adding multiple pruning hooks to the\
-                same tensor {name} of module {module}. Use a PruningContainer."
+            if found > 1:
+                raise AssertionError(
+                    f"Avoid adding multiple pruning hooks to the "
+                    f"same tensor {name} of module {module}. Use a PruningContainer."
+                )
 
             for k in hooks_to_remove:
                 del module._forward_pre_hooks[k]
@@ -143,7 +146,7 @@ class BasePruningMethod(ABC):
 
         method = _get_composite_method(cls, module, name, *args, **kwargs)
         # at this point we have no forward_pre_hooks but we could have an
-        # active reparametrization of the tensor if another pruning method
+        # active reparameterization of the tensor if another pruning method
         # had been applied (in which case `method` would be a PruningContainer
         # and not a simple pruning method).
 
@@ -153,9 +156,11 @@ class BasePruningMethod(ABC):
 
         orig = getattr(module, name)
         if importance_scores is not None:
-            assert (
-                importance_scores.shape == orig.shape
-            ), f"importance_scores should have the same shape as parameter                 {name} of {module}"
+            if importance_scores.shape != orig.shape:
+                raise AssertionError(
+                    f"importance_scores should have the same shape as parameter "
+                    f"{name} of {module}, got {importance_scores.shape} vs {orig.shape}"
+                )
         else:
             importance_scores = orig
 
@@ -222,15 +227,17 @@ class BasePruningMethod(ABC):
             pruned version of tensor ``t``.
         """
         if importance_scores is not None:
-            assert (
-                importance_scores.shape == t.shape
-            ), "importance_scores should have the same shape as tensor t"
+            if importance_scores.shape != t.shape:
+                raise AssertionError(
+                    f"importance_scores should have the same shape as tensor t, "
+                    f"got {importance_scores.shape} vs {t.shape}"
+                )
         else:
             importance_scores = t
         default_mask = default_mask if default_mask is not None else torch.ones_like(t)
         return t * self.compute_mask(importance_scores, default_mask=default_mask)
 
-    def remove(self, module):
+    def remove(self, module) -> None:
         r"""Remove the pruning reparameterization from a module.
 
         The pruned parameter named ``name`` remains permanently pruned,
@@ -241,9 +248,10 @@ class BasePruningMethod(ABC):
             Pruning itself is NOT undone or reversed!
         """
         # before removing pruning from a tensor, it has to have been applied
-        assert (
-            self._tensor_name is not None
-        ), f"Module {module} has to be pruned            before pruning can be removed"  # this gets set in apply()
+        if self._tensor_name is None:
+            raise AssertionError(
+                f"Module {module} has to be pruned before pruning can be removed"
+            )  # this gets set in apply()
 
         # to update module[name] to latest trained weights
         weight = self.apply_mask(module)  # masked weights
@@ -268,19 +276,22 @@ class PruningContainer(BasePruningMethod):
     them.
     """
 
-    def __init__(self, *args):
+    def __init__(self, *args) -> None:
         self._pruning_methods: tuple[BasePruningMethod, ...] = ()
         if not isinstance(args, Iterable):  # only 1 item
             self._tensor_name = args._tensor_name
             self.add_pruning_method(args)
+        # pyrefly: ignore [bad-argument-type]
         elif len(args) == 1:  # only 1 item in a tuple
+            # pyrefly: ignore [index-error]
             self._tensor_name = args[0]._tensor_name
+            # pyrefly: ignore [index-error]
             self.add_pruning_method(args[0])
         else:  # manual construction from list or other iterable (or no args)
             for method in args:
                 self.add_pruning_method(method)
 
-    def add_pruning_method(self, method):
+    def add_pruning_method(self, method) -> None:
         r"""Add a child pruning ``method`` to the container.
 
         Args:
@@ -299,7 +310,7 @@ class PruningContainer(BasePruningMethod):
         # if all checks passed, add to _pruning_methods tuple
         self._pruning_methods += (method,)  # type: ignore[operator]
 
-    def __len__(self):
+    def __len__(self) -> int:
         return len(self._pruning_methods)
 
     def __iter__(self):
@@ -394,6 +405,8 @@ class PruningContainer(BasePruningMethod):
                 raise ValueError(f"Unrecognized PRUNING_TYPE {method.PRUNING_TYPE}")
 
             # compute the new mask on the unpruned slice of the tensor t
+            if isinstance(slc, list):
+                slc = tuple(slc)
             partial_mask = method.compute_mask(t[slc], default_mask=mask[slc])
             new_mask[slc] = partial_mask.to(dtype=new_mask.dtype)
 
@@ -414,7 +427,7 @@ class Identity(BasePruningMethod):
         return mask
 
     @classmethod
-    def apply(cls, module, name):
+    def apply(cls, module, name):  # type: ignore[override]
         r"""Add pruning on the fly and reparametrization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
@@ -443,7 +456,7 @@ class RandomUnstructured(BasePruningMethod):
 
     PRUNING_TYPE = "unstructured"
 
-    def __init__(self, amount):
+    def __init__(self, amount) -> None:
         # Check range of validity of pruning amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -469,7 +482,7 @@ class RandomUnstructured(BasePruningMethod):
         return mask
 
     @classmethod
-    def apply(cls, module, name, amount):
+    def apply(cls, module, name, amount):  # type: ignore[override]
         r"""Add pruning on the fly and reparametrization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
@@ -500,7 +513,7 @@ class L1Unstructured(BasePruningMethod):
 
     PRUNING_TYPE = "unstructured"
 
-    def __init__(self, amount):
+    def __init__(self, amount) -> None:
         # Check range of validity of pruning amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -528,7 +541,7 @@ class L1Unstructured(BasePruningMethod):
         return mask
 
     @classmethod
-    def apply(cls, module, name, amount, importance_scores=None):
+    def apply(cls, module, name, amount, importance_scores=None):  # type: ignore[override]
         r"""Add pruning on the fly and reparametrization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
@@ -568,7 +581,7 @@ class RandomStructured(BasePruningMethod):
 
     PRUNING_TYPE = "structured"
 
-    def __init__(self, amount, dim=-1):
+    def __init__(self, amount, dim=-1) -> None:
         # Check range of validity of amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -625,6 +638,7 @@ class RandomStructured(BasePruningMethod):
             mask = torch.zeros_like(t)
             slc = [slice(None)] * len(t.shape)
             slc[dim] = channel_mask
+            slc = tuple(slc)
             mask[slc] = 1
             return mask
 
@@ -638,7 +652,7 @@ class RandomStructured(BasePruningMethod):
         return mask
 
     @classmethod
-    def apply(cls, module, name, amount, dim=-1):
+    def apply(cls, module, name, amount, dim=-1):  # type: ignore[override]
         r"""Add pruning on the fly and reparametrization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
@@ -675,7 +689,7 @@ class LnStructured(BasePruningMethod):
 
     PRUNING_TYPE = "structured"
 
-    def __init__(self, amount, n, dim=-1):
+    def __init__(self, amount, n, dim=-1) -> None:
         # Check range of validity of amount
         _validate_pruning_amount_init(amount)
         self.amount = amount
@@ -739,6 +753,7 @@ class LnStructured(BasePruningMethod):
             # replace a None at position=dim with indices
             # e.g.: slc = [None, None, [0, 2, 3]] if dim=2 & indices=[0,2,3]
             slc[dim] = indices
+            slc = tuple(slc)
             # use slc to slice mask and replace all its entries with 1s
             # e.g.: mask[:, :, [0, 2, 3]] = 1
             mask[slc] = 1
@@ -753,7 +768,7 @@ class LnStructured(BasePruningMethod):
         return mask
 
     @classmethod
-    def apply(cls, module, name, amount, n, dim, importance_scores=None):
+    def apply(cls, module, name, amount, n, dim, importance_scores=None):  # type: ignore[override]
         r"""Add pruning on the fly and reparametrization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
@@ -791,16 +806,20 @@ class LnStructured(BasePruningMethod):
 class CustomFromMask(BasePruningMethod):
     PRUNING_TYPE = "global"
 
-    def __init__(self, mask):
+    def __init__(self, mask) -> None:
         self.mask = mask
 
     def compute_mask(self, t, default_mask):
-        assert default_mask.shape == self.mask.shape
+        if default_mask.shape != self.mask.shape:
+            raise AssertionError(
+                f"default_mask shape {default_mask.shape} must match "
+                f"self.mask shape {self.mask.shape}"
+            )
         mask = default_mask * self.mask.to(dtype=default_mask.dtype)
         return mask
 
     @classmethod
-    def apply(cls, module, name, mask):
+    def apply(cls, module, name, mask):  # type: ignore[override]
         r"""Add pruning on the fly and reparametrization of a tensor.
 
         Adds the forward pre-hook that enables pruning on the fly and
@@ -842,7 +861,7 @@ def identity(module, name):
 
     Examples:
         >>> # xdoctest: +SKIP
-        >>> m = prune.identity(nn.Linear(2, 3), 'bias')
+        >>> m = prune.identity(nn.Linear(2, 3), "bias")
         >>> print(m.bias_mask)
         tensor([1., 1., 1.])
     """
@@ -878,7 +897,7 @@ def random_unstructured(module, name, amount):
 
     Examples:
         >>> # xdoctest: +SKIP
-        >>> m = prune.random_unstructured(nn.Linear(2, 3), 'weight', amount=1)
+        >>> m = prune.random_unstructured(nn.Linear(2, 3), "weight", amount=1)
         >>> torch.sum(m.weight_mask == 0)
         tensor(1)
 
@@ -921,7 +940,7 @@ def l1_unstructured(module, name, amount, importance_scores=None):
 
     Examples:
         >>> # xdoctest: +SKIP
-        >>> m = prune.l1_unstructured(nn.Linear(2, 3), 'weight', amount=0.2)
+        >>> m = prune.l1_unstructured(nn.Linear(2, 3), "weight", amount=0.2)
         >>> m.state_dict().keys()
         odict_keys(['bias', 'weight_orig', 'weight_mask'])
     """
@@ -961,9 +980,7 @@ def random_structured(module, name, amount, dim):
 
     Examples:
         >>> # xdoctest: +SKIP
-        >>> m = prune.random_structured(
-        ...     nn.Linear(5, 3), 'weight', amount=3, dim=1
-        ... )
+        >>> m = prune.random_structured(nn.Linear(5, 3), "weight", amount=3, dim=1)
         >>> columns_pruned = int(sum(torch.sum(m.weight, dim=0) == 0))
         >>> print(columns_pruned)
         3
@@ -1010,7 +1027,7 @@ def ln_structured(module, name, amount, n, dim, importance_scores=None):
     Examples:
         >>> from torch.nn.utils import prune
         >>> m = prune.ln_structured(
-        ...     nn.Conv2d(5, 3, 2), 'weight', amount=0.3, dim=1, n=float('-inf')
+        ...     nn.Conv2d(5, 3, 2), "weight", amount=0.3, dim=1, n=float("-inf")
         ... )
     """
     LnStructured.apply(
@@ -1019,7 +1036,9 @@ def ln_structured(module, name, amount, n, dim, importance_scores=None):
     return module
 
 
-def global_unstructured(parameters, pruning_method, importance_scores=None, **kwargs):
+def global_unstructured(
+    parameters, pruning_method, importance_scores=None, **kwargs
+) -> None:
     r"""
     Globally prunes tensors corresponding to all parameters in ``parameters`` by applying the specified ``pruning_method``.
 
@@ -1063,13 +1082,17 @@ def global_unstructured(parameters, pruning_method, importance_scores=None, **kw
     Examples:
         >>> from torch.nn.utils import prune
         >>> from collections import OrderedDict
-        >>> net = nn.Sequential(OrderedDict([
-        ...     ('first', nn.Linear(10, 4)),
-        ...     ('second', nn.Linear(4, 1)),
-        ... ]))
+        >>> net = nn.Sequential(
+        ...     OrderedDict(
+        ...         [
+        ...             ("first", nn.Linear(10, 4)),
+        ...             ("second", nn.Linear(4, 1)),
+        ...         ]
+        ...     )
+        ... )
         >>> parameters_to_prune = (
-        ...     (net.first, 'weight'),
-        ...     (net.second, 'weight'),
+        ...     (net.first, "weight"),
+        ...     (net.second, "weight"),
         ... )
         >>> prune.global_unstructured(
         ...     parameters_to_prune,
@@ -1090,6 +1113,7 @@ def global_unstructured(parameters, pruning_method, importance_scores=None, **kw
 
     # flatten importance scores to consider them all at once in global pruning
     relevant_importance_scores = torch.nn.utils.parameters_to_vector(
+        # pyrefly: ignore [bad-argument-type]
         [
             importance_scores.get((module, name), getattr(module, name))
             for (module, name) in parameters
@@ -1161,7 +1185,7 @@ def custom_from_mask(module, name, mask):
     Examples:
         >>> from torch.nn.utils import prune
         >>> m = prune.custom_from_mask(
-        ...     nn.Linear(5, 3), name='bias', mask=torch.tensor([0, 1, 0])
+        ...     nn.Linear(5, 3), name="bias", mask=torch.tensor([0, 1, 0])
         ... )
         >>> print(m.bias_mask)
         tensor([0., 1., 0.])
@@ -1187,8 +1211,8 @@ def remove(module, name):
             will act.
 
     Examples:
-        >>> m = random_unstructured(nn.Linear(5, 7), name='weight', amount=0.2)
-        >>> m = remove(m, name='weight')
+        >>> m = random_unstructured(nn.Linear(5, 7), name="weight", amount=0.2)
+        >>> m = remove(m, name="weight")
     """
     for k, hook in module._forward_pre_hooks.items():
         if isinstance(hook, BasePruningMethod) and hook._tensor_name == name:
@@ -1201,7 +1225,7 @@ def remove(module, name):
     )
 
 
-def is_pruned(module):
+def is_pruned(module) -> bool:
     r"""Check if a module is pruned by looking for pruning pre-hooks.
 
     Check whether ``module`` is pruned by looking for
@@ -1219,7 +1243,7 @@ def is_pruned(module):
         >>> m = nn.Linear(5, 7)
         >>> print(prune.is_pruned(m))
         False
-        >>> prune.random_unstructured(m, name='weight', amount=0.2)
+        >>> prune.random_unstructured(m, name="weight", amount=0.2)
         >>> print(prune.is_pruned(m))
         True
     """
@@ -1230,7 +1254,7 @@ def is_pruned(module):
     return False
 
 
-def _validate_pruning_amount_init(amount):
+def _validate_pruning_amount_init(amount) -> None:
     r"""Validate helper to check the range of amount at init.
 
     Args:
@@ -1260,7 +1284,7 @@ def _validate_pruning_amount_init(amount):
         )
 
 
-def _validate_pruning_amount(amount, tensor_size):
+def _validate_pruning_amount(amount, tensor_size) -> None:
     r"""Validate that the pruning amount is meaningful wrt to the size of the data.
 
     Validation helper to check that the amount of parameters to prune
@@ -1284,7 +1308,7 @@ def _validate_pruning_amount(amount, tensor_size):
         )
 
 
-def _validate_structured_pruning(t):
+def _validate_structured_pruning(t) -> None:
     r"""Validate that the tensor to be pruned is at least 2-Dimensional.
 
     Validation helper to check that the tensor to be pruned is multi-
@@ -1331,7 +1355,7 @@ def _compute_nparams_toprune(amount, tensor_size):
         return round(amount * tensor_size)
 
 
-def _validate_pruning_dim(t, dim):
+def _validate_pruning_dim(t, dim) -> None:
     r"""Validate that the pruning dimension is within the bounds of the tensor dimension.
 
     Args:

@@ -13,7 +13,6 @@ pytorch_test_dir = os.path.dirname(os.path.dirname(os.path.realpath(__file__)))
 sys.path.append(pytorch_test_dir)
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
-    run_tests,
     set_default_dtype,
     suppress_warnings,
 )
@@ -105,4 +104,7 @@ class TestComplexity(JitTestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

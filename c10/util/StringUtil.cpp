@@ -79,7 +79,7 @@ std::ostream& _str(std::ostream& ss, const std::wstring& wString) {
 } // namespace detail
 
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc) {
-  out << loc.function << " at " << loc.file << ":" << loc.line;
+  out << loc.function << " at " << loc.file << ':' << loc.line;
   return out;
 }
 
@@ -200,4 +200,19 @@ std::optional<double> tryToNumber<double>(const char* symbol) {
   return value;
 }
 
+std::vector<std::string_view> split(std::string_view target, char delimiter) {
+  std::vector<std::string_view> atoms;
+  std::string_view buffer = target;
+  while (!buffer.empty()) {
+    auto i = buffer.find(delimiter);
+    if (i == std::string_view::npos) {
+      atoms.push_back(buffer);
+      buffer.remove_prefix(buffer.size());
+    } else {
+      atoms.push_back(buffer.substr(0, i));
+      buffer.remove_prefix(i + 1);
+    }
+  }
+  return atoms;
+}
 } // namespace c10

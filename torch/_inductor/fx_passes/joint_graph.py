@@ -5,15 +5,19 @@ import logging
 import operator
 import typing
 from collections import Counter
-from typing import Any, Union
+from collections.abc import Sequence
+from typing import Any
 
 import torch
 import torch._guards
 import torch.utils._pytree as pytree
+from torch._dynamo.utils import counters
 from torch._inductor.constant_folding import ConstantFolder
 from torch._inductor.fx_passes.dedupe_symint_uses import _SymHashingDict
+from torch._inductor.utils import get_gpu_type
 from torch.fx.experimental.symbolic_shapes import (
-    _guard_sizes_oblivious,
+    guard_or_false,
+    guard_or_true,
     statically_known_true,
 )
 from torch.multiprocessing.reductions import StorageWeakRef
@@ -21,19 +25,26 @@ from torch.utils._ordered_set import OrderedSet
 
 from .. import config
 from ..pattern_matcher import (
+    Arg,
     CallFunction,
     init_once_fakemode,
     KeywordArg,
     Match,
     MULTIPLE,
-    PatternMatcherPass,
+    PatternMatcherPass as PatternMatcherPassBase,
     register_graph_pattern,
     stable_topological_sort,
 )
+from .decompose_mem_bound_mm import check_device
 from .replace_random import replace_random_passes
 
 
+PatternMatcherPass = functools.partial(
+    PatternMatcherPassBase, subsystem="joint_graph_passes"
+)
+
 log = logging.getLogger(__name__)
+early_patterns = PatternMatcherPass()
 patterns = PatternMatcherPass()
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -200,7 +211,7 @@ def remove_redundant_views(gm: torch.fx.GraphModule):
 
 class UniformValueConstantFolder(ConstantFolder):
     """
-    Runs constant folding and replaces tensors that have a unifrom value
+    Runs constant folding and replaces tensors that have a uniform value
     with a tensor constructor call: aten.full([shape], value, ...)
     """
 
@@ -217,7 +228,8 @@ class UniformValueConstantFolder(ConstantFolder):
         self.symint_nodes = _SymHashingDict()
         for n in self.module.graph.nodes:  # type: ignore[union-attr]
             if "val" in n.meta and isinstance(n.meta["val"], torch.SymInt):
-                self.symint_nodes[n.meta["val"]] = n
+                if n.meta["val"] not in self.symint_nodes:
+                    self.symint_nodes[n.meta["val"]] = n
 
         # reference from torch/_funtorch/partitioners.py:get_default_op_list
         self.view_op_packets = [
@@ -238,6 +250,40 @@ class UniformValueConstantFolder(ConstantFolder):
                 aten.slice,
             ]
         )
+
+        self._add_peephole_patterns()
+
+    def _add_peephole_patterns(self) -> None:
+        """
+        Add peephole patterns for nodes where we can infer constant value even if some inputs
+        of the node are unknown.
+        """
+        for op in itertools.chain(
+            self.module.graph.find_nodes(  # type: ignore[operator, union-attr]
+                op="call_function", target=torch.ops.aten.mul.Tensor
+            ),
+            self.module.graph.find_nodes(  # type: ignore[operator, union-attr]
+                op="call_function", target=torch.ops.aten.mul.Scalar
+            ),
+        ):
+            tensor_val = op.meta.get("val", None)
+            if not isinstance(tensor_val, torch.Tensor):
+                continue
+
+            def is_zero_int(arg: Any) -> bool:
+                return isinstance(arg, int) and arg == 0
+
+            if not any(is_zero_int(a) for a in op.args):
+                continue
+
+            t = torch.full(
+                [1],  # shape
+                0,  # value
+                dtype=tensor_val.dtype,
+                device=tensor_val.device,
+                pin_memory=False,
+            )
+            self.add_node_replacement(op, t)
 
     def _support_dynamic_shape(self):
         return True
@@ -271,7 +317,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # single-elem attrs
         if node.op == "get_attr" or (
             node.op == "call_function"
-            and node.target == torch.ops.aten.lift_fresh_copy.default
+            and node.target is torch.ops.aten.lift_fresh_copy.default
         ):
             out = super(ConstantFolder, self).run_node(node)
             if isinstance(out, torch.Tensor) and out.numel() == 1:
@@ -284,7 +330,7 @@ class UniformValueConstantFolder(ConstantFolder):
         # constructors ops
         if (
             node.op == "call_function"
-            and node.target == aten.full.default
+            and node.target is aten.full.default
             and len(node.args) == 2
         ):
             args, kwargs = self.fetch_args_kwargs_from_env(node)
@@ -295,7 +341,7 @@ class UniformValueConstantFolder(ConstantFolder):
                 return aten.full.default(*new_args, **node.kwargs)
 
         # handle before view ops because this changes value
-        if node.target == aten.view.dtype:
+        if node.target is aten.view.dtype:
             return super(ConstantFolder, self).run_node(node)
 
         # view ops, return input tensor, the first argument
@@ -393,7 +439,7 @@ def constant_fold_uniform_value(gm: torch.fx.GraphModule):
                 # the conversion from tensor and back to value can be lossy, just use the original full ctor value
                 if (
                     node.op == "call_function"
-                    and node.target == aten.full.default
+                    and node.target is aten.full.default
                     and len(node.args) == 2
                 ):
                     value = node.args[1]
@@ -473,6 +519,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             invoke_quant_replacement = graph.call_function(
                 torch._higher_order_ops.invoke_quant,
                 (subgraph, *args),
+                # pyrefly: ignore [bad-argument-type]
                 kwargs,
             )
             invoke_quant_replacement.meta.update(subgraph.meta)
@@ -489,7 +536,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
             if (
                 len(invoke_quant_replacement.users) == 1
                 and len(subgraph.users) == 1
-                and first_user.target == operator.getitem
+                and first_user.target is operator.getitem
                 and first_user.args[1] == 0
             ):
                 subgraph_graph = getattr(gm, subgraph.target)
@@ -500,6 +547,7 @@ def canonicalize_quant_mapping(gm: torch.fx.GraphModule):
                 )
 
                 unpacked_output = output_node.args[0][0]
+                # pyrefly: ignore [bad-argument-type]
                 output_node.args = (unpacked_output,)
                 if "val" in output_node.meta:
                     output_node.meta["val"] = output_node.meta["val"][0]
@@ -548,11 +596,21 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
             constant_fold_uniform_value
         )
 
-    if config.joint_custom_pre_pass is not None:
-        GraphTransformObserver(graph, "joint_custom_pre_pass").apply_graph_pass(
-            config.joint_custom_pre_pass
-        )
-        count += 1
+    if config.pattern_matcher:
+        count += early_patterns.apply(graph.graph)
+
+    # Make sure AutoChunker happens before pad_mm so we don't need
+    # to handle padding when searching for chunking patterns.
+    if config.auto_chunker.enable:
+        from .auto_chunker import CantChunk, chunk
+
+        try:
+            graph = chunk(graph)
+        except CantChunk:
+            auto_chunker_log = torch._logging.getArtifactLogger(
+                __name__, "auto_chunker"
+            )
+            auto_chunker_log.debug("AutoChunker fail.", exc_info=True)
 
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
@@ -589,6 +647,7 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         device=KeywordArg("device"),
         requires_grad=KeywordArg("requires_grad"),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=patterns,
 )
 def fix_iota_device(match: Match, length, start, step, dtype, device, requires_grad):
@@ -642,6 +701,7 @@ def fix_iota_device(match: Match, length, start, step, dtype, device, requires_g
         ),
         KeywordArg("dtype2"),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=patterns,
 )
 def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtype):
@@ -658,15 +718,60 @@ def pointless_convert(match: Match, arg, dtype1: torch.dtype, dtype2: torch.dtyp
         match.erase_nodes()
 
 
+def definitely_equal(
+    old_sizes: Sequence[torch.SymInt | int],
+    new_sizes: Sequence[torch.SymInt | torch.fx.Node | int],
+) -> bool:
+    """
+    Leverage guard_or_true/false to compare if two lists of int/symint are equal.
+    Useful to compare sizes, strides etc.
+
+    Can handle -1 in new_sizes which happens in the size arguments of a
+    view op. old_sizes is supposed to be the tensor shape and should not
+    contain -1.
+
+    new_sizes can contains fx.Node when dynamic shape is enabled. In that
+    case new_sizes[i].meta['val'] contains the real torch.SymInt.
+    """
+
+    num_neg1 = 0
+
+    if len(old_sizes) != len(new_sizes):
+        return False
+
+    for lhs_item, rhs_item in zip(old_sizes, new_sizes):
+        if isinstance(rhs_item, torch.fx.Node):
+            rhs_item = rhs_item.meta["val"]
+
+        assert isinstance(lhs_item, (int, torch.SymInt)), type(lhs_item)
+        assert isinstance(rhs_item, (int, torch.SymInt)), type(rhs_item)
+
+        # It still makes sense to call guard_or_true/false since lhs_item
+        # rhs_item are torch.SymInt rather than sympy expressions when
+        # dynamic shape is enabled.
+        if guard_or_false(lhs_item == rhs_item):
+            continue
+
+        if guard_or_true(rhs_item != -1):
+            return False
+
+        num_neg1 += 1
+
+        if num_neg1 > 1:
+            return False
+    return True
+
+
 @register_graph_pattern(
     CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
-    pass_dict=patterns,
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=early_patterns,
 )
 def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
     node = match.output_node()
     arg_size = list(node.args[0].meta["val"].shape)  # type: ignore[union-attr]
-    if _guard_sizes_oblivious(size, arg_size):
+    if definitely_equal(arg_size, size):
         node.replace_all_uses_with(node.args[0])  # type: ignore[arg-type]
         match.erase_nodes()
 
@@ -677,7 +782,8 @@ def pointless_view(match: Match, arg, size):
         CallFunction(aten.view.default, KeywordArg("arg"), KeywordArg("size1")),
         KeywordArg("size2"),
     ),
-    pass_dict=patterns,
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=early_patterns,
 )
 def pointless_view_pair(match: Match, arg, size1, size2):
     """
@@ -685,9 +791,10 @@ def pointless_view_pair(match: Match, arg, size1, size2):
     """
     node = match.output_node()
     arg_size = list(arg.meta["val"].shape)
-    if _guard_sizes_oblivious(arg_size, size2):
+    if definitely_equal(arg_size, size2):
         node.replace_all_uses_with(arg)
         match.erase_nodes()
+        counters["inductor"]["removed_pointless_view_pair"] += 1
 
 
 @register_graph_pattern(
@@ -696,7 +803,8 @@ def pointless_view_pair(match: Match, arg, size1, size2):
         CallFunction(aten.permute.default, KeywordArg("arg"), KeywordArg("perm1")),
         KeywordArg("perm2"),
     ),
-    pass_dict=patterns,
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=early_patterns,
 )
 def pointless_permute_pair(match: Match, arg, perm1, perm2):
     rank = len(perm1)
@@ -708,6 +816,30 @@ def pointless_permute_pair(match: Match, arg, perm1, perm2):
     node = match.output_node()
     node.replace_all_uses_with(arg)
     match.erase_nodes()
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.bmm,
+        Arg(),
+        Arg(),
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=patterns,
+)
+def bmm_to_mm(match: Match, mat1: torch.fx.Node, mat2: torch.fx.Node):
+    """Convert bmm to mm when batch size is 1"""
+
+    def repl(a, b):
+        return torch.mm(a.squeeze(0), b.squeeze(0)).unsqueeze(0)
+
+    if (
+        check_device(mat1.meta["val"], mat2.meta["val"], get_gpu_type())
+        and statically_known_true(mat1.meta["val"].shape[0] == 1)
+        and statically_known_true(mat2.meta["val"].shape[0] == 1)
+    ):
+        # pyrefly: ignore [bad-argument-type]
+        match.replace_by_example(repl, [mat1, mat2])
 
 
 # When softmax is used with temperature or other scaling, we get the pattern
@@ -779,6 +911,9 @@ def _other_is_broadcasted_in_dim(match):
     if isinstance(dim, int):
         dim = (dim,)
 
+    if any(d >= len(other_shape) for d in dim):
+        return False
+
     return all(statically_known_true(other_shape[d] == 1) for d in dim)
 
 
@@ -787,7 +922,7 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         if dtype is not None:
             inp = inp.to(dtype)
 
-        sign: Union[int, float, torch.Tensor]
+        sign: int | float | torch.Tensor
         if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
@@ -796,14 +931,17 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
+        # pyrefly: ignore [unsupported-operation]
         return (inp - max_) * (sign * other)
 
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
 
 
 for reverse, to_dtype in itertools.product((False, True), repeat=2):
     register_graph_pattern(
         _partial_softmax_pattern(aten.mul.Tensor, reverse=reverse, to_dtype=to_dtype),
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[1],
         extra_check=_other_is_broadcasted_in_dim,
     )(mul_softmax_pattern)
@@ -814,7 +952,7 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
         if dtype is not None:
             inp = inp.to(dtype)
 
-        sign: Union[int, float, torch.Tensor]
+        sign: int | float | torch.Tensor
         if isinstance(other, (int, float, torch.SymInt, torch.SymFloat)):
             sign = 1 if other >= 0 else -1
         else:
@@ -823,14 +961,106 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
+        # pyrefly: ignore [unsupported-operation]
         return (inp - max_) / (sign * other)
 
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, [inp, other])
 
 
 for to_dtype in (False, True):
     register_graph_pattern(
         _partial_softmax_pattern(aten.div.Tensor, to_dtype=to_dtype),
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=pass_patterns[1],
         extra_check=_other_is_broadcasted_in_dim,
     )(div_softmax_pattern)
+
+
+def scatter_upon_const_tensor_extra_check(m):
+    if not config.optimize_scatter_upon_const_tensor:
+        return False
+    full_shape = m.kwargs["shape"]
+    selector = m.kwargs["selector"]
+    dim = m.kwargs["dim"]
+    if dim < 0:
+        dim += len(full_shape)
+
+    selector_ft = selector.meta["val"]
+    assert selector_ft.dim() == len(full_shape)
+
+    for idx, select_sz, full_sz in zip(
+        itertools.count(), selector_ft.shape, full_shape
+    ):
+        if idx == dim:
+            continue
+
+        # TODO: the pattern can be updated to support the case that index tensor
+        # is shorter. But that will need a more complex condition expression
+        # especially for multi-dimensional tensors.
+        # Skip it for now.
+        if isinstance(full_sz, torch.fx.Node):
+            full_sz = full_sz.meta["val"]
+        if select_sz < full_sz:
+            return False
+
+    # Actually we can support small size larger than 1. It would be a bit
+    # tedious. E.g., we load all the index values (not many) and compare
+    # them with the position in tensor to decide what value to return.
+    return selector_ft.size(dim) == 1
+
+
+@register_graph_pattern(
+    CallFunction(
+        aten.scatter.value,
+        CallFunction(
+            aten.full,
+            KeywordArg("shape"),
+            KeywordArg("background_val"),
+            dtype=KeywordArg("dtype"),
+        ),
+        KeywordArg("dim"),
+        KeywordArg("selector"),
+        KeywordArg("val"),  # scalar value
+    ),
+    # pyrefly: ignore [bad-argument-type]
+    pass_dict=patterns,
+    extra_check=scatter_upon_const_tensor_extra_check,
+)
+def scatter_upon_const_tensor(
+    match: Match, shape, background_val, dtype, dim, selector, val
+):
+    """
+    Match the pattern of full+scatter into a pointwise operation in joint graph.
+
+    TODO: Right now the scatter value must be a scalar. But we could support it
+    when it is a tensor as well.
+    """
+    from torch._inductor import metrics
+
+    # pyrefly: ignore  # bad-assignment
+    metrics.num_matches_for_scatter_upon_const_tensor += 1
+
+    # Create a replacement that uses torch.where for the pointwise operation
+    def repl_fn(shape, background_val, dim, selector, val):
+        # Create a tensor of indices for the scatter dimension
+        length = shape[dim]
+        indices = torch.arange(length, device=selector.device, dtype=torch.int64)
+
+        # Reshape indices to have size 'length' at dim, then broadcast
+        view_shape = [1] * len(shape)
+        view_shape[dim] = length
+        indices_view = indices.view(*view_shape)
+
+        # Broadcast selector to match full tensor shape
+        selector_expanded = selector.expand(shape)
+
+        # Create a mask for where to scatter
+        mask = selector_expanded == indices_view
+
+        # Use torch.where to implement the scatter pointwise operation
+        return torch.where(mask, val, background_val)
+
+    # replace the scatter operation with pointwise equivalent
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(repl_fn, [shape, background_val, dim, selector, val])

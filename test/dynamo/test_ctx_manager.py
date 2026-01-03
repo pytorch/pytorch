@@ -1,26 +1,18 @@
 # Owner(s): ["module: dynamo"]
 import contextlib
 import sys
-import traceback
 import unittest
 from contextlib import contextmanager
 
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import InternalTorchDynamoError
-from torch._dynamo.testing import (
-    EagerAndRecordGraphs,
-    normalize_gm,
-    same,
-    skipIfNotPy311,
-)
+from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
-    make_dynamo_test,
     parametrize,
 )
 
@@ -35,6 +27,16 @@ _variable = 0
 _variable1 = 0
 z_glb = 0
 k_glb = 0
+
+
+@contextlib.contextmanager
+def set_default_dtype(dtype):
+    old_dtype = torch.get_default_dtype()
+    try:
+        torch.set_default_dtype(dtype)
+        yield
+    finally:
+        torch.set_default_dtype(old_dtype)
 
 
 class CustomizedCtxManager:
@@ -74,7 +76,7 @@ def customized_ctx_manager_with_graph_break(mode):
         torch._C._set_grad_enabled(prev)
 
 
-class CtxManagerTests(torch._dynamo.test_case.TestCase):
+class CtxManagerTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_no_grad(self):
         def fn1(a, b):
             x = a + 1
@@ -227,7 +229,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 12)
+        self.assertExpectedInline(str(cnts.op_count), """9""")
 
     @unittest.expectedFailure  # https://github.com/pytorch/pytorch/issues/118204
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
@@ -332,7 +334,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 21)
+        self.assertExpectedInline(str(cnts.op_count), """15""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_stream_compared_with_constant(self):
@@ -385,7 +387,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         ref1 = fn(x, s1, s1)
         res1 = opt_fn(x, s1, s1)
-        # We have a re-compilation because of chaning inputs
+        # We have a re-compilation because of changing inputs
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(ref1, res1)
 
@@ -400,11 +402,14 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
 
         ref0 = fn(x, s0, s1)
         res0 = opt_fn(x, s0, s1)
-        # We have a re-compilation because of chaning inputs
+        # We have a re-compilation because of changing inputs
         self.assertEqual(cnts.frame_count, 2)
         self.assertEqual(ref0, res0)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_reconstruct(self):
         def fn(x):
             e = torch.cuda.Event()
@@ -422,6 +427,9 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.op_count, 3)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_across_graph_break(self):
         def fn(x):
             e = torch.cuda.Event()
@@ -443,9 +451,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref[0], res[0])
         self.assertEqual(cnts.frame_count, 2)
-        self.assertEqual(cnts.op_count, 9)
+        self.assertEqual(cnts.op_count, 10)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_created_outside_of_graph(self):
         user_stream = torch.cuda.Stream()
         event = torch.cuda.Event()
@@ -475,9 +486,12 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = run_iters(func, compile=True)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 3)
+        self.assertEqual(cnts.op_count, 4)
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
+    @unittest.skip(
+        "Will not support external events for now: https://github.com/pytorch/pytorch/issues/167257"
+    )
     def test_cuda_event_method_create_stream_outside_of_compile(self):
         def fn(x, cur_stream, new_stream):
             x = torch.mul(x, 1)
@@ -514,7 +528,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x, cur_stream, new_stream)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 19)
+        self.assertExpectedInline(str(cnts.op_count), """16""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_event_method(self):
@@ -534,7 +548,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             with torch.cuda.stream(new_stream):
                 x = torch.add(x, 4)
 
-            new_event = torch.cuda.Event()
+            new_event = torch.Event()
             new_event.record(new_stream)
 
             new_event.wait(cur_stream)
@@ -554,7 +568,7 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
         self.assertEqual(cnts.frame_count, 1)
-        self.assertEqual(cnts.op_count, 19)
+        self.assertExpectedInline(str(cnts.op_count), """16""")
 
     @unittest.skipIf(not torch.cuda.is_available(), "requires cuda")
     def test_cuda_device(self):
@@ -1249,10 +1263,13 @@ class CtxManagerTests(torch._dynamo.test_case.TestCase):
             def f(x, y):
                 return x + y
 
-            x, y = torch.ones(
-                1,
-            ), torch.zeros(
-                1,
+            x, y = (
+                torch.ones(
+                    1,
+                ),
+                torch.zeros(
+                    1,
+                ),
             )
             return f(x, y)
 
@@ -1286,10 +1303,13 @@ class GraphModule(torch.nn.Module):
             def f(x, y):
                 return x + y
 
-            x, y = torch.ones(
-                1,
-            ), torch.zeros(
-                1,
+            x, y = (
+                torch.ones(
+                    1,
+                ),
+                torch.zeros(
+                    1,
+                ),
             )
             return f(x, y)
 
@@ -1332,10 +1352,13 @@ class GraphModule(torch.nn.Module):
 
                 return inner_fn(x, y) + x
 
-            x, y = torch.ones(
-                1,
-            ), torch.zeros(
-                1,
+            x, y = (
+                torch.ones(
+                    1,
+                ),
+                torch.zeros(
+                    1,
+                ),
             )
             return f(x, y)
 
@@ -1694,7 +1717,7 @@ class GraphModule(torch.nn.Module):
         cnts = torch._dynamo.testing.CompileCounter()
         opt_f = torch.compile(f, backend=cnts)
         opt_f(torch.randn(2, 2, 2, 2).to(dtype=torch.float16))
-        self.assertEqual(cnts.frame_count, 3)
+        self.assertEqual(cnts.frame_count, 2)
 
     # test sdpa_kernel graph break with 2 arguments
     def test_sdpa_kernel_ctx_manager3(self):
@@ -1730,6 +1753,83 @@ class GraphModule(torch.nn.Module):
         opt_f = torch.compile(f, backend="eager")
         opt_f(torch.randn(2, 2))
 
+    # Regression test to make sure dynamo won't crash on these kwargs.
+    def test_sdpa_kernel_ctx_manager_kwargs(self):
+        backends = [torch.nn.attention.SDPBackend.MATH]
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_state_is_modified():
+            self.assertEqual(
+                set(torch.nn.attention._cur_sdpa_kernel_backends()),
+                set(backends),
+            )
+
+        def f(x):
+            with torch.nn.attention.sdpa_kernel(backends=backends, set_priority=True):
+                x = x + 1
+                check_backend_state_is_modified()
+                x = x + 1
+
+            return x
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f(torch.randn(2, 2))
+
+    # Regression test to make sure dynamo won't graph break on calling functions
+    # decorated with special context manager.
+    def test_sdpa_kernel_ctx_manager_as_decorator(self):
+        SDPA_BACKEND_PRIORITY = [
+            torch.nn.attention.SDPBackend.MATH,
+            torch.nn.attention.SDPBackend.EFFICIENT_ATTENTION,
+            torch.nn.attention.SDPBackend.FLASH_ATTENTION,
+        ]
+
+        @torch.nn.attention.sdpa_kernel(
+            backends=SDPA_BACKEND_PRIORITY, set_priority=True
+        )
+        def scaled_dot_product_attention(q, k, v, *args, **kwargs):
+            return torch.nn.functional.scaled_dot_product_attention(
+                q, k, v, *args, **kwargs
+            )
+
+        def f(x):
+            return scaled_dot_product_attention(x, x, x)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.rand(16, 16, 64, 256, dtype=torch.float16)
+        ref = f(x)
+        res = opt_f(x)
+
+        self.assertEqual(ref, res)
+
+    # Regression test to make sure the value of set_priority is used correctly.
+    def test_sdpa_kernel_ctx_manager_set_priority(self):
+        backends = [torch.nn.attention.SDPBackend.MATH]
+        default_priority = torch._C._get_sdp_priority_order()
+
+        @torch._dynamo.allow_in_graph
+        def check_backend_priority(changed: bool):
+            self.assertEqual(
+                changed,
+                torch._C._get_sdp_priority_order() != default_priority,
+            )
+
+        def f(x):
+            with torch.nn.attention.sdpa_kernel(backends=backends, set_priority=True):
+                x = x + 1
+                check_backend_priority(changed=True)
+                x = x + 1
+
+            with torch.nn.attention.sdpa_kernel(backends=backends, set_priority=False):
+                x = x + 1
+                check_backend_priority(changed=False)
+                x = x + 1
+
+            return x
+
+        opt_f = torch.compile(f, backend="eager")
+        opt_f(torch.randn(2, 2))
+
     def test_torch_profiler_use_after_with_block(self):
         counters.clear()
 
@@ -1746,15 +1846,72 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
         self.assertEqual(len(counters["graph_break"]), 1)
 
+    def test_311_resume_block_keyerror(self):
+        # https://github.com/pytorch/pytorch/issues/162313
+        flag = True
 
-class ContextlibContextManagerTests(torch._dynamo.test_case.TestCase):
+        def fn(x):
+            x = x + 1
+            torch._dynamo.graph_break()
+            x = x + 2
+            if flag:
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+                x = x + 4
+            else:
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+                x = x + 8
+            return x + 16
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+        flag = False
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_311_resume_block_keyerror2(self):
+        # https://github.com/pytorch/pytorch/issues/166176
+        def fn(x):
+            torch._dynamo.graph_break()
+            with torch.no_grad():
+                with torch.no_grad():
+                    torch._dynamo.graph_break()
+            return x + 1
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+
+    def test_store_attr_graph_break_key_error(self):
+        # STORE_ATTR on dummy should result in graph break
+        def dummy():
+            pass
+
+        def fn(x):
+            x = x + 2
+            with torch.no_grad():
+                dummy.attr1 = x
+            return x + 4
+
+        inp = torch.ones(3)
+        opt_fn = torch.compile(fn, backend="eager")
+        self.assertEqual(fn(inp), opt_fn(inp))
+        self.assertGreater(len(counters["graph_break"]), 0)
+
+
+class ContextlibContextManagerTests(
+    torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
+):
     def setUp(self):
+        super().setUp()
         self._prev = torch._dynamo.config.enable_trace_contextlib
         self._u_prev = torch._dynamo.config.enable_trace_unittest
         torch._dynamo.config.enable_trace_contextlib = True
         torch._dynamo.config.enable_trace_unittest = True
 
     def tearDown(self):
+        super().tearDown()
         torch._dynamo.config.enable_trace_contextlib = self._prev
         torch._dynamo.config.enable_trace_unittest = self._u_prev
 
@@ -2170,8 +2327,9 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected, result)
 
     def test_graph_break_in_finally(self):
         z = []
@@ -2326,8 +2484,9 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected, result)
 
     def test_disable___exit__(self):
         def h(x):
@@ -2353,8 +2512,9 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected, result)
 
     def test_contextmanager_as_argument(self):
         def h(x):
@@ -2399,8 +2559,10 @@ class GraphModule(torch.nn.Module):
             return x + 1, ctx
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected[0], result[0])
+        self.assertEqual(type(expected[1]).__name__, type(result[1]).__name__)
 
     def test_return_advanced_contextmanager(self):
         L = []
@@ -2422,8 +2584,10 @@ class GraphModule(torch.nn.Module):
             return x + y, ctx
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected[0], result[0])
+        self.assertEqual(type(expected[1]).__name__, type(result[1]).__name__)
 
     def test_contextmanager_as_argument_only___enter__(self):
         L = []
@@ -2698,319 +2862,6 @@ class GraphModule(torch.nn.Module):
         t = torch.randn(2)
         y = fn(t)
         self.assertEqual(y, t.sin())
-
-
-class CPythonContextManagerTestCase(torch._dynamo.test_case.CPythonTestCase):
-    # Tests taken from CPython source code in cpython/Lib/test/test_contextlib.py
-    # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_contextlib.py
-
-    @make_dynamo_test
-    def test_contextmanager_plain(self):
-        state = []
-
-        @contextmanager
-        def woohoo():
-            state.append(1)
-            yield 42
-            state.append(999)
-
-        with woohoo() as x:
-            self.assertEqual(state, [1])
-            self.assertEqual(x, 42)
-            state.append(x)
-        self.assertEqual(state, [1, 42, 999])
-
-    @skipIfNotPy311
-    @make_dynamo_test
-    def test_contextmanager_finally(self):
-        state = []
-
-        @contextmanager
-        def woohoo():
-            state.append(1)
-            try:
-                yield 42
-            finally:
-                state.append(999)
-
-        with self.assertRaises(ZeroDivisionError):
-            with woohoo() as x:
-                self.assertEqual(state, [1])
-                self.assertEqual(x, 42)
-                state.append(x)
-                raise ZeroDivisionError
-        self.assertEqual(state, [1, 42, 999])
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_traceback(self):
-        @contextmanager
-        def f():
-            yield
-
-        try:
-            with f():
-                1 / 0
-        except ZeroDivisionError as e:
-            frames = traceback.extract_tb(e.__traceback__)
-
-        self.assertEqual(len(frames), 1)
-        self.assertEqual(frames[0].name, "test_contextmanager_traceback")
-        self.assertEqual(frames[0].line, "1/0")
-
-        # Repeat with RuntimeError (which goes through a different code path)
-        try:
-            with f():
-                raise NotImplementedError(42)
-        except NotImplementedError as e:
-            frames = traceback.extract_tb(e.__traceback__)
-
-        self.assertEqual(len(frames), 1)
-        self.assertEqual(frames[0].name, "test_contextmanager_traceback")
-        self.assertEqual(frames[0].line, "raise NotImplementedError(42)")
-
-    @make_dynamo_test
-    def test_contextmanager_no_reraise(self):
-        @contextmanager
-        def whee():
-            yield
-
-        ctx = whee()
-        ctx.__enter__()
-        # Calling __exit__ should not result in an exception
-        self.assertFalse(ctx.__exit__(TypeError, TypeError("foo"), None))
-
-    @make_dynamo_test
-    def test_contextmanager_trap_yield_after_throw(self):
-        @contextmanager
-        def whoo():
-            try:
-                yield
-            except Exception:  # noqa: E722
-                yield
-
-        ctx = whoo()
-        ctx.__enter__()
-        with self.assertRaises(RuntimeError):
-            ctx.__exit__(TypeError, TypeError("foo"), None)
-
-    @unittest.skipIf(sys.version_info < (3, 11), "Python 3.11+")
-    def test_contextmanager_except(self):
-        state = []
-
-        @contextmanager
-        def woohoo():
-            state.append(1)
-            try:
-                yield 42
-            except ZeroDivisionError as e:
-                state.append(e.args[0])
-                self.assertEqual(state, [1, 42, 999])
-
-        with woohoo() as x:
-            self.assertEqual(state, [1])
-            self.assertEqual(x, 42)
-            state.append(x)
-            raise ZeroDivisionError(999)
-        self.assertEqual(state, [1, 42, 999])
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_except_stopiter(self):
-        @contextmanager
-        def woohoo():
-            yield
-
-        class StopIterationSubclass(StopIteration):
-            pass
-
-        for stop_exc in (StopIteration("spam"), StopIterationSubclass("spam")):
-            with self.subTest(type=type(stop_exc)):
-                try:
-                    with woohoo():
-                        raise stop_exc
-                except Exception as ex:
-                    self.assertIs(ex, stop_exc)
-                else:
-                    self.fail(f"{stop_exc} was suppressed")
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_except_pep479(self):
-        code = """\
-from __future__ import generator_stop
-from contextlib import contextmanager
-@contextmanager
-def woohoo():
-    yield
-"""
-        locals = {}
-        exec(code, locals, locals)
-        woohoo = locals["woohoo"]
-
-        stop_exc = StopIteration("spam")
-        try:
-            with woohoo():
-                raise stop_exc
-        except Exception as ex:
-            self.assertIs(ex, stop_exc)
-        else:
-            self.fail("StopIteration was suppressed")
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_do_not_unchain_non_stopiteration_exceptions(self):
-        @contextmanager
-        def test_issue29692():
-            try:
-                yield
-            except Exception as exc:
-                raise RuntimeError("issue29692:Chained") from exc
-
-        try:
-            with test_issue29692():
-                raise ZeroDivisionError
-        except Exception as ex:
-            self.assertIs(type(ex), RuntimeError)
-            self.assertEqual(ex.args[0], "issue29692:Chained")
-            self.assertIsInstance(ex.__cause__, ZeroDivisionError)
-
-        try:
-            with test_issue29692():
-                raise StopIteration("issue29692:Unchained")
-        except Exception as ex:
-            self.assertIs(type(ex), StopIteration)
-            self.assertEqual(ex.args[0], "issue29692:Unchained")
-            self.assertIsNone(ex.__cause__)
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def _create_contextmanager_attribs(self):
-        def attribs(**kw):
-            def decorate(func):
-                for k, v in kw.items():
-                    setattr(func, k, v)
-                return func
-
-            return decorate
-
-        @contextmanager
-        @attribs(foo="bar")
-        def baz(spam):
-            """Whee!"""
-
-        return baz
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_attribs(self):
-        baz = self._create_contextmanager_attribs()
-        self.assertEqual(baz.__name__, "baz")
-        self.assertEqual(baz.foo, "bar")
-
-    @make_dynamo_test
-    def test_keywords(self):
-        # Ensure no keyword arguments are inhibited
-        @contextmanager
-        def woohoo(self, func, args, kwds):
-            yield (self, func, args, kwds)
-
-        with woohoo(self=11, func=22, args=33, kwds=44) as target:
-            self.assertEqual(target, (11, 22, 33, 44))
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_param_errors(self):
-        @contextmanager
-        def woohoo(a, *, b):
-            yield
-
-        with self.assertRaises(TypeError):
-            woohoo()
-        with self.assertRaises(TypeError):
-            woohoo(3, 5)
-        with self.assertRaises(TypeError):
-            woohoo(b=3)
-
-    @make_dynamo_test
-    def test_recursive(self):
-        depth = 0
-
-        @contextmanager
-        def woohoo():
-            nonlocal depth
-            before = depth
-            depth += 1
-            yield
-            depth -= 1
-            self.assertEqual(depth, before)
-
-        @woohoo()
-        def recursive():
-            if depth < 10:
-                recursive()
-
-        recursive()
-        self.assertEqual(depth, 0)
-
-    @skipIfNotPy311
-    @make_dynamo_test
-    def test_contextmanager_trap_no_yield(self):
-        @contextmanager
-        def whoo():
-            if False:
-                yield
-
-        ctx = whoo()
-        with self.assertRaises(RuntimeError):
-            ctx.__enter__()
-
-    @make_dynamo_test
-    def test_contextmanager_trap_second_yield(self):
-        @contextmanager
-        def whoo():
-            yield
-            yield
-
-        ctx = whoo()
-        ctx.__enter__()
-        with self.assertRaises(RuntimeError):
-            ctx.__exit__(None, None, None)
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_contextmanager_wrap_runtimeerror(self):
-        @contextmanager
-        def woohoo():
-            try:
-                yield
-            except Exception as exc:
-                raise RuntimeError(f"caught {exc}") from exc
-
-        with self.assertRaises(RuntimeError):
-            with woohoo():
-                1 / 0
-
-        # If the context manager wrapped StopIteration in a RuntimeError,
-        # we also unwrap it, because we can't tell whether the wrapping was
-        # done by the generator machinery or by the generator itself.
-        with self.assertRaises(StopIteration):
-            with woohoo():
-                raise StopIteration
-
-    @make_dynamo_test
-    def test_contextmanager_non_normalised(self):
-        @contextmanager
-        def whoo():
-            try:
-                yield
-            except RuntimeError:
-                raise SyntaxError  # noqa: B904
-
-        ctx = whoo()
-        ctx.__enter__()
-        with self.assertRaises(SyntaxError):
-            ctx.__exit__(RuntimeError, None, None)
 
 
 instantiate_parametrized_tests(CtxManagerTests)

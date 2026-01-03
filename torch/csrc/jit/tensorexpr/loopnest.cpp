@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 
 #include <ATen/core/functional.h>
@@ -131,9 +130,9 @@ std::string sanitizeName(const std::string& input_name) {
     } else {
       if (i == 0) {
         // Don't start names with underscore
-        sanitized_name << "v";
+        sanitized_name << 'v';
       }
-      sanitized_name << "_";
+      sanitized_name << '_';
     }
   }
   return sanitized_name.str();
@@ -987,7 +986,7 @@ void LoopNest::inlineIntermediateBufs(bool allow_duplicated_work) {
         }
       }
 
-      // all bufs will have at least one store (if they have > 1 they cant be
+      // all bufs will have at least one store (if they have > 1 they can't be
       // inlined anyway)
       size_t reads = uses.size() - 1;
       // if only one read, we can inline it without duplicating work

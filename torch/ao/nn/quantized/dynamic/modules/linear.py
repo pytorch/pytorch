@@ -35,6 +35,7 @@ class Linear(nnq.Linear):
         >>> print(output.size())
         torch.Size([128, 30])
     """
+
     # version used in this class is different from the parent class nnq.Linear
     _version = 4
 
@@ -111,15 +112,16 @@ class Linear(nnq.Linear):
             torch.ao.nn.qat.dynamic.Linear,
         ]
 
-        assert (
-            type(mod) in float_modules
-        ), "nn.quantized.dynamic.Linear.from_float only works for one of" + str(
-            [float_mod.__name__ for float_mod in float_modules]
+        assert type(mod) in float_modules, (
+            "nn.quantized.dynamic.Linear.from_float only works for one of"
+            + str([float_mod.__name__ for float_mod in float_modules])
         )
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
-        if type(mod) == nni.LinearReLU:
+        if type(mod) is nni.LinearReLU:
             mod = mod[0]
+        # pyrefly: ignore [missing-attribute]
         if mod.qconfig is not None and mod.qconfig.weight is not None:
+            # pyrefly: ignore [not-callable]
             weight_observer = mod.qconfig.weight()
         else:
             # We have the circular import issues if we import the qconfig in the beginning of this file:
@@ -143,11 +145,12 @@ class Linear(nnq.Linear):
                 "Unsupported dtype specified for dynamic quantized Linear!"
             )
         qlinear = cls(mod.in_features, mod.out_features, dtype=dtype)
+        # pyrefly: ignore [bad-argument-type]
         qlinear.set_weight_bias(qweight, mod.bias)
         return qlinear
 
     @classmethod
-    def from_reference(cls, ref_qlinear):
+    def from_reference(cls, ref_qlinear):  # type: ignore[override]
         """Create a (fbgemm/qnnpack) dynamic quantized module from a reference quantized
         module
         Args:

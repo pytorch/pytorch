@@ -33,7 +33,7 @@ if TYPE_CHECKING:
 
 
 # All currently running heuristics.
-# To add a heurstic in trial mode, specify the keywork argument `trial_mode=True`.
+# To add a heurstic in trial mode, specify the keyword argument `trial_mode=True`.
 HEURISTICS: list[HeuristicInterface] = [
     PreviouslyFailedInPR(),
     EditedByPR(),

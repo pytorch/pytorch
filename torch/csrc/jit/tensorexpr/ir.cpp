@@ -125,7 +125,7 @@ Dtype Intrinsics::IntrinsicsDtype(
     IntrinsicsOp op_type,
     const std::vector<ExprPtr>& params) {
   // TODO: check the op_type and make a real decision
-  // Doesnt this fail with kRand?
+  // Doesn't this fail with kRand?
   if (params.empty()) {
     throw malformed_input("invalid params in Intrinsics");
   } else if (params.size() == 1) {

@@ -2,7 +2,7 @@
 import copy
 import operator
 from collections import namedtuple
-from typing import Callable, Union
+from collections.abc import Callable
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -114,7 +114,7 @@ _FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS = DTypeWithConstraints(
     scale_exact_match=2.0 / 256.0,
     zero_point_exact_match=128,
 )
-_FIXED_QPARAMS_OP_TO_CONSTRAINTS: dict[Union[Callable, str], DTypeWithConstraints] = {
+_FIXED_QPARAMS_OP_TO_CONSTRAINTS: dict[Callable | str, DTypeWithConstraints] = {
     torch.nn.Hardsigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
     torch.nn.functional.hardsigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
     "hardsigmoid": _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
@@ -165,9 +165,7 @@ def _get_binary_op_configs(
         )
     # matmul
     binary_op_configs.append(
-        BackendPatternConfig(torch.matmul).set_dtype_configs(
-            dtype_configs
-        )  # noqa: E131
+        BackendPatternConfig(torch.matmul).set_dtype_configs(dtype_configs)  # noqa: E131
     )
     return binary_op_configs
 
@@ -483,16 +481,12 @@ def _get_ln_configs(dtype_configs: list[DTypeConfig]) -> list[BackendPatternConf
     ln_configs = []
     ln_configs.append(
         BackendPatternConfig(torch.nn.LayerNorm)
-        .set_observation_type(
-            ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-        )  # noqa: E131
+        .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
         .set_dtype_configs(dtype_configs)
     )
     ln_configs.append(
         BackendPatternConfig(torch.nn.functional.layer_norm)
-        .set_observation_type(
-            ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-        )  # noqa: E131
+        .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 2, "bias": 3})
     )
@@ -518,27 +512,21 @@ def _get_default_op_configs(
     ]
     configs = [
         BackendPatternConfig(op)
-        .set_observation_type(
-            ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-        )  # noqa: E131
+        .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
         .set_dtype_configs(dtype_configs)
         for op in default_ops
     ]
 
     configs.append(
         BackendPatternConfig(torch.nn.functional.group_norm)
-        .set_observation_type(
-            ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-        )  # noqa: E131
+        .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 2, "bias": 3})
     )
 
     configs.append(
         BackendPatternConfig(torch.nn.functional.instance_norm)
-        .set_observation_type(
-            ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
-        )  # noqa: E131
+        .set_observation_type(ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT)  # noqa: E131
         .set_dtype_configs(dtype_configs)
         ._set_input_type_to_index({"weight": 3, "bias": 4})
     )
@@ -689,7 +677,7 @@ def _get_bn_configs(dtype_configs: list[DTypeConfig]) -> list[BackendPatternConf
         torch.nn.BatchNorm2d: nni.BNReLU2d,
         torch.nn.BatchNorm3d: nni.BNReLU3d,
     }
-    for bn in bn_to_fused_bn.keys():
+    for bn in bn_to_fused_bn:
         fused_bn = bn_to_fused_bn[bn]
         # bn module + relu module fusion config
         bn_configs.append(

@@ -21,6 +21,16 @@ from _pytest.terminal import _get_raw_skip_reason
 from pytest_shard_custom import pytest_addoptions as shard_addoptions, PytestShardPlugin
 
 
+try:
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+except ImportError:
+    # Temporary workaround needed until parse_cmd_line_args makes it into a nightlye because
+    # main / PR's tests are sometimes run against the previous day's nightly which won't
+    # have this function.
+    def parse_cmd_line_args():
+        pass
+
+
 if TYPE_CHECKING:
     from _pytest._code.code import ReprFileLocation
 
@@ -83,6 +93,7 @@ def pytest_addoption(parser: Parser) -> None:
 
 
 def pytest_configure(config: Config) -> None:
+    parse_cmd_line_args()
     xmlpath = config.option.xmlpath_reruns
     # Prevent opening xmllog on worker nodes (xdist).
     if xmlpath and not hasattr(config, "workerinput"):
@@ -227,7 +238,7 @@ def pytest_pycollect_makemodule(module_path, path, parent) -> Module:
 
 @pytest.hookimpl(hookwrapper=True)
 def pytest_report_teststatus(report, config):
-    # Add the test time to the verbose output, unforunately I don't think this
+    # Add the test time to the verbose output, unfortunately I don't think this
     # includes setup or teardown
     pluggy_result = yield
     if not isinstance(report, pytest.TestReport):
@@ -297,11 +308,15 @@ class StepcurrentPlugin:
         self.report_status = ""
         assert config.cache is not None
         self.cache: pytest.Cache = config.cache
-        self.directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
-        self.lastrun: Optional[str] = self.cache.get(self.directory, None)
+        directory = f"{STEPCURRENT_CACHE_DIR}/{config.getoption('stepcurrent')}"
+        self.lastrun_location = f"{directory}/lastrun"
+        self.lastrun: Optional[str] = self.cache.get(self.lastrun_location, None)
         self.initial_val = self.lastrun
         self.skip: bool = config.getoption("stepcurrent_skip")
         self.run_single: bool = config.getoption("run_single")
+
+        self.made_failing_xml_location = f"{directory}/made_failing_xml"
+        self.cache.set(self.made_failing_xml_location, False)
 
     def pytest_collection_modifyitems(self, config: Config, items: list[Any]) -> None:
         if not self.lastrun:
@@ -338,8 +353,10 @@ class StepcurrentPlugin:
 
     def pytest_runtest_protocol(self, item, nextitem) -> None:
         self.lastrun = item.nodeid
-        self.cache.set(self.directory, self.lastrun)
+        self.cache.set(self.lastrun_location, self.lastrun)
 
     def pytest_sessionfinish(self, session, exitstatus):
-        if exitstatus == 0 and not self.run_single:
-            self.cache.set(self.directory, self.initial_val)
+        if exitstatus == 0:
+            self.cache.set(self.lastrun_location, self.initial_val)
+        if exitstatus != 0:
+            self.cache.set(self.made_failing_xml_location, True)

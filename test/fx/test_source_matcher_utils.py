@@ -18,6 +18,7 @@ from torch.fx.passes.utils.source_matcher_utils import (
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
+    raise_on_run_directly,
     skipIfTorchDynamo,
 )
 from torch.testing._internal.jit_utils import JitTestCase
@@ -221,7 +222,7 @@ class TestSourceMatcher(JitTestCase):
         class M(torch.nn.Module):
             def forward(self, x, y):
                 b = x.item()
-                torch._check_is_size(b)
+                torch._check(b >= 0)
                 torch._check(b + 1 < y.size(0))
                 return y[: b + 1]
 
@@ -481,3 +482,6 @@ class TestSourceMatcher(JitTestCase):
 
 
 instantiate_parametrized_tests(TestSourceMatcher)
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_fx.py")

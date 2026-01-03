@@ -4,10 +4,11 @@
 import dataclasses
 import io
 import logging
-import operator
+import math
+import sys
+from bisect import bisect_right, insort
 from collections import ChainMap
-from functools import reduce
-from typing import Any, cast, Optional, Union
+from typing import Any, cast
 
 import torch
 from torch.distributed._shard._utils import narrow_tensor_by_index
@@ -73,7 +74,7 @@ class DefaultSavePlanner(SavePlanner):
         self,
         flatten_state_dict: bool = True,
         flatten_sharded_tensors: bool = True,
-        dedup_replicated_tensors: Optional[bool] = None,
+        dedup_replicated_tensors: bool | None = None,
         dedup_save_to_lowest_rank: bool = False,
         enable_plan_caching: bool = False,
     ) -> None:
@@ -93,7 +94,7 @@ class DefaultSavePlanner(SavePlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        storage_meta: Optional[StorageMeta] = None,
+        storage_meta: StorageMeta | None = None,
         is_coordinator: bool = False,
     ) -> None:
         if self.flatten_state_dict:
@@ -250,7 +251,7 @@ class DefaultSavePlanner(SavePlanner):
         self.plan = finished_plan
         return self.plan
 
-    def resolve_data(self, write_item: WriteItem) -> Union[torch.Tensor, io.BytesIO]:
+    def resolve_data(self, write_item: WriteItem) -> torch.Tensor | io.BytesIO:
         object = self.lookup_object(write_item.index)
         return self.transform_object(write_item, object)
 
@@ -296,7 +297,7 @@ class DefaultLoadPlanner(LoadPlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Optional[Metadata] = None,
+        metadata: Metadata | None = None,
         is_coordinator: bool = False,
     ) -> None:
         _init_state_dict(state_dict)
@@ -313,7 +314,8 @@ class DefaultLoadPlanner(LoadPlanner):
         self.is_coordinator = is_coordinator
 
     def create_local_plan(self) -> LoadPlan:
-        assert self.metadata is not None
+        if self.metadata is None:
+            raise AssertionError("self.metadata is not None")
         if self.flatten_state_dict:
             # To support checkpoints that are saved before v2.4, we have to
             # differentiate if the missing keys are due to old checkpoints.
@@ -408,7 +410,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
             return True
 
         if key in self.keys:
-            True
+            return True
 
         unflattened_keys: list[str] = []
         planner_data = metadata.planner_data.get(key)
@@ -429,11 +431,13 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
     def set_up_planner(
         self,
         state_dict: STATE_DICT_TYPE,
-        metadata: Optional[Metadata] = None,
+        metadata: Metadata | None = None,
         is_coordinator: bool = False,
     ) -> None:
-        assert not state_dict
-        assert metadata is not None
+        if state_dict:
+            raise AssertionError("not state_dict")
+        if metadata is None:
+            raise AssertionError("metadata is not None")
 
         # rebuild the state dict from the metadata
         for k, v in metadata.state_dict_metadata.items():
@@ -442,7 +446,7 @@ class _EmptyStateDictLoadPlanner(DefaultLoadPlanner):
 
             if isinstance(v, TensorStorageMetadata):
                 v = torch.empty(v.size, dtype=v.properties.dtype)  # type: ignore[assignment]
-            if k in metadata.planner_data:
+            if metadata.planner_data is not None and k in metadata.planner_data:
                 set_element(state_dict, metadata.planner_data[k], v)
             else:
                 state_dict[k] = v
@@ -548,14 +552,16 @@ def create_default_global_save_plan(
     for plan in all_plans:
         new_items = []
         for item in plan.items:
-            if not item.type == WriteItemType.SHARD:
-                assert item.index.fqn not in md
+            if item.type != WriteItemType.SHARD:
+                if item.index.fqn in md:
+                    raise AssertionError("item.index.fqn not in md")
 
             if item.type == WriteItemType.BYTE_IO:
                 md[item.index.fqn] = BytesStorageMetadata()
                 new_items.append(item)
             else:
-                assert item.tensor_data is not None
+                if item.tensor_data is None:
+                    raise AssertionError("item.tensor_data is not None")
                 tensor_md = cast(
                     TensorStorageMetadata,
                     md.setdefault(
@@ -575,10 +581,11 @@ def create_default_global_save_plan(
                     new_item = dataclasses.replace(item, index=new_index)
                 new_items.append(new_item)
 
-                assert item.tensor_data.chunk is not None, f"""
+                if item.tensor_data.chunk is None:
+                    raise AssertionError(f"""
                     Cannot create MD for tensor without bounds.
                     FQN: {item.index.fqn}
-                """
+                """)
                 tensor_md.chunks.append(item.tensor_data.chunk)
         new_plans.append(dataclasses.replace(plan, items=new_items))
     return (new_plans, Metadata(md))
@@ -628,10 +635,11 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
             continue
         if len(value.size) == 0:
             continue
+        chunks = value.chunks
         chunks_volume = 0
-        for chunk_idx, chunk0 in enumerate(value.chunks):
+        for chunk in chunks:
             # Compute the volume
-            if not _check_box_bounds(value.size, chunk0):
+            if not _check_box_bounds(value.size, chunk):
                 logger.warning(
                     """
                         key:%s has out of bounds chunk:
@@ -639,22 +647,47 @@ def _validate_global_plan(global_plan: list[SavePlan], metadata: Metadata) -> bo
                     """,
                     key,
                     value.size,
-                    chunk0,
+                    chunk,
                 )
                 all_good = False
-            chunks_volume += reduce(operator.mul, chunk0.sizes, 1)
+            chunks_volume += math.prod(chunk.sizes)
 
-            # Check for overlap
-            for chunk1 in value.chunks[chunk_idx + 1 :]:
-                if _check_box_overlap(chunk0, chunk1):
-                    logger.warning(
-                        "key:%s has overlapping chunks: %s %s", key, chunk0, chunk1
-                    )
-                    all_good = False
+        if len(chunks) > 1:
+            dims = len(value.size)
+            sweep_dim = max(range(dims), default=0, key=lambda d: value.size[d])
+            sorted_indices = sorted(
+                range(len(chunks)),
+                key=lambda idx: (
+                    chunks[idx].offsets[sweep_dim],
+                    *(chunks[idx].offsets[d] for d in range(dims)),
+                ),
+            )
+            active: list[tuple[int, int]] = []
+            for idx in sorted_indices:
+                current = chunks[idx]
+                start = current.offsets[sweep_dim]
+                end = start + current.sizes[sweep_dim]
+
+                cutoff = bisect_right(active, (start, sys.maxsize))
+                if cutoff:
+                    del active[:cutoff]
+
+                for _, other_idx in active:
+                    other = chunks[other_idx]
+                    if _check_box_overlap(current, other):
+                        logger.warning(
+                            "key:%s has overlapping chunks: %s %s",
+                            key,
+                            current,
+                            other,
+                        )
+                        all_good = False
+
+                insort(active, (end, idx))
 
         # Check whether combined chunk cover the whole tensor
-        tensor_volume = reduce(operator.mul, value.size, 1)
-        if chunks_volume != tensor_volume:
+        tensor_volume = math.prod(value.size)
+        if len(global_plan) > 1 and chunks_volume != tensor_volume:
             logger.warning(
                 """
                     key:%s invalid fill tensor-volume:

@@ -100,7 +100,7 @@ if(IOS_DEPLOYMENT_TARGET)
   set(XCODE_IOS_PLATFORM_VERSION_FLAGS "-m${XCODE_IOS_PLATFORM}-version-min=${IOS_DEPLOYMENT_TARGET}")
 endif()
 
-# Hidden visibilty is required for cxx on iOS
+# Hidden visibility is required for cxx on iOS
 set(CMAKE_C_FLAGS_INIT "${XCODE_IOS_PLATFORM_VERSION_FLAGS}")
 set(CMAKE_CXX_FLAGS_INIT "${XCODE_IOS_PLATFORM_VERSION_FLAGS} -fvisibility-inlines-hidden")
 

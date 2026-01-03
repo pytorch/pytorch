@@ -98,7 +98,7 @@ void InplaceMKLDNNSubgraph(const std::shared_ptr<Graph>& graph) {
   // This function first calculates aliasing sets,
   // then calculates the last node each aliasing set is alive for.
   // Then we go through each node, if it's a node which has an equivalent
-  // inplace node and the aliasing set for its input is dead afer this node, we
+  // inplace node and the aliasing set for its input is dead after this node, we
   // inplace it. Then we merge the aliasing sets for the input and output of the
   // node and extend the liveness of the set. To inplace a node you need to
   // prove device and dtype of the input and output are the same, which we've
@@ -272,8 +272,7 @@ Operation createUnaryOp(
     TORCH_INTERNAL_ASSERT(
         a_it.get_desc().get_size() % elementSize(a.scalar_type()) == 0);
 
-    auto out_aten = at::from_blob(
-        out_raw_data, {static_cast<int64_t>(nelem)}, a_options_with_strided);
+    auto out_aten = at::from_blob(out_raw_data, nelem, a_options_with_strided);
     aten_op(out_aten, in_aten);
     push(stack, out);
   };
@@ -812,7 +811,7 @@ void ComputeSubgraphInMKLDNN(Node* subgraph_node) {
 
     if (body_node->kind() == aten::conv2d ||
         body_node->kind() == aten::conv3d) {
-      // this node doesnt handle string padding yet...
+      // this node doesn't handle string padding yet...
       if (!body_node->namedInput("padding")->type()->cast<StringType>()) {
         body_node->replaceWithNewSymbol(Symbol::prim("mkldnn_convolution"));
         body_node->destroy();

@@ -6,7 +6,7 @@ import torch
 from torch.fx import symbolic_trace
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.passes.dialect.common.cse_pass import CSEPass, get_CSE_banned_ops
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import raise_on_run_directly, TestCase
 
 
 banned_ops = get_CSE_banned_ops()
@@ -46,9 +46,9 @@ def check(self, f, t, delta, check_val=True, graph_input=False, P=None):
     old_num_nodes = len(fx_g.graph.nodes)
     new_num_nodes = len(new_graph.nodes)
 
-    assert (
-        new_num_nodes < old_num_nodes
-    ) == modified, "modified should be True if the number of nodes decrease"
+    assert (new_num_nodes < old_num_nodes) == modified, (
+        "modified should be True if the number of nodes decrease"
+    )
 
     if delta == -1:
         self.assertTrue(
@@ -259,4 +259,4 @@ class TestCSEPass(TestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    raise_on_run_directly("test/test_fx.py")

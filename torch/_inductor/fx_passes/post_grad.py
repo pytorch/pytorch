@@ -5,7 +5,8 @@ import itertools
 import logging
 import operator
 from collections import Counter, defaultdict
-from typing import Any, Callable, Optional, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -15,13 +16,14 @@ from torch import fx
 from torch._decomp import register_decomposition
 from torch._dynamo.utils import counters
 from torch._inductor import comms
-from torch._inductor.virtualized import ops
+from torch._inductor.virtualized import ops  # noqa: F401
 from torch._logging import trace_structured
 from torch._prims_common import is_boolean_dtype, is_expandable_to, is_integer_dtype
 from torch.fx.experimental.symbolic_shapes import statically_known_true, sym_eq
 from torch.utils._ordered_set import OrderedSet
 
-from .. import config, ir, pattern_matcher
+from .. import config, ir, pattern_matcher  # noqa: F401
+from ..codegen.common import custom_backend_passes
 from ..comms import remove_fsdp2_unsharded_param_graph_input_usage
 from ..fx_utils import FakeTensorUpdater, get_fake_args_kwargs, get_node_storage
 from ..lowering import lowerings as L
@@ -41,12 +43,19 @@ from ..pattern_matcher import (
     Match,
     MultiOutputPattern,
     MULTIPLE,
-    PatternMatcherPass,
+    PatternMatcherPass as PatternMatcherPassBase,
     register_graph_pattern,
     register_replacement,
     stable_topological_sort,
 )
-from ..utils import decode_device, get_gpu_type, is_gpu, is_pointwise_use
+from ..utils import (
+    decode_device,
+    get_all_devices,
+    get_gpu_type,
+    is_gpu,
+    is_pointwise_use,
+    OPTIMUS_EXCLUDE_POST_GRAD,
+)
 from ..virtualized import V
 from .b2b_gemm import B2B_GEMM_PASS
 from .ddp_fusion import fuse_ddp_communication
@@ -60,6 +69,10 @@ from .split_cat import POST_GRAD_PATTERNS
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
 
+PatternMatcherPass = functools.partial(
+    PatternMatcherPassBase, subsystem="post_grad_passes"
+)
+
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -70,6 +83,30 @@ pass_patterns = [
     PatternMatcherPass(),
     PatternMatcherPass(),
 ]
+
+
+def _remove_profiler_ops(graph: torch.fx.Graph) -> None:
+    """
+    Remove profiler ops (record_function) from the graph.
+    These ops are side-effectful but don't affect computation,
+    and we don't want them to block fusion.
+    """
+    profiler_ops = OrderedSet(
+        [
+            torch.ops.profiler._record_function_enter.default,
+            torch.ops.profiler._record_function_enter_new.default,
+            torch.ops.profiler._record_function_exit._RecordFunction,
+        ]
+    )
+
+    nodes_to_remove = []
+
+    for node in graph.nodes:
+        if node.op == "call_function" and node.target in profiler_ops:
+            nodes_to_remove.append(node)
+
+    for node in reversed(nodes_to_remove):
+        graph.erase_node(node)
 
 
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
@@ -103,28 +140,29 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             post_grad_custom_pre_pass
         )
 
-    if (
-        config.cpp.enable_grouped_gemm_template
-        and config.max_autotune
-        and "CPP" in config.max_autotune_gemm_backends
-        and torch._C._has_mkldnn
-    ):
-        from .mkldnn_fusion import grouped_gemm_pass
+    if torch._C._has_mkldnn:
+        if (
+            config.cpp.enable_grouped_gemm_template
+            and config.max_autotune
+            and "CPP" in config.max_autotune_gemm_backends
+        ):
+            from .mkldnn_fusion import grouped_gemm_pass
 
-        grouped_gemm_pass(gm.graph)
+            grouped_gemm_pass(gm.graph)
+
+        if config.cpp.enable_concat_linear:
+            from .quantization import concat_linear_woq_int4
+
+            # Concat linear optimization for WOQ int4
+            concat_linear_woq_int4(gm)
+
+    # Remove profiler ops (record_function) to prevent them blocking fusion
+    GraphTransformObserver(gm, "remove_profiler_ops").apply_graph_pass(
+        _remove_profiler_ops
+    )
 
     if config.pattern_matcher:
         lazy_init()
-        trace_structured(
-            "artifact",
-            metadata_fn=lambda: {
-                "name": "before_recompile_post_grad",
-                "encoding": "string",
-            },
-            payload_fn=lambda: gm.print_readable(
-                print_output=False, include_stride=True, include_device=True
-            ),
-        )
         GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
             functools.partial(group_batch_fusion_passes, pre_grad=False)
         )
@@ -137,8 +175,8 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
                 patterns.apply
             )
         for pass_name in config.post_grad_fusion_options:
-            # skip all patterns for group batch fusions
-            if pass_name in POST_GRAD_FUSIONS:
+            # skip all patterns for group batch fusions or quantization patterns
+            if pass_name in POST_GRAD_FUSIONS or pass_name in OPTIMUS_EXCLUDE_POST_GRAD:
                 continue
             pattern_matcher_pass = POST_GRAD_PATTERNS[pass_name]
             inductor_before_change = save_inductor_dict(
@@ -186,10 +224,128 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
 
     fake_tensor_updater.incremental_update()
 
-    # Keep these last, since they introduces mutation. Look at
+    for device, custom_backend_pass in custom_backend_passes.items():
+        if custom_backend_pass is not None:
+            gm_devices = [d.type for d in get_all_devices(gm)]
+            if device in gm_devices:
+                pass_name = "custom_backend_passes_" + device
+                GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
+
+    collectives_bucketing: bool = False
+
+    if config.bucket_reduce_scatters_fx != "none":
+        from torch._inductor.fx_passes.bucketing import bucket_reduce_scatter
+        from torch._inductor.fx_passes.fsdp import bucket_fsdp_reduce_scatter
+
+        p = (
+            bucket_fsdp_reduce_scatter
+            if "fsdp" in config.bucket_reduce_scatters_fx
+            else bucket_reduce_scatter
+        )
+        GraphTransformObserver(gm, "bucket_reduce_scatters").apply_graph_pass(
+            lambda graph: p(
+                graph.owning_module,
+                config.bucket_reduce_scatters_fx_bucket_size_determinator,
+                config.bucket_reduce_scatters_fx,  # type: ignore[arg-type]
+            )
+        )
+        collectives_bucketing = True
+
+    if config.bucket_all_reduces_fx != "none":
+        from torch._inductor.fx_passes.bucketing import bucket_all_reduce
+
+        GraphTransformObserver(gm, "bucket_all_reduce").apply_graph_pass(
+            lambda graph: bucket_all_reduce(
+                graph.owning_module,
+                config.bucket_all_reduces_fx_bucket_size_determinator,
+                config.bucket_all_reduces_fx,  # type: ignore[arg-type]
+            )
+        )
+        collectives_bucketing = True
+
+    # Fx all_gather bucketing introduces mutation op
+    # Keeping it in the end to keep invariant of functional graph for previous passes.
+    if config.bucket_all_gathers_fx != "none":
+        from torch._inductor.fx_passes.bucketing import bucket_all_gather
+        from torch._inductor.fx_passes.fsdp import bucket_fsdp_all_gather
+
+        p = (
+            bucket_fsdp_all_gather  # type: ignore[assignment]
+            if "fsdp" in config.bucket_all_gathers_fx
+            else bucket_all_gather
+        )
+        GraphTransformObserver(gm, "bucket_all_gathers").apply_graph_pass(
+            lambda graph: p(
+                graph.owning_module,
+                config.bucket_all_gathers_fx_bucket_size_determinator,
+                config.bucket_all_gathers_fx,  # type: ignore[arg-type]
+            )
+        )
+        collectives_bucketing = True
+
+    if collectives_bucketing:
+        # Fx collectives bucketing passes require topological sort for the cases:
+        # when bucketed collectives have users before the last collective in the bucket
+        # AND when inputs of bucketed collective have ancestors after the first collective in the bucket.
+        #
+        # In this case we can not manually pick the place for bucketed collective insertion.
+        # But we are guaranteed by the bucketing (independent collectives in the bucket),
+        # that it is possible to reorder nodes to satisfy all ordering requirements.
+        #
+        # --- before bucketing ---
+        # in0 = ...
+        # wait_ag0 = ag(in0)
+        # user0(wait_ag0)
+        # ...
+        # pre_in1 = ...
+        # in1 = transform(pre_in1)
+        # wait_ag1 = ag(in1)
+        # user1(wait_ag1)
+        #
+        # --- after bucketing ---
+        #
+        # in0 = ...
+        # user(wait_ag0) <--- wait_ag0 is defined only after bucketed collective.
+        #
+        # pre_in1 = ...
+        # in1 = transform(pre_in1)
+        # ag_bucket(in0+in1)
+        # wait_bucket
+        # wait_ag0 = wait_bucket[0]
+        # wait_ag1 = wait_bucket[1]
+        # user1(wait_ag1)
+        stable_topological_sort(gm.graph)
+
+    # Apply overlap scheduling if enabled
+    if config.aten_distributed_optimizations.enable_overlap_scheduling:
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing_from_inductor_configs,
+        )
+
+        overlap_deps = config.aten_distributed_optimizations.insert_overlap_deps
+        fusion_regions = config.aten_distributed_optimizations.enable_fusion_regions
+
+        # by default, insert overlap deps and enable fusion regions within inductor
+        with config.patch(
+            {
+                "aten_distributed_optimizations.insert_overlap_deps": (
+                    True if overlap_deps is None else overlap_deps
+                ),
+                "aten_distributed_optimizations.enable_fusion_regions": (
+                    True if fusion_regions is None else fusion_regions
+                ),
+            }
+        ):
+            GraphTransformObserver(gm, "overlap_scheduling").apply_graph_pass(
+                lambda graph: schedule_overlap_bucketing_from_inductor_configs(
+                    graph.owning_module,
+                )
+            )
+
+    # Keep these last, since they introduce mutation. Look at
     # ./fx_passes/README.md for a discussion of mutation invariants.
     GraphTransformObserver(gm, "reinplace_inplaceable_ops").apply_graph_pass(
-        reinplace_inplaceable_ops
+        functools.partial(reinplace_inplaceable_ops, fake_tensor_updater),
     )
     GraphTransformObserver(
         gm, "decompose_triton_kernel_wrapper_functional"
@@ -201,21 +357,14 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         GraphTransformObserver(gm, "reinplace_fsdp_all_gather").apply_graph_pass(
             comms.reinplace_fsdp_all_gather
         )
-    GraphTransformObserver(gm, "lower_scan_to_while_loop").apply_gm_pass(
-        lower_scan_to_while_loop
+    GraphTransformObserver(gm, "decompose_scan_to_while_loop").apply_gm_pass(
+        decompose_scan_to_while_loop
+    )
+    GraphTransformObserver(gm, "decompose_map_to_while_loop").apply_gm_pass(
+        decompose_map_to_while_loop
     )
 
     gm.recompile()
-    trace_structured(
-        "artifact",
-        metadata_fn=lambda: {
-            "name": "after_recompile_post_grad",
-            "encoding": "string",
-        },
-        payload_fn=lambda: gm.print_readable(
-            print_output=False, include_stride=True, include_device=True
-        ),
-    )
     gm.graph.lint()
 
 
@@ -244,81 +393,216 @@ def prepare_softmax_extra_check(match):
     """
     We only have triton online softmax kernels currently.
     """
+    device_type = match.kwargs["x"].meta["val"].device.type
     return (
         config.online_softmax
-        and match.kwargs["x"].meta["val"].device.type == "cuda"
-        and config.cuda_backend == "triton"
+        and device_type in ["cuda", "xpu"]
+        and getattr(config, f"{device_type}_backend") == "triton"
     )
 
 
-"""
-NOTE [lower scan to while_loop]
-This pass lowers `scan` to  `while_loop` by replacing the scan fx_node with a while_loop hop.
+def decompose_map_to_while_loop(gm: torch.fx.GraphModule):
+    """This is similar to decompose_scan_to_while_loop."""
+    graph_pass = PatternMatcherPass()
 
-Suppose we have a function f:
+    @register_graph_pattern(
+        CallFunctionVarArgs(torch.ops.higher_order.map_impl),
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=graph_pass,
+    )
+    def _(match: Match, *args, **kwargs):
+        assert len(kwargs) == 0, (
+            "kwargs of map are not merged into args before entering decompose_map_to_while_loop_pass"
+        )
+        subgraph, fx_xs, fx_additional_inputs = args
+        sub_gm: torch.fx.GraphModule = getattr(gm, subgraph.target)
+        cur_node = match.nodes[0]
+        mapped_outputs = cur_node.meta["val"]
 
-    def f():
-        init = torch.zeros([])
-        xs = torch.arange(4)
-        ys = []
-        for i in range(xs.size(0)):
-            init = xs[i] + init
-            ys.append(init)
+        def lower_to_while_loop(*args, **kwargs):
+            assert len(kwargs) == 0
+            xs, additional_inputs = pytree.tree_unflatten(args, tree_spec)
+            assert isinstance(xs, (tuple, list)) and isinstance(
+                additional_inputs, (tuple, list)
+            ), (xs, additional_inputs)
+            map_length = xs[0].size(0)
+            loop_idx = torch.zeros([], dtype=torch.int64, device=torch.device("cpu"))
 
-        # Return the final carry and stack the intermediates
-        return init, torch.stack(ys)
+            # Similar to NOTE [Pre-allocate scan's output buffer]
+            bound_symbols = {
+                arg.node.expr: arg
+                for arg in pytree.tree_leaves((args, map_length))
+                if isinstance(arg, torch.SymInt)
+            }
+            out_buffers = [
+                torch.empty_strided(
+                    resolve_shape_to_proxy(out.size(), bound_symbols),
+                    resolve_shape_to_proxy(out.stride(), bound_symbols),
+                    device=out.device,
+                    dtype=out.dtype,
+                    layout=out.layout,
+                    requires_grad=out.requires_grad,
+                )
+                for out in mapped_outputs
+            ]
 
-We could rewrite it with a scan with the benefits of reducing compilation time/binary size, reducing
-memory usage, supporting loops over unbacked shapes and cudagraph etc.
+            while_loop_operands = (loop_idx, out_buffers, xs)
+            while_loop_flat_operands, operands_spec = pytree.tree_flatten(
+                while_loop_operands
+            )
+            while_loop_additional_inputs = additional_inputs
+            _, operands_and_additional_inputs_spec = pytree.tree_flatten(
+                (*while_loop_operands, additional_inputs)
+            )
 
-    def g():
-        def step_fn(init: torch.Tensor, x: torch.Tensor):
-            next_init = x + init
-            return next_init, next_init
+            def cond_fn(*flat_args):
+                loop_idx, _, _, _ = pytree.tree_unflatten(
+                    flat_args,
+                    operands_and_additional_inputs_spec,
+                )
+                return loop_idx < map_length
 
-        init = torch.zeros([])
-        xs = torch.arange(4)
-        final_carry, ys = torch._higher_order.scan(step_fn, init, xs)
-        return final_carry, ys
+            def body_fn(*flat_args):
+                loop_idx, out_bufs, xs, additional_inputs = pytree.tree_unflatten(
+                    flat_args,
+                    operands_and_additional_inputs_spec,
+                )
 
-This pass will rewrite scan into:
+                idx_int = loop_idx.item()
+                torch.ops.aten._assert_scalar.default(idx_int >= 0, "")
+                torch.ops.aten._assert_scalar.default(idx_int < map_length, "")
+                sub_xs = [torch.ops.aten.select.int(x, 0, idx_int) for x in xs]
+                outs = sub_gm(*sub_xs, *additional_inputs)
 
-    def k():
-        init = torch.zeros([])
-        xs = torch.arange(4)
+                for out, buffer in zip(outs, out_bufs):
+                    buffer_slice = torch.ops.aten.select.int(buffer, 0, idx_int)
+                    buffer_slice.copy_(out)
+                return loop_idx + 1, *out_bufs, *xs
 
-        # we create a loop_idx and loop through xs.shape[0]
-        loop_idx = torch.zeros([])
-        ys = torch.empty_strided(_shape_stride_of_ys)
-        def cond_fn(loop_idx, ys, init, xs):
-            return loop_idx < xs.shape[0]
+            _, final_out, _ = pytree.tree_unflatten(
+                torch.ops.higher_order.while_loop(
+                    cond_fn,
+                    body_fn,
+                    tuple(while_loop_flat_operands),
+                    tuple(while_loop_additional_inputs),
+                ),
+                operands_spec,
+            )
+            return (final_out,)
 
-        # we pre-allocate the output buffer ys and inplace
-        # copy the y of each intermediate into a slice.
-        # NOTE [Pre-allocate scan's output buffer].
-        def body_fn(loop_idx, ys, init, xs):
-            int_idx = loop_idx.item()
-            next_init, y = step_fn(init, xs[int_idx])
-            ys[int_idx].copy_(y)
-            return loop_idx + 1, ys, next_init, xs
+        lower_to_while_loop_args, tree_spec = pytree.tree_flatten(
+            (fx_xs, fx_additional_inputs)
+        )
+        match.replace_by_example(
+            lower_to_while_loop, lower_to_while_loop_args, run_functional_passes=False
+        )
 
-        final_carry, _, _, ys = torch._higher_order.while_loop(cond_fn, body_fn, (loop_idx, ys, init, xs))
-        return final_carry, ys
-"""
+    graph_pass.apply(gm)
+
+    for _node in gm.graph.find_nodes(
+        op="call_function", target=torch.ops.higher_order.map_impl
+    ):
+        raise AssertionError("map is not lowered to while_loop")
 
 
-def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
+def resolve_shape_to_proxy(
+    shape: list[int | torch.SymInt], bound_symbols: dict[Any, Any]
+):
+    """
+    Given a list of symints/ints, this function returns a calculated expression of bound_symbols' values.
+    When we trace this function, we'll get a graph with call_function nodes that describes how the shape expr is
+    computed from bound_symbols' values.
+
+    Suppose shape = (s1*s2, s1+s2) and bound_symbols = {s1: arg0, s2: arg1}, the result will be
+    (arg0 * arg1, arg0 + arg1).
+    """
+    from torch.utils._sympy.interp import sympy_interp
+    from torch.utils._sympy.reference import PythonReferenceAnalysis
+
+    ret = []
+    for s in shape:
+        if isinstance(s, torch.SymInt):
+            ret.append(
+                sympy_interp(
+                    PythonReferenceAnalysis,
+                    bound_symbols,
+                    s.node.expr,
+                ),
+            )
+        else:
+            assert isinstance(s, int)
+            ret.append(s)
+    return ret
+
+
+def decompose_scan_to_while_loop(gm: torch.fx.GraphModule):
+    """
+    NOTE [decompose scan to while_loop]
+    This pass decomposes `scan` to  `while_loop` by replacing the scan fx_node with a while_loop hop.
+
+    Suppose we have a function f:
+
+        def f():
+            init = torch.zeros([])
+            xs = torch.arange(4)
+            ys = []
+            for i in range(xs.size(0)):
+                init = xs[i] + init
+                ys.append(init)
+
+            # Return the final carry and stack the intermediates
+            return init, torch.stack(ys)
+
+    We could rewrite it with a scan with the benefits of reducing compilation time/binary size, reducing
+    memory usage, supporting loops over unbacked shapes and cudagraph etc.
+
+        def g():
+            def step_fn(init: torch.Tensor, x: torch.Tensor):
+                next_init = x + init
+                return next_init, next_init
+
+            init = torch.zeros([])
+            xs = torch.arange(4)
+            final_carry, ys = torch._higher_order.scan(step_fn, init, xs)
+            return final_carry, ys
+
+    This pass will rewrite scan into:
+
+        def k():
+            init = torch.zeros([])
+            xs = torch.arange(4)
+
+            # we create a loop_idx and loop through xs.shape[0]
+            loop_idx = torch.zeros([])
+            ys = torch.empty_strided(_shape_stride_of_ys)
+            def cond_fn(loop_idx, ys, init, xs):
+                return loop_idx < xs.shape[0]
+
+            # we pre-allocate the output buffer ys and inplace
+            # copy the y of each intermediate into a slice.
+            # NOTE [Pre-allocate scan's output buffer].
+            def body_fn(loop_idx, ys, init, xs):
+                int_idx = loop_idx.item()
+                next_init, y = step_fn(init, xs[int_idx])
+                ys[int_idx].copy_(y)
+                return loop_idx + 1, ys, next_init, xs
+
+            final_carry, _, _, ys = torch._higher_order.while_loop(cond_fn, body_fn, (loop_idx, ys, init, xs))
+            return final_carry, ys
+    """
+
     graph_pass = PatternMatcherPass()
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.scan),
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
         from torch._higher_order_ops.scan import _extract_carry_and_out
 
         assert len(kwargs) == 0, (
-            "kwargs of scan are not merged into args before entering lower_scan_to_while_loop_pass"
+            "kwargs of scan are not merged into args before entering decompose_scan_to_while_loop_pass"
         )
 
         combine_subgraph, fx_init, fx_xs, fx_additional_inputs = args
@@ -334,35 +618,6 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
             """
             assert len(kwargs) == 0
 
-            def resolve_shape_to_proxy(
-                shape: list[Union[int, torch.SymInt]], bound_symbols: dict[Any, Any]
-            ):
-                """
-                Given a list of symints/ints, this function returns a calculated expression of bound_symbols' values.
-                When we trace this function, we'll get a graph with call_function nodes that describes how the shape expr is
-                computed from bound_symbols' values.
-
-                Suppose shape = (s1*s2, s1+s2) and bound_symbols = {s1: arg0, s2: arg1}, the result will be
-                (arg0 * arg1, arg0 + arg1).
-                """
-                from torch.utils._sympy.interp import sympy_interp
-                from torch.utils._sympy.reference import PythonReferenceAnalysis
-
-                ret = []
-                for s in shape:
-                    if isinstance(s, torch.SymInt):
-                        ret.append(
-                            sympy_interp(
-                                PythonReferenceAnalysis,
-                                bound_symbols,
-                                s.node.expr,
-                            ),
-                        )
-                    else:
-                        assert isinstance(s, int)
-                        ret.append(s)
-                return ret
-
             # Step 1: construct necessary inputs to while_loop based on scan's input.
             (
                 init,
@@ -375,7 +630,7 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
             # NOTE [Pre-allocate scan's output buffer]
             # In order to pre-allocate the output buffer for ys, we rely on the meta of scan's fx_node.
             # However, the meta consists of concrete symints, we need to bind those symints with
-            # proxies in order to trace the torch.empyt_strided call correctly.
+            # proxies in order to trace the torch.empty_strided call correctly.
             #
             # Also note that basic free symbols of tensor's shapes are guaranteed to be lifted as subgraph inputs
             # in dynamo so we can always re-construct the sym expression from placeholders.
@@ -456,7 +711,7 @@ def lower_scan_to_while_loop(gm: torch.fx.GraphModule):
 
     graph_pass.apply(gm)
 
-    for node in gm.graph.find_nodes(
+    for _node in gm.graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.scan
     ):
         raise AssertionError("scan is not lowered to while_loop")
@@ -474,11 +729,15 @@ def lazy_init():
     # pass since otherwise there will be perf/peak-memory regression:
     # https://github.com/pytorch/pytorch/issues/148141
     register_replacement(
+        # pyrefly: ignore [bad-argument-type]
         prepare_softmax_pattern,
+        # pyrefly: ignore [bad-argument-type]
         prepare_softmax_replacement,
         [torch.empty(4, 8)],
         scalar_workaround=dict(dim=-1),
+        # pyrefly: ignore [bad-argument-type]
         trace_fn=fwd_only,
+        # pyrefly: ignore [bad-argument-type]
         pass_dicts=pass_patterns[1],
         extra_check=prepare_softmax_extra_check,
     )
@@ -516,12 +775,12 @@ def reorder_for_locality(graph: torch.fx.Graph):
 
     # only reorder nodes before the first copy_ in the graph.
     # copy_ will appear at the end of functionalized graphs when there is mutation on inputs,
-    # and this reordering doesnt work well with mutation
+    # and this reordering doesn't work well with mutation
     first_copy = next(
         iter(graph.find_nodes(op="call_function", target=torch.ops.aten.copy_.default)),
         None,
     )
-    past_mutating_epilogue = True if first_copy is None else False
+    past_mutating_epilogue = first_copy is None
 
     for node in reversed(graph.nodes):
         seen_nodes.add(node)
@@ -539,7 +798,10 @@ def register_lowering_pattern(
     Register an aten to inductor IR replacement pattern
     """
     return pattern_matcher.register_lowering_pattern(
-        pattern, extra_check, pass_dict=pass_patterns[pass_number]
+        pattern,
+        extra_check,
+        # pyrefly: ignore [bad-argument-type]
+        pass_dict=pass_patterns[pass_number],
     )
 
 
@@ -552,16 +814,25 @@ def register_lowering_pattern(
 
 
 def is_valid_mm_plus_mm(match: Match):
-    if not torch._inductor.utils.use_max_autotune():
+    if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    *_b1, m1, k1 = match.kwargs["mat1"].meta.get("tensor_meta").shape
-    *_b2, k2, n1 = match.kwargs["mat2"].meta.get("tensor_meta").shape
+    # Check if all required values exist
+    mat1_val = match.kwargs["mat1"].meta.get("val")
+    mat2_val = match.kwargs["mat2"].meta.get("val")
+    mat3_val = match.kwargs["mat3"].meta.get("val")
+    mat4_val = match.kwargs["mat4"].meta.get("val")
+
+    if mat1_val is None or mat2_val is None or mat3_val is None or mat4_val is None:
+        return False
+
+    *_b1, m1, k1 = mat1_val.shape
+    *_b2, k2, n1 = mat2_val.shape
     if k1 != k2:
         return False
 
-    *_b1, m2, k3 = match.kwargs["mat3"].meta.get("tensor_meta").shape
-    *_b2, k4, n2 = match.kwargs["mat4"].meta.get("tensor_meta").shape
+    *_b1, m2, k3 = mat3_val.shape
+    *_b2, k4, n2 = mat4_val.shape
     if k3 != k4:
         return False
 
@@ -569,88 +840,6 @@ def is_valid_mm_plus_mm(match: Match):
         return False
 
     return True
-
-
-def scatter_upon_const_tensor_extra_check(m):
-    if not config.optimize_scatter_upon_const_tensor:
-        return False
-    full_shape = m.kwargs["shape"]
-    selector = m.kwargs["selector"]
-    dim = m.kwargs["dim"]
-    if dim < 0:
-        dim += len(full_shape)
-
-    selector_ft = selector.meta["val"]
-    assert selector_ft.dim() == len(full_shape)
-
-    for idx, select_sz, full_sz in zip(
-        itertools.count(), selector_ft.shape, full_shape
-    ):
-        if idx == dim:
-            continue
-
-        # TODO: the pattern can be updated to support the case that index tensor
-        # is shorter. But that will need a more complex condition expression
-        # especially for multi-dimensional tensors.
-        # Skip it for now.
-        if isinstance(full_sz, fx.Node):
-            full_sz = full_sz.meta["val"]
-        if select_sz < full_sz:
-            return False
-
-    # Actually we can support small size larger than 1. It would be a bit
-    # tedius. E.g., we load all the index values (not many) and compare
-    # them with the position in tensor to decide what value to return.
-    return selector_ft.size(dim) == 1
-
-
-@register_lowering_pattern(
-    CallFunction(
-        aten.scatter.value,
-        CallFunction(
-            aten.full,
-            KeywordArg("shape"),
-            KeywordArg("background_val"),
-            dtype=KeywordArg("dtype"),
-        ),
-        KeywordArg("dim"),
-        KeywordArg("selector"),
-        KeywordArg("val"),  # scalar value
-    ),
-    extra_check=scatter_upon_const_tensor_extra_check,
-)
-def scatter_upon_const_tensor(
-    match: Match, shape, background_val, dtype, dim, selector, val
-):
-    """
-    Match the pattern of full+scatter into a pointwise.
-
-    TODO: Right now the scatter value must be a scalar. But we could support it
-    when it is a tensor as well.
-    """
-    from torch._inductor import metrics
-
-    metrics.num_matches_for_scatter_upon_const_tensor += 1
-
-    selector_loader = selector.make_loader()
-
-    def inner_fn(idx):
-        selector_idx = list(idx)
-        selector_idx[dim] = 0
-
-        selector = selector_loader(selector_idx)
-        return ops.where(
-            selector == ops.index_expr(idx[dim], torch.int64),
-            ops.constant(val, dtype),
-            ops.constant(background_val, dtype),
-        )
-
-    return ir.Pointwise.create(
-        device=selector.get_device(),
-        dtype=dtype,
-        inner_fn=inner_fn,
-        ranges=shape,
-    )
 
 
 @register_lowering_pattern(
@@ -681,6 +870,7 @@ def mm_plus_mm(match: Match, mat1, mat2, mat3, mat4):
         KeywordArg("dim"),
         _users=MULTIPLE,
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[1],
 )
 def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype, dim):
@@ -700,6 +890,7 @@ def pointless_cumsum_replacement(match: Match, shape, fill_value, device, dtype,
 
     # only replace the output node, not all nodes
     match.nodes = [match.output_node()]
+    # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(repl, list(shape))
 
 
@@ -921,8 +1112,8 @@ def remove_noop_ops(graph: torch.fx.Graph):
     Removes both operations that are essentially aten.clone and operations that are essentially aten.alias from the graph.
     """
     inputs = OrderedSet[torch.fx.Node]()
-    input_storages = OrderedSet[Union[int, None]]()
-    output_storages = OrderedSet[Union[int, None]]()
+    input_storages = OrderedSet[int | None]()
+    output_storages = OrderedSet[int | None]()
 
     for node in graph.find_nodes(op="placeholder"):
         inputs.add(node)
@@ -1017,6 +1208,7 @@ def decompose_triton_kernel_wrapper_functional(graph):
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.triton_kernel_wrapper_functional),
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -1033,11 +1225,12 @@ def decompose_triton_kernel_wrapper_functional(graph):
             args, kwargs = pytree.tree_unflatten(flat_args, spec)
             return (triton_kernel_wrapper_functional_dense(*args, **kwargs),)
 
+        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
 
-    for node in graph.find_nodes(
+    for _ in graph.find_nodes(
         op="call_function",
         target=torch.ops.higher_order.triton_kernel_wrapper_functional,
     ):
@@ -1056,6 +1249,7 @@ def decompose_auto_functionalized(graph):
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized),
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -1076,10 +1270,12 @@ def decompose_auto_functionalized(graph):
             mode = args[0]
             return auto_functionalized_dense(mode, only_clone_these_tensors, **kwargs)
 
+        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     @register_graph_pattern(
         CallFunctionVarArgs(torch.ops.higher_order.auto_functionalized_v2),
+        # pyrefly: ignore [bad-argument-type]
         pass_dict=graph_pass,
     )
     def _(match: Match, *args, **kwargs):
@@ -1093,6 +1289,22 @@ def decompose_auto_functionalized(graph):
 
         flat_args, spec = pytree.tree_flatten((args, kwargs))
 
+        def _maybe_resolve_constant_get_attr(node):
+            # Resolve getattr node to its value because they don't always have meta["val"]
+            if (
+                isinstance(node, torch.fx.Node)
+                and node.op == "get_attr"
+                and "val" not in node.meta
+            ):
+                const_attr = getattr(graph.owning_module, node.target)  # type: ignore[arg-type]
+                assert isinstance(
+                    const_attr, (torch.fx.GraphModule, pytree.TreeSpec)
+                ), (type(const_attr), const_attr)
+                return const_attr
+            return node
+
+        flat_args = [_maybe_resolve_constant_get_attr(arg) for arg in flat_args]
+
         # NB: we combine (args, kwargs) into flat args for replacing.
         # This is replace_by_example uses make_fx which does not support
         # tracing a function with kwargs.
@@ -1104,9 +1316,51 @@ def decompose_auto_functionalized(graph):
                 mutable_op, only_clone_these_bases, **kwargs
             )
 
+        # pyrefly: ignore [bad-argument-type]
         match.replace_by_example(decomp, flat_args, run_functional_passes=False)
 
     graph_pass.apply(graph)
+
+    # Remove unused get_attr nodes and their corresponding attributes from the graph module.
+    # When auto_functionalizing a hop, we need to clean up get_attr nodes for _constant_schema
+    # and the auto_functionalized graph module that are no longer referenced.
+    unused_get_attr_nodes = []
+    removable_attrs: OrderedSet[torch.fx.node.Target] = OrderedSet()
+    protected_attrs: OrderedSet[torch.fx.node.Target] = OrderedSet()
+
+    # First pass: identify unused get_attr nodes and track attribute usage
+    for node in graph.nodes:
+        if node.op != "get_attr":
+            continue
+
+        if len(node.users) == 0:
+            # Node is unused, mark for removal
+            unused_get_attr_nodes.append(node)
+
+            # Check if the attribute can be removed from the module
+            if (
+                hasattr(graph.owning_module, node.target)
+                and isinstance(
+                    getattr(graph.owning_module, node.target), torch.fx.GraphModule
+                )
+                and node.target not in protected_attrs
+            ):
+                removable_attrs.add(node.target)
+        else:
+            # Node is used, protect its attribute from removal
+            if node.target in removable_attrs:
+                removable_attrs.remove(node.target)
+            protected_attrs.add(node.target)
+
+    # Second pass: clean up unused nodes and attributes
+    for node in unused_get_attr_nodes:
+        graph.erase_node(node)
+
+    for attr_name in removable_attrs:
+        assert isinstance(attr_name, str)
+        delattr(graph.owning_module, attr_name)
+
+    graph.lint()
 
     for _ in graph.find_nodes(
         op="call_function", target=torch.ops.higher_order.auto_functionalized
@@ -1202,6 +1456,14 @@ def view_to_reshape(gm):
     """
     Replace view ops in the GraphModule to reshape ops.
     """
+    subgraph_names: OrderedSet[str] = OrderedSet(
+        x.target for x in gm.graph.find_nodes(op="get_attr")
+    )
+
+    for child_name, child_mod in gm.named_children():
+        if child_name in subgraph_names and isinstance(child_mod, torch.fx.GraphModule):
+            view_to_reshape(child_mod)
+
     for nd in gm.graph.find_nodes(
         op="call_function", target=torch.ops.aten.view.default
     ):
@@ -1218,15 +1480,29 @@ def should_prefer_unfused_addmm(match):
 
 
 @register_graph_pattern(
-    CallFunction(aten.addmm, KeywordArg("inp"), Arg(), Arg()),
+    CallFunction(
+        aten.addmm,
+        KeywordArg("inp"),
+        Arg(),
+        Arg(),
+        beta=KeywordArg("beta"),
+        alpha=KeywordArg("alpha"),
+    ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[2],
     extra_check=should_prefer_unfused_addmm,
 )
-def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp):
-    def repl(inp, x1, x2):
-        return x1 @ x2 + inp
+def unfuse_bias_add_to_pointwise(match: Match, mat1, mat2, *, inp, alpha, beta):
+    def repl(inp, x1, x2, alpha, beta):
+        mm_result = x1 @ x2
+        if alpha != 1:
+            mm_result = alpha * mm_result
+        if beta != 1:
+            inp = beta * inp
+        return inp + mm_result
 
-    match.replace_by_example(repl, [inp, mat1, mat2])
+    # pyrefly: ignore [bad-argument-type]
+    match.replace_by_example(repl, [inp, mat1, mat2, alpha, beta])
 
 
 def is_valid_addmm_fusion(match):
@@ -1244,6 +1520,12 @@ def is_valid_addmm_fusion(match):
     if not matched:
         return False  # Shape mismatch
 
+    inp_dtype = inp.meta["val"].dtype
+
+    # aten cublas integration assumes equal dtypes
+    if inp_dtype != mat1.meta["val"].dtype or inp_dtype != mat2.meta["val"].dtype:
+        return False
+
     return not should_prefer_unfused_addmm(match)
 
 
@@ -1253,6 +1535,7 @@ def is_valid_addmm_fusion(match):
         CallFunction(aten.mm, Arg(), Arg()),
         KeywordArg("inp"),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[2],
     extra_check=is_valid_addmm_fusion,
 )
@@ -1262,6 +1545,7 @@ def is_valid_addmm_fusion(match):
         KeywordArg("inp"),
         CallFunction(aten.mm, Arg(), Arg()),
     ),
+    # pyrefly: ignore [bad-argument-type]
     pass_dict=pass_patterns[2],
     extra_check=is_valid_addmm_fusion,
 )
@@ -1291,12 +1575,14 @@ def register_partial_reduction_pattern():
         full_reduc = CallFunction([red_op, equiv_red[red_op]], inp)
 
         @register_graph_pattern(
-            MultiOutputPattern([partial_reduc, full_reduc]), pass_dict=pass_patterns[2]
+            MultiOutputPattern([partial_reduc, full_reduc]),
+            # pyrefly: ignore [bad-argument-type]
+            pass_dict=pass_patterns[2],
         )
         def reuse_partial(match, input, reduced_dims, keepdim):
             partial_red, full_red = match.output_nodes()
 
-            # if theyre small, reuse not worth it
+            # if they're small, reuse not worth it
             if not statically_known_true(input.meta["val"].numel() >= 4096):
                 return True
 
@@ -1350,7 +1636,9 @@ def is_index_put_and_requires_h2d_sync_for_gpu_value(node):
 
 
 class ConstructorMoverPass:
-    def __init__(self, target: str, allow_outputs: bool = False) -> None:
+    def __init__(
+        self, target: str, allow_outputs: bool = False, allow_inputs: bool = False
+    ) -> None:
         """
         Move constructors from cpu to the target_device.
 
@@ -1363,9 +1651,11 @@ class ConstructorMoverPass:
 
         - target: target device type
         - allow_outputs: allow outputs to be moved
+        - allow_inputs: allow inputs to be moved
         """
 
         self.target = target
+        self.allow_inputs = allow_inputs
         self.allow_outputs = allow_outputs
 
         assert isinstance(target, str), (
@@ -1387,6 +1677,38 @@ class ConstructorMoverPass:
             torch.ops.aten.slice_scatter.default,
         )
 
+    def is_on_target_device(self, node: fx.Node) -> bool:
+        """
+        Returns whether a node is on the target device.
+        """
+        node_device = self.get_node_device(node)
+        return node_device is not None and node_device.type == self.target
+
+    def is_cpu_scalar_tensor(self, node: fx.Node) -> bool:
+        """
+        Returns whether a node is a cpu scalar tensor.
+        """
+        device = self.get_node_device(node)
+        is_cpu = device is not None and device.type == "cpu"
+        ten = node.meta.get("val")
+        is_scalar = isinstance(ten, torch.Tensor) and len(ten.size()) == 0
+        return is_cpu and is_scalar
+
+    def all_inputs_are_cpu_scalar_or_on_target_device(self, node: fx.Node) -> bool:
+        """
+        Returns whether a node's inputs are either cpu scalar tensors or
+        on the target device.
+        """
+        inputs = (
+            inp
+            for inp in itertools.chain(node.args, node.kwargs.values())
+            if isinstance(inp, fx.Node)
+        )
+        return all(
+            self.is_cpu_scalar_tensor(inp) or self.is_on_target_device(inp)
+            for inp in inputs
+        )
+
     def cannot_be_moved(self, node: fx.Node) -> bool:
         """
         Returns whether a node can be moved to the target device.
@@ -1402,12 +1724,13 @@ class ConstructorMoverPass:
             and node.target.namespace in ("prims", "aten")
         ):
             return True
+
         if is_index_put_and_requires_h2d_sync_for_gpu_value(node):
             return True
 
         return False
 
-    def get_node_device(self, node: fx.Node) -> Optional[torch.device]:
+    def get_node_device(self, node: fx.Node) -> torch.device | None:
         """
         Get the device of a node.
         """
@@ -1430,6 +1753,7 @@ class ConstructorMoverPass:
 
             pytree.tree_map_only(fx.Node, add_cpu_inp, (node.args, node.kwargs))
 
+            # pyrefly: ignore [redundant-condition]
             if cpu_count:
                 cpu_indeg[node] = cpu_count
 
@@ -1438,11 +1762,21 @@ class ConstructorMoverPass:
     def __call__(self, graph: fx.Graph) -> None:
         target_devices = OrderedSet[torch.device]()
         constructors = []
+        cpu_placeholders: OrderedSet[fx.Node] = OrderedSet()
 
         for node in graph.nodes:
             device = self.get_node_device(node)
             if device and device.type == self.target:
                 target_devices.add(device)
+
+            if (
+                self.allow_inputs
+                and node.op == "placeholder"
+                and self.is_cpu_scalar_tensor(node)
+            ):
+                cpu_placeholders.add(node)
+                constructors.append(node)
+                continue
 
             if not (
                 isinstance(node.target, torch._ops.OpOverload)
@@ -1453,7 +1787,7 @@ class ConstructorMoverPass:
             if not torch._subclasses.fake_tensor._is_tensor_constructor(node.target):
                 continue
 
-            if not node.kwargs.get("device") == torch.device("cpu"):
+            if node.kwargs.get("device") != torch.device("cpu"):
                 continue
 
             constructors.append(node)
@@ -1464,9 +1798,63 @@ class ConstructorMoverPass:
 
         movable_constructors = self.find_movable_constructors(graph, constructors)
 
+        target_device = next(iter(target_devices))
+        movable_cpu_placeholders = movable_constructors & cpu_placeholders
+        if movable_cpu_placeholders:
+            node = next(iter(reversed(movable_cpu_placeholders)))
+            last_node = node
+            unsqueezed_nodes = []
+            for elem in movable_cpu_placeholders:
+                with graph.inserting_after(last_node):
+                    unsqueezed_nodes.append(
+                        graph.call_function(torch.ops.aten.unsqueeze.default, (elem, 0))
+                    )
+                    last_node = unsqueezed_nodes[-1]
+            with graph.inserting_after(last_node):
+                cpu_concat = graph.call_function(
+                    torch.ops.aten.cat.default, (unsqueezed_nodes,)
+                )
+                last_node = cpu_concat
+            with graph.inserting_after(last_node):
+                gpu_concat = graph.call_function(
+                    torch.ops.prims.device_put.default,
+                    (cpu_concat, target_device, True),
+                )
+                last_node = gpu_concat
+            with graph.inserting_after(last_node):
+                gpu_split = graph.call_function(
+                    torch.ops.aten.unbind.int, (gpu_concat,)
+                )
+                last_node = gpu_split
+            for idx, node in enumerate(movable_cpu_placeholders):
+                with graph.inserting_after(last_node):
+                    gpu_node = graph.call_function(operator.getitem, (gpu_split, idx))
+                    node.replace_all_uses_with(
+                        gpu_node,
+                        lambda x: x
+                        not in [cpu_concat, gpu_concat, gpu_split, gpu_node]
+                        + unsqueezed_nodes
+                        and x.target != torch.ops.aten.copy_.default,
+                    )
+                    last_node = gpu_node
+
+                # noop elimination if there are other device_put for gpu_node to
+                # target device. Alternatively, we could just move the other device_put
+                # earlier in the graph, but that is not supported in fx graph yet.
+                noop_device_puts = [
+                    user
+                    for user in gpu_node.users
+                    if user.target is torch.ops.prims.device_put.default
+                    and user.args[1] == target_device
+                ]
+                for noop in noop_device_puts:
+                    noop.replace_all_uses_with(gpu_node)
+                    graph.erase_node(noop)
+
+        movable_constructors -= movable_cpu_placeholders
         for node in movable_constructors:
             kwargs = node.kwargs.copy()
-            kwargs["device"] = next(iter(target_devices))
+            kwargs["device"] = target_device
             node.kwargs = kwargs
 
     def find_movable_constructors(
@@ -1518,12 +1906,15 @@ class ConstructorMoverPass:
 
                 # this node was used on a op which takes in multiple devices and output a gpu
                 # tensor. we can convert its cpu input to gpu without making further changes
-                node_device = self.get_node_device(user)
-                if (
-                    self.allow_cpu_device(user)
-                    and node_device
-                    and node_device.type == self.target
+                if self.allow_cpu_device(user) and self.is_on_target_device(user):
+                    del cpu_indeg[user]
+                elif (
+                    self.allow_inputs
+                    and self.all_inputs_are_cpu_scalar_or_on_target_device(user)
                 ):
+                    # this node takes only cpu scalar tensors or gpu tensors as inputs
+                    # and outputs a gpu tensor. we can convert its cpu scalar inputs to gpu
+                    # without making further changes
                     del cpu_indeg[user]
                 else:
                     # otherwise, we should continue look at its downstream uses
@@ -1552,4 +1943,17 @@ def move_constructors_to_gpu(graph: fx.Graph) -> None:
     """
     Moves intermediary tensors which are constructed on the cpu to gpu when safe
     """
-    ConstructorMoverPass(get_gpu_type())(graph)
+
+    # cudagraph does not support cpu tensors. In this pass, we update the graph
+    # by explicitly moving cpu scalar tensors to gpu when profitable, relying on
+    # graph partition to split off this data copy, and cudagraphifying
+    # the remaining gpu ops.
+    allow_inputs_outputs = bool(
+        torch._inductor.config.triton.cudagraphs
+        and torch._inductor.config.graph_partition
+    )
+    ConstructorMoverPass(
+        get_gpu_type(),
+        allow_inputs=allow_inputs_outputs,
+        allow_outputs=allow_inputs_outputs,
+    )(graph)

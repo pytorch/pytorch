@@ -1,5 +1,3 @@
-# mypy: ignore-errors
-
 """
 This module implements distributed training optimizations for TorchDynamo backends.
 
@@ -20,16 +18,22 @@ of compilation.
 
 import logging
 import traceback
+from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING
 from unittest import mock
 
 import torch
 from torch import fx
+from torch._dynamo.backends.registry import CompiledFn, CompilerFn
 from torch._dynamo.output_graph import GraphCompileReason
 from torch._dynamo.utils import deepcopy_to_fake_tensor, detect_fake_mode
 from torch._logging import trace_structured
 from torch.fx.node import Node
+
+
+if TYPE_CHECKING:
+    from torch._functorch._aot_autograd.schemas import ViewAndMutationMeta
 
 
 # Regular log messages should go through 'log'.
@@ -39,7 +43,7 @@ log = logging.getLogger(__name__)
 ddp_graph_log = torch._logging.getArtifactLogger(__name__, "ddp_graphs")
 
 
-def args_str(args):
+def args_str(args: Any) -> str:
     # a debug helper
     if torch.is_tensor(args):
         return f"T[{args.shape}]"
@@ -58,7 +62,7 @@ class Bucket:
     nodes: list[fx.Node] = field(default_factory=list)
 
     # param_ids is just used for unit testing
-    param_ids: list = field(default_factory=list)
+    param_ids: list[int] = field(default_factory=list)
 
     # keep track of any buckets that were extended for logging purposes
     opcount_increased_to_capture_external_output: int = 0
@@ -78,9 +82,9 @@ def bucket_has_external_output(bucket: Bucket) -> bool:
     return False
 
 
-def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int):
+def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int) -> None:
     headers = ("Index", "Size (b)", "Param Names")
-    rows = []
+    rows: list[tuple[Optional[int], Optional[int], str]] = []
     extended_buckets = []
     for idx, bucket in enumerate(reversed(buckets)):
         if len(bucket.params) > 0:
@@ -95,14 +99,14 @@ def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int):
                 )
             )
 
-    if len(rows):
+    if rows:
         log.info(
             "\nDDPOptimizer used bucket cap %s and created %d buckets. Enable debug logs for detailed bucket info.",
             bucket_bytes_cap,
             len(buckets),
         )
 
-        if len(extended_buckets):
+        if extended_buckets:
             log.warning(
                 "Some buckets were extended beyond their requested parameter capacities"
                 " in order to ensure each subgraph has an output node, required for fx graph partitioning."
@@ -119,7 +123,7 @@ def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int):
                 tabulate(rows, headers=headers, tablefmt="simple_grid"),
             )
 
-            if len(extended_buckets):
+            if extended_buckets:
                 log.warning(
                     "DDPOptimizer extended these buckets to ensure per-subgraph output nodes:\n%s",
                     tabulate(
@@ -136,7 +140,7 @@ def pretty_print_buckets(buckets: list[Bucket], bucket_bytes_cap: int):
         log.debug("DDPOptimizer captured no parameters and did not split this graph.")
 
 
-def has_higher_order_op(gm):
+def has_higher_order_op(gm: fx.GraphModule) -> bool:
     # Check if there is a higher order op in the graph
     for node in gm.graph.nodes:
         if node.op == "get_attr":
@@ -146,14 +150,51 @@ def has_higher_order_op(gm):
     return False
 
 
+def propagate_metadata(orig_gm: fx.GraphModule, split_gm: fx.GraphModule) -> None:
+    for name, module in split_gm.named_modules():
+        if "." not in name and len(name):
+            # TODO: add split id to CompileId: https://github.com/pytorch/tlparse/pull/83/files#r1880649384
+            module.meta = orig_gm.meta
+            module._param_name_to_source = orig_gm._param_name_to_source
+
+
+def propagate_dynamo_source(orig_gm: fx.GraphModule, split_gm: fx.GraphModule) -> None:
+    name_to_dynamo_source = {}
+    for node in orig_gm.graph.find_nodes(op="placeholder"):
+        name_to_dynamo_source[node.name] = node._dynamo_source
+
+    for name, module in split_gm.named_modules():
+        if "." not in name and len(name):
+            for node in module.graph.find_nodes(op="placeholder"):
+                # non-placeholder in original_gm may become placeholder in submodules
+                node._dynamo_source = name_to_dynamo_source.get(node.name)
+
+
+class DDPOptimizerContext:
+    def __init__(self) -> None:
+        self.curr_bucket: int = -1
+        self.metadata_per_bucket: list[ViewAndMutationMeta] = []
+
+
 # compile each of the partitioned submodules using the user-provided compiler
 class SubmodCompiler(torch.fx.interpreter.Interpreter):
-    def __init__(self, module, compiler, fake_mode) -> None:
+    def __init__(
+        self,
+        module: fx.GraphModule,
+        compiler: CompilerFn,
+        fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
+    ) -> None:
         super().__init__(module)
         self.compiler = compiler
         self.fake_mode = fake_mode
+        # See Note [DDPOptimizer and fw_metadata]
+        ctx = torch._guards.TracingContext.try_get()
+        if ctx is not None:
+            ctx.ddp_optimizer_ctx = DDPOptimizerContext()
 
-    def compile_submod(self, input_mod, args, kwargs):
+    def compile_submod(
+        self, input_mod: fx.GraphModule, args: list[torch.Tensor], kwargs: Any
+    ) -> Any:
         """
         Compile the submodule,
         using a wrapper to make sure its output is always a tuple,
@@ -162,12 +203,14 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         assert len(kwargs) == 0, "We assume only args for these modules"
 
         class WrapperModule(torch.nn.Module):
-            def __init__(self, submod, unwrap_singleton_tuple) -> None:
+            def __init__(
+                self, submod: Callable[..., Any], unwrap_singleton_tuple: bool
+            ) -> None:
                 super().__init__()
                 self.submod = submod
                 self.unwrap_singleton_tuple = unwrap_singleton_tuple
 
-            def forward(self, *args):
+            def forward(self, *args: Any) -> Any:
                 x = self.submod(*args)
                 # TODO(whc)
                 # for some reason the isinstance check is necessary if I split one node per submod
@@ -185,12 +228,12 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                     sn.args = (sn.args,)
 
         input_mod.recompile()
-        input_mod.compile_subgraph_reason = GraphCompileReason(
+        input_mod.compile_subgraph_reason = GraphCompileReason(  # type: ignore[assignment]
             "DDPOptimizer intentional graph-break (See Note [DDPOptimizer])."
             " Set `torch._dynamo.config.optimize_ddp = False` to disable.",
             [
                 # it's close to useless to get a real stacktrace here, and quite verbose.
-                traceback.FrameSummary(__file__, 0, DDPOptimizer),
+                traceback.FrameSummary(__file__, 0, "DDPOptimizer"),
             ],
         )
 
@@ -237,7 +280,7 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
         assert isinstance(kwargs, dict)
 
         if n.op == "call_module":
-            real_mod = self.fetch_attr(n.target)
+            real_mod = self.fetch_attr(str(n.target))
             if self.fake_mode:
                 curr_submod = deepcopy_to_fake_tensor(real_mod, self.fake_mode)
             else:
@@ -267,10 +310,10 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                 def __init__(self) -> None:
                     self.tc = torch._guards.TracingContext.try_get()
                     assert self.tc
-                    torch._guards.TracingContext.try_get().fakify_first_call = True
+                    self.tc.fakify_first_call = True
 
                 def __del__(self) -> None:
-                    self.tc.fakify_first_call = False
+                    self.tc.fakify_first_call = False  # type: ignore[union-attr]
 
             # For aot_eager and other backends, tracing context is not set
             has_tracing_context = torch._guards.TracingContext.try_get() is not None
@@ -288,9 +331,9 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
 
             # We update the original (outer) graph with a call into the compiled module
             # instead of the uncompiled one.
-            self.module.delete_submodule(n.target)
-            n.target = "compiled_" + n.target
-            self.module.add_submodule(n.target, compiled_submod_real)
+            self.module.delete_submodule(n.target)  # type: ignore[operator]
+            n.target = "compiled_" + n.target  # type: ignore[operator]
+            self.module.add_submodule(n.target, compiled_submod_real)  # type: ignore[operator]
 
             # Finally, we have to produce inputs for use compiling the next submodule,
             # and these need to be FakeTensors, so we execute the module under fake_mode
@@ -300,6 +343,16 @@ class SubmodCompiler(torch.fx.interpreter.Interpreter):
                 mock.patch.object(self.fake_mode, "allow_non_fake_inputs", True),
             ):
                 if has_tracing_context and invoked_aot_autograd:
+                    tracing_ctx = torch._guards.TracingContext.try_get()
+                    assert tracing_ctx is not None
+                    # DDPOptimizer maintains 1 dynamo graph -> N AOT graphs
+                    # Dynamo only has 1 tracing context, so it needs to maintain all N AOT metadata instances
+                    ddp_ctx = tracing_ctx.ddp_optimizer_ctx
+                    assert ddp_ctx is not None
+                    assert tracing_ctx.fw_metadata is not None
+                    ddp_ctx.curr_bucket += 1
+                    ddp_ctx.metadata_per_bucket.append(tracing_ctx.fw_metadata)
+
                     out = compiled_submod_real(*new_args, **kwargs)
                     # output should be fake or subclass
                     assert all(
@@ -378,7 +431,7 @@ class DDPOptimizer:
     def __init__(
         self,
         bucket_bytes_cap: int,
-        backend_compile_fn,
+        backend_compile_fn: CompilerFn,
         first_bucket_cap: Optional[int] = None,
     ) -> None:
         if first_bucket_cap is not None:
@@ -396,21 +449,27 @@ class DDPOptimizer:
 
         self.backend_compile_fn = backend_compile_fn
 
-    def _ignore_parameter(self, parameter):
+    def _ignore_parameter(self, parameter: torch.nn.Parameter) -> bool:
         return hasattr(parameter, "_ddp_ignored") and parameter._ddp_ignored
 
-    def add_param(self, bucket, param, name):
+    def add_param(self, bucket: Bucket, param: torch.nn.Parameter, name: str) -> None:
         bucket.size += param.untyped_storage().nbytes()
         bucket.params.append(name)
         bucket.param_ids.append(id(param))
 
-    def add_module_params_to_bucket(self, mod, bucket, processed_modules, prefix):
+    def add_module_params_to_bucket(
+        self,
+        mod: torch.nn.Module,
+        bucket: Bucket,
+        processed_modules: set[torch.nn.Module],
+        prefix: str,
+    ) -> None:
         processed_modules.add(mod)
         for name, param in mod.named_parameters():
             if param.requires_grad and not self._ignore_parameter(param):
                 self.add_param(bucket, param, f"{prefix}_{name}")
 
-    def add_param_args(self, bucket, node):
+    def add_param_args(self, bucket: Bucket, node: fx.Node) -> None:
         for arg in node.args:
             if not isinstance(arg, torch.fx.node.Node):
                 continue
@@ -422,9 +481,11 @@ class DDPOptimizer:
                 and param.requires_grad
                 and not self._ignore_parameter(param)
             ):
-                self.add_param(bucket, param, arg.target)
+                self.add_param(bucket, param, str(arg.target))
 
-    def compile_fn(self, gm: fx.GraphModule, example_inputs: list[torch.Tensor]):
+    def compile_fn(
+        self, gm: fx.GraphModule, example_inputs: list[torch.Tensor]
+    ) -> CompiledFn:
         """
         Implements graph splitting, first determining a set of of buckets by counting
         parameter sizes in reverse graph order, then invoking the user/backend compiler
@@ -433,7 +494,7 @@ class DDPOptimizer:
         """
         # 1: compute the partition map according to DDP bucket logic
         buckets = [Bucket()]  # (size, param_names)
-        processed_modules = set()
+        processed_modules: set[torch.nn.Module] = set()
         for node in reversed(gm.graph.nodes):
             if node.op in ("output", "placeholder"):
                 continue
@@ -513,8 +574,14 @@ class DDPOptimizer:
                 partition_map[node] = idx
 
         split_gm = fx.passes.split_module.split_module(
-            gm, None, lambda node: partition_map[node]
+            gm,
+            None,  # type: ignore[arg-type]
+            lambda node: partition_map[node],
         )
+
+        # See note [Assumption on Dynamo Metadata]
+        propagate_dynamo_source(gm, split_gm)
+        propagate_metadata(gm, split_gm)
 
         debug_str = (
             f"\n---orig graph---\n{gm.graph}\n"

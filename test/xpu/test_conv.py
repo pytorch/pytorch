@@ -1,5 +1,6 @@
 # Owner(s): ["module: intel"]
 
+import copy
 import itertools
 import math
 import unittest
@@ -365,6 +366,31 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     dilation,
                     no_weight,
                 )
+
+    @dtypes(torch.float)
+    def test_conv1d_large_input(self, device, dtype):
+        N, C_in, L = 4, 512, 441
+        C_out, K, P = 512, 3, 1
+        torch.manual_seed(42)
+
+        conv_cpu = (
+            nn.Conv1d(C_in, C_out, kernel_size=K, padding=P, bias=True)
+            .to(torch.float32)
+            .requires_grad_()
+        )
+        x_cpu = torch.randn(N, C_in, L, dtype=torch.float32)
+        out_cpu = conv_cpu(x_cpu)
+
+        conv_dev = nn.Conv1d(C_in, C_out, kernel_size=K, padding=P, bias=True).to(
+            device, dtype
+        )
+        conv_dev.weight.data.copy_(conv_cpu.weight.data.to(dtype))
+        conv_dev.bias.data.copy_(conv_cpu.bias.data.to(dtype))
+
+        x_dev = x_cpu.to(device, dtype).requires_grad_()
+        out_dev = conv_dev(x_dev)
+
+        self.assertEqual(out_cpu, out_dev, atol=1e-5, rtol=1e-5, exact_device=False)
 
     @dtypes(torch.float)
     def test_conv1d_same_padding(self, device, dtype):
@@ -1190,6 +1216,25 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     output_ng = m(input)
                 output = m(input)
                 self.assertEqual(output, output_ng, rtol=1e-2, atol=1e-5)
+
+    @unittest.skipIf(torch.xpu.device_count() < 2, "only one GPU detected")
+    @dtypes(torch.double, torch.float, torch.half)
+    def test_conv2d_on_multi_device(self, dtype):
+        input = torch.randn(3, 256, 224, 224, dtype=dtype, requires_grad=True)
+        conv = torch.nn.Conv2d(256, 256, kernel_size=3, padding=1, dtype=dtype)
+        output_grad = torch.randn(3, 256, 224, 224, dtype=dtype)
+        input_0 = input.to(device="xpu:0")
+        conv_0 = copy.deepcopy(conv).to(device="xpu:0")
+        output_0 = conv_0(input_0)
+        input_1 = input.to(device="xpu:1")
+        conv_1 = copy.deepcopy(conv).to(device="xpu:1")
+        output_1 = conv_1(input_1)
+        self.assertEqual(output_0.cpu(), output_1.cpu())
+        output_grad_0 = output_grad.to(device="xpu:0")
+        output_0.backward(output_grad_0)
+        output_grad_1 = output_grad.to(device="xpu:1")
+        output_1.backward(output_grad_1)
+        self.assertEqual(output_grad_0.cpu(), output_grad_1.cpu())
 
     def test_conv_double_backward_strided_with_3D_input_and_weight(self, device):
         input = torch.randn(2, 3, 6, device=device)

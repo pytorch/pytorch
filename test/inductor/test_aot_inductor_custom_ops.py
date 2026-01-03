@@ -1,5 +1,5 @@
 # Owner(s): ["module: inductor"]
-# This test requires libaoti_custom_ops.so to be built, which happnes when BUILD_TEST = 1
+# This test requires libaoti_custom_ops.so to be built, which happens when BUILD_TEST = 1
 import logging
 import os
 import sys
@@ -20,9 +20,10 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_SANDCASTLE,
     IS_WINDOWS,
+    skipIfXpu,
 )
+from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU_AND_TRITON
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
-from torch.testing._internal.triton_utils import HAS_CUDA
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -111,14 +112,18 @@ def _(x):
 class AOTInductorTestsTemplate:
     def test_custom_op_add(self) -> None:
         class M(torch.nn.Module):
-            def forward(self, x, y):
-                return torch.ops.aoti_custom_ops.custom_add(x, y)
+            def __init__(self, device):
+                super().__init__()
+                self.device = device
+                self.w = torch.randn(3, 3, device=device)
 
-        m = M().to(device=self.device)
-        args = (
-            torch.randn(3, 3, device=self.device),
-            torch.randn(3, 3, device=self.device),
-        )
+            def forward(self, x):
+                const = torch.tensor([1], device=self.device)
+                x = torch.ops.aoti_custom_ops.custom_add(x, const)
+                return torch.ops.aoti_custom_ops.custom_add(x, self.w)
+
+        m = M(self.device).to(device=self.device)
+        args = (torch.randn(3, 3, device=self.device),)
         self.check_model(m, args)
 
     def test_custom_op_add_output_path(self) -> None:
@@ -134,6 +139,58 @@ class AOTInductorTestsTemplate:
         with config.patch("aot_inductor.output_path", "model.pt2"):
             with self.assertRaises(Exception):
                 self.check_model(m, args)
+
+    def test_fn_with_optional_tensor_output(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.fn_with_optional_tensor_output(x, y)
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
+
+    def test_fn_with_optional_tensor_output_2(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.fn_with_optional_tensor_output_2(x, y)
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
+
+    def test_fn_with_optional_tensor_nullopt_output(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.ops.aoti_custom_ops.fn_with_optional_tensor_nullopt_output(
+                    x, y
+                )
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
+
+    def test_fn_with_int_output(self) -> None:
+        class M(torch.nn.Module):
+            def forward(self, x, y):
+                i = x.shape[0]
+                z, _, _, i1, i2 = torch.ops.aoti_custom_ops.fn_with_int_output(x, y, i)
+                return z, z * (i1 + i2 + i)
+
+        m = M().to(device=self.device)
+        args = (
+            torch.randn(3, 3, device=self.device),
+            torch.randn(3, 3, device=self.device),
+        )
+        self.check_model(m, args)
 
     def test_custom_op_all_inputs(self) -> None:
         class MyModel(torch.nn.Module):
@@ -356,6 +413,40 @@ class AOTInductorTestsTemplate:
         self.assertEqual(len(inps), 0)
         self.assertTrue(sentinel_seen)
 
+    @skipIfXpu
+    @unittest.skipIf(IS_FBCODE, "unable to find library -laoti_custom_ops")
+    def test_custom_op_square(self) -> None:
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return torch.ops.aoti_custom_ops.fn_square(x)
+
+        m = Model().to(device=self.device)
+        args = (torch.randn(2, 3, device=self.device),)
+        with (
+            config.patch(
+                "aot_inductor.custom_ops_to_c_shims",
+                {
+                    torch.ops.aoti_custom_ops.fn_square.default: [
+                        """
+                AOTITorchError
+                aoti_torch_cpu_fn_square(
+                    AtenTensorHandle input,
+                    AtenTensorHandle* ret)""",
+                        """
+                AOTITorchError
+                aoti_torch_cuda_fn_square(
+                    AtenTensorHandle input,
+                    AtenTensorHandle* ret)""",
+                    ],
+                },
+            ),
+            config.patch(
+                "aot_inductor.custom_op_libs",
+                ["aoti_custom_ops"],
+            ),
+        ):
+            self.check_model(m, args)
+
 
 class AOTInductorLoggingTest(LoggingTestCase):
     @make_logging_test(dynamic=logging.DEBUG)
@@ -401,9 +492,9 @@ def fail_cpu(is_skip=False):
     )
 
 
-def fail_cuda(is_skip=False):
+def fail_gpu(suffixes: tuple[str, ...], is_skip=False):
     return TestFailure(
-        ("cuda"),
+        suffixes,
         is_skip=is_skip,
     )
 
@@ -415,10 +506,11 @@ CPU_TEST_FAILURES = {
 }
 
 # test_failures, xfail by default, set is_skip=True to skip
-CUDA_TEST_FAILURES = {
+GPU_TEST_FAILURES = {
     # quantized unsupported for GPU
-    "test_quantized_linear": fail_cuda(),
-    "test_quanatized_int8_linear": fail_cuda(),
+    "test_quantized_linear": fail_gpu(("cuda", "xpu")),
+    "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
+    "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
 }
 
 
@@ -441,9 +533,9 @@ copy_tests(
 
 
 @unittest.skipIf(sys.platform == "darwin", "No CUDA on MacOS")
-class AOTInductorTestABICompatibleCuda(AOTICustomOpTestCase):
-    device = "cuda"
-    device_type = "cuda"
+class AOTInductorTestABICompatibleGpu(AOTICustomOpTestCase):
+    device = GPU_TYPE
+    device_type = GPU_TYPE
     check_model = check_model
     check_model_with_multiple_inputs = check_model_with_multiple_inputs
     code_check_count = code_check_count
@@ -453,14 +545,14 @@ class AOTInductorTestABICompatibleCuda(AOTICustomOpTestCase):
 
 copy_tests(
     AOTInductorTestsTemplate,
-    AOTInductorTestABICompatibleCuda,
-    "cuda",
-    CUDA_TEST_FAILURES,
+    AOTInductorTestABICompatibleGpu,
+    GPU_TYPE,
+    GPU_TEST_FAILURES,
 )
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
     # cpp_extension N/A in fbcode
-    if HAS_CUDA or sys.platform == "darwin":
+    if HAS_GPU_AND_TRITON or sys.platform == "darwin":
         run_tests(needs="filelock")

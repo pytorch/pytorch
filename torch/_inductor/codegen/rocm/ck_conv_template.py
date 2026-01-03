@@ -2,8 +2,12 @@
 import copy
 import logging
 import random
+from typing import Any
+from typing_extensions import override
 
 from torch._inductor.virtualized import V
+
+from .rocm_template import ArgInfo
 
 
 try:
@@ -283,6 +287,8 @@ class CKGroupedConvFwdTemplate(CKTemplate):
 
                 using ConvolutionForwardSpecialization = ck::tensor_operation::device::ConvolutionForwardSpecialization;
 
+                using OutElementOp = PassThrough;
+
                 namespace ck {
                 namespace utils {
                 namespace conv {
@@ -474,9 +480,9 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         chosen_instances = (
             random.sample(
                 filtered_instances,
-                min(len(filtered_instances), config.rocm.n_max_profiling_configs),
+                min(len(filtered_instances), config.rocm.ck_max_profiling_configs),
             )
-            if config.rocm.n_max_profiling_configs
+            if config.rocm.ck_max_profiling_configs
             else filtered_instances
         )
         log.debug(
@@ -507,9 +513,11 @@ class CKGroupedConvFwdTemplate(CKTemplate):
                     arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
                 else:  # tile shape
                     arg = f"/* {field_name} */ S<{tuple_elements}>"
+                # pyrefly: ignore [bad-argument-type]
                 template_params.append(arg)
             else:
                 if field_value is not None:
+                    # pyrefly: ignore [bad-argument-type]
                     template_params.append(f"/* {field_name} */ {field_value}")
         return self._template_from_string(template_definition).render(
             operation_name=op.name(),
@@ -522,7 +530,7 @@ class CKGroupedConvFwdTemplate(CKTemplate):
         op: "CKGroupedConvFwdOp",  # type: ignore[name-defined]
         **kwargs,
     ) -> str:
-        template_buffer_node = kwargs.get("template_buffer_node", None)
+        template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         X, W = self.input_nodes[0], self.input_nodes[1]
@@ -606,3 +614,14 @@ class CKGroupedConvFwdTemplate(CKTemplate):
             right_pads_0,
             right_pads_1,
         )
+
+    @override
+    def get_runtime_arg_info(self) -> list[ArgInfo]:
+        return []
+
+    @override
+    def get_runtime_arg_values(self, **kwargs: Any) -> list[Any]:
+        """
+        Helper method to retrieve runtime args from generate kwargs
+        """
+        return []

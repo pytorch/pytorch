@@ -12,7 +12,8 @@ import re
 import subprocess
 import sys
 import unittest.mock
-from typing import Any, Callable
+from typing import Any
+from collections.abc import Callable
 from collections.abc import Iterator
 
 import torch
@@ -285,7 +286,6 @@ class TestTesting(TestCase):
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
     # See: https://github.com/pytorch/pytorch/issues/49019
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
@@ -313,13 +313,17 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 if __name__ == '__main__':
     run_tests()
 """)
-        # should capture CUDA error
-        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            f"Expected device assert error in stderr, got: {stderr}",
+        )
         # should run only 1 test because it throws unrecoverable error.
         self.assertIn('errors=1', stderr)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
@@ -354,8 +358,13 @@ instantiate_device_type_tests(
 if __name__ == '__main__':
     run_tests()
 """)
-        # should capture CUDA error
-        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            f"Expected device assert error in stderr, got: {stderr}",
+        )
         # should run only 1 test because it throws unrecoverable error.
         self.assertIn('errors=1', stderr)
 
@@ -509,7 +518,7 @@ if __name__ == '__main__':
         # Test without setting env var should run everything.
         env = dict(os.environ)
         for k in ['CI', PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY]:
-            if k in env.keys():
+            if k in env:
                 del env[k]
         _, stderr = TestCase.run_process_no_exception(test_filter_file_template, env=env)
         self.assertIn(f'Ran {test_bases_count} test', stderr.decode('ascii'))
@@ -951,19 +960,33 @@ class TestAssertCloseErrorMessage(TestCase):
             torch.float8_e5m2fnuz,
             torch.float8_e8m0fnu,
         ]:
-            w = torch.tensor([3.14, 1.0], dtype=dtype)
-            x = torch.tensor([1.0, 3.14], dtype=dtype)
-            y = torch.tensor([3.14, 3.14], dtype=dtype)
-            z = torch.tensor([1.0, 3.14], dtype=dtype)
-            for fn in assert_close_with_inputs(x, y):
-                with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 0")):
-                    fn()
+            w_vector = torch.tensor([3.14, 1.0], dtype=dtype)
+            x_vector = torch.tensor([1.0, 3.14], dtype=dtype)
+            y_vector = torch.tensor([3.14, 3.14], dtype=dtype)
+            z_vector = torch.tensor([1.0, 3.14], dtype=dtype)
 
-            for fn in assert_close_with_inputs(w, y):
-                with self.assertRaisesRegex(AssertionError, re.escape("The first mismatched element is at index 1")):
+            for additional_dims in range(4):
+                new_shape = list(w_vector.shape) + ([1] * additional_dims)
+                w_tensor = w_vector.reshape(new_shape)
+                x_tensor = x_vector.reshape(new_shape)
+                y_tensor = y_vector.reshape(new_shape)
+                z_tensor = z_vector.reshape(new_shape)
+
+                for fn in assert_close_with_inputs(x_tensor, y_tensor):
+                    expected_shape = (0,) + (0,) * (additional_dims)
+                    with self.assertRaisesRegex(
+                        AssertionError, re.escape(f"The first mismatched element is at index {expected_shape}")
+                    ):
+                        fn()
+
+                for fn in assert_close_with_inputs(w_tensor, y_tensor):
+                    expected_shape = (1,) + (0,) * (additional_dims)
+                    with self.assertRaisesRegex(
+                        AssertionError, re.escape(f"The first mismatched element is at index {expected_shape}")
+                    ):
+                        fn()
+                for fn in assert_close_with_inputs(x_tensor, z_tensor):
                     fn()
-            for fn in assert_close_with_inputs(x, z):
-                fn()
 
     def test_abs_diff_scalar(self):
         actual = 3
@@ -2337,7 +2360,7 @@ class TestImports(TestCase):
             # fail, so just set CWD to this script's directory
             cwd=os.path.dirname(os.path.realpath(__file__)),).decode("utf-8")
 
-    # The test is flaky on ROCm and has been open and close multiple times
+    # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
     @skipIfRocm
     def test_circular_dependencies(self) -> None:
@@ -2352,6 +2375,14 @@ class TestImports(TestCase):
                            "torch.onnx._internal",  # depends on onnx-script
                            "torch._inductor.runtime.triton_helpers",  # depends on triton
                            "torch._inductor.codegen.cuda",  # depends on cutlass
+                           "torch._inductor.codegen.cutedsl",  # depends on cutlass
+                           "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
+                           "torch.distributed.examples",  # requires CUDA and torchvision
+                           "torch.distributed.tensor.examples",  # example scripts
+                           "torch.distributed._tools.sac_ilp",  # depends on pulp
+                           "torch.csrc",  # files here are devtools, not part of torch
+                           "torch.include",  # torch include files after install
+                           "torch._inductor.kernel.vendored_templates.cutedsl_grouped_gemm",  # depends on cutlass
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac

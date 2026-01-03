@@ -1,14 +1,17 @@
 # mypy: allow-untyped-defs
 import functools
+import hashlib
 import itertools
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, TYPE_CHECKING, Union
 from typing_extensions import override
 from unittest.mock import patch
 
 import sympy
 
 import torch
+from torch._inductor import config
+from torch._inductor.utils import clear_on_fresh_cache, Placeholder
 from torch._logging import getArtifactLogger
 
 from ...autotune_process import CUDABenchmarkRequest, TensorMeta
@@ -17,7 +20,15 @@ from ...utils import IndentedBuffer, unique
 from ...virtualized import V
 from ..common import KernelTemplate
 from .cuda_kernel import CUDATemplateCaller, CUDATemplateKernel
+from .cutlass_utils import DTYPE_TO_CUTLASS_TYPE
 
+
+if TYPE_CHECKING:
+    from ...scheduler import BaseSchedulerNode  # noqa: TC004
+else:
+    BaseSchedulerNode = Any
+
+GemmOperation = Any
 
 autotuning_log = getArtifactLogger(__name__, "autotuning")
 
@@ -28,8 +39,12 @@ class ArgInfo:
     ty: str
 
 
+@clear_on_fresh_cache
 class CUDATemplate(KernelTemplate):
     index_counter = itertools.count()
+    # dict of cache key to (code, size_args)
+    code_cache: dict[str, tuple[str, tuple[int, ...], tuple[int, ...]]] = {}
+    cache_clear = staticmethod(code_cache.clear)
 
     def __init__(
         self,
@@ -39,15 +54,15 @@ class CUDATemplate(KernelTemplate):
         input_reorder: Optional[list[int]] = None,
     ) -> None:
         """
-
-        Baseclass for CUDA C++ Templates, derived from KernelTemplate. Not to be instantiated directly.
+        Baseclass for CUDA C++ Templates, derived from KernelTemplate.
+        Not to be instantiated directly.
 
         Args:
             name (str): The name of the CUDATemplate object.
             input_nodes (List[IRNode]): A list of input IRNodes.
             layout (Layout): The layout of the output buffer / tensor.
-            input_reorder (Optional[List[int]]): An optional list that specifies the order of the input nodes.
-
+            input_reorder (Optional[List[int]]): An optional list that specifies
+                the order of the input nodes.
         """
         super().__init__(name)
         self.input_nodes = input_nodes
@@ -55,36 +70,71 @@ class CUDATemplate(KernelTemplate):
         self.input_reorder = input_reorder
         self.layout = layout
 
-    def generate(  # type: ignore[override]
-        self,
-        description,
-        **kwargs,
-    ) -> CUDATemplateCaller:
+    @classmethod
+    @functools.lru_cache(None)
+    # pyrefly: ignore [bad-override]
+    def _template_from_string(cls, source: str) -> Any:
+        return KernelTemplate._template_from_string(source)
+
+    @staticmethod
+    def supports_epilogue_fusion(op: GemmOperation) -> bool:
+        return False
+
+    def make_key(self, name: str, input_key: str, layout_repr: str) -> str:
         """
-        Generates the CUDA template caller object for the given GEMM template and operation. This CUDATemplateCaller
-        may be used to call and benchmark the generated CUDA kernel in a standalone manner to enable Autotuning.
+        Make a key for the code cache. The idea of the method is to cache
+        everything that matters but doesn't include runtime param values, i.e.,
+        self.get_runtime_arg_values().
 
         Args:
-            kwargs: Additional keyword arguments.
-
-        Returns:
-            A CUDATemplateCaller object representing the generated CUDA template caller.
+            kwargs: Additional keyword arguments. Including op (GemmOperation).
         """
-        kernel_name = f"cuda_{self.name}"
-        with (
-            patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)),
-            CUDATemplateKernel(
-                kernel_name=kernel_name,
-                runtime_arg_info=self.get_runtime_arg_info(),
-                runtime_arg_values=self.get_runtime_arg_values(**kwargs),
-            ) as kernel,
-        ):
+        return hashlib.sha256(
+            str(
+                (
+                    input_key,
+                    self.input_reorder,
+                    # output layout, same as self.output_node.get_layout()
+                    layout_repr,
+                    self.get_runtime_arg_info(),
+                    name,
+                )
+            ).encode("utf-8")
+        ).hexdigest()
+
+    def generate_code_and_args(
+        self, name: str, input_key: str, layout_repr: str, **kwargs
+    ) -> tuple[str, tuple[int, ...]]:
+        """
+        Generate code and args with caching. We cache the code even if runtime
+        args are different.
+        """
+        key: Optional[str] = None
+        if config.cuda.enable_caching_codegen:
+            key = self.make_key(name=name, input_key=input_key, layout_repr=layout_repr)
+
+        if key is not None and key in self.code_cache:
+            code, size_args, offset_args = self.code_cache[key]
+            extra_args = tuple(
+                list(size_args)
+                + list(offset_args)
+                + list(self.get_runtime_arg_values(**kwargs))
+            )
+            return code, extra_args
+
+        kernel_name = str(Placeholder.KERNEL_NAME)
+        kernel = CUDATemplateKernel(
+            kernel_name=kernel_name,
+            runtime_arg_info=self.get_runtime_arg_info(),
+            runtime_arg_values=self.get_runtime_arg_values(**kwargs),
+        )
+        with patch.object(V.graph, "get_dtype", self._fake_get_dtype(self.output_node)):
             code = self.render(kernel=kernel, **kwargs)
             _, call_args, _, _ = kernel.args.python_argdefs()
             autotuning_log.debug("Generated Code:\n%s", code)
             autotuning_log.debug(
                 "Args: cpp_argdefs: %s, python_argdefs: %s",
-                kernel.args.cpp_argdefs(),
+                kernel.args.cpp_argdefs(DTYPE_TO_CUTLASS_TYPE),
                 kernel.args.python_argdefs(),
             )
 
@@ -102,26 +152,79 @@ class CUDATemplate(KernelTemplate):
             expected_args,
         )
         V.graph.sizevars.size_hints(map(sympy.expand, call_args[len(expected_args) :]))
-        size_args = V.graph.sizevars.size_hints(kernel.get_layout_args())
-        extra_args = tuple(list(size_args) + self.get_runtime_arg_values(**kwargs))
+        size_args = V.graph.sizevars.size_hints(kernel.get_dynamic_shape_args())
+        offset_args = V.graph.sizevars.size_hints(kernel.get_offset_args())
 
-        kernel_hash_name = f"cuda_{self.name}_{next(self.index_counter)}"
+        if key is not None:
+            self.code_cache[key] = code, size_args, offset_args
+
+        # extra args has runtime params, which shouldn't be cached
+        extra_args = tuple(
+            list(size_args) + list(offset_args) + self.get_runtime_arg_values(**kwargs)
+        )
+
+        return code, extra_args
+
+    def generate(  # type: ignore[override]
+        self,
+        name: str,
+        description: str,
+        input_key: str,
+        layout_repr: str,
+        input_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
+        **kwargs,
+    ) -> CUDATemplateCaller:
+        """
+        Generates the CUDA template caller object for the given GEMM template and operation.
+        This CUDATemplateCaller may be used to call and benchmark the generated CUDA kernel
+        in a standalone manner to enable Autotuning.
+
+        Args:
+            description: op name followed by swizzle.
+            kwargs: Additional keyword arguments.
+
+        Returns:
+            A CUDATemplateCaller object representing the generated CUDA template caller.
+        """
+        code, extra_args = self.generate_code_and_args(
+            name=name,
+            input_key=input_key,
+            layout_repr=layout_repr,
+            **kwargs,
+        )
+
+        # not caching since kernel name is needed below
+        kernel_hash = hashlib.sha256(code.encode("utf-8")).hexdigest()[:8]
+        kernel_name = f"cutlass_{kernel_hash}"
+        code = code.replace(self.name, kernel_name)
 
         # create the BenchmarkRequest
         bmreq = CUDABenchmarkRequest(
             kernel_name=kernel_name,
-            input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
-            output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
+            input_tensor_meta=input_tensor_meta,
+            output_tensor_meta=output_tensor_meta,
             extra_args=extra_args,
             source_code=code,
         )
 
+        # kwargs has "op" argument in case of CUTLASSGemmTemplate
+        op = kwargs["op"]
+        if not op:
+            supports_epilogue_fusion = False
+        else:
+            # epilogue fusion is only supported for TMA kernels
+            supports_epilogue_fusion = self.supports_epilogue_fusion(op)
+
         def make_kernel_render(
             template_node: CUDATemplateBuffer,
-            epilogue_nodes: Optional[list[IRNode]] = None,
-        ):
+            epilogue_nodes: Optional[list[BaseSchedulerNode]] = None,
+        ) -> tuple[CUDATemplateKernel, functools.partial[str]]:
+            assert supports_epilogue_fusion or not epilogue_nodes, (
+                "epilogue fusion is not supported for this kernel"
+            )
             kernel = CUDATemplateKernel(
-                kernel_name="KERNEL_NAME",
+                kernel_name=str(Placeholder.KERNEL_NAME),
                 runtime_arg_info=self.get_runtime_arg_info(),
                 runtime_arg_values=self.get_runtime_arg_values(**kwargs),
             )
@@ -135,12 +238,13 @@ class CUDATemplate(KernelTemplate):
             return kernel, render
 
         return CUDATemplateCaller(
-            kernel_hash_name,
-            self.name,
+            kernel_name,
+            "cutlass_gemm",
             self.input_nodes,
             self.output_node.get_layout(),
             make_kernel_render,
             bmreq,
+            supports_epilogue_fusion,
             self,
             kwargs,
             description,
@@ -175,7 +279,6 @@ class CUDATemplate(KernelTemplate):
                 #define PT_EXPORT
                 #endif
                 #endif
-                using bfloat16 = nv_bfloat16;
             """
         )
         return res
@@ -257,6 +360,7 @@ class CUTLASSTemplate(CUDATemplate):
         torch.uint8: "uint8_t",
         torch.bool: "bool",
         torch.bfloat16: "cutlass::bfloat16_t",
+        torch.float8_e4m3fn: "cutlass::float_e4m3_t",
     }
 
     _DTYPE_TO_CUTLASS_SPARSE_META = {

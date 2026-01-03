@@ -4,10 +4,9 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 import torch.nn as nn
-from torch.distributed._tensor import DeviceMesh, DTensor
-from torch.distributed._tensor.placement_types import Shard
+from torch.distributed.tensor import DeviceMesh, DTensor, Shard
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.testing._internal.common_distributed import requires_nccl
+from torch.testing._internal.common_distributed import requires_accelerator_dist_backend
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import MLPModule
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -15,6 +14,9 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 
 c10d_functional = torch.ops.c10d_functional
 c10d_ops = torch.ops.c10d
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class TestCommMode(TestCase):
@@ -29,7 +31,7 @@ class TestCommMode(TestCase):
         dist.init_process_group(
             backend="fake", rank=1, world_size=self.world_size, store=store
         )
-        self.device_type = "cuda" if torch.cuda.is_available() else "cpu"
+        self.device_type = device_type
         self.world_pg = dist.distributed_c10d._get_default_group()
 
     def checksAssert(self, comm_mode, key, expected_value, expected_total_value):
@@ -112,12 +114,12 @@ class TestCommMode(TestCase):
         self.assertEqual(comm_counts[c10d_functional.all_gather_into_tensor], 1)
         self.assertEqual(comm_counts[c10d_functional.reduce_scatter_tensor], 0)
 
-    @requires_nccl()
+    @requires_accelerator_dist_backend(["nccl", "xccl"])
     def test_comm_mode_with_c10d(self):
-        if not torch.cuda.is_available():
+        if not torch.accelerator.is_available():
             return
 
-        inp = torch.rand(2, 8, 16).cuda()
+        inp = torch.rand(2, 8, 16).to(device_type)
         all_gather_out = inp.new_empty(self.world_size * 2, 8, 16)
 
         comm_mode = CommDebugMode()

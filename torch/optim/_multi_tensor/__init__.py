@@ -5,6 +5,7 @@ Most commonly used methods are already supported, and the interface is general
 enough, so that more sophisticated ones can be also easily integrated in the
 future.
 """
+
 from functools import partialmethod
 
 from torch import optim
@@ -12,6 +13,7 @@ from torch import optim
 
 def partialclass(cls, *args, **kwargs):  # noqa: D103
     class NewCls(cls):
+        # pyrefly: ignore [not-iterable]
         __init__ = partialmethod(cls.__init__, *args, **kwargs)
 
     return NewCls

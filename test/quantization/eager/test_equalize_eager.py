@@ -7,6 +7,7 @@ import torch.ao.quantization._equalize as _equalize
 import torch.nn as nn
 from torch.ao.quantization.fuse_modules import fuse_modules
 from torch.testing._internal.common_quantization import QuantizationTestCase
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 class TestEqualizeEager(QuantizationTestCase):
@@ -203,3 +204,7 @@ class TestEqualizeEager(QuantizationTestCase):
         input = torch.randn(20, 3)
         self.assertEqual(fused_model1(input), fused_model2(input))
         self.assertEqual(fused_model1(input), model(input))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

@@ -2,19 +2,21 @@
 from copy import deepcopy
 
 import torch
+import torch.distributed as dist
 import torch.distributed.checkpoint as dist_cp
 import torch.nn as nn
 import torch.nn.functional as F
-from torch.distributed._tensor import init_device_mesh, Replicate
 from torch.distributed.checkpoint.default_planner import (
     DefaultLoadPlanner,
     DefaultSavePlanner,
 )
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import FullyShardedDataParallel as FSDP
 from torch.distributed.fsdp.fully_sharded_data_parallel import (
     ShardingStrategy,
     StateDictType,
 )
+from torch.distributed.tensor import Replicate
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -26,6 +28,9 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     with_comms,
 )
 from torch.testing._internal.distributed.checkpoint_utils import with_temp_dir
+
+
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
 
 
 class SimpleModel(torch.nn.Module):
@@ -43,7 +48,7 @@ class SimpleModel(torch.nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(4, 5, device="cuda")
+        return torch.rand(4, 5, device=device_type)
 
 
 class SimpleModelUneven(torch.nn.Module):
@@ -63,16 +68,17 @@ class SimpleModelUneven(torch.nn.Module):
         return x
 
     def get_input(self):
-        return torch.rand(4, 5, device="cuda")
+        return torch.rand(4, 5, device=device_type)
 
 
 class TestHSDPCheckpoint(DTensorTestBase):
     @property
     def backend(self):
-        return "cpu:gloo,cuda:nccl"
+        curr_backend = dist.get_default_backend_for_device(self.device_type)
+        return f"cpu:gloo,{self.device_type}:{curr_backend}"
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     @parametrize("is_even_sharded_model", [True, False])
     def test_hsdp_checkpoint(self, is_even_sharded_model) -> None:
@@ -81,7 +87,7 @@ class TestHSDPCheckpoint(DTensorTestBase):
 
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
         model = FSDP(
-            simple_model().cuda(),
+            simple_model().to(self.device_type),
             sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             device_mesh=mesh_2d,
         )
@@ -129,8 +135,8 @@ class TestHSDPCheckpoint(DTensorTestBase):
             self.assertEqual(v1.placements, v2.placements)
             self.assertEqual(v1.to_local(), v2.to_local())
 
-    @with_comms
     @skip_if_lt_x_gpu(4)
+    @with_comms
     @with_temp_dir
     @parametrize("is_even_sharded_model", [True, False])
     def test_hsdp_fsdp_checkpoint_conversion(self, is_even_sharded_model) -> None:
@@ -140,7 +146,7 @@ class TestHSDPCheckpoint(DTensorTestBase):
         # save the hsdp model state_dict
         mesh_2d = init_device_mesh(self.device_type, (2, self.world_size // 2))
         hsdp_model = FSDP(
-            simple_model().cuda(),
+            simple_model().to(self.device_type),
             sharding_strategy=ShardingStrategy.HYBRID_SHARD,
             device_mesh=mesh_2d,
         )
@@ -158,7 +164,7 @@ class TestHSDPCheckpoint(DTensorTestBase):
         # initialize a fsdp model to load checkpoint into
         mesh_1d = init_device_mesh(self.device_type, (self.world_size,))
         fsdp_model = FSDP(
-            simple_model().cuda(),
+            simple_model().to(self.device_type),
             device_mesh=mesh_1d,
         )
         FSDP.set_state_dict_type(

@@ -16,10 +16,6 @@
 #include <unordered_set>
 #include <vector>
 
-namespace c10 {
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
-
 namespace torch::jit {
 
 using caffe2::serialize::FileAdapter;
@@ -67,8 +63,7 @@ std::vector<IValue> get_bytecode_ivalues(PyTorchStreamReader& reader) {
 /********************** Bytecode **********************/
 
 // Forward declare
-uint64_t _get_model_bytecode_version(
-    const std::vector<IValue>& bytecode_ivalues);
+
 static uint64_t _get_model_bytecode_version_from_bytes(char* data, size_t size);
 
 uint64_t _get_model_bytecode_version(std::istream& in) {
@@ -250,8 +245,6 @@ std::unordered_map<std::string, OperatorInfo> _get_model_ops_and_info(
 /********************** Get Type Table **********************/
 
 // Forward declare
-std::unordered_set<std::string> _get_mobile_model_contained_types(
-    const std::vector<IValue>& bytecode_ivalues);
 
 std::unordered_set<std::string> _get_mobile_model_contained_types(
     std::istream& in) {
@@ -393,7 +386,7 @@ ModelCompatCheckResult is_compatible(
       OperatorInfo runtime_op_info = runtime_info.operator_info.at(op_name);
 
       // If the runtime op has no schema information its a false alarm and isn't
-      // actually useable
+      // actually usable
       if (!runtime_op_info.num_schema_args.has_value()) {
         result.status = ModelCompatibilityStatus::ERROR;
         std::ostringstream s;

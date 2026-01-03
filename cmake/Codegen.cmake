@@ -35,7 +35,7 @@ endfunction()
 
 ################################################################################
 
-# -- [ Deterine commit hash
+# -- [ Determine commit hash
 execute_process(
     COMMAND "${Python_EXECUTABLE}" -c "from tools.generate_torch_version import get_sha;print(get_sha('.'), end='')"
     OUTPUT_VARIABLE COMMIT_SHA
@@ -81,7 +81,7 @@ if(INTERN_BUILD_ATEN_OPS)
   if(USE_CUDA)
     # The stable/nightly builds do not enable some SM architectures,
     # like 89/90a/100a.  Still, some files need to be built for these
-    # architecturs specifically.  This function makes it possible to
+    # architectures specifically.  This function makes it possible to
     # enable building given file for a specific such architecture, in
     # case if PyTorch is built for corresponding other architecture;
     # for example, it will enable building for SM 90a in case PyTorch
@@ -91,25 +91,46 @@ if(INTERN_BUILD_ATEN_OPS)
       torch_cuda_get_nvcc_gencode_flag(_existing_arch_flags)
 
       set(_file_compile_flags "")
-      if(CMAKE_CUDA_COMPILER_VERSION VERSION_GREATER_EQUAL 12.0)
-        foreach(_arch ${archs})
-          if("${_arch}" STREQUAL "89")
-            if(_existing_arch_flags MATCHES ".*compute_86.*")
-              list(APPEND _file_compile_flags "-gencode;arch=compute_89,code=sm_89")
-            endif()
+      foreach(_arch ${archs})
+        if("${_arch}" STREQUAL "89")
+          if(_existing_arch_flags MATCHES ".*compute_86.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_89,code=sm_89")
           endif()
-          if("${_arch}" STREQUAL "90a")
-            if(_existing_arch_flags MATCHES ".*compute_90.*")
-              list(APPEND _file_compile_flags "-gencode;arch=compute_90a,code=sm_90a")
-            endif()
+        endif()
+        if("${_arch}" STREQUAL "90a")
+          if(_existing_arch_flags MATCHES ".*compute_90.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_90a,code=sm_90a")
           endif()
-          if("${_arch}" STREQUAL "100a")
-            if(_existing_arch_flags MATCHES ".*compute_100.*")
-              list(APPEND _file_compile_flags "-gencode;arch=compute_100a,code=sm_100a")
-            endif()
+        endif()
+        if("${_arch}" STREQUAL "100a")
+          if(_existing_arch_flags MATCHES ".*compute_100.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_100a,code=sm_100a")
           endif()
-        endforeach()
-      endif()
+        endif()
+        # We will need to gate against CUDA version, because sm_103a is available on CUDA 12.9+
+        if("${_arch}" STREQUAL "103a" AND CUDA_VERSION VERSION_GREATER_EQUAL 12.9)
+          if(_existing_arch_flags MATCHES ".*compute_100.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_103a,code=sm_103a")
+          endif()
+        endif()
+        # We will need to gate against CUDA version, because sm_110a is available on CUDA 13.0+
+        if("${_arch}" STREQUAL "110a" AND CUDA_VERSION VERSION_GREATER_EQUAL 13.0)
+          if(_existing_arch_flags MATCHES ".*compute_110.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_110a,code=sm_110a")
+          endif()
+        endif()
+        if("${_arch}" STREQUAL "120a")
+          if(_existing_arch_flags MATCHES ".*compute_120.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_120a,code=sm_120a")
+          endif()
+        endif()
+        # We will need to gate against CUDA version, sm_121a was introduced in CUDA 12.9
+        if("${_arch}" STREQUAL "121a" AND CUDA_VERSION VERSION_GREATER_EQUAL 12.9)
+          if(_existing_arch_flags MATCHES ".*compute_120.*")
+            list(APPEND _file_compile_flags "-gencode;arch=compute_121a,code=sm_121a")
+          endif()
+        endif()
+      endforeach()
       list(JOIN _file_compile_flags " " _file_compile_flags)
 
       set_source_files_properties(${file} PROPERTIES COMPILE_FLAGS "${_file_compile_flags}")
@@ -117,13 +138,13 @@ if(INTERN_BUILD_ATEN_OPS)
 
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/RowwiseScaledMM.cu"
-      "89;90a;100a")
+      "89;90a;100a;103a;110a;120a;121a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/ScaledGroupMM.cu"
       "90a")
     _BUILD_FOR_ADDITIONAL_ARCHS(
       "${CMAKE_CURRENT_LIST_DIR}/../aten/src/ATen/native/cuda/GroupMM.cu"
-      "90a")
+      "90a;100a;103a;110a")
 
   endif()
 
@@ -398,12 +419,12 @@ if(INTERN_BUILD_ATEN_OPS)
     else()
       list(APPEND CPU_CAPABILITY_FLAGS "${OPT_FLAG} -march=armv8-a+sve+bf16 -D__ARM_FEATURE_BF16 -DCPU_CAPABILITY_SVE -msve-vector-bits=256")
     endif()
-  endif(CXX_SVE_FOUND AND CXX_SVE256_FOUND)
+  endif()
 
   list(LENGTH CPU_CAPABILITY_NAMES NUM_CPU_CAPABILITY_NAMES)
   math(EXPR NUM_CPU_CAPABILITY_NAMES "${NUM_CPU_CAPABILITY_NAMES}-1")
 
-  # The sources list might get reordered later based on the capabilites.
+  # The sources list might get reordered later based on the capabilities.
   # See NOTE [ Linking AVX and non-AVX files ]
   foreach(i RANGE ${NUM_CPU_CAPABILITY_NAMES})
     function(process_vec NAME)

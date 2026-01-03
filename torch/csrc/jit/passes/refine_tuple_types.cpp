@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/passes/refine_tuple_types.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
-#include <ATen/core/type_factory.h>
-
 #include <utility>
 
 namespace torch::jit {

@@ -62,7 +62,8 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
     assert device_type in ["cpu", "cuda"]
     if not TEST_CUDA and device_type == "cuda":
         warnings.warn(
-            "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!"
+            "WARNING: CUDA is not available, empty_dtypes dispatch will be returned!",
+            stacklevel=2,
         )
         return _dynamic_dispatch_dtypes(())
 
@@ -76,7 +77,8 @@ def get_supported_dtypes(op, sample_inputs_fn, device_type):
             # We raise a warning, so that user knows that this was the case
             # and can investigate if there was an issue with the `sample_inputs_fn`.
             warnings.warn(
-                f"WARNING: Unable to generate sample for device:{device_type} and dtype:{dtype}"
+                f"WARNING: Unable to generate sample for device:{device_type} and dtype:{dtype}",
+                stacklevel=2,
             )
             continue
 
@@ -156,7 +158,7 @@ def np_unary_ufunc_integer_promotion_wrapper(fn):
     # Wrapper that passes PyTorch's default scalar
     #   type as an argument to the wrapped NumPy
     #   unary ufunc when given an integer input.
-    #   This mimicks PyTorch's integer->floating point
+    #   This mimics PyTorch's integer->floating point
     #   type promotion.
     #
     # This is necessary when NumPy promotes

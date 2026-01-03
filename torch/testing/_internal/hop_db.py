@@ -100,8 +100,11 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "triton_kernel_wrapper_mutation",
     "triton_kernel_wrapper_functional",
     "hints_wrapper",
+    "dynamo_bypassing_wrapper",  # TODO(soulitzer)
     "foreach_map",
     "aoti_call_delegate",
+    "print",
+    "inductor_compiled_code",  # Tested separately in test_inductor_wrap_inductor_compile_regions
 ]
 
 torch.library.define(
@@ -115,19 +118,19 @@ torch.library.define(
 def foo_impl_cpu(x, z):
     x.add_(5)
     z.add_(5)
-    return x, z, x + z
+    return x.clone(), z.clone(), x + z
 
 
 @torch.library.impl("testlib::mutating_custom_op", "cuda")
 def foo_impl_cuda(x, z):
     x.add_(5)
     z.add_(5)
-    return x, z, x + z
+    return x.clone(), z.clone(), x + z
 
 
 @torch.library.register_fake("testlib::mutating_custom_op")
 def foo_impl_abstract(x, z):
-    return x, z, x + z
+    return x.clone(), z.clone(), x + z
 
 
 def sample_inputs_cond(opinfo, device, dtype, requires_grad, **kwargs):
@@ -151,6 +154,7 @@ def sample_inputs_invoke_subgraph(opinfo, device, dtype, requires_grad, **kwargs
 @mark_compile_region
 def fn_for_invoke_subgraph(x):
     return torch.sin(x)
+
 
 def simple_invoke_subgraph(x):
     return fn_for_invoke_subgraph(x)
@@ -202,6 +206,47 @@ def simple_while_loop(iter_t, x):
     return torch._higher_order_ops.while_loop(cond_fn, body_fn, (iter_t, x))
 
 
+def simple_while_loop_stack_output(iter_t, x):
+    def cond_fn(iter_t, x):
+        return iter_t > 0
+
+    def body_fn(iter_t, x):
+        return iter_t - 1, x.cos()
+
+    return torch._higher_order_ops.while_loop_stack_output(
+        cond_fn, body_fn, (iter_t, x), tuple()
+    )
+
+
+def sample_inputs_local_map_hop(opinfo, device, dtype, requires_grad, **kwargs):
+    # TODO: once HOPs support DTensor inputs, we should also test DTensors
+    make_arg = functools.partial(
+        make_tensor, device=device, dtype=dtype, requires_grad=False
+    )
+    yield SampleInput(
+        make_arg(2, 3, 4, low=0.1, high=2),
+        make_arg(2, 3, 4, low=0.1, high=2),
+    )
+
+
+def simple_local_map_hop(inp1, inp2):
+    def body_gm(inp1, inp2):
+        return inp1.cos() + inp2.sin()
+
+    gm = torch.fx.symbolic_trace(body_gm)
+
+    assert torch.distributed.is_available()
+    from torch.distributed.tensor.placement_types import Replicate
+
+    gm.meta["local_map_kwargs"] = {
+        "in_placements": (Replicate(), Replicate(), Replicate()),
+        "out_placements": ((Replicate(), Replicate(), Replicate()),),
+    }
+
+    # TODO: Dynamo would rewrite this op differently
+    return torch._higher_order_ops.local_map_hop(gm, inp1, inp2)
+
+
 def sample_inputs_scan(opinfo, device, dtype, requires_grad, **kwargs):
     make_arg = functools.partial(
         make_tensor, device=device, dtype=dtype, requires_grad=requires_grad
@@ -213,7 +258,6 @@ def sample_inputs_scan(opinfo, device, dtype, requires_grad, **kwargs):
 
 
 def simple_scan(init, xs):
-
     def combine_fn(carry, x):
         result = carry @ x + x
         return result, carry.clone()
@@ -228,15 +272,14 @@ def simple_invoke_quant(x):
     def fn(x, y):
         return (torch.sin(x) * y,)
 
-    return quant_tracer(fn, x, x)[0] * 2.
+    return quant_tracer(fn, x, x)[0] * 2.0
 
 
 def simple_invoke_quant_packed(x):
     def fn(x):
         return (torch.sin(x),)
 
-    return invoke_quant_packed(fn, x)[0] * 2.
-
+    return invoke_quant_packed(fn, x)[0] * 2.0
 
 
 hop_db = [
@@ -374,6 +417,19 @@ hop_db = [
         supports_autograd=False,
     ),
     OpInfo(
+        name="while_loop_stack_output",
+        variant_test_name="simple",
+        op=simple_while_loop_stack_output,
+        sample_inputs_func=sample_inputs_while_loop,
+        dtypes=all_types_and(torch.bool, torch.half),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        supports_autograd=False,
+    ),
+    OpInfo(
         name="auto_functionalize",
         variant_test_name="simple",
         op=simple_auto_functionalize,
@@ -427,5 +483,31 @@ hop_db = [
             DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
         ),
         decorators=[onlyCUDA],
+    ),
+    OpInfo(
+        name="local_map_hop",
+        variant_test_name="simple",
+        op=simple_local_map_hop,
+        sample_inputs_func=sample_inputs_local_map_hop,
+        dtypes=custom_types(torch.float16, torch.float32),
+        supports_out=False,
+        check_batched_grad=False,
+        check_batched_gradgrad=False,
+        check_batched_forward_grad=False,
+        check_inplace_batched_forward_grad=False,
+        skips=(
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_aot_export"),
+            DecorateInfo(
+                unittest.expectedFailure, "TestHOP", "test_pre_dispatch_export"
+            ),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_serialize_export"),
+            DecorateInfo(unittest.expectedFailure, "TestHOP", "test_retrace_export"),
+        ),
+        decorators=[
+            onlyCUDA,
+            unittest.skipIf(
+                not torch.distributed.is_available(), "requires distributed build"
+            ),
+        ],
     ),
 ]

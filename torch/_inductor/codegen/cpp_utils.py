@@ -5,8 +5,8 @@ import functools
 import math
 import sys
 from collections import namedtuple
-from collections.abc import Sequence
-from typing import Any, Callable, Optional
+from collections.abc import Callable, Sequence
+from typing import Any, Optional
 from unittest.mock import patch
 
 import sympy
@@ -22,6 +22,7 @@ from .. import ir
 from ..dependencies import Dep
 from ..loop_body import LoopBody
 from ..scheduler import BaseSchedulerNode, SchedulerBuffer
+from ..shape_propagation import BlockShapeType
 from ..utils import IndentedBuffer, sympy_index_symbol_with_prefix, sympy_subs
 from ..virtualized import ops, OpsValue, V
 from .common import CSEVariable, Kernel, KernelArgs, OptimizationContext
@@ -30,7 +31,7 @@ from .common import CSEVariable, Kernel, KernelArgs, OptimizationContext
 DTYPE_TO_CPP = {
     torch.float32: "float",
     torch.float64: "double",
-    torch.float16: "half",
+    torch.float16: "at::Half",
     torch.int64: "int64_t",
     torch.int32: "int32_t",
     torch.int16: "int16_t",
@@ -40,14 +41,14 @@ DTYPE_TO_CPP = {
     torch.uint16: "uint16_t",
     torch.uint8: "uint8_t",
     torch.bool: "bool",
-    torch.bfloat16: "bfloat16",
-    torch.complex32: "c10::complex<half>",
-    torch.complex64: "c10::complex<float>",
-    torch.complex128: "c10::complex<double>",
-    torch.float8_e4m3fn: "float8_e4m3fn",
-    torch.float8_e5m2: "float8_e5m2",
-    torch.float8_e4m3fnuz: "float8_e4m3fnuz",
-    torch.float8_e5m2fnuz: "float8_e5m2fnuz",
+    torch.bfloat16: "at::BFloat16",
+    torch.complex32: "at::complex<at::Half>",
+    torch.complex64: "at::complex<float>",
+    torch.complex128: "at::complex<double>",
+    torch.float8_e4m3fn: "at::Float8_e4m3fn",
+    torch.float8_e5m2: "at::Float8_e5m2",
+    torch.float8_e4m3fnuz: "at::Float8_e4m3fnuz",
+    torch.float8_e5m2fnuz: "at::Float8_e5m2fnuz",
 }
 
 DTYPE_TO_ATEN = {
@@ -80,6 +81,7 @@ DEVICE_TO_ATEN = {
     "cpu": "at::kCPU",
     "cuda": "at::kCUDA",
     "xpu": "at::kXPU",
+    "mps": "at::kMPS",
 }
 
 LAYOUT_TO_ATEN = {
@@ -99,6 +101,7 @@ GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
 def get_promote_dtype(args):
     return (
+        # pyrefly: ignore [no-matching-overload]
         functools.reduce(
             torch.promote_types,  # type: ignore[arg-type]
             [n.dtype for n in args if isinstance(n, CppCSEVariable)],
@@ -144,8 +147,9 @@ class CppCSEVariable(CSEVariable):
         name,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
+        shape: BlockShapeType = None,
     ) -> None:
-        super().__init__(name, bounds, dtype)
+        super().__init__(name, bounds, dtype, shape=shape)
         self.is_vec = False
         self.dependent_itervars = OrderedSet[sympy.Symbol]()
 
@@ -197,6 +201,14 @@ class CppPrinter(_CppPrinter):
         if simplify and isinstance(expr, sympy.Expr) and hasattr(V.graph, "sizevars"):
             expr = V.graph.sizevars.simplify(expr)
         return super().doprint(expr)
+
+    def parenthesize(self, item: sympy.Expr, level: int, strict: bool = False) -> str:
+        if isinstance(item, sympy.Mod):
+            # use parenthesis to enforce precedence.
+            # in sympy 1.13.3, -2*Mod(x,y) becomes -2*x%y, which is wrong.
+            return f"({self._print(item)})"
+        else:
+            return super().parenthesize(item, level, strict)
 
 
 # A function to print, useful for printing sympy symbols.
@@ -300,6 +312,7 @@ class LocalizeBufferHandler(V.WrapperHandler):  # type: ignore[name-defined]
         return res
 
     def store_reduction(self, name, index, value):
+        # pyrefly: ignore [bad-argument-count]
         return self._inner.store_reduction(*self.localize(name, index), value)
 
 
@@ -418,7 +431,7 @@ class LocalBufferContext:
         `local_buf`. This helps the fused loops to work on smaller-sized local buffers
         for better data locality.
 
-        The the data access of `local_buf` is assumed to be contiguous with the
+        The data access of `local_buf` is assumed to be contiguous with the
         same order as the `global_buf`.
         """
         assert len(nodes) > 0

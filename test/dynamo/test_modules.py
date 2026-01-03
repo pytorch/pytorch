@@ -262,7 +262,7 @@ class ConstLoop(torch.nn.Module):
         self.count = 3
 
     def forward(self, x):
-        for i in range(self.count):
+        for _ in range(self.count):
             x = torch.sigmoid(self.linear1(x))
         return x
 
@@ -509,7 +509,7 @@ class CfgModule(torch.nn.Module):
         self.layer = torch.nn.Linear(10, 10)
 
     def forward(self, x):
-        for i in range(self.cfg.count):
+        for _ in range(self.cfg.count):
             x = self.layer(x + self.cfg.val)
         return x
 
@@ -699,6 +699,17 @@ class LazyModuleKwArgs(LazyModuleMixin, torch.nn.Module):
         return self.layer(x, y=y)
 
 
+class LazyModuleBadInferParams(LazyModuleMixin, torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def initialize_parameters(self, *args, **kwargs):
+        self.foo += 1
+
+    def forward(self, x, y):
+        return self.layer(x, y=y)
+
+
 class LazyParentModule(LazyModuleMixin, torch.nn.Module):
     def __init__(self) -> None:
         super().__init__()
@@ -770,7 +781,7 @@ class ParametersModule5(torch.nn.Module):
 
     def forward(self, x):
         counter = 0
-        for param in self.parameters():
+        for _param in self.parameters():
             counter += 1
 
         return x * self.scale * counter
@@ -830,7 +841,7 @@ class EnumValues(torch.nn.ModuleDict):
 
     def forward(self, init_features):
         features = [init_features]
-        for idx, layer in enumerate(self.values()):
+        for layer in self.values():
             new_features = layer(features)
             features.append(new_features)
         return torch.cat(features, 1)
@@ -1299,6 +1310,7 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch._dynamo.testing.same(r, m(i)))
         self.assertEqual(cnt.op_count, 6)
 
+    @patch.object(torch._dynamo.config, "allow_unspec_int_on_nn_module", True)
     def test_self_mutating1(self):
         m1 = torch.nn.Linear(10, 10)
         m2 = SelfMutatingModule(m1)
@@ -1653,6 +1665,32 @@ class NNModuleTests(torch._dynamo.test_case.TestCase):
         exp_res = m(x, y)
         self.assertTrue(torch.allclose(exp_res, opt_m(x, y)))
 
+    def test_lazy_module_bad_params(self):
+        m = LazyModuleBadInferParams()
+        x = [torch.rand([5, 5])] * 3
+        y = [torch.rand([5, 5])] * 2
+        # Note that this raises from within dynamo code, with no exception handling.
+        with self.assertRaises(AttributeError) as cm:
+            opt_m = torch.compile(backend="eager")(m)
+            exp_res = opt_m(x, y)
+
+    def test_lazy_module_bad_params_call_function(self):
+        class holder:
+            x = LazyModuleBadInferParams()
+
+            def apply(self, x, y):
+                self.x(x, y)
+
+        def m(x, y):
+            h = holder()
+            return h.apply(x, y)
+
+        x = [torch.rand([5, 5])] * 3
+        y = [torch.rand([5, 5])] * 2
+        opt_m = torch.compile(backend="eager")(m)
+        with self.assertRaises(AttributeError):
+            exp_res = opt_m(x, y)
+
     # RuntimeError: SymIntArrayRef expected to contain only concrete integers
     @expectedFailureDynamic
     def test_lazy_module_speculation_log_divergence(self):
@@ -1986,7 +2024,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         # Check order of _modules
         def fn(x):
             for idx, p in enumerate(mod.modules()):
-                # Something silly to force depedency on the order
+                # Something silly to force dependency on the order
                 x += coeffs_for_mod[p] * coeffs[idx]
             for idx, p in enumerate(mod.named_modules()):
                 x += coeffs_for_mod[p[1]] * coeffs[idx]
@@ -2093,11 +2131,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = MockModule()
         # Each submod is compiled separately and has a different nn module
         # guard. Ensure that recompilation logic is handle correctly.
-        with unittest.mock.patch(
-            "torch._dynamo.config.error_on_recompile", True
-        ), unittest.mock.patch(
-            "torch._dynamo.config.recompile_limit",
-            recompile_limit,
+        with (
+            unittest.mock.patch("torch._dynamo.config.error_on_recompile", True),
+            unittest.mock.patch(
+                "torch._dynamo.config.recompile_limit",
+                recompile_limit,
+            ),
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
@@ -2122,7 +2161,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         cnts = torch._dynamo.testing.CompileCounterWithBackend("eager")
         opt_mod = torch.compile(fn, backend=cnts)
-        for i in range(8):
+        for _ in range(8):
             mod = Mod()
             opt_mod(torch.randn(5, 5), mod)
 
@@ -2159,11 +2198,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         mod = MockModule()
         # Each submod is compiled separately and has a different nn module
         # guard. Ensure that recompilation logic is handle correctly.
-        with unittest.mock.patch(
-            "torch._dynamo.config.error_on_recompile", True
-        ), unittest.mock.patch(
-            "torch._dynamo.config.recompile_limit",
-            recompile_limit,
+        with (
+            unittest.mock.patch("torch._dynamo.config.error_on_recompile", True),
+            unittest.mock.patch(
+                "torch._dynamo.config.recompile_limit",
+                recompile_limit,
+            ),
         ):
             x = torch.randn(*size, requires_grad=True)
             mod(x)
@@ -2476,7 +2516,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         compiled_model = torch.compile(model, backend="aot_eager")
 
         activations = compiled_activations
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             compiled_activations.clear()
@@ -2486,7 +2526,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
             loss.backward()
 
         activations = eager_activations
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             eager_activations.clear()
@@ -2535,12 +2575,12 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         def save_activations(mod, inp, out):
             activations.append(inp)
 
-        for name, module in model.named_modules():
+        for module in model.modules():
             module.register_forward_hook(save_activations)
 
         cnt = torch._dynamo.testing.CompileCounter()
         model = torch.compile(model, backend=cnt, fullgraph=True)
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             activations.clear()
@@ -2663,7 +2703,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         model = torch.compile(model, backend="aot_eager")
 
-        for i in range(2):
+        for _ in range(2):
             # second iteration is key, hooks would have fired during aot trace
             # on first iter
             x = torch.randn((20, 10))
@@ -2723,6 +2763,22 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertEqual(eager_res, optim_res)
         self.assertEqual(cnt.frame_count, 1)
 
+    def test_specialized_module___iter__(self):
+        ml = torch.nn.ModuleList(
+            [
+                torch.nn.Linear(10, 10),
+            ]
+        )
+        ml.torchdynamo_force_dynamic = False
+
+        def f(x):
+            it = ml.__iter__()
+            return next(it)(x)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+        x = torch.randn(10)
+        self.assertEqual(f(x), opt_f(x))
+
     def test_module_dict_iter_keys(self):
         class MyModule(torch.nn.Module):
             def __init__(self) -> None:
@@ -2732,7 +2788,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 )
 
             def forward(self, x):
-                for activation_name in self.activations.keys():
+                for activation_name in self.activations:
                     x = self.activations[activation_name](x)
                 return x
 
@@ -3007,7 +3063,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         def generate(x, c):
             return mod(x) + c
 
-        for _ in range(0, 10):
+        for _ in range(10):
             generate(torch.randn(10, 10), 0)
             generate(torch.randn(10, 10), 1)
         self.assertEqual(cnt.frame_count, 2)
@@ -3047,7 +3103,38 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(model.x, compiled_model.x)
 
+    def test_delattr_on_compiled_module(self):
+        class Mod(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = Mod()
+        compiled_model = torch.compile(model)
+        compiled_model.foo = 42
+        del compiled_model.foo
+
+        self.assertFalse(hasattr(model, "foo"))
+        self.assertFalse(hasattr(compiled_model, "foo"))
+
     def test_globals_change_in_other_file(self):
+        global _variable, _variable1
+
+        prev_variable = _variable
+        prev_variable1 = _variable1
+        prev_test_functions_variable = test_functions._variable
+
+        def restore_globals():
+            global _variable, _variable1
+            _variable = prev_variable
+            _variable1 = prev_variable1
+            test_functions._variable = prev_test_functions_variable
+
+        self.addCleanup(restore_globals)
+
+        _variable = 0
+        _variable1 = 0
+        test_functions._variable = 0
+
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             # Let `update_global` get invoked in a nested frame, to make sure
@@ -3070,6 +3157,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         "inductor backend is not available",
     )
     def test_save_and_load_inductor(self):
+        torch._logging.set_logs(inductor_metrics=True)
         mod = MockModule()
         opt_mod = torch.compile(mod, backend="inductor")
         inp = torch.randn(10, 10)
@@ -3089,8 +3177,10 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         torch._inductor.metrics.generated_kernel_count = 0
         loaded_model(inp)
         self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+        torch._logging.set_logs()
 
     def test_save_and_load_all_backends(self):
+        torch._logging.set_logs(inductor_metrics=True)
         mod = MockModule()
         inp = torch.randn(10, 10)
         for backend in torch._dynamo.list_backends():
@@ -3113,6 +3203,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 self.assertEqual(opt_success, loaded_success)
             except torch._dynamo.exc.BackendCompilerFailed:
                 pass
+
+    torch._logging.set_logs()
 
     def test_monkeypatching_forward(self):
         class FakeModule(torch.nn.Module):
@@ -3291,7 +3383,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
             def __bool__(self):
                 self.bool_invoked += 1
-                return len(self.key_cache)
+                # __bool__ must return a real bool; use truthiness of cache size
+                return len(self.key_cache) > 0
 
         @torch.compile(fullgraph=True, backend="eager")
         def f(x):
@@ -3346,9 +3439,81 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         res = compiled_module(input_tensor)
         self.assertEqual(ref, res)
 
+    def test_unhashable_nn_submodule(self):
+        class UnhashableModule(torch.nn.Module):
+            def __hash__(self):
+                raise TypeError("Unhashable module")
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(NNModuleTestsDevice, globals(), only_for=devices)
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unhashable_attr = UnhashableModule()
+
+            def forward(self, x):
+                return x
+
+        mod = MyModule()
+        x = torch.randn(1)
+        compiled_mod = torch.compile(mod, backend="eager")
+        compiled_mod(x)
+
+    def test_trace_delattr(self):
+        TMP_PREFIX = "_tmp_"
+
+        def pre_forward_rename_hook(module: torch.nn.Module, _input: torch.Tensor):
+            param_name = "weight"
+            original_param = getattr(module, param_name)
+            setattr(module, TMP_PREFIX + param_name, original_param)
+            new_param = original_param + 1.0
+            delattr(module, param_name)
+            setattr(module, param_name, new_param)
+
+        def post_forward_restore_hook(
+            module: torch.nn.Module, _input: torch.Tensor, _output: torch.Tensor
+        ):
+            param_name = "weight"
+            tmp_param_name = TMP_PREFIX + param_name
+            original_param = getattr(module, tmp_param_name)
+            delattr(module, param_name)
+            setattr(module, param_name, original_param)
+            delattr(module, tmp_param_name)
+
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 5)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        torch.manual_seed(0)
+        model = SimpleModel()
+
+        model.linear.register_forward_pre_hook(pre_forward_rename_hook)
+        model.linear.register_forward_hook(post_forward_restore_hook)
+
+        input_tensor = torch.randn(4, 10)
+
+        eager_output = model(input_tensor)
+        assert hasattr(model.linear, "weight")
+        assert not hasattr(model.linear, "_tmp_weight")
+
+        torch.manual_seed(0)
+        model_to_compile = SimpleModel()
+        model_to_compile.linear.register_forward_pre_hook(pre_forward_rename_hook)
+        model_to_compile.linear.register_forward_hook(post_forward_restore_hook)
+
+        compiled_model = torch.compile(model_to_compile, fullgraph=True)
+        compiled_output = compiled_model(input_tensor)
+        assert hasattr(model.linear, "weight")
+        assert not hasattr(compiled_model.linear, "_tmp_weight")
+        torch.testing.assert_close(eager_output, compiled_output)
+
+
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(
+    NNModuleTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -5,8 +5,11 @@
 #include <ATen/miopen/miopen-wrapper.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorUtils.h>
+#include <c10/macros/Export.h>
 
 namespace at { namespace native {
+
+std::string miopenTypeToString(miopenDataType_t dtype);
 
 inline int dataSize(miopenDataType_t dataType)
 {
@@ -15,6 +18,32 @@ inline int dataSize(miopenDataType_t dataType)
     case miopenFloat: return 4;
     case miopenBFloat16: return 2;
     default: return 8;
+  }
+}
+
+// See NOTE [ cudnn fixSizeOneDimStride ] in aten/src/ATen/cudnn/Descriptors.h
+template <typename T>
+static inline void fixSizeOneDimStride(int dim, const T *size, T *stride, bool nhwc) {
+  int64_t z = 1;
+  int index = 0;
+  std::vector<int> permutation(dim);
+
+  if (nhwc) {
+    permutation[index++] = 1;
+  }
+  for (int d = dim-1; d > 1; d--) {
+    permutation[index++] = d;
+  }
+  if (!nhwc) {
+    permutation[index++] = 1;
+  }
+  permutation[index++] = 0;
+  for (int d : permutation) {
+    if (size[d] == 1) {
+      stride[d] = z;
+    } else {
+      z *= size[d];
+    }
   }
 }
 
@@ -37,9 +66,9 @@ struct DescriptorDeleter {
 // initialized the first time you call set() or any other initializing
 // function.
 template <typename T, miopenStatus_t (*ctor)(T**), miopenStatus_t (*dtor)(T*)>
-class Descriptor
-{
-public:
+// NOLINTNEXTLINE(bugprone-exception-escape)
+class TORCH_HIP_CPP_API Descriptor {
+ public:
   // Use desc() to access the underlying descriptor pointer in
   // a read-only fashion.  Most client code should use this.
   // If the descriptor was never initialized, this will return
@@ -55,7 +84,7 @@ public:
 protected:
   void init() {
     if (desc_ == nullptr) {
-      T* raw_desc;
+      T* raw_desc = nullptr;
       MIOPEN_CHECK(ctor(&raw_desc));
       desc_.reset(raw_desc);
     }
@@ -64,35 +93,40 @@ private:
   std::unique_ptr<T, DescriptorDeleter<T, dtor>> desc_;
 };
 
-class TensorDescriptor
-  : public Descriptor<miopenTensorDescriptor,
-                      &miopenCreateTensorDescriptor,
-                      &miopenDestroyTensorDescriptor>
-{
-public:
-  TensorDescriptor() {}
+class TORCH_HIP_CPP_API TensorDescriptor : public Descriptor<
+                                               miopenTensorDescriptor,
+                                               &miopenCreateTensorDescriptor,
+                                               &miopenDestroyTensorDescriptor> {
+ public:
+  TensorDescriptor() = default;
   explicit TensorDescriptor(const at::Tensor &t, size_t pad = 0) {
     set(t, pad);
   }
 
+  // See Note [CuDNN broadcast padding]
   void set(const at::Tensor &t, size_t pad = 0);
+  void set(const at::Tensor &t, at::MemoryFormat memory_format, size_t pad = 0);
   void set(miopenDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad = 0);
 
   void print();
 
 private:
-  void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
-    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
+  void set(miopenDataType_t dataType, IntArrayRef sizes, IntArrayRef strides, size_t pad, bool nhwc);
+
+  void set(miopenDataType_t dataType, int dim, size_t* size, size_t* stride, bool nhwc) {
+    std::vector<size_t> strides_copy(stride, stride + dim);
+    fixSizeOneDimStride<size_t>(dim, size, strides_copy.data(), nhwc);
+    // Use V2 API which supports 64-bit size/stride for large tensors
+    MIOPEN_CHECK(miopenSetTensorDescriptorV2(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
 
 std::ostream& operator<<(std::ostream & out, const TensorDescriptor& d);
 
-class FilterDescriptor
-  : public Descriptor<miopenTensorDescriptor,
-                      &miopenCreateTensorDescriptor,
-                      &miopenDestroyTensorDescriptor>
-{
+class TORCH_HIP_CPP_API FilterDescriptor : public Descriptor<
+                                               miopenTensorDescriptor,
+                                               &miopenCreateTensorDescriptor,
+                                               &miopenDestroyTensorDescriptor> {
  public:
   void set(const at::Tensor &t, int64_t pad = 0) {
     set(t, at::MemoryFormat::Contiguous, pad);
@@ -101,16 +135,19 @@ class FilterDescriptor
   void set(const at::Tensor &t, const at::MemoryFormat memory_format, int64_t pad = 0);
 
 private:
-  void set(miopenDataType_t dataType, int dim, int* size, int* stride) {
-    MIOPEN_CHECK(miopenSetTensorDescriptor(mut_desc(), dataType, dim, size, stride));
+  void set(miopenDataType_t dataType, int dim, size_t* size, size_t* stride, bool nhwc) {
+    std::vector<size_t> strides_copy(stride, stride + dim);
+    fixSizeOneDimStride<size_t>(dim, size, strides_copy.data(), nhwc);
+    // Use V2 API which supports 64-bit size/stride for large tensors
+    MIOPEN_CHECK(miopenSetTensorDescriptorV2(mut_desc(), dataType, dim, size, strides_copy.data()));
   }
 };
 
-struct ConvolutionDescriptor
-  : public Descriptor<miopenConvolutionDescriptor,
-                      &miopenCreateConvolutionDescriptor,
-                      &miopenDestroyConvolutionDescriptor>
-{
+struct TORCH_HIP_CPP_API ConvolutionDescriptor
+    : public Descriptor<
+          miopenConvolutionDescriptor,
+          &miopenCreateConvolutionDescriptor,
+          &miopenDestroyConvolutionDescriptor> {
   void set(miopenDataType_t dataType, miopenConvolutionMode_t c_mode,  int dim, int* pad, int* stride, int * upscale /* aka dilation */, int groups, bool benchmark, bool deterministic) {
     MIOPEN_CHECK(miopenInitConvolutionNdDescriptor(mut_desc(), dim, pad, stride, upscale, c_mode));
     MIOPEN_CHECK(miopenSetConvolutionGroupCount(mut_desc(), groups));
@@ -121,11 +158,12 @@ struct ConvolutionDescriptor
   }
 };
 
-struct DropoutDescriptor
-  : public Descriptor<miopenDropoutDescriptor,
-                      &miopenCreateDropoutDescriptor,
-                      &miopenDestroyDropoutDescriptor>
-{
+// NOLINTNEXTLINE(bugprone-exception-escape)
+struct TORCH_HIP_CPP_API DropoutDescriptor
+    : public Descriptor<
+          miopenDropoutDescriptor,
+          &miopenCreateDropoutDescriptor,
+          &miopenDestroyDropoutDescriptor> {
     void set(miopenHandle_t handle, float dropout, void* states, size_t stateSizeInBytes,
              unsigned long long seed, bool use_mask, bool state_evo, miopenRNGType_t rng_mode) {
       MIOPEN_CHECK(miopenSetDropoutDescriptor(mut_desc(), handle, dropout, states, stateSizeInBytes, seed, use_mask, state_evo, rng_mode));
@@ -137,7 +175,7 @@ struct DropoutDescriptor
     }
 };
 
-struct RNNDescriptor
+struct TORCH_HIP_CPP_API RNNDescriptor
   : public Descriptor<miopenRNNDescriptor,
                       &miopenCreateRNNDescriptor,
                       &miopenDestroyRNNDescriptor>
@@ -166,4 +204,4 @@ union Constant
   }
 };
 
-}}  // namespace
+}} // namespace

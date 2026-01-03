@@ -27,7 +27,6 @@ from torch._C._distributed_rpc import (
     get_rpc_timeout,
     PyRRef,
     RemoteProfilerManager,
-    TensorPipeAgent,
     WorkerInfo,
 )
 from torch.futures import Future
@@ -296,8 +295,8 @@ def _barrier(worker_names):
     """
     try:
         _all_gather(None, set(worker_names))
-    except RuntimeError as ex:
-        logger.error("Failed to complete barrier, got error %s", ex)
+    except RuntimeError:
+        logger.exception("Failed to complete barrier")
 
 
 @_require_initialized
@@ -312,9 +311,7 @@ def _wait_all_workers(timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     try:
         _all_gather(None, timeout=timeout)
     except RuntimeError as ex:
-        logger.error(
-            "Failed to respond to 'Shutdown Proceed' in time, got error %s", ex
-        )
+        logger.exception("Failed to respond to 'Shutdown Proceed' in time")
         raise ex
 
 
@@ -371,6 +368,8 @@ def shutdown(graceful=True, timeout=DEFAULT_SHUTDOWN_TIMEOUT):
     if graceful:
         try:
             agent = _get_current_rpc_agent()
+            from torch._C._distributed_rpc import TensorPipeAgent
+
             if not isinstance(agent, TensorPipeAgent) or agent.is_static_group:
                 _wait_all_workers(timeout)
                 _delete_all_user_and_unforked_owner_rrefs()
@@ -472,6 +471,7 @@ def _rref_typeof_on_user(
 
 
 T = TypeVar("T")
+# pyrefly: ignore [invalid-annotation]
 GenericWithOneTypeVar = Generic[T]
 
 
@@ -718,6 +718,7 @@ def _invoke_rpc(
         is_async_exec = hasattr(func, "_wrapped_async_rpc_function")
 
         if is_async_exec:
+            # pyrefly: ignore [missing-attribute]
             wrapped = func._wrapped_async_rpc_function
             if isinstance(wrapped, torch.jit.ScriptFunction):
                 func = wrapped

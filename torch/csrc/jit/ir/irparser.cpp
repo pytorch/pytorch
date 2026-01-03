@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/ir/irparser.h>
 
-#include <ATen/EmptyTensor.h>
 #include <torch/csrc/jit/frontend/lexer.h>
 #include <torch/csrc/jit/frontend/parse_string_literal.h>
 #include <torch/csrc/jit/frontend/schema_type_parser.h>
@@ -9,7 +8,6 @@
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_strided.h>
 #endif
 
@@ -182,9 +180,25 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
       r.s = parseStringLiteral(token.range, token.text());
       L.next();
       return r;
+    case TK_TRUE:
+      r.k = AttributeKind::i;
+      r.i = 1;
+      L.next();
+      return r;
+    case TK_FALSE:
+      r.k = AttributeKind::i;
+      r.i = 0;
+      L.next();
+      return r;
     case '-':
       str = "-";
       L.next();
+      if (L.cur().kind == TK_IDENT && L.cur().text() == "inf") {
+        r.k = AttributeKind::f;
+        r.f = -std::numeric_limits<double>::infinity();
+        L.next();
+        return r;
+      }
       if (L.cur().kind != TK_NUMBER) {
         throw(
             ErrorReport(token.range)
@@ -198,11 +212,11 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         double imag = 0.0f;
         try {
           imag = std::stod(str.substr(0, str.size() - 1));
-        } catch (const std::invalid_argument& e) {
+        } catch (const std::invalid_argument&) {
           throw(
               ErrorReport(token.range)
               << "Number cannot be converted to double");
-        } catch (const std::out_of_range& e) {
+        } catch (const std::out_of_range&) {
           throw(
               ErrorReport(token.range)
               << "Number is too long to be represented in type double");
@@ -214,11 +228,11 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         r.k = AttributeKind::f;
         try {
           r.f = std::stod(str);
-        } catch (const std::invalid_argument& e) {
+        } catch (const std::invalid_argument&) {
           throw(
               ErrorReport(token.range)
               << "Number cannot be converted to double");
-        } catch (const std::out_of_range& e) {
+        } catch (const std::out_of_range&) {
           throw(
               ErrorReport(token.range)
               << "Number is too long to be represented in type double");
@@ -227,17 +241,24 @@ ParsedLiteral IRParser::parseScalarLiteral(Node* n) {
         r.k = AttributeKind::i;
         try {
           r.i = std::stoll(str);
-        } catch (const std::invalid_argument& e) {
+        } catch (const std::invalid_argument&) {
           throw(
               ErrorReport(token.range)
               << "Number cannot be converted to integer");
-        } catch (const std::out_of_range& e) {
+        } catch (const std::out_of_range&) {
           throw(ErrorReport(token.range) << "Number is too big");
         }
       }
       L.next();
       return r;
     case TK_IDENT:
+      if (L.cur().text() == "inf") {
+        r.k = AttributeKind::f;
+        r.f = std::numeric_limits<double>::infinity();
+        L.next();
+        return r;
+      }
+
       // Type literal
       r.k = AttributeKind::ty;
       type_alias = type_parser.parseType();

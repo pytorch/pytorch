@@ -1,10 +1,14 @@
 # mypy: ignore-errors
 
 
-from typing import Callable
+import operator
+from collections.abc import Callable
+
+import sympy
 
 import torch
 import torch.fx as fx
+from torch.fx.experimental.symbolic_shapes import free_unbacked_symbols
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import tree_flatten
@@ -95,6 +99,20 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
+            # This CSE pass currently doesn't handle re-propagation of unbacked
+            # meta where it'll sometimes eliminate a _local_scalar_dense but not
+            # replace the meta of downstream users. eg. one bug we've seen is:
+            #
+            # _local_scalar_dense_11: "Sym(u14)" = torch.ops.aten._local_scalar_dense.default(select_10);
+            # sym_sum_2: "Sym(u19 + u20 + u21)" = torch.sym_sum((_local_scalar_dense_11, _local_scalar_dense_12, _local_scalar_dense_13)) # noqa: B950
+            #
+            # Notice how _local_scalar_dense_11 is u14 but sym_sum_2's meta is incorrectly the old
+            # pre-cse value of u19.
+            or (
+                "val" in n.meta
+                and isinstance(n.meta["val"], sympy.Symbol)
+                and free_unbacked_symbols(n.meta["val"])
+            )
         ):
             new_node = new_graph.node_copy(n, lambda x: env[x])
             env[n] = new_node
@@ -151,6 +169,24 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
                 token_map[hash_val] = token
 
     return new_graph
+
+
+def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
+    # Pre-create a list of nodes to iterate over, as modifying the node order
+    # during the loop can lead to infinite loops if not handled properly.
+    getitem_nodes = list(
+        gm.graph.find_nodes(op="call_function", target=operator.getitem)
+    )
+
+    # loop through getitem nodes in the graph and raise them to the parent node
+    # in reverse order to preserve their original relative order
+    for node in reversed(getitem_nodes):
+        assert len(node.all_input_nodes) == 1
+        parent = node.all_input_nodes[0]
+        parent.append(node)
+
+    gm.recompile()
+    return gm
 
 
 def strip_overloads(gm):

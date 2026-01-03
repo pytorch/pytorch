@@ -3136,6 +3136,7 @@ extern "C" {
 
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
+#include <share.h>
 
 static WCHAR* mz_utf8z_to_widechar(const char* str)
 {
@@ -3149,11 +3150,13 @@ static FILE *mz_fopen(const char *pFilename, const char *pMode)
 {
   WCHAR* wFilename = mz_utf8z_to_widechar(pFilename);
   WCHAR* wMode = mz_utf8z_to_widechar(pMode);
-  FILE* pFile = NULL;
-  errno_t err = _wfopen_s(&pFile, wFilename, wMode);
+  /*
+  Must use _wfsopen with _SH_DENYNO on Windows, to open opened temp files.
+  */
+  FILE* pFile = _wfsopen(wFilename, wMode, _SH_DENYNO);
   free(wFilename);
   free(wMode);
-  return err ? NULL : pFile;
+  return pFile;
 }
 
 static FILE *mz_freopen(const char *pPath, const char *pMode, FILE *pStream)

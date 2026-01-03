@@ -1,5 +1,18 @@
 #pragma once
 
+// See https://github.com/pytorch/pytorch/issues/161660
+// This compile flag is intended to be passed in to CppExtensions that rely on
+// the stable ABI via the `extra_compile_args` argument. This is a stopgap
+// solution to ensure that non-stable libtorch APIs are not used in the extension.
+// The long term solution is to have a torch_stable target that excludes headers
+// that are not in torch/stable or torch/headeronly.
+// See test/cpp_extensions/torch_stable_test_extension/setup.py for an example
+// of how this is used.
+#ifdef TORCH_STABLE_ONLY
+#error \
+    "TensorBase.h should not be included when TORCH_STABLE_ONLY compile flag is passed"
+#endif
+
 #include <c10/core/Device.h>
 #include <c10/core/Layout.h>
 #include <c10/core/MemoryFormat.h>
@@ -57,16 +70,16 @@ inline bool variable_excluded_from_dispatch() {
 // NOTE: [Tensor vs. TensorBase]
 //
 // Tensor, being the central data structure in PyTorch, gets used and
-// it's header included almost everywhere. Unfortunately this means
+// its header included almost everywhere. Unfortunately this means
 // every time an operator signature is updated or changed in
 // native_functions.yaml, you (and every other PyTorch developer) need
-// to recompile all of ATen and it's dependencies.
+// to recompile all of ATen and its dependencies.
 //
 // TensorBase aims to break up these header dependencies, and improve
 // incremental build times for all PyTorch developers. TensorBase
 // represents a reference counted handle to TensorImpl, exactly the
 // same as Tensor. However, TensorBase doesn't have code generated
-// methods in it's API and thus no dependence on native_functions.yaml.
+// methods in its API and thus no dependence on native_functions.yaml.
 //
 // Usage tips
 // ----------
@@ -75,9 +88,9 @@ inline bool variable_excluded_from_dispatch() {
 //   native_functions.yaml (direct or indirect).
 // - Tensor inherits from TensorBase, so functions taking
 //   `const TensorBase &` are callable with Tensor as well.
-// - TensorBase can be converted to tensor with `Tensor(tensor_base)`,
-//   but this requires a reference-count bump. OptionalTensorRef on
-//   the other hand can materialize a `const Tensor &` without
+// - TensorBase can be converted to Tensor with `Tensor(tensor_base)`,
+//   but this requires a reference-count bump. OptionalTensorRef, on
+//   the other hand, can materialize a `const Tensor &` without
 //   touching the reference-count.
 class TORCH_API TensorBase {
  public:
@@ -87,7 +100,7 @@ class TORCH_API TensorBase {
   // Create a Tensor with a +0 reference count. Special care must be
   // taken to avoid decrementing this reference count at destruction
   // time. Intended to support MaybeOwnedTraits<Tensor>.
-  explicit TensorBase(unsafe_borrow_t, const TensorBase& rhs)
+  explicit TensorBase(unsafe_borrow_t /*unused*/, const TensorBase& rhs)
       : impl_(c10::intrusive_ptr<at::TensorImpl, UndefinedTensorImpl>(rhs.impl_.get(), c10::raw::DontIncreaseRefcount{})) {}
   friend MaybeOwnedTraits<TensorBase>;
 
@@ -98,9 +111,7 @@ class TORCH_API TensorBase {
   explicit TensorBase(
       c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> tensor_impl)
       : impl_(std::move(tensor_impl)) {
-    if (impl_.get() == nullptr) {
-      throw std::runtime_error("TensorImpl with nullptr is not supported");
-    }
+    TORCH_CHECK(impl_.get(), "TensorImpl with nullptr is not supported");
   }
   TensorBase(const TensorBase&) = default;
   TensorBase(TensorBase&&) noexcept = default;
@@ -124,7 +135,7 @@ class TORCH_API TensorBase {
   }
 
   TensorBase contiguous(MemoryFormat memory_format=MemoryFormat::Contiguous) const {
-    if (is_contiguous(memory_format)) {
+    if (is_contiguous_or_false(memory_format)) {
       return *this;
     } else {
       return __dispatch_contiguous(memory_format);
@@ -234,6 +245,9 @@ class TORCH_API TensorBase {
   size_t weak_use_count() const noexcept {
     return impl_.weak_use_count();
   }
+  bool is_uniquely_owned() const noexcept {
+    return impl_.is_uniquely_owned();
+  }
 
   std::string toString() const;
 
@@ -262,6 +276,25 @@ class TORCH_API TensorBase {
   }
 
   bool is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+    return impl_->is_contiguous(memory_format);
+  }
+
+  // Like is_contiguous, but more dynamic shape-friendly. May return a symbolic representation of
+  // contiguity instead of SymTrue SymFalse, when results are data-dependent.
+  c10::SymBool sym_is_contiguous(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+    if (impl_->has_symbolic_sizes_strides()) {
+      return impl_->sym_is_contiguous(memory_format);
+    }
+    return impl_->is_contiguous(memory_format);
+  }
+
+  // Like is_contiguous, but more dynamic shape-friendly. Can returns
+  // false instead of throwing data-dependent errors for tensors with unbacked
+  // sizes or strides.
+  bool is_contiguous_or_false(at::MemoryFormat memory_format=at::MemoryFormat::Contiguous) const {
+    if (impl_->has_symbolic_sizes_strides()) {
+      return impl_->sym_is_contiguous(memory_format).guard_or_false(__FILE__, __LINE__);
+    }
     return impl_->is_contiguous(memory_format);
   }
 
@@ -308,7 +341,7 @@ class TORCH_API TensorBase {
                 "nbytes is not defined for sparse tensors.  If you want the size of the constituent " \
                 "tensors, add the nbytes of the indices and values.  If you want the size of the  " \
                 "equivalent dense tensor, multiply numel() by element_size()");
-    return impl_->sym_numel() * impl_->itemsize();
+    return impl_->sym_numel() * c10::SymInt(impl_->itemsize());
   }
 
   int64_t numel() const {
@@ -898,6 +931,10 @@ public:
 
   const TensorBase& requires_grad_(bool _requires_grad=true) const;
 
+  std::optional<ScalarType> grad_dtype() const;
+
+  void set_grad_dtype(const std::optional<ScalarType>& grad_dtype) const;
+
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -918,7 +955,7 @@ protected:
   c10::intrusive_ptr<TensorImpl, UndefinedTensorImpl> impl_;
 
 private:
-  TensorBase __dispatch_contiguous(c10::MemoryFormat) const;
+  TensorBase __dispatch_contiguous(c10::MemoryFormat /*memory_format*/) const;
 };
 
 inline DeviceIndex get_device(const TensorBase& self) {

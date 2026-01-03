@@ -2,7 +2,6 @@ import logging
 import operator
 import types
 from collections import defaultdict
-from typing import Optional
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -26,9 +25,9 @@ def _get_getitem_users(node: torch.fx.Node) -> set[torch.fx.Node]:
         if user.op == "output":
             continue
 
-        assert (
-            user.op == "call_function" and user.target == operator.getitem
-        ), f"Expected getitem node as user for {node}, instead got {user}"
+        assert user.op == "call_function" and user.target is operator.getitem, (
+            f"Expected getitem node as user for {node}, instead got {user}"
+        )
         getitem_users.update(list(user.users.keys()))
     return getitem_users
 
@@ -63,13 +62,13 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
     log.debug("Trying to remove pytrees for module call %s", curr_module_node)
 
     curr_module_users = list(curr_module_node.users.keys())
-    assert (
-        len(curr_module_users) == 1
-    ), f"Expected only one user for module node, instead got {list(curr_module_users)}"
+    assert len(curr_module_users) == 1, (
+        f"Expected only one user for module node, instead got {list(curr_module_users)}"
+    )
     flatten_node = curr_module_users[0]
     assert (
         flatten_node.op == "call_function"
-        and flatten_node.target == fx_pytree.tree_flatten_spec
+        and flatten_node.target is fx_pytree.tree_flatten_spec
     )
 
     flatten_getitem_users = _get_getitem_users(flatten_node)
@@ -85,7 +84,7 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
     unflatten_node = next(iter(flatten_getitem_users))
     if not (
         unflatten_node.op == "call_function"
-        and unflatten_node.target == pytree.tree_unflatten
+        and unflatten_node.target is pytree.tree_unflatten
     ):
         log.debug(
             "Flatten node %s's user is not a pytree.tree_unflatten. "
@@ -107,8 +106,11 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
             return
 
         if not (
+            # pyrefly: ignore [missing-attribute]
             arg.op == "call_function"
-            and arg.target == operator.getitem
+            # pyrefly: ignore [missing-attribute]
+            and arg.target is operator.getitem
+            # pyrefly: ignore [missing-attribute]
             and arg.args[1] == i
         ):
             log.debug(
@@ -139,7 +141,7 @@ def _try_remove_connecting_pytrees(curr_module_node: torch.fx.Node) -> None:
         return
 
     next_module_node = next(iter(unflatten_getitem_getitem_users))
-    if not (next_module_node.op == "call_module"):
+    if next_module_node.op != "call_module":
         log.debug(
             "Unflatten node %s's user is not a call_module. "
             "Instead it is: %s. Passing...",
@@ -163,7 +165,7 @@ def _remove_extraneous_pytrees(gm: torch.fx.GraphModule) -> None:
     """
 
     for node in gm.graph.nodes:
-        if node.op == "call_module":
+        if node.op == "call_module" and node.target != "_guards_fn":
             _try_remove_connecting_pytrees(node)
 
     gm.graph.eliminate_dead_code()
@@ -174,7 +176,7 @@ def _construct_inputs(
     signature: ModuleCallSignature,
     node_name_map: dict[str, torch.fx.Node],
 ) -> tuple[list[torch.fx.Node], dict[str, torch.fx.Node]]:
-    tree_unflatten_args: list[Optional[torch.fx.Node]] = []
+    tree_unflatten_args: list[torch.fx.Node | None] = []
     for input_ in signature.inputs:
         if isinstance(input_, ConstantArgument) and input_.value is None:
             # Constants should be directly embedded into the graph and not used
@@ -192,17 +194,16 @@ def _construct_inputs(
     unflatten_node = _generate_unflatten(gm, tree_unflatten_args, signature.in_spec)
 
     assert signature.in_spec.num_children == 2
+    assert signature.in_spec.type is tuple
+    args_spec, kwargs_spec = signature.in_spec.children()
+    assert args_spec.type is tuple
+    assert kwargs_spec.type is dict
 
-    args_spec = signature.in_spec.children_specs[0]
-    assert args_spec.context is None
     args_node = gm.graph.call_function(operator.getitem, (unflatten_node, 0))
     args_nodes = [
         gm.graph.call_function(operator.getitem, (args_node, i))
         for i in range(args_spec.num_children)
     ]
-
-    kwargs_spec = signature.in_spec.children_specs[1]
-    assert kwargs_spec.context is not None
     kwargs_node = gm.graph.call_function(operator.getitem, (unflatten_node, 1))
     kwargs_nodes = {
         k: gm.graph.call_function(operator.getitem, (kwargs_node, k))
@@ -369,10 +370,10 @@ def _fix_input_output_signature(
     if forward_arg_names is None:
         forward_arg_names = []
         assert signature.in_spec.num_children == 2
-        arg_spec = signature.in_spec.children_specs[0]
-        kwarg_spec = signature.in_spec.children_specs[1]
-        assert arg_spec.type == tuple
-        assert kwarg_spec.type == dict
+        arg_spec = signature.in_spec.child(0)
+        kwarg_spec = signature.in_spec.child(1)
+        assert arg_spec.type is tuple
+        assert kwarg_spec.type is dict
         for i in range(arg_spec.num_children):
             forward_arg_names.append(f"arg_{i}")
         forward_arg_names.extend(kwarg_spec.context)

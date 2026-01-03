@@ -4,6 +4,7 @@ import argparse
 import contextlib
 import logging
 import os
+import re
 import subprocess
 import sys
 import tempfile
@@ -16,11 +17,11 @@ logging.basicConfig(
     level=logging.INFO, format="%(asctime)s - %(levelname)s - %(message)s"
 )
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.DEBUG)
+logger.setLevel(logging.INFO)
 
 ROOT_PATH = Path(__file__).absolute().parent.parent.parent
-SETUP_PY_PATH = ROOT_PATH / "setup.py"
 REQUIREMENTS_PATH = ROOT_PATH / "requirements.txt"
+PYPROJECT_TOML_PATH = ROOT_PATH / "pyproject.toml"
 
 
 def run_cmd(
@@ -45,6 +46,79 @@ def interpreter_version(interpreter: str) -> str:
     return str(version_string.split(" ")[1])
 
 
+def get_supported_python_versions() -> list[str]:
+    """Extract supported Python versions from pyproject.toml classifiers."""
+    with open(PYPROJECT_TOML_PATH) as f:
+        content = f.read()
+
+    # Find Python version classifiers
+    pattern = r'"Programming Language :: Python :: (\d+\.\d+)"'
+    matches = re.findall(pattern, content)
+
+    # Sort versions and return them
+    return sorted(matches, key=lambda x: tuple(map(int, x.split("."))))
+
+
+def find_python_interpreters(mode: str) -> list[str]:
+    """Find Python interpreters based on the specified mode."""
+    if mode == "manylinux":
+        return _find_manylinux_interpreters()
+    else:
+        raise ValueError(f"Unsupported mode: {mode}")
+
+
+def _find_manylinux_interpreters() -> list[str]:
+    """Find Python interpreters in manylinux format (/opt/python/)."""
+    supported_versions = get_supported_python_versions()
+    interpreters = []
+
+    python_root = Path("/opt/python")
+    if not python_root.exists():
+        logger.warning("Path /opt/python does not exist, no interpreters found")
+        return []
+
+    # Find all python3 binaries in /opt/python/
+    python_binaries = list(python_root.glob("*/bin/python3"))
+
+    for python_path in python_binaries:
+        try:
+            # Check if it's PyPy (skip it)
+            version_output = run_cmd(
+                [str(python_path), "--version"], capture_output=True
+            )
+            version_string = version_output.stdout.decode("utf-8").strip()
+
+            if "PyPy" in version_string:
+                logger.debug("Skipping PyPy interpreter: %s", python_path)
+                continue
+
+            # Extract Python version (e.g., "Python 3.9.1" -> "3.9")
+            match = re.search(r"Python (\d+\.\d+)", version_string)
+            if not match:
+                logger.debug("Could not parse version from: %s", version_string)
+                continue
+
+            python_version = match.group(1)
+
+            # Check if this version is supported
+            if python_version in supported_versions:
+                interpreters.append(str(python_path))
+                logger.debug(
+                    "Found supported Python %s at %s", python_version, python_path
+                )
+            else:
+                logger.debug(
+                    "Python %s not in supported versions: %s",
+                    python_version,
+                    supported_versions,
+                )
+
+        except subprocess.CalledProcessError as e:
+            logger.debug("Failed to get version for %s: %s", python_path, e)  # noqa:G200
+            continue
+    return interpreters
+
+
 @contextlib.contextmanager
 def venv(interpreter: str) -> Iterator[str]:
     # Should this use EnvBuilder? Probably, maybe a good todo in the future
@@ -62,24 +136,33 @@ def venv(interpreter: str) -> Iterator[str]:
 
 
 class Builder:
-    # The python interpeter that we should be using
+    # The python interpreter that we should be using
     interpreter: str
 
     def __init__(self, interpreter: str) -> None:
         self.interpreter = interpreter
 
-    def setup_py(self, cmd_args: list[str]) -> bool:
-        return (
-            run_cmd([self.interpreter, str(SETUP_PY_PATH), *cmd_args]).returncode == 0
-        )
-
-    def bdist_wheel(self, destination: str) -> bool:
+    def build_wheel(self, destination: str) -> bool:
         logger.info("Running bdist_wheel -d %s", destination)
-        return self.setup_py(["bdist_wheel", "-d", destination])
+        return (
+            run_cmd(
+                [
+                    self.interpreter,
+                    "-m",
+                    "build",
+                    "--wheel",
+                    "--no-isolation",
+                    "--outdir",
+                    destination,
+                    str(ROOT_PATH),
+                ]
+            ).returncode
+            == 0
+        )
 
     def clean(self) -> bool:
         logger.info("Running clean")
-        return self.setup_py(["clean"])
+        return run_cmd([self.interpreter, "setup.py", "clean"]).returncode == 0
 
     def install_requirements(self) -> None:
         logger.info("Installing requirements")
@@ -101,6 +184,16 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--find-python",
+        type=str,
+        choices=["manylinux"],
+        help=(
+            "Automatically find Python interpreters based on the specified mode. "
+            "Available modes: 'manylinux' (searches /opt/python/ for interpreters "
+            "matching supported versions in pyproject.toml)"
+        ),
+    )
+    parser.add_argument(
         "-d",
         "--destination",
         default="dist/",
@@ -112,7 +205,26 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    pythons = args.python or [sys.executable]
+
+    if args.find_python:
+        if args.python:
+            logger.warning(
+                "Both --python and --find-python specified. Using --find-python and ignoring --python."
+            )
+        pythons = find_python_interpreters(args.find_python)
+        if not pythons:
+            logger.error(
+                "No Python interpreters found with --find-python %s", args.find_python
+            )
+            sys.exit(1)
+        logger.info(
+            "Found %d supported Python interpreters: %s",
+            len(pythons),
+            ", ".join(pythons),
+        )
+    else:
+        pythons = args.python or [sys.executable]
+
     build_times: dict[str, float] = dict()
 
     if len(pythons) > 1 and args.destination == "dist/":
@@ -124,13 +236,13 @@ def main() -> None:
         with venv(interpreter) as venv_interpreter:
             builder = Builder(venv_interpreter)
             # clean actually requires setuptools so we need to ensure we
-            # install requriements before
+            # install requirements before
             builder.install_requirements()
             builder.clean()
 
             start_time = time.time()
 
-            builder.bdist_wheel(args.destination)
+            builder.build_wheel(args.destination)
 
             end_time = time.time()
 

@@ -106,7 +106,6 @@ DECLARE_DISPATCH(void(*)(TensorIteratorBase&, std::optional<Generator>), random_
 
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const int64_t, const double), kaiser_window_stub)
 DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const int64_t), polygamma_stub)
-DECLARE_DISPATCH(void(*)(TensorIteratorBase&, const Scalar& a, const Scalar& b), clamp_stub)
 DECLARE_DISPATCH(
     void (*)(Tensor&, const Tensor&, int64_t, std::optional<Generator>),
     multinomial_with_replacement_stub)

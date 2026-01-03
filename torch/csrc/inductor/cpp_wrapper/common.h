@@ -6,13 +6,13 @@
 #include <utility>
 
 #include <Python.h>
-#define PYBIND11_SIMPLE_GIL_MANAGEMENT
-#include <pybind11/gil.h>
+#include <pybind11/gil_simple.h>
 
 // Include some often-used cpp_wrapper headers, for precompiling.
 #include <c10/util/BFloat16.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/stable/library.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
@@ -68,8 +68,6 @@ using namespace torch::aot_inductor;
 
 #include <c10/util/generic_math.h>
 #include <torch/csrc/inductor/aoti_runtime/scalar_to_tensor.h>
-using half = at::Half;
-using bfloat16 = at::BFloat16;
 
 // Round up to the nearest multiple of 64
 [[maybe_unused]] inline int64_t align(int64_t nbytes) {

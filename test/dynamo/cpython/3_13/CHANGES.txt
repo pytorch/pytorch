@@ -1,0 +1,9 @@
+This subdirectory contains a selection of tests from the CPython repository (branch: v3.13.0):\
+https://github.com/python/cpython/releases/tag/v3.13.0
+
+Modifications were made to ensure compatibility with the Dynamo infrastructure:
++ Monkey-patched `unittest.TestCase` to `torch._dynamo.test_case.CPythonTestCase`.
++ Replaced `unittest.main()` with `torch._dynamo.test_case.run_tests()`.
++ Assigned test "owners."
++ Annotated CPU-intensive tests with the `@slowTest` decorator.
++ Adjusted imports to use `import module` instead of `from test import module`.

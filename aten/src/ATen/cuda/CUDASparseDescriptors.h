@@ -35,7 +35,6 @@ class CuSparseDescriptor {
   std::unique_ptr<T, CuSparseDescriptorDeleter<T, destructor>> descriptor_;
 };
 
-#if AT_USE_CUSPARSE_CONST_DESCRIPTORS() || AT_USE_HIPSPARSE_CONST_DESCRIPTORS()
 template <typename T, cusparseStatus_t (*destructor)(const T*)>
 struct ConstCuSparseDescriptorDeleter {
   void operator()(T* x) {
@@ -58,7 +57,6 @@ class ConstCuSparseDescriptor {
  protected:
   std::unique_ptr<T, ConstCuSparseDescriptorDeleter<T, destructor>> descriptor_;
 };
-#endif // AT_USE_CUSPARSE_CONST_DESCRIPTORS || AT_USE_HIPSPARSE_CONST_DESCRIPTORS
 
 #if defined(USE_ROCM)
 using cusparseMatDescr = std::remove_pointer_t<hipsparseMatDescr_t>;
@@ -67,10 +65,8 @@ using cusparseDnVecDescr = std::remove_pointer_t<hipsparseDnVecDescr_t>;
 using cusparseSpMatDescr = std::remove_pointer_t<hipsparseSpMatDescr_t>;
 using cusparseSpMatDescr = std::remove_pointer_t<hipsparseSpMatDescr_t>;
 using cusparseSpGEMMDescr = std::remove_pointer_t<hipsparseSpGEMMDescr_t>;
-#if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
 using bsrsv2Info = std::remove_pointer_t<bsrsv2Info_t>;
 using bsrsm2Info = std::remove_pointer_t<bsrsm2Info_t>;
-#endif
 #endif
 
 // NOTE: This is only needed for CUDA 11 and earlier, since CUDA 12 introduced
@@ -99,7 +95,6 @@ class TORCH_CUDA_CPP_API CuSparseMatDescriptor
   }
 };
 
-#if AT_USE_HIPSPARSE_TRIANGULAR_SOLVE()
 
 class TORCH_CUDA_CPP_API CuSparseBsrsv2Info
     : public CuSparseDescriptor<bsrsv2Info, &cusparseDestroyBsrsv2Info> {
@@ -121,41 +116,9 @@ class TORCH_CUDA_CPP_API CuSparseBsrsm2Info
   }
 };
 
-#endif // AT_USE_HIPSPARSE_TRIANGULAR_SOLVE
-
-#if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 cusparseIndexType_t getCuSparseIndexType(const c10::ScalarType& scalar_type);
 
-#if AT_USE_CUSPARSE_NON_CONST_DESCRIPTORS() || AT_USE_HIPSPARSE_NON_CONST_DESCRIPTORS()
-class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
-    : public CuSparseDescriptor<cusparseDnMatDescr, &cusparseDestroyDnMat> {
- public:
-  explicit CuSparseDnMatDescriptor(const Tensor& input, int64_t batch_offset = -1);
-};
-
-class TORCH_CUDA_CPP_API CuSparseConstDnMatDescriptor
-    : public CuSparseDescriptor<const cusparseDnMatDescr, &destroyConstDnMat> {
- public:
-  explicit CuSparseConstDnMatDescriptor(const Tensor& input, int64_t batch_offset = -1);
-  cusparseDnMatDescr* unsafe_mutable_descriptor() const {
-    return const_cast<cusparseDnMatDescr*>(descriptor());
-  }
-  cusparseDnMatDescr* unsafe_mutable_descriptor() {
-    return const_cast<cusparseDnMatDescr*>(descriptor());
-  }
-};
-
-class TORCH_CUDA_CPP_API CuSparseDnVecDescriptor
-    : public CuSparseDescriptor<cusparseDnVecDescr, &cusparseDestroyDnVec> {
- public:
-  explicit CuSparseDnVecDescriptor(const Tensor& input);
-};
-
-class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
-    : public CuSparseDescriptor<cusparseSpMatDescr, &cusparseDestroySpMat> {};
-
-#elif AT_USE_CUSPARSE_CONST_DESCRIPTORS() || AT_USE_HIPSPARSE_CONST_DESCRIPTORS()
   class TORCH_CUDA_CPP_API CuSparseDnMatDescriptor
       : public ConstCuSparseDescriptor<
             cusparseDnMatDescr,
@@ -194,7 +157,6 @@ class TORCH_CUDA_CPP_API CuSparseSpMatDescriptor
       : public ConstCuSparseDescriptor<
             cusparseSpMatDescr,
             &cusparseDestroySpMat> {};
-#endif // AT_USE_CUSPARSE_CONST_DESCRIPTORS() || AT_USE_HIPSPARSE_CONST_DESCRIPTORS()
 
 class TORCH_CUDA_CPP_API CuSparseSpMatCsrDescriptor
     : public CuSparseSpMatDescriptor {
@@ -282,7 +244,5 @@ class TORCH_CUDA_CPP_API CuSparseSpGEMMDescriptor
     descriptor_.reset(raw_descriptor);
   }
 };
-
-#endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 } // namespace at::cuda::sparse

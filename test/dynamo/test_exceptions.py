@@ -2,7 +2,6 @@
 
 import contextlib
 import sys
-import unittest
 
 import torch
 import torch._dynamo.config
@@ -11,6 +10,7 @@ import torch._functorch.config
 import torch.nn
 import torch.utils.checkpoint
 from torch._dynamo.bytecode_transformation import Instruction
+from torch._dynamo.exc import Unsupported
 from torch._dynamo.symbolic_convert import SpeculationLog, SpeculationLogDivergence
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -20,7 +20,16 @@ from torch.testing._internal.common_utils import (
 
 
 class CustomException(Exception):
-    ...
+    pass
+
+
+class CustomExceptionMeta(type):
+    def __instancecheck__(cls, instance):
+        return True
+
+
+class CustomExceptionWithInstanceCheck(Exception, metaclass=CustomExceptionMeta):
+    pass
 
 
 class CustomExceptionWithArgs(Exception):
@@ -118,7 +127,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 x = torch.sigmoid(x)
                 try:
                     x = torch.cos(x)
-                    raise AssertionError
+                    raise AssertionError  # noqa: B904
                 except AssertionError:
                     x = torch.cos(x)
 
@@ -128,13 +137,57 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_exception_with_vars(self):
+        def fn(x):
+            try:
+                vars(42)
+                raise RuntimeError("Should not be raised")
+            except TypeError:
+                return x.sin()
+
+        x = torch.randn(4)
+        ref = fn(x)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_autocast_with_exception(self):
+        class Optimizer(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                raise NotImplementedError("Not implemented")
+
+            @staticmethod
+            def backward(ctx, grad_out):
+                return grad_out
+
+        @torch.compile
+        def f(x: torch.Tensor):
+            try:
+                with torch.autocast(device_type="cpu", dtype=None):
+                    Optimizer.apply(x)
+            except NotImplementedError:
+                return x + 1
+
+        inp = torch.ones(3)
+        out = f(inp)
+        self.assertTrue(torch.equal(out, inp + 1))
+
+    @make_dynamo_test
+    def test_isinstance_CustomException(self):
+        assert isinstance(CustomException, type)
+        assert not isinstance(CustomException(), type)
+        C = CustomExceptionWithInstanceCheck
+        assert isinstance(C, C)
+        assert isinstance(C(), C)
+
     @make_dynamo_test
     def test_propagate_exception_inside_ctx_manager(self):
         @contextlib.contextmanager
         def cm():
             try:
                 yield
-            except BaseException:
+            except BaseException:  # noqa: B036
                 raise ValueError  # noqa: B904
 
         @contextlib.contextmanager
@@ -212,7 +265,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 for x, y in args:
                     try:
                         fn(x, y)
-                    except BaseException:
+                    except BaseException:  # noqa: B036
                         new_exc = sys.exc_info()
                         fix_exc_context(frame_exc[1], new_exc[1], prev_exc[1])
                         prev_exc = new_exc
@@ -220,7 +273,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 try:
                     fixed_ctx = prev_exc[1].__context__
                     raise prev_exc[1]
-                except BaseException:
+                except BaseException:  # noqa: B036
                     prev_exc[1].__context__ = fixed_ctx
                     raise
 
@@ -254,7 +307,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         x = torch.randn(4)
         fn(x)
-        # Cant use fullgraph=True because RERAISE is not supported
+        # Can't use fullgraph=True because RERAISE is not supported
         opt_fn = torch.compile(fn, backend="eager")
         opt_fn(x)
 
@@ -320,7 +373,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_raise_custom_exception(self):
         class Exc(Exception):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -337,7 +390,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
     def test_raise_custom_exception_with_args(self):
         class Exc(Exception):
-            ...
+            pass
 
         @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
@@ -578,7 +631,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ZeroDivisionError
             except ZeroDivisionError:
                 try:
-                    raise ValueError
+                    raise ValueError  # noqa: B904
                 except ValueError:
                     pass
                 raise
@@ -628,7 +681,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 yield 1
             except ValueError:
                 try:
-                    raise TypeError
+                    raise TypeError  # noqa: B904
                 finally:
                     pass
 
@@ -658,7 +711,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise ValueError
             except ValueError:
                 try:
-                    raise TypeError
+                    raise TypeError  # noqa: B904
                 finally:
                     pass
 
@@ -711,7 +764,7 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
                 raise GeneratorExit
             except Exception:
                 return t.sin()
-            except BaseException:
+            except BaseException:  # noqa: B036
                 return t.cos()
 
         t = torch.randn(2)
@@ -836,20 +889,26 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
         assert z == 1
 
     def test_user_defined_exception_variable(self):
-        @torch.compile(backend="eager", fullgraph=True)
         def fn(t):
             z = 0
             try:
                 raise CustomException
             except ValueError:
                 z = 1
-            except CustomException:
+            except CustomException as e:
+                # trying to call python_type on the
+                # UserDefinedExceptionClassVariable
+                cls = type(e)
+                if type(cls) is type:
+                    t = t + 1
                 z = 2
             assert z == 2
             return t.sin()
 
         t = torch.randn(2)
         fn(t)
+        opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        self.assertEqual(fn(t), opt_fn(t))
 
     def test_user_defined_exception_with_args(self):
         @torch.compile(backend="eager", fullgraph=True)
@@ -882,237 +941,72 @@ class ExceptionTests(torch._dynamo.test_case.TestCase):
 
         assert exc2.__context__ is None
 
+    def test_exception_kwargs(self):
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn():
+            raise AttributeError(name="a")
 
-class CPythonExceptionTests(torch._dynamo.test_case.TestCase):
-    # Tests taken from CPython source code in cpython/Lib/test/test_exceptions.py
-    # https://github.com/python/cpython/blob/v3.13.1/Lib/test/test_exceptions.py
-    def setUp(self):
-        self._u_prev = torch._dynamo.config.enable_trace_unittest
-        torch._dynamo.config.enable_trace_unittest = True
+        self.assertRaises(Unsupported, fn)
 
-    def tearDown(self):
-        torch._dynamo.config.enable_trace_unittest = self._u_prev
+    def test_stack_trace_from_observed_exception(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(16, 16)
 
-    @make_dynamo_test
-    def testChainingAttrs(self):
-        e = Exception()
-        assert e.__context__ is None
-        assert e.__cause__ is None
+            def forward(self, x):
+                # no attribute w on self.linear
+                weight = self.linear.w
+                return torch.nn.functional.linear(x, weight)
 
-        e = TypeError()
-        assert e.__context__ is None
-        assert e.__cause__ is None
+        x = (torch.randn(4, 16, requires_grad=True),)
 
-        e = MyException()
-        assert e.__context__ is None
-        assert e.__cause__ is None
+        with self.assertRaisesRegex(Exception, "weight = self.linear.w"):
+            torch._dynamo.functional_export.dynamo_graph_capture_for_export(Model())(x)
 
-    @make_dynamo_test
-    def testChainingDescriptors(self):
-        try:
-            raise Exception  # noqa: TRY002
-        except Exception as exc:
-            e = exc
+    def test_context_manager_preserves_exception_stack(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167900
+        # When an exception is raised inside a context manager and the context manager
+        # doesn't suppress it, the error message should point to the original raise
+        # location, not the context manager cleanup code.
+        def g():
+            assert False  # noqa: B011
 
-        assert e.__context__ is None
-        assert e.__cause__ is None
-        assert e.__suppress_context__ is False
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
+            with torch.no_grad():
+                g()
+            return x
 
-        e.__context__ = NameError()
-        e.__cause__ = None
-        assert isinstance(e.__context__, NameError)
-        assert e.__cause__ is None
-        assert e.__suppress_context__ is True
-        e.__suppress_context__ = False
-        assert e.__suppress_context__ is False
+        with self.assertRaises(Unsupported) as ctx:
+            f(torch.randn(1))
 
-    @make_dynamo_test
-    def test_context_of_exception_in_try_and_finally(self):
-        try:
+        # The error should point to "assert False" in g(), not "return x"
+        self.assertIn("in g", str(ctx.exception))
+        self.assertIn("assert False", str(ctx.exception))
+        self.assertNotIn("return x", str(ctx.exception))
+
+    def test_reraise_preserves_exception_stack(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/167900
+        # When an exception is caught and re-raised, the error message should
+        # point to the original raise location, not the reraise location.
+        def g():
+            raise Exception("Invalid")  # noqa: TRY002
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def f(x):
             try:
-                te = TypeError(1)
-                raise te
-            finally:
-                ve = ValueError(2)
-                raise ve
-        except Exception as e:
-            exc = e
+                g()
+            except Exception:  # noqa: TRY203
+                raise
+            return x
 
-        assert exc is ve
-        assert exc.__context__ is te
+        with self.assertRaises(Unsupported) as ctx:
+            f(torch.randn(1))
 
-    @make_dynamo_test
-    def test_context_of_exception_in_except_and_finally(self):
-        try:
-            try:
-                te = TypeError(1)
-                raise te
-            except Exception:  # noqa: E722
-                ve = ValueError(2)
-                raise ve  # noqa: B904
-            finally:
-                oe = OSError(3)
-                raise oe
-        except Exception as e:
-            exc = e
-
-        assert exc is oe
-        assert exc.__context__ is ve
-        assert exc.__context__.__context__ is te
-
-    @make_dynamo_test
-    def test_context_of_exception_in_else_and_finally(self):
-        try:
-            try:
-                pass
-            except Exception:  # noqa: E722
-                pass
-            else:
-                ve = ValueError(1)
-                raise ve
-            finally:
-                oe = OSError(2)
-                raise oe
-        except Exception as e:
-            exc = e
-
-        assert exc is oe
-        assert exc.__context__ is ve
-
-    @make_dynamo_test
-    def test_raise_does_not_create_context_chain_cycle(self):
-        A = AssertionError
-        B = BytesWarning
-        C = ConnectionError
-
-        # Create a context chain:
-        # C -> B -> A
-        # Then raise A in context of C.
-        try:
-            try:
-                raise A
-            except A as a_:
-                a = a_
-                try:
-                    raise B
-                except B as b_:
-                    b = b_
-                    try:
-                        raise C
-                    except C as c_:
-                        c = c_
-                        self.assertIsInstance(a, A)
-                        self.assertIsInstance(b, B)
-                        self.assertIsInstance(c, C)
-                        self.assertIsNone(a.__context__)
-                        self.assertIs(b.__context__, a)
-                        self.assertIs(c.__context__, b)
-                        raise a  # noqa: B904
-        except A as e:
-            exc = e
-
-        # Expect A -> C -> B, without cycle
-        self.assertIs(exc, a)
-        self.assertIs(a.__context__, c)
-        self.assertIs(c.__context__, b)
-        self.assertIsNone(b.__context__)
-
-    @make_dynamo_test
-    def test_no_hang_on_context_chain_cycle1(self):
-        # See issue 25782. Cycle in context chain.
-
-        def cycle():
-            try:
-                raise ValueError(1)
-            except ValueError as ex:
-                ex.__context__ = ex
-                raise TypeError(2)  # noqa: B904
-
-        try:
-            cycle()
-        except Exception as e:
-            exc = e
-
-        self.assertIsInstance(exc, TypeError)
-        self.assertIsInstance(exc.__context__, ValueError)
-        self.assertIs(exc.__context__.__context__, exc.__context__)
-
-    @unittest.expectedFailure
-    @make_dynamo_test
-    def test_no_hang_on_context_chain_cycle2(self):
-        # See issue 25782. Cycle at head of context chain.
-
-        A = AssertionError
-        B = BytesWarning
-        C = ConnectionError
-
-        # Context cycle:
-        # +-----------+
-        # V           |
-        # C --> B --> A
-        with self.assertRaises(C) as cm:
-            try:
-                raise A()  # noqa: RSE102
-            except A as _a:
-                a = _a
-                try:
-                    raise B()  # noqa: RSE102
-                except B as _b:
-                    b = _b
-                    try:
-                        raise C()  # noqa: RSE102
-                    except C as _c:
-                        c = _c
-                        a.__context__ = c
-                        raise c  # noqa: B904
-
-        self.assertIs(cm.exception, c)
-        # Verify the expected context chain cycle
-        self.assertIs(c.__context__, b)
-        self.assertIs(b.__context__, a)
-        self.assertIs(a.__context__, c)
-
-    @make_dynamo_test
-    def test_no_hang_on_context_chain_cycle3(self):
-        # See issue 25782. Longer context chain with cycle.
-        A = AssertionError
-        B = BytesWarning
-        C = ConnectionError
-        D = DeprecationWarning
-        E = Exception
-
-        # Context cycle:
-        #             +-----------+
-        #             V           |
-        # E --> D --> C --> B --> A
-        with self.assertRaises(E) as cm:
-            try:
-                raise A
-            except A as _a:
-                a = _a
-                try:
-                    raise B
-                except B as _b:
-                    b = _b
-                    try:
-                        raise C
-                    except C as _c:
-                        c = _c
-                        a.__context__ = c
-                        try:
-                            raise D
-                        except D as _d:
-                            d = _d
-                            e = E()
-                            raise e  # noqa: B904
-
-        self.assertIs(cm.exception, e)
-        # Verify the expected context chain cycle
-        self.assertIs(e.__context__, d)
-        self.assertIs(d.__context__, c)
-        self.assertIs(c.__context__, b)
-        self.assertIs(b.__context__, a)
-        self.assertIs(a.__context__, c)
+        # The error should point to 'raise Exception("Invalid")' in g()
+        self.assertIn("in g", str(ctx.exception))
+        self.assertIn('raise Exception("Invalid")', str(ctx.exception))
 
 
 instantiate_parametrized_tests(ExceptionTests)

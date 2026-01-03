@@ -81,10 +81,9 @@ Tensor _mul_out_xnnpack(
     const Tensor& other,
     double output_scale,
     int64_t output_zero_point) {
-  const std::string_view func_name = "xnnp_mul()";
-  TORCH_CHECK(self.ndimension() > 0, func_name, ": Got empty input tensor.");
+  TORCH_CHECK(self.ndimension() > 0, __func__, ": Got empty input tensor.");
   TORCH_CHECK(
-      at::native::xnnpack::available(), func_name, ": XNNPACK is not available")
+      at::native::xnnpack::available(), __func__, ": XNNPACK is not available")
 
   // using qa memory format for qb to allow xnnpack kernel to flatten all the
   // dims
@@ -120,7 +119,7 @@ Tensor _mul_out_xnnpack(
     &subgraph_ptr);
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name, ": xnn create subgraph failed(", status,")!");
+      __func__, ": xnn create subgraph failed(", status,")!");
   std::unique_ptr<xnn_subgraph, decltype(&xnn_delete_subgraph)> subgraph(
       subgraph_ptr, &xnn_delete_subgraph);
 
@@ -139,7 +138,7 @@ Tensor _mul_out_xnnpack(
   );
   TORCH_CHECK(
       status == xnn_status_success && input0_id != XNN_INVALID_VALUE_ID,
-      func_name, ": xnn define input 0 failed(", status,")!");
+      __func__, ": xnn define input 0 failed(", status,")!");
 
   // Defining the quantized input 1
   status = xnnp_define_q_tensor(
@@ -152,7 +151,7 @@ Tensor _mul_out_xnnpack(
   );
   TORCH_CHECK(
       status == xnn_status_success && input1_id != XNN_INVALID_VALUE_ID,
-      func_name, ": xnn define input 1 failed(", status,")!");
+      __func__, ": xnn define input 1 failed(", status,")!");
 
   // Defining the quantized output
   status = xnnp_define_q_tensor(
@@ -165,7 +164,7 @@ Tensor _mul_out_xnnpack(
   );
   TORCH_CHECK(
       status == xnn_status_success && output_id != XNN_INVALID_VALUE_ID,
-      func_name, ": xnn define output failed(", status,")!");
+      __func__, ": xnn define output failed(", status,")!");
 
   const struct xnn_binary_params binary_params = {output_min, output_max};
   status = xnn_define_binary(
@@ -178,17 +177,17 @@ Tensor _mul_out_xnnpack(
     0);
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name, ": xnn define binary add failed(", status,")!");
+      __func__, ": xnn define binary add failed(", status,")!");
 
   // create runtime
   xnn_runtime_t runtime_ptr = nullptr;
   status = xnn_create_runtime_v2(subgraph_ptr, caffe2::pthreadpool_(), 0, &runtime_ptr);
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name, ": xnn create runtime failed(", status,")!");
+      __func__, ": xnn create runtime failed(", status,")!");
   TORCH_CHECK(
       runtime_ptr != nullptr,
-      func_name, ": xnn create runtime failed because runtime_ptr is null");
+      __func__, ": xnn create runtime failed because runtime_ptr is null");
   std::unique_ptr<xnn_runtime, decltype(&xnn_delete_runtime)> auto_runtime(
       runtime_ptr, &xnn_delete_runtime);
 
@@ -203,11 +202,11 @@ Tensor _mul_out_xnnpack(
     external.data());
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name, ": xnn setup runtime failed(", status,")!");
+      __func__, ": xnn setup runtime failed(", status,")!");
   status = xnn_invoke_runtime(runtime_ptr);
   TORCH_CHECK(
       status == xnn_status_success,
-      func_name, ": xnn invoke runtime failed(", status,")!");
+      __func__, ": xnn invoke runtime failed(", status,")!");
 
   return out;
 }

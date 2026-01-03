@@ -1,5 +1,6 @@
 import collections
-from typing import Any, Callable, Optional
+from collections.abc import Callable
+from typing import Any, Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -15,6 +16,18 @@ aten = torch.ops.aten
 META_TAG = "MODULE_TYPE"
 MODULE_TAG = "_MAIN_MODULE"
 CONST_MODULE_TAG = "_CONST_MODULE"
+
+_dont_constant_fold: list[torch.fx.node.Target] = []
+
+
+def add_dont_constant_fold(op: torch.fx.node.Target) -> None:
+    global _dont_constant_fold
+    _dont_constant_fold.append(op)
+
+
+def clear_dont_constant_fold() -> None:
+    global _dont_constant_fold
+    _dont_constant_fold.clear()
 
 
 def replace_node_with_constant(
@@ -110,7 +123,7 @@ class ConstantFolder(torch.fx.Interpreter):
     def is_impure(self, node: torch.fx.node.Node) -> bool:
         def is_woq_int8_pattern(node: torch.fx.node.Node) -> bool:
             return (
-                node.target == torch.ops.prims.convert_element_type.default  # type: ignore[return-value]
+                node.target is torch.ops.prims.convert_element_type.default  # type: ignore[return-value]
                 and isinstance(node.args[0], torch.fx.Node)
                 and "val" in node.args[0].meta
                 and node.args[0].meta["val"].dtype == torch.int8  # type: ignore[union-attr]
@@ -120,7 +133,7 @@ class ConstantFolder(torch.fx.Interpreter):
         if (
             is_woq_int8_pattern(node)
             or (
-                node.target == torch.ops.aten.permute.default
+                node.target is torch.ops.aten.permute.default
                 and len(node.users) == 1
                 and is_woq_int8_pattern(next(iter(node.users)))
             )
@@ -145,6 +158,9 @@ class ConstantFolder(torch.fx.Interpreter):
             # For the pattern fp32_weight -> q -> dq
             # We only folding fp32_weight -> q
             # int8_weight and leave dq in graph to be fused
+            return True
+
+        if node.target in _dont_constant_fold:
             return True
         return False
 
@@ -191,7 +207,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # contains a ScriptObject, equality checking results in a type error if
         # the types are different.
         if any(
-            type(self.unknown_value) == type(input_) and self.unknown_value == input_
+            type(self.unknown_value) is type(input_) and self.unknown_value == input_
             for input_ in flattened_inputs
         ):
             return self.unknown_value
@@ -199,7 +215,7 @@ class ConstantFolder(torch.fx.Interpreter):
         # TODO - fix errors with this
         if (
             node.op == "call_function"
-            and node.target == aten._efficientzerotensor.default
+            and node.target is aten._efficientzerotensor.default
         ):
             return self.unknown_value
 
@@ -374,7 +390,7 @@ def run_and_get_constant_graph(
     # We rewrite the tags, if it's a constant being directly consumed, without
     # any folding opportunity, we keep it in main gm.
     for node in gm.graph.nodes:
-        if node.op == "getattr" or (node.name in (lifted_constant_names or ())):
+        if node.op == "get_attr" or (node.name in (lifted_constant_names or ())):
             untag(node)
 
     new_graph = torch.fx.Graph()

@@ -17,7 +17,7 @@
 #include "requantization-tester.h"
 
 /*
- * Precise scalar implementation using unsigned 32-bit arithmetics.
+ * Precise scalar implementation using unsigned 32-bit arithmetic.
  */
 
 TEST(PRECISE__SCALAR_UNSIGNED32, exact_divide_by_po2) {
@@ -83,7 +83,7 @@ TEST(PRECISE__SCALAR_UNSIGNED32, random_cases) {
 }
 
 /*
- * Precise scalar implementation using unsigned 64-bit arithmetics.
+ * Precise scalar implementation using unsigned 64-bit arithmetic.
  */
 
 TEST(PRECISE__SCALAR_UNSIGNED64, exact_divide_by_po2) {
@@ -149,7 +149,7 @@ TEST(PRECISE__SCALAR_UNSIGNED64, random_cases) {
 }
 
 /*
- * Precise scalar implementation using signed 64-bit arithmetics.
+ * Precise scalar implementation using signed 64-bit arithmetic.
  */
 
 TEST(PRECISE__SCALAR_SIGNED64, exact_divide_by_po2) {
@@ -302,7 +302,7 @@ TEST(GEMMLOWP__SCALAR, random_cases) {
 }
 
 /*
- * Precise PSIMD implementation using unsigned 32-bit arithmetics.
+ * Precise PSIMD implementation using unsigned 32-bit arithmetic.
  */
 
 TEST(PRECISE__PSIMD, exact_divide_by_po2) {

@@ -167,7 +167,7 @@ static void check_args(CheckedFrom c, IntArrayRef args, size_t expected_size, co
     std::stringstream ss;
     ss << arg_name << " should be greater than zero but got (";
     std::copy(args.begin(), args.end() - 1, std::ostream_iterator<int>(ss,", "));
-    ss << args.back() <<  ")" << " (while checking arguments for " << c << ")";
+    ss << args.back() <<  ")" << " (while checking arguments for " << c << ')';
     TORCH_CHECK(false, ss.str());
   }
 }
@@ -196,6 +196,15 @@ inline void convolution_shape_check(
   check_args(c, padding, input->dim() - 2, "padding");
   check_args(c, stride, padding.size(), "stride");
   check_args(c, dilation, padding.size(), "dilation");
+  for (auto s : stride) {
+      TORCH_CHECK(s > 0, "Stride must be greater than 0 but got ", s);
+  }
+  for (auto d : dilation) {
+      TORCH_CHECK(d > 0, "Dilation must be greater than 0 but got ", d);
+  }
+  for (auto p : padding) {
+      TORCH_CHECK(p >= 0, "Padding must be non-negative but got ", p);
+  }
 
   // Input
   checkDimRange(c, input, 3, 6 /* exclusive */);
@@ -353,31 +362,45 @@ TORCH_API void _cudnn_set_conv_benchmark_empty_cache(bool enable);
 TORCH_API bool _cudnn_get_conv_benchmark_empty_cache();
 
 
-inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
-
+inline at::MemoryFormat miopen_conv_suggest_memory_format(const at::Tensor& input, const at::Tensor& weight) {
   // disable NHWC for float64 input.
   if (!at::detail::getCUDAHooks().compiledWithMIOpen() ||
       input.scalar_type() == at::kDouble ||
       weight.scalar_type() == at::kDouble) {
-    return false;
+    return at::MemoryFormat::Contiguous;
   }
 
-  bool can_use_miopen_channels_last_2d = false;
   // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC once ROCm officially supports NHWC in MIOpen
-  // See #64427
-  static std::optional<bool> PYTORCH_MIOPEN_SUGGEST_NHWC = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC");
+  // See https://github.com/pytorch/pytorch/issues/64427.
+  // non static variable is used to be able to change environment variable in runtime for testing
+  bool suggest_nhwc = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC").value_or(false);
 
   auto input_memory_format = input.suggest_memory_format();
   auto weight_memory_format = weight.suggest_memory_format();
+  auto weight_ndim = weight.ndimension();
 
-  can_use_miopen_channels_last_2d = PYTORCH_MIOPEN_SUGGEST_NHWC &&  *PYTORCH_MIOPEN_SUGGEST_NHWC && (
-            ( (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
-            (weight_memory_format == at::MemoryFormat::ChannelsLast) )
-        );
+  bool can_use_miopen_channels_last_2d = suggest_nhwc && (weight_ndim == 4) && (
+    (input_memory_format  == at::MemoryFormat::ChannelsLast) ||
+    (weight_memory_format == at::MemoryFormat::ChannelsLast)
+  );
+  if (can_use_miopen_channels_last_2d) {
+    return at::MemoryFormat::ChannelsLast;
+  }
 
-  bool can_use_miopen_channels_last_3d = false;
+  bool can_use_miopen_channels_last_3d = suggest_nhwc && (weight_ndim == 5) && (
+    (input_memory_format  == at::MemoryFormat::ChannelsLast3d) ||
+    (weight_memory_format == at::MemoryFormat::ChannelsLast3d)
+  );
+  if (can_use_miopen_channels_last_3d) {
+    return at::MemoryFormat::ChannelsLast3d;
+  }
 
-  return can_use_miopen_channels_last_2d || can_use_miopen_channels_last_3d;
+  return at::MemoryFormat::Contiguous;
+}
+
+// deprecated, but to remove would be BC-breaking
+inline bool miopen_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
+  return miopen_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous;
 }
 
 inline bool mkldnn_conv_use_channels_last(const at::Tensor& input, const at::Tensor& weight) {
@@ -448,8 +471,11 @@ inline bool mps_conv_use_channels_last(const at::Tensor& input, const at::Tensor
     return false;
   }
 
-  auto fmt = input.suggest_memory_format();
-  return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+  auto is_channel_last = [](const at::Tensor& t) {
+    auto fmt = t.suggest_memory_format();
+    return fmt == at::MemoryFormat::ChannelsLast || fmt == at::MemoryFormat::ChannelsLast3d;
+  };
+  return is_channel_last(input) || is_channel_last(weight);
 }
 
 } // namespace at::native

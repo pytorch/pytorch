@@ -3,7 +3,7 @@
 
 import torch
 from torch.onnx import symbolic_helper
-from torch.onnx._globals import GLOBALS
+from torch.onnx._internal.torchscript_exporter._globals import GLOBALS
 from torch.testing._internal import common_utils
 
 

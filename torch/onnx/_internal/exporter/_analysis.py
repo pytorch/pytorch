@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import dataclasses
+import operator
 import textwrap
 import traceback
 from collections import defaultdict
@@ -99,7 +100,9 @@ def _format_model_info(model_info: ModelInfo) -> str:
     lines.append("\n")
     lines.append("Of the call_function nodes, the counts of operators used are:\n")
     sorted_targets = sorted(
-        model_info.fx_node_target_count.items(), key=lambda x: x[1], reverse=True
+        model_info.fx_node_target_count.items(),
+        key=operator.itemgetter(1),
+        reverse=True,
     )
     for target, count in sorted_targets:
         lines.append(f"- `{target}`: {count}")
@@ -119,15 +122,17 @@ def _format_model_info(model_info: ModelInfo) -> str:
 
         target_to_nodes = defaultdict(list)
         for node, _ in model_info.dispatch_failures:
+            # pyrefly: ignore [index-error]
             target_to_nodes[str(node.target)].append(node)
 
         target_to_messages = {}
         for node, message in model_info.dispatch_failures:
             if str(node.target) not in target_to_messages:
+                # pyrefly: ignore [unsupported-operation]
                 target_to_messages[str(node.target)] = message
 
         for target, nodes in sorted(
-            target_to_nodes.items(), key=lambda x: x[0], reverse=True
+            target_to_nodes.items(), key=operator.itemgetter(0), reverse=True
         ):
             message = textwrap.indent(
                 f"{target_to_messages[target]}. Example node: `{nodes[0].format_node()}`. All nodes: `{nodes}`",
@@ -156,20 +161,46 @@ def _get_io_specs(exported_program: torch.export.ExportedProgram) -> tuple[dict,
         for spec in exported_program.graph_signature.output_specs
         if spec.kind == graph_signature.OutputKind.USER_OUTPUT
     ]
-    inputs: dict[str, torch._export.serde.schema.TensorMeta] = {}
-    outputs: dict[str, torch._export.serde.schema.TensorMeta] = {}
+    inputs: dict[str, torch._export.serde.schema.TensorMeta | str] = {}
+    outputs: dict[str, torch._export.serde.schema.TensorMeta | str] = {}
     for spec in user_inputs:
-        if isinstance(spec.arg, graph_signature.ConstantArgument):
-            continue
-        name = spec.arg.name
-        # FIXME: tensor_meta is None sometimes when the exported program still knows the shape/type
-        inputs[name] = nodes[name].meta["tensor_meta"]
+        inputs = _log_spec_into_io_specs(spec, nodes, inputs)
     for spec in user_outputs:
-        if isinstance(spec.arg, graph_signature.ConstantArgument):
-            continue
-        name = spec.arg.name
-        outputs[name] = nodes[name].meta["tensor_meta"]
+        outputs = _log_spec_into_io_specs(spec, nodes, outputs)
     return inputs, outputs
+
+
+def _log_spec_into_io_specs(
+    spec: graph_signature.InputSpec,
+    nodes: dict[str, torch.fx.Node],
+    inputs_or_outputs: dict[str, torch._export.serde.schema.TensorMeta | str],
+) -> dict[str, torch._export.serde.schema.TensorMeta | str]:
+    # If dynamic is set to a constant input, it becomes a
+    # symbolic argument, which is not a tensor.
+    if isinstance(spec.arg, graph_signature.ConstantArgument):
+        # Constant input does not have tensor_meta.
+        return inputs_or_outputs
+    # Symbolic arguments are not tensors, so it does not have tensor_meta,
+    # but we need to provide a string representation for them to inform users.
+    name = spec.arg.name
+    if isinstance(
+        spec.arg,
+        (
+            graph_signature.SymIntArgument,
+            graph_signature.SymFloatArgument,
+            graph_signature.SymBoolArgument,
+        ),
+    ):
+        argument_to_str: dict[type[graph_signature.ArgumentSpec], str] = {
+            graph_signature.SymIntArgument: "SymInt",
+            graph_signature.SymFloatArgument: "SymFloat",
+            graph_signature.SymBoolArgument: "SymBool",
+        }
+        inputs_or_outputs[name] = argument_to_str[type(spec.arg)]
+        return inputs_or_outputs
+    # FIXME: tensor_meta is None sometimes when the exported program still knows the shape/type
+    inputs_or_outputs[name] = nodes[name].meta["tensor_meta"]
+    return inputs_or_outputs
 
 
 def _count_fx_targets(

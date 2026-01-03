@@ -1,5 +1,8 @@
 # mypy: allow-untyped-defs
 import inspect
+from collections.abc import Callable
+from typing import Any, TypeVar
+from typing_extensions import TypeVarTuple, Unpack
 
 from .dispatcher import Dispatcher, MethodDispatcher
 
@@ -8,8 +11,13 @@ global_namespace = {}  # type: ignore[var-annotated]
 
 __all__ = ["dispatch", "ismethod"]
 
+T = TypeVar("T")
+Ts = TypeVarTuple("Ts")
 
-def dispatch(*types, **kwargs):
+
+def dispatch(
+    *types: Unpack[Ts], **kwargs: Any
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
     """Dispatch function on the types of the inputs
     Supports dispatch on all non-keyword arguments.
     Collects implementations based on the function name.  Ignores namespaces.
@@ -50,7 +58,7 @@ def dispatch(*types, **kwargs):
     """
     namespace = kwargs.get("namespace", global_namespace)
 
-    types = tuple(types)
+    types_tuple: tuple[type, ...] = tuple(types)  # type: ignore[arg-type]
 
     def _df(func):
         name = func.__name__
@@ -65,7 +73,7 @@ def dispatch(*types, **kwargs):
                 namespace[name] = Dispatcher(name)
             dispatcher = namespace[name]
 
-        dispatcher.add(types, func)
+        dispatcher.add(types_tuple, func)
         return dispatcher
 
     return _df

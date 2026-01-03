@@ -2,6 +2,7 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
+#include <ATen/native/xpu/Blas.h>
 #include <torch/library.h>
 #ifndef AT_PER_OPERATOR_HEADERS
 
@@ -50,9 +51,13 @@ Tensor& addmm_out(
       mat1.dtype(),
       " != ",
       mat2.dtype())
+
   // complex case
-  TORCH_CHECK(
-      !mat1.is_complex(), "Complex datatype matmul is not supported in oneDNN");
+  if (self.is_complex()) {
+    at::native::addmm_complex_out_xpu(self, mat1, mat2, beta, alpha, result);
+
+    return result;
+  }
 
   std::vector<int64_t> result_shape = {mat1.size(0), mat2.size(1)};
   result.resize_(result_shape);
@@ -91,7 +96,8 @@ Tensor& addmm_out(
     // if result and self are the same tensor, we use post op sum.
     bias = self;
   } else {
-    Tensor binary = self.dim() == 1 ? self.unsqueeze(0) : self;
+    Tensor binary = self.dim() < 1 ? self.unsqueeze(0) : self;
+    binary = binary.dim() == 1 ? binary.unsqueeze(0) : binary;
     bool inplace = binary.is_same(result);
     if (inplace) {
       attr.append_post_eltwise(
@@ -154,7 +160,7 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
       ")");
   TORCH_CHECK(
       self.dtype() == mat2.dtype(),
-      "expected self and mat2 to have the same dtype, but got: ",
+      "expected mat1 and mat2 to have the same dtype, but got: ",
       self.dtype(),
       " != ",
       mat2.dtype())
@@ -166,8 +172,11 @@ Tensor& mm_out(const Tensor& self, const Tensor& mat2, Tensor& result) {
     return result;
   }
 
-  TORCH_CHECK(
-      !self.is_complex(), "Complex datatype matmul is not supported in oneDNN");
+  if (self.is_complex()) {
+    at::native::mm_complex_out_xpu(self, mat2, result);
+
+    return result;
+  }
 
   onednn::matmul(result, self, mat2, Tensor(), true, onednn::Attr());
   return result;
@@ -207,9 +216,12 @@ Tensor& baddbmm_out(
       input.sizes());
 
   // complex case
-  TORCH_CHECK(
-      !batch1.is_complex(),
-      "Complex datatype matmul is not supported in oneDNN");
+  if (input.is_complex()) {
+    at::native::baddbmm_complex_out_xpu(
+        input, batch1, batch2, beta, alpha, result);
+
+    return result;
+  }
 
   // general case
   onednn::Attr attr;
@@ -219,7 +231,8 @@ Tensor& baddbmm_out(
   if (beta_ == 0.f) {
     attr.append_post_eltwise(1.f, alpha_, 0.f, attr.kind_with_linear);
   } else {
-    binary = input.dim() < 3 ? input.unsqueeze(0) : input;
+    Tensor binary = input.dim() < 1 ? input.unsqueeze(0) : input;
+    binary = binary.dim() < 3 ? binary.unsqueeze(0) : binary;
     // If input is a 1d tensor need be broadcasted, we need unsqueeze twice.
     binary = binary.dim() < 3 ? binary.unsqueeze_(0) : binary;
     bool inplace = binary.is_same(result);
@@ -255,8 +268,13 @@ Tensor& bmm_out(const Tensor& self, const Tensor& batch2, Tensor& result) {
     return result;
   }
 
-  TORCH_CHECK(
-      !self.is_complex(), "Complex datatype matmul is not supported in oneDNN");
+  // complex case
+  if (self.is_complex()) {
+    at::native::bmm_complex_out_xpu(self, batch2, result);
+
+    return result;
+  }
+
   onednn::matmul(result, self, batch2, at::Tensor(), true, onednn::Attr());
   return result;
 }
@@ -467,4 +485,271 @@ Tensor _weight_int4pack_mm_xpu(
 
   return C;
 }
+
+Tensor& _int_mm_out_xpu(
+    const Tensor& self,
+    const Tensor& mat2,
+    Tensor& result) {
+  TORCH_CHECK(
+      self.dim() == 2,
+      "Expected self to be of dimension 2 but got ",
+      self.dim());
+  TORCH_CHECK(
+      mat2.dim() == 2,
+      "Expected mat2 to be of dimension 2 but got ",
+      mat2.dim());
+  TORCH_CHECK(
+      self.size(1) == mat2.size(0),
+      "self.size(1) needs to match mat2.size(0) but got ",
+      self.size(1),
+      " and ",
+      mat2.size(0));
+
+  TORCH_CHECK(
+      self.dtype() == at::kChar,
+      "Expected self dtype to be of type int8 but got ",
+      self.dtype());
+  TORCH_CHECK(
+      mat2.dtype() == at::kChar,
+      "Expected mat2 dtype to be of type int8 but got ",
+      mat2.dtype());
+  TORCH_CHECK(
+      result.dtype() == at::kInt,
+      "Expected result dtype to be of type kInt but got ",
+      result.dtype());
+  TORCH_CHECK(
+      result.size(0) == self.size(0),
+      "Expected result.size(0) to be ",
+      self.size(0),
+      " but got ",
+      result.size(0));
+  TORCH_CHECK(
+      result.size(1) == mat2.size(1),
+      "Expected result.size(1) to be ",
+      mat2.size(1),
+      " but got ",
+      result.size(1));
+
+  TORCH_CHECK(
+      result.dim() == 2,
+      "Expected result to be of dimension 2 but got ",
+      result.dim());
+
+  TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
+
+  if (result.numel() == 0 || self.size(1) == 0) {
+    return result.zero_();
+  }
+
+  Tensor bias = at::Tensor();
+  Tensor mat2_scales = at::ones({1}, mat2.options().dtype(at::kFloat));
+  Tensor mat2_zero_points = at::Tensor();
+  auto post_op_args = torch::List<std::optional<at::Scalar>>();
+
+  at::native::onednn::quantized_matmul(
+      self.contiguous(),
+      1.0,
+      0,
+      mat2,
+      mat2_scales,
+      mat2_zero_points,
+      bias,
+      result,
+      1.0,
+      0,
+      result.scalar_type(),
+      /*other*/ std::nullopt,
+      /*other scale*/ 1.0,
+      /*other zp*/ 0,
+      /*binary post op*/ "none",
+      /*binary alpha*/ 1.0,
+      /*post_op_name*/ "none",
+      post_op_args,
+      /*post_op_algorithm*/ "none",
+      /*m2_trans*/ true);
+  return result;
+}
+
+Tensor _int_mm_xpu(const Tensor& self, const Tensor& mat2) {
+  Tensor result =
+      at::empty({self.size(0), mat2.size(1)}, self.options().dtype(at::kInt));
+  return _int_mm_out_xpu(self, mat2, result);
+}
+
+Tensor _weight_int8pack_mm_xpu(
+    const Tensor& A,
+    const Tensor& B,
+    const Tensor& scales) {
+  auto M = A.size(0);
+  auto N = B.size(0);
+  auto K = A.size(1);
+
+  TORCH_CHECK(
+      A.dtype() == kBFloat16 || A.dtype() == kHalf || A.dtype() == kFloat,
+      " : expect A to be either 32-bit or 16-bit float tensor.");
+  TORCH_CHECK(A.dim() == 2, __func__, " : expect A to be 2D tensor.");
+  TORCH_CHECK(
+      A.stride(1) == 1, " : A must be contiguous on the last dimension.");
+  TORCH_CHECK(B.dtype() == kChar, " : expect B to be int8 tensor.");
+  TORCH_CHECK(B.is_contiguous(), " : expect B to be contiguous.");
+  TORCH_CHECK(B.size(1) == K, " : expect B.size(1) == ", K);
+
+  TORCH_CHECK(
+      scales.dim() == 1 && scales.size(0) == N,
+      " : expect scales to be 1d tensor with size ",
+      N);
+
+  auto C = at::empty({M, N}, A.options());
+
+  // --- Launch kernel ---
+  Tensor bias = at::Tensor();
+  Tensor mat2_zero_points = at::Tensor();
+  Tensor non_const_scales = scales;
+  auto post_op_args = torch::List<std::optional<at::Scalar>>();
+
+  at::native::onednn::quantized_matmul(
+      A.contiguous(),
+      1.0,
+      0,
+      B,
+      non_const_scales,
+      mat2_zero_points,
+      bias,
+      C,
+      1.0,
+      0,
+      C.scalar_type(),
+      /*other*/ std::nullopt,
+      /*other scale*/ 1.0,
+      /*other zp*/ 0,
+      /*binary post op*/ "none",
+      /*binary alpha*/ 1.0,
+      /*post_op_name*/ "none",
+      post_op_args,
+      /*post_op_algorithm*/ "none",
+      /*m2_trans*/ false);
+
+  return C;
+}
+
+Tensor _bmm_dtype_xpu(
+    const Tensor& batch1,
+    const Tensor& batch2,
+    const at::ScalarType out_dtype) {
+  Tensor out = at::empty(
+      {batch1.size(0), batch1.size(1), batch2.size(2)},
+      batch1.options().dtype(out_dtype));
+  return _bmm_out_dtype_xpu(batch1, batch2, out_dtype, out);
+}
+
+static void out_dtype_checks(
+    const Tensor& mat1,
+    const at::ScalarType out_dtype,
+    const Tensor& out) {
+  TORCH_CHECK(
+      out_dtype == out.scalar_type(),
+      "out_dtype must be the same as the dtype of the provided out tensor");
+  TORCH_CHECK(
+      out_dtype == mat1.scalar_type() ||
+          (out_dtype == at::ScalarType::Float &&
+           (mat1.scalar_type() == at::ScalarType::Half ||
+            mat1.scalar_type() == at::ScalarType::BFloat16)),
+      "out_dtype must be the same as input dtype or fp32 for fp16/bf16 inputs");
+}
+
+Tensor& _bmm_out_dtype_xpu(
+    const Tensor& batch1,
+    const Tensor& batch2,
+    const at::ScalarType out_dtype,
+    Tensor& out) {
+  out_dtype_checks(batch1, out_dtype, out);
+  xpu::bmm_out(batch1, batch2, const_cast<Tensor&>(out));
+  return out;
+}
+
+Tensor _baddbmm_dtype_xpu(
+    const Tensor& self,
+    const Tensor& batch1,
+    const Tensor& batch2,
+    const at::ScalarType out_dtype,
+    const Scalar& beta,
+    const Scalar& alpha) {
+  TORCH_CHECK(
+      self.scalar_type() == out_dtype || self.scalar_type() == batch1.dtype(),
+      "self dtype must match either out_dtype or batch1 dtype");
+  Tensor out = at::empty(
+      {batch1.size(0), batch1.size(1), batch2.size(2)},
+      batch1.options().dtype(out_dtype));
+  return _baddbmm_out_dtype_xpu(
+      self, batch1, batch2, out_dtype, beta, alpha, out);
+}
+
+Tensor& _baddbmm_out_dtype_xpu(
+    const Tensor& self,
+    const Tensor& batch1,
+    const Tensor& batch2,
+    const at::ScalarType out_dtype,
+    const Scalar& beta,
+    const Scalar& alpha,
+    Tensor& out) {
+  out_dtype_checks(batch1, out_dtype, out);
+  xpu::baddbmm_out(
+      self,
+      batch1,
+      batch2,
+      beta,
+      alpha,
+      // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
+      const_cast<Tensor&>(out));
+  return out;
+}
+
+Tensor _mm_dtype_xpu(
+    const Tensor& self,
+    const Tensor& mat2,
+    const at::ScalarType out_dtype) {
+  Tensor result =
+      at::empty({self.size(0), mat2.size(1)}, self.options().dtype(out_dtype));
+  return _mm_dtype_out_xpu(self, mat2, out_dtype, result);
+}
+
+Tensor& _mm_dtype_out_xpu(
+    const Tensor& self,
+    const Tensor& mat2,
+    const at::ScalarType out_dtype,
+    Tensor& out) {
+  out_dtype_checks(self, out_dtype, out);
+  xpu::mm_out(self, mat2, const_cast<Tensor&>(out));
+  return out;
+}
+
+Tensor _addmm_dtype_xpu(
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const at::ScalarType out_dtype,
+    const Scalar& beta,
+    const Scalar& alpha) {
+  TORCH_CHECK(
+      mat1.dim() == 2, "mat1 must be a matrix, got ", mat1.dim(), "-D tensor");
+  TORCH_CHECK(
+      mat2.dim() == 2, "mat2 must be a matrix, got ", mat2.dim(), "-D tensor");
+  Tensor result =
+      at::empty({mat1.size(0), mat2.size(1)}, self.options().dtype(out_dtype));
+  return _addmm_dtype_out_xpu(self, mat1, mat2, out_dtype, beta, alpha, result);
+}
+
+Tensor& _addmm_dtype_out_xpu(
+    const Tensor& self,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const at::ScalarType out_dtype,
+    const Scalar& beta,
+    const Scalar& alpha,
+    Tensor& out) {
+  out_dtype_checks(mat1, out_dtype, out);
+  xpu::addmm_out(self, mat1, mat2, beta, alpha, out);
+  return out;
+}
+
 } // namespace at::native

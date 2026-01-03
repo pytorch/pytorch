@@ -238,6 +238,7 @@ class Dispatcher:
                         "To use a variadic union type place the desired types "
                         "inside of a tuple, e.g., [(int, str)]"
                     )
+                # pyrefly: ignore [bad-specialization]
                 new_signature.append(Variadic[typ[0]])
             else:
                 new_signature.append(typ)
@@ -265,7 +266,7 @@ class Dispatcher:
         return od
 
     def __call__(self, *args, **kwargs):
-        types = tuple([type(arg) for arg in args])
+        types = tuple(type(arg) for arg in args)
         try:
             func = self._cache[types]
         except KeyError as e:
@@ -354,7 +355,7 @@ class Dispatcher:
         self._cache = {}
 
     @property
-    def __doc__(self):
+    def __doc__(self):  # type: ignore[override]
         docs = [f"Multiply dispatched method: {self.name}"]
 
         if self.doc:
@@ -406,6 +407,7 @@ class MethodDispatcher(Dispatcher):
         Dispatcher
     """
 
+    # pyrefly: ignore [bad-override]
     __slots__ = ("obj", "cls")
 
     @classmethod
@@ -420,7 +422,7 @@ class MethodDispatcher(Dispatcher):
         return self
 
     def __call__(self, *args, **kwargs):
-        types = tuple([type(arg) for arg in args])
+        types = tuple(type(arg) for arg in args)
         func = self.dispatch(*types)
         if not func:
             raise NotImplementedError(

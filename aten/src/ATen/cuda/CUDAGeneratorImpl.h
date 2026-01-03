@@ -96,16 +96,16 @@ struct CUDAGraph;
 struct CUDAGeneratorState : public c10::intrusive_ptr_target {
   uint64_t seed_;
   uint64_t philox_offset_per_thread_;
-  uint32_t offset_intragraph_;
+  uint64_t offset_intragraph_;
   bool capturing_{};
   std::unordered_set<cuda::CUDAGraph*> registered_graphs_;
-  at::TensorBase seed_extragraph_{};
-  at::TensorBase offset_extragraph_{};
+  at::TensorBase seed_extragraph_;
+  at::TensorBase offset_extragraph_;
 
   CUDAGeneratorState(
       uint64_t seed = default_rng_seed_val,
       uint64_t philox_offset_per_thread = 0,
-      uint32_t offset_intragraph = 0)
+      uint64_t offset_intragraph = 0)
       : seed_(seed),
         philox_offset_per_thread_(philox_offset_per_thread),
         offset_intragraph_(offset_intragraph) {}
@@ -167,7 +167,7 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   CUDAGeneratorImpl* clone_impl() const override;
 
   c10::intrusive_ptr<CUDAGeneratorState> state_;
-  std::atomic_flag no_reset_rnn_state_{};
+  std::atomic_flag no_reset_rnn_state_;
 };
 
 namespace cuda::detail {

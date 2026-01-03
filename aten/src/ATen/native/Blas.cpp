@@ -9,6 +9,7 @@
 #include <ATen/native/mkldnn/Matmul.h>
 #include <ATen/native/mkldnn/Linear.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/GroupedMMUtils.h>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -57,7 +58,7 @@ scalar_t dot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y,
 template<typename scalar_t>
 scalar_t vdot_impl(int64_t n, const scalar_t *x, int64_t incx, const scalar_t *y, int64_t incy);
 
-static constexpr inline bool lda_cond(int64_t m, int64_t n, int64_t lda) {
+static constexpr bool lda_cond(int64_t m, int64_t n, int64_t lda) {
   return n == 1 || lda >= std::max<int64_t>(1L, m);
 }
 
@@ -246,6 +247,10 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
       mat1.sizes()[0], "x", mat1.sizes()[1], " and ", mat2.sizes()[0], "x", mat2.sizes()[1], ")");
 
   TORCH_INTERNAL_ASSERT((scale_a.numel() == 1 && scale_b.numel() == 1), "Now _scaled_mm only supports per-tensor scaling for CPU backend.");
+  TORCH_CHECK(
+      !scale_result ||
+          (scale_result->numel() == 1 && scale_result->scalar_type() == kFloat),
+      "scale_result must be a float scalar");
   TORCH_CHECK(!bias || bias->numel() == mat2.sizes()[1], "Bias must be size ", mat2.sizes()[1],
        " but got ", bias->numel());
 
@@ -262,11 +267,21 @@ _scaled_mm_out_cpu_emulated(const Tensor& mat1, const Tensor& mat2,
 
   float input_scale = scale_a.item<float>();
   float weight_scale = scale_b.item<float>();
+  float output_scale = 1.0f;
+  if (scale_result.has_value() &&
+      (*out_dtype == ScalarType::Float8_e4m3fn ||
+       *out_dtype == ScalarType::Float8_e5m2)) {
+    output_scale = scale_result.value().item<float>();
+  }
   auto fp32_mat1 = at::mul(mat1.to(kFloat), input_scale);
   auto fp32_mat2 = at::mul(mat2_c.to(kFloat), weight_scale);
   auto out_tmp = at::matmul(fp32_mat1, fp32_mat2);
   if (bias) {
     out_tmp.add_(bias.value());
+  }
+  if (*out_dtype == ScalarType::Float8_e4m3fn ||
+      *out_dtype == ScalarType::Float8_e5m2) {
+    out_tmp = at::mul(out_tmp, 1 / output_scale);
   }
   out_tmp = out_tmp.to(out.scalar_type());
   out.copy_(out_tmp);
@@ -282,7 +297,7 @@ _scaled_mm_out_cpu(const Tensor& mat1, const Tensor& mat2,
           std::optional<c10::ScalarType> out_dtype,
           bool use_fast_accum,
           Tensor& out) {
-#if AT_MKLDNN_ENABLED()
+#if AT_MKLDNN_ENABLED() && !defined(__powerpc__)
   if (at::globalContext().userEnabledMkldnn()) {
     bool mixed_dtype = mat1.scalar_type() != mat2.scalar_type();
     if ((!mixed_dtype && cpuinfo_has_x86_amx_int8()) ||
@@ -316,6 +331,25 @@ _scaled_mm_cpu(const Tensor& mat_a, const Tensor& mat_b,
   const auto out_dtype_ = out_dtype.value_or(mat_a.scalar_type());
   Tensor out = at::empty({0}, mat_a.options().dtype(out_dtype_));
   return _scaled_mm_out_cpu(mat_a, mat_b, scale_a, scale_b, bias, scale_result, out_dtype, use_fast_accum, out);
+}
+
+// TODO(vasiliy, future PR): figure out why we need to declare this function, when
+// other functions that live in ATen/native/*.cpp without declarations
+// or headers work just fine.
+Tensor _grouped_mm(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype);
+
+Tensor _grouped_mm(const Tensor& mat_a, const Tensor& mat_b,
+const std::optional<at::Tensor>& offs,
+const std::optional<at::Tensor>& bias,
+std::optional<c10::ScalarType> out_dtype) {
+  _grouped_mm_validate_inputs(mat_a, mat_b, offs, bias, out_dtype);
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+  return out;
 }
 
 }  // namespace at::native

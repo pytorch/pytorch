@@ -11,13 +11,15 @@ from ..scheduler import (
     SchedulerNode,
 )
 from .cuda.cuda_cpp_scheduling import CUDACPPScheduling
+from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
+from .nv_universal_gemm.nv_universal_gemm_scheduling import NVUniversalGemmScheduling
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
 
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
-    from typing_extensions import TypeAlias
+    from typing import TypeAlias
 
     from sympy import Expr
 
@@ -44,6 +46,8 @@ class CUDACombinedScheduling(BaseScheduling):
         self._triton_scheduling = TritonScheduling(scheduler)
         self._cuda_cpp_scheduling = CUDACPPScheduling(scheduler)
         self._rocm_cpp_scheduling = ROCmCPPScheduling(scheduler)
+        self._cutedsl_scheduling = CuteDSLScheduling(scheduler)
+        self._nv_universal_gemm_scheduling = NVUniversalGemmScheduling(scheduler)
 
     def get_backend_features(self, device: torch.device) -> OrderedSet[BackendFeature]:
         return self._triton_scheduling.get_backend_features(device)
@@ -53,6 +57,10 @@ class CUDACombinedScheduling(BaseScheduling):
             return self._cuda_cpp_scheduling
         if self._rocm_cpp_scheduling.is_rocm_cpp_template(node):
             return self._rocm_cpp_scheduling
+        if self._cutedsl_scheduling.is_cutedsl_template(node):
+            return self._cutedsl_scheduling
+        if self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node):
+            return self._nv_universal_gemm_scheduling
         return self._triton_scheduling
 
     def can_fuse_vertical(
@@ -60,6 +68,20 @@ class CUDACombinedScheduling(BaseScheduling):
     ) -> bool:
         if self._cuda_cpp_scheduling.can_fuse_vertical(node1, node2):
             return True
+        elif self._cuda_cpp_scheduling.is_cuda_cpp_template(
+            node1
+        ) or self._cuda_cpp_scheduling.is_cuda_cpp_template(node2):
+            return False
+        # CuteDSL doesn't support vertical fusion currently
+        elif self._cutedsl_scheduling.is_cutedsl_template(
+            node1
+        ) or self._cutedsl_scheduling.is_cutedsl_template(node2):
+            return False
+        # NVIDIA Universal GEMM doesn't support vertical fusion currently
+        elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(
+            node1
+        ) or self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node2):
+            return False
         return self._triton_scheduling.can_fuse_vertical(node1, node2)
 
     def can_fuse_horizontal(
@@ -68,6 +90,14 @@ class CUDACombinedScheduling(BaseScheduling):
         for node in (node1, node2):
             if self._cuda_cpp_scheduling.is_cuda_cpp_template(node):
                 return self._cuda_cpp_scheduling.can_fuse_horizontal(
+                    node1, node2
+                )  # always False at the moment
+            if self._cutedsl_scheduling.is_cutedsl_template(node):
+                return self._cutedsl_scheduling.can_fuse_horizontal(
+                    node1, node2
+                )  # always False at the moment
+            if self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node):
+                return self._nv_universal_gemm_scheduling.can_fuse_horizontal(
                     node1, node2
                 )  # always False at the moment
         return self._triton_scheduling.can_fuse_horizontal(node1, node2)
@@ -84,7 +114,6 @@ class CUDACombinedScheduling(BaseScheduling):
         prologue_nodes: Sequence[BaseSchedulerNode],
     ) -> Optional[str]:
         if self._cuda_cpp_scheduling.is_cuda_cpp_template(template_node):
-            assert not epilogue_nodes
             assert not prologue_nodes
             return self._cuda_cpp_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
@@ -95,10 +124,29 @@ class CUDACombinedScheduling(BaseScheduling):
             return self._rocm_cpp_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
+        elif self._cutedsl_scheduling.is_cutedsl_template(template_node):
+            # TODO remove this when we add epilogue support
+            assert not epilogue_nodes
+            assert not prologue_nodes
+            return self._cutedsl_scheduling.codegen_template(
+                template_node, epilogue_nodes, prologue_nodes
+            )
+        elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(
+            template_node
+        ):
+            # NVIDIA Universal GEMM doesn't support epilogue/prologue fusion yet
+            assert not epilogue_nodes
+            assert not prologue_nodes
+            return self._nv_universal_gemm_scheduling.codegen_template(
+                template_node, epilogue_nodes, prologue_nodes
+            )
         else:
             return self._triton_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
+
+    def codegen_mix_order_reduction(self, node):
+        return self._triton_scheduling.codegen_mix_order_reduction(node)
 
     def codegen_node(self, node: Union[FusedSchedulerNode, SchedulerNode]) -> None:
         return self._triton_scheduling.codegen_node(node)
@@ -121,10 +169,13 @@ class CUDACombinedScheduling(BaseScheduling):
         return self._triton_scheduling.benchmark_codegened_module(module)
 
     def generate_kernel_code_from_nodes(
-        self, nodes: Sequence[Any], benchmark_kernel: bool = False
+        self,
+        nodes: Sequence[Any],
+        benchmark_kernel: bool = False,
+        hint_override: Optional[int] = None,
     ) -> str:
         return self._triton_scheduling.generate_kernel_code_from_nodes(
-            nodes, benchmark_kernel
+            nodes, benchmark_kernel, hint_override=hint_override
         )
 
     def benchmark_combo_kernel(

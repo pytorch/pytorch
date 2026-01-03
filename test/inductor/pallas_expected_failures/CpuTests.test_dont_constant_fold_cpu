@@ -1,0 +1,6 @@
+ERROR
+           ^^^^^^^^^^^^^^^^^^^
+  File "/home/oulgen/dev/pytorch/test/inductor/test_torchinductor.py", line 14418, in test_dont_constant_fold
+    FileCheck().check("cpp_fused_add_mul").run(code)
+RuntimeError: Expected to find "cpp_fused_add_mul" but did not find it
+Searched string:

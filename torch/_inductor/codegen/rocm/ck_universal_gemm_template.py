@@ -17,7 +17,7 @@ from torch._inductor.codegen.rocm.rocm_kernel import ROCmTemplateKernel
 from torch._inductor.ir import Buffer, Layout
 from torch._inductor.runtime.runtime_utils import next_power_of_2
 
-from ...utils import IndentedBuffer, try_import_ck_lib
+from ...utils import IndentedBuffer, is_dynamic, try_import_ck_lib
 
 
 _, gen_ops_library, gen_ops_preselected, CKGemmOperation = try_import_ck_lib()
@@ -510,7 +510,7 @@ class CKGemmTemplate(CKTemplate):
                         torch.cuda.get_device_properties(X_meta.device).warp_size,
                     )
                 except Exception as e:
-                    log.debug(
+                    log.debug(  # noqa: G200
                         "Failed to prefetch_stages for %s with exception %s", op.name, e
                     )
                     # be conservative here and disable the op
@@ -547,7 +547,7 @@ class CKGemmTemplate(CKTemplate):
         # Define the mapping of versions to stages
         version_to_stages = {1: 1, 3: 2, 4: 4, 5: 3}
         # Get the stages for the given version
-        stages = version_to_stages.get(version, None)
+        stages = version_to_stages.get(version)
         if stages is None:
             # This means we're at stage 2, and this requires computation
             # See github.com/ROCm/composable_kernel/blob/d6a4605/include/ck/tensor_operation/gpu/block/blockwise_gemm_pipeline_xdlops_v2.hpp#L143 # noqa: B950
@@ -590,9 +590,11 @@ class CKGemmTemplate(CKTemplate):
                     arg = f"/* {field_name} */ Tuple<{tuple_elements}>"
                 else:  # tile shape
                     arg = f"/* {field_name} */ S<{tuple_elements}>"
+                # pyrefly: ignore [bad-argument-type]
                 template_params.append(arg)
             else:
                 if field_value is not None:
+                    # pyrefly: ignore [bad-argument-type]
                     template_params.append(f"/* {field_name} */ {field_value}")
         operation_name = op.name().replace("(", "").replace(",", "").replace(")", "")
         return self._template_from_string(template_definition).render(
@@ -612,9 +614,9 @@ class CKGemmTemplate(CKTemplate):
         """
         The primary entry point for the code rendering process used in this template.
         """
-        epilogue_nodes = kwargs.get("epilogue_nodes", None)
+        epilogue_nodes = kwargs.get("epilogue_nodes")
         assert epilogue_nodes is None or 0 == len(epilogue_nodes)
-        template_buffer_node = kwargs.get("template_buffer_node", None)
+        template_buffer_node = kwargs.get("template_buffer_node")
         if template_buffer_node is not None:
             self.output_node = template_buffer_node
         # input nodes:
@@ -887,6 +889,8 @@ class CKGemmTemplate(CKTemplate):
         M = X_meta.size[-2]
         K = X_meta.size[-1]
         N = W_meta.size[-1]
+        if is_dynamic(*self.input_nodes):
+            return [1]
         if K // max(M, N) < config.rocm.split_k_threshold:
             return [1]
         # if the user is telling us which kBatches to sweep, just use those
@@ -935,6 +939,7 @@ class CKGemmTemplate(CKTemplate):
         for o in rops:
             kBatches = self._get_kBatch(o)
             for kBatch in kBatches:
+                # pyrefly: ignore [bad-argument-type]
                 ops.append(InductorROCmOp(op=o, kBatch=kBatch))
 
         filtered_instances = list(filter(lambda op: self.filter_op(op), ops))
@@ -945,9 +950,9 @@ class CKGemmTemplate(CKTemplate):
         chosen_instances = (
             random.sample(
                 filtered_instances,
-                min(len(filtered_instances), config.rocm.n_max_profiling_configs),
+                min(len(filtered_instances), config.rocm.ck_max_profiling_configs),
             )
-            if config.rocm.n_max_profiling_configs
+            if config.rocm.ck_max_profiling_configs
             else filtered_instances
         )
         log.debug(

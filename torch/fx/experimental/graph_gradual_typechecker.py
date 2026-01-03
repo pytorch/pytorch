@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 import itertools
 import operator
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, TypeVar
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 import sympy
@@ -82,7 +83,7 @@ def expand_to_tensor_dim(t, n):
 def broadcast_types(t1, t2):
     """
     Applies broadcasting to both given types such that they
-    become consistent with eachother and returns two new
+    become consistent with each other and returns two new
     resulting types
     """
 
@@ -100,11 +101,11 @@ def broadcast_types(t1, t2):
         # We make the types the same length which is the first requirement
         # for consistency
         if s1 > s2:
-            for i in range(s1 - s2):
+            for _ in range(s1 - s2):
                 new_t2.insert(0, 1)
 
         elif s2 > s1:
-            for i in range(s2 - s1):
+            for _ in range(s2 - s1):
                 new_t1.insert(0, 1)
 
         # we replace occurrences of "1" with each tensor with
@@ -180,12 +181,12 @@ def add_inference_rule(n: Node):
     t2 = n.args[1].type
 
     # handle scalar addition
-    if t1 == int and isinstance(t2, TensorType):
+    if t1 is int and isinstance(t2, TensorType):
         n.type = t2
         return n.type
 
     # handle scalar addition
-    elif t2 == int and isinstance(t1, TensorType):
+    elif t2 is int and isinstance(t1, TensorType):
         n.type = t1
         return n.type
 
@@ -249,7 +250,7 @@ def transpose_inference_rule(n: Node):
     We check that dimensions for the transpose operations
     are within range of the tensor type of the node
     """
-    if n.target == torch.transpose:
+    if n.target is torch.transpose:
         assert isinstance(n.args[0], Node)
         t = n.args[0].type
 
@@ -673,7 +674,7 @@ class GraphTypeChecker:
             return n.type
 
         elif n.op == "call_function":
-            if n.target == getattr:
+            if n.target is getattr:
                 assert getattr in _INFERENCE_RULES
                 return _INFERENCE_RULES[n.target](n, self.traced)
 
@@ -846,7 +847,7 @@ def flatten_refinement_rule(n: Node):
 @register_algebraic_expressions_inference_rule(Conv2d)
 def conv_rule(n: Node, module_instance):
     """
-    Represents the outout in terms of an algrbraic expression w.r.t
+    Represents the output in terms of an algrbraic expression w.r.t
     the input when possible
     """
     assert isinstance(n.args[0], Node)
@@ -942,15 +943,11 @@ class Refine:
         if n.op == "call_function":
             if n.target in _REFINEMENT_RULES:
                 self.constraints += _REFINEMENT_RULES[n.target](n)
-            else:
-                pass
 
         if n.op == "call_module":
             module_instance = self.traced.get_submodule(n.target)
             if type(module_instance) in _REFINEMENT_RULES:
                 self.constraints += _REFINEMENT_RULES[type(module_instance)](n)
-            else:
-                pass
 
         if n.op == "output":
 
@@ -959,24 +956,17 @@ class Refine:
 
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
-
-        else:
-            pass
 
     def infer_symbolic_relations(self, n: Node):
         n.type = self.convert_to_sympy_symbols(n.type)
         if n.op == "call_function":
             if n.target in _RULES:
                 return _RULES[n.target](n)
-            else:
-                pass
 
         if n.op == "call_module":
             module_instance = self.traced.get_submodule(n.target)
             if type(module_instance) in _RULES:
                 return _RULES[type(module_instance)](n, module_instance)
-            else:
-                pass
 
         if n.op == "output":
 
@@ -985,9 +975,6 @@ class Refine:
 
             n.type = torch.fx.node.map_arg(n.args[0], get_node_type)
             return n.type
-
-        else:
-            pass
 
 
 def get_parameter(traced, target: str):

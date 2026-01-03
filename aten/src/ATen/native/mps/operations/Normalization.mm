@@ -84,6 +84,9 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
                                                          Tensor& output,
                                                          Tensor& save_mean,
                                                          Tensor& save_var) {
+  TORCH_CHECK_NOT_IMPLEMENTED(self.scalar_type() != kLong, "Long batch norm is not supported with MPS");
+  TORCH_CHECK_NOT_IMPLEMENTED(!c10::isComplexType(self.scalar_type()),
+                              "Batch norm for complex is not supported for MPS");
   using namespace at::native::mps;
   struct CachedGraph : public MPSCachedGraph {
     CachedGraph(MPSGraph* graph) : MPSCachedGraph(graph) {}
@@ -103,7 +106,8 @@ std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_mps_out(const Tensor& self,
 
   const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
   const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
-  TORCH_CHECK(has_running_mean == has_running_var);
+  TORCH_CHECK_VALUE(has_running_mean == has_running_var,
+                    "running_mean and running_var must either both be None or neither be None");
 
   const bool has_weight = (weight_opt.has_value() && weight_opt->defined());
   const bool has_bias = (bias_opt.has_value() && bias_opt->defined());
@@ -587,14 +591,19 @@ std::tuple<Tensor, Tensor, Tensor> batch_norm_backward_mps(const Tensor& grad_ou
 
   const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
   const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
-  TORCH_CHECK(has_running_mean == has_running_var);
+  TORCH_CHECK_VALUE(has_running_mean == has_running_var,
+                    "running_mean and running_var must either both be None or neither be None");
   const bool has_save_mean = (save_mean_opt.has_value() && save_mean_opt->defined());
   const bool has_save_var = (save_var_opt.has_value() && save_var_opt->defined());
-  TORCH_CHECK(has_save_mean == has_save_var);
+  TORCH_CHECK_VALUE(has_save_mean == has_save_var,
+                    "save_mean and save_var must either both be None or neither be None");
 
   const bool has_weight = (weight_opt.has_value() && weight_opt->defined());
 
-  if (grad_input.numel() == 0) {
+  bool any_grad_needed = (grad_input_mask[0] && grad_input.numel() > 0) ||
+      (grad_input_mask[1] && grad_weight.numel() > 0) || (grad_input_mask[2] && grad_bias.numel() > 0);
+
+  if (!any_grad_needed) {
     return std::make_tuple(grad_input, grad_weight, grad_bias);
   }
 
@@ -912,8 +921,9 @@ std::tuple<Tensor, Tensor, Tensor> layer_norm_mps(const Tensor& input,
   // NOLINTNEXTLINE(bugprone-narrowing-conversions,cppcoreguidelines-narrowing-conversions)
   const int axis = input_ndim - normalized_ndim;
   MPSStream* stream = getCurrentMPSStream();
+  TORCH_CHECK_NOT_IMPLEMENTED(input.scalar_type() != kLong, "Not implemented for long on MPS");
   @autoreleasepool {
-    mps::dispatch_sync_with_rethrow(stream->queue(), ^() {
+    dispatch_sync_with_rethrow(stream->queue(), ^() {
       // which kernel variant to use based on the normalized axis N size
       const int N_READS = 4;
       auto metalType = mps::scalarToMetalTypeString(input);

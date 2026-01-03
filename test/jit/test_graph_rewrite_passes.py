@@ -3,6 +3,7 @@
 import torch
 import torch._C
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
 
 
@@ -59,3 +60,7 @@ class TestGraphRewritePasses(JitTestCase):
         FileCheck().check_not("aten::linear").run(model.graph)
         # make sure it runs
         model(x)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

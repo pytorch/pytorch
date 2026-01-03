@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -29,12 +28,15 @@ class Uniform(Distribution):
         high (float or Tensor): upper range (exclusive).
     """
 
-    # TODO allow (loc,scale) parameterization to allow independent constraints.
-    arg_constraints = {
-        "low": constraints.dependent(is_discrete=False, event_dim=0),
-        "high": constraints.dependent(is_discrete=False, event_dim=0),
-    }
     has_rsample = True
+
+    @property
+    def arg_constraints(self):
+        # TODO allow (loc,scale) parameterization to allow independent constraints.
+        return {
+            "low": constraints.less_than(self.high),
+            "high": constraints.greater_than(self.low),
+        }
 
     @property
     def mean(self) -> Tensor:
@@ -54,9 +56,9 @@ class Uniform(Distribution):
 
     def __init__(
         self,
-        low: Union[Tensor, float],
-        high: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        low: Tensor | float,
+        high: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         self.low, self.high = broadcast_all(low, high)
 
@@ -65,9 +67,6 @@ class Uniform(Distribution):
         else:
             batch_shape = self.low.size()
         super().__init__(batch_shape, validate_args=validate_args)
-
-        if self._validate_args and not torch.lt(self.low, self.high).all():
-            raise ValueError("Uniform is not defined when low>= high")
 
     def expand(self, batch_shape, _instance=None):
         new = self._get_checked_instance(Uniform, _instance)
@@ -79,6 +78,7 @@ class Uniform(Distribution):
         return new
 
     @constraints.dependent_property(is_discrete=False, event_dim=0)
+    # pyrefly: ignore [bad-override]
     def support(self):
         return constraints.interval(self.low, self.high)
 

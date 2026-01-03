@@ -6,6 +6,7 @@
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
 #include <ATen/native/DispatchStub.h>
+#include <c10/core/DeviceType.h>
 #include <c10/core/ScalarType.h>
 
 #include <c10/util/Exception.h>
@@ -340,7 +341,7 @@ inline bool check_grouped_query_attention(sdp_params const& params, bool debug) 
   const auto v_num_heads = params.value.sym_size(-3);
   const bool same_kv_heads = k_num_heads == v_num_heads;
 
-  if (requires_same_num_heads && !(same_kv_heads)){
+  if (requires_same_num_heads && !same_kv_heads){
     if (debug) {
       TORCH_WARN(
           "Both fused kernels require key and value to have the same num_heads and batch_size but got: ",
@@ -503,26 +504,27 @@ inline bool check_last_dim_stride_equals_1_dense(sdp_params const& params, bool 
   if (ignore_singleton_dim){
     qkv_strides_equal_1 = qkv_strides_equal_1 || params.query.sym_size(-1) == 1;
   }
+  bool is_cpu = params.query.device().type() == c10::DeviceType::CPU;
   bool mask_stride_equal_1 = params.attn_mask.has_value()
       ? params.attn_mask.value().sym_stride(-1) == 1
       : true;
-  if (!(qkv_strides_equal_1 && mask_stride_equal_1)) {
+  bool mask_stride_valid = is_cpu ? true : mask_stride_equal_1;
+  if (!(qkv_strides_equal_1 && mask_stride_valid)) {
     if (debug) {
-      std::ostringstream epilogue_message;
+      std::ostringstream message;
+      message
+          << "All fused kernels require the last dimension of the input to have stride 1. ";
+      message << "Got Query.stride(-1): " << params.query.sym_stride(-1)
+              << ", Key.stride(-1): " << params.key.sym_stride(-1)
+              << ", Value.stride(-1): " << params.value.sym_stride(-1);
+
       if (params.attn_mask.has_value()) {
-        epilogue_message << ", Attn_mask.stride(-1): "
-                         << params.attn_mask.value().sym_stride(-1);
+        message
+            << ", Attn_mask.stride(-1): "
+            << params.attn_mask.value().sym_stride(-1)
+            << " (GPU backends require attn_mask's last dimension to have stride 1 while the CPU does not).";
       }
-      epilogue_message << " instead.";
-      TORCH_WARN(
-          "All fused kernels require the last dimension of the input to have stride 1. ",
-          "Got Query.stride(-1): ",
-          params.query.sym_stride(-1),
-          ", Key.stride(-1): ",
-          params.key.sym_stride(-1),
-          ", Value.stride(-1): ",
-          params.value.sym_stride(-1),
-          epilogue_message.str());
+      TORCH_WARN(message.str());
     }
 
     return false;

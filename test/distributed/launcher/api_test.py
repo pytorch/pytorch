@@ -137,7 +137,7 @@ class ElasticLaunchTest(unittest.TestCase):
         self.test_dir = tempfile.mkdtemp()
 
         # remove any lingering environment variables.
-        for env in os.environ.keys():
+        for env in os.environ.keys():  # noqa:SIM118
             if env.startswith("PET_"):
                 del os.environ[env]
 
@@ -411,3 +411,10 @@ class ElasticLaunchTest(unittest.TestCase):
                 launch_agent(config, simple_rank_scale, [])
             rdzv_handler_mock.shutdown.assert_called_once()
             record_event_mock.assert_called_once()
+
+
+if __name__ == "__main__":
+    raise RuntimeError(
+        "This test is not currently used and should be "
+        "enabled in discover_tests.py if required."
+    )

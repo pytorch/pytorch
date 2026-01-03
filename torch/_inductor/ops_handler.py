@@ -6,7 +6,16 @@ import itertools
 import re
 import warnings
 from io import StringIO
-from typing import Any, Callable, Generic, Literal, NamedTuple, Optional, TypeVar, Union
+from typing import (
+    Any,
+    Generic,
+    Literal,
+    NamedTuple,
+    Optional,
+    TYPE_CHECKING,
+    TypeVar,
+    Union,
+)
 from unittest.mock import patch
 
 import sympy
@@ -18,8 +27,12 @@ from ..utils._ordered_set import OrderedSet
 from .utils import IndentedBuffer, reduction_num_outputs, sympy_index_symbol, sympy_str
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
+
 T = TypeVar("T")
-StoreMode = Optional[Literal["atomic_add"]]
+StoreMode = Optional[Literal["atomic_add", "tma"]]
 ReductionType = Literal[
     "argmax",
     "argmin",
@@ -30,7 +43,9 @@ ReductionType = Literal[
     "min",
     "prod",
     "sum",
+    "dot",
     "xor_sum",
+    "online_softmax_reduce",
 ]
 
 
@@ -284,6 +299,15 @@ class OpsHandler(Generic[T]):
         sorter_indices: Optional[T] = None,
     ) -> T:
         # See [Note: Inductor bucketize op]
+        raise NotImplementedError
+
+    def partial_accumulate(
+        self,
+        name: str,
+        reduction_type: ReductionType,
+        value: T,
+        extra_meta: dict[str, Any],
+    ) -> None:
         raise NotImplementedError
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -686,6 +710,10 @@ class OpsHandler(Generic[T]):
         raise NotImplementedError
 
     # triton-only
+    def dot(self, x: T, y: T) -> T:
+        raise NotImplementedError
+
+    # triton-only
     def inline_asm_elementwise(
         self,
         *inputs: T,
@@ -703,6 +731,9 @@ class OpsHandler(Generic[T]):
 
     def placeholder(self, index: int) -> T:
         """This is a fake op used in analysis but not codegen"""
+        raise NotImplementedError
+
+    def device_assert_async(self, cond: T, msg: str) -> T:
         raise NotImplementedError
 
 
@@ -1145,3 +1176,8 @@ class SimpleCSEHandler(WrapperHandler):
         val = getattr(self._inner, name)(*args, **kwargs)
         self.cse_cache[key] = val
         return val
+
+    def device_assert_async(self, *args, **kwargs) -> None:
+        raise NotImplementedError(
+            f"{type(self).__name__}: device_assert_async should be handled by CSEProxy"
+        )

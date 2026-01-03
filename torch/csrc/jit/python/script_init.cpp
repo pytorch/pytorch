@@ -272,7 +272,7 @@ static void checkMutableFunctionDefault(
         << "Mutable default parameters are not supported because Python binds them to the function"
         << " and they persist across function calls.\n As a workaround, make the default None and instantiate"
         << " the default parameter within the body of the function. Found "
-        << def_arg.get_type() << " on parameter " << arg.name());
+        << py::type::handle_of(def_arg) << " on parameter " << arg.name());
   }
 }
 
@@ -497,7 +497,7 @@ static bool ivalue_tags_match(const Module& lhs, const Module& rhs) {
     if (item.a.isPtrType()) {
       // uncomment to debug type matching errors
       // std::cout << "MATCHING " << /*item.a <<*/ "(" << *item.a.type() << ") "
-      //          << item.a.internalToPointer() << " " << /*item.b <<*/ " ("
+      //          << item.a.internalToPointer() << ' ' << /*item.b <<*/ " ("
       //          << *item.b.type() << ") " << item.b.internalToPointer() <<
       //          "\n";
 
@@ -902,7 +902,7 @@ void initJitScriptBindings(PyObject* module) {
                     std::stringstream err;
                     err << "Tried to deepcopy object ";
                     if (auto qualname = class_type->name()) {
-                      err << qualname->qualifiedName() << " ";
+                      err << qualname->qualifiedName() << ' ';
                     }
                     err << "which does not have a __setstate__ method defined!";
                     throw std::runtime_error(err.str());
@@ -912,7 +912,7 @@ void initJitScriptBindings(PyObject* module) {
                 std::stringstream err;
                 err << "Tried to deepcopy object ";
                 if (auto qualname = self.type()->name()) {
-                  err << qualname->qualifiedName() << " ";
+                  err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
                 throw std::runtime_error(err.str());
@@ -929,7 +929,7 @@ void initJitScriptBindings(PyObject* module) {
                 std::stringstream err;
                 err << "Tried to serialize object ";
                 if (auto qualname = self.type()->name()) {
-                  err << qualname->qualifiedName() << " ";
+                  err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __getstate__ method defined!";
                 throw std::runtime_error(err.str());
@@ -966,7 +966,7 @@ void initJitScriptBindings(PyObject* module) {
                 std::stringstream err;
                 err << "Tried to deserialize object ";
                 if (auto qualname = class_type->name()) {
-                  err << qualname->qualifiedName() << " ";
+                  err << qualname->qualifiedName() << ' ';
                 }
                 err << "which does not have a __setstate__ method defined!";
                 throw std::runtime_error(err.str());
@@ -1430,7 +1430,7 @@ void initJitScriptBindings(PyObject* module) {
               return StrongFunctionPtr(std::move(self), fn);
             } else {
               throw AttributeError(
-                  "'CompilationUnit' has no attribute '%s'", name.c_str());
+                  fmt::format("'CompilationUnit' has no attribute '{}'", name));
             }
           })
       .def(
@@ -1485,12 +1485,30 @@ void initJitScriptBindings(PyObject* module) {
           "__call__",
           [](py::args args, const py::kwargs& kwargs) {
             HANDLE_TH_ERRORS
-            // see: [pybind11 varargs]
             auto strongPtr = py::cast<StrongFunctionPtr>(args[0]);
-            Function& callee = *strongPtr.function_;
-            py::object result = invokeScriptFunctionFromPython(
-                callee, tuple_slice(std::move(args), 1), kwargs);
-            return result;
+            if (py::module::import("torch")
+                    .attr("compiler")
+                    .attr("is_exporting")()
+                    .cast<bool>()) {
+              TORCH_INTERNAL_ASSERT(
+                  py::hasattr(args[0], py::str("_torchdynamo_inline")),
+                  "During PT2 exporting, we encountered TorchScripted function",
+                  strongPtr.function_->name(),
+                  "When tracing through it, we cannot find its _torchdynamo_inline attribute, ",
+                  "which stores non scripted kcallable. ",
+                  "Please file an issue to PyTorch if you see this error.");
+
+              // remove the function itself with args[1:]
+              py::slice slice0(1, args.size(), 1);
+              return args[0].attr("_torchdynamo_inline")(
+                  *args[slice0], **kwargs);
+            } else {
+              // see: [pybind11 varargs]
+              Function& callee = *strongPtr.function_;
+              py::object result = invokeScriptFunctionFromPython(
+                  callee, tuple_slice(std::move(args), 1), kwargs);
+              return result;
+            }
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def(
@@ -1590,12 +1608,29 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "__call__",
           [](py::args args, const py::kwargs& kwargs) {
-            // see: [pybind11 varargs]
             HANDLE_TH_ERRORS
-            Method& method = py::cast<Method&>(args[0]);
-
-            return invokeScriptMethodFromPython(
-                method, tuple_slice(std::move(args), 1), kwargs);
+            if (py::module::import("torch")
+                    .attr("compiler")
+                    .attr("is_exporting")()
+                    .cast<bool>() &&
+                // TODO: fix all cases where ScriptMethod doesn't have
+                // __wrapped__, which is the non-scripted original method. E.g.
+                // it seems the top-level script module's scriptMethod doesn't
+                // have __wrapped__ attributes:
+                //  class M(torch.nn.Module):
+                //    def forward(self, x):
+                //        return x.cos() + x.sin()
+                //  traced_module = torch.jit.trace(M(), example_inputs=inps)
+                // , where traced_module.forward is a ScriptMethod but doesn't
+                // have __wrapped__.
+                py::hasattr(args[0], "__wrapped__")) {
+              return args[0].attr("__wrapped__")(*args, **kwargs);
+            } else {
+              // see: [pybind11 varargs]
+              Method& method = py::cast<Method&>(args[0]);
+              return invokeScriptMethodFromPython(
+                  method, tuple_slice(std::move(args), 1), kwargs);
+            }
             END_HANDLE_TH_ERRORS_PYBIND
           })
       .def_property_readonly("graph", &Method::graph)

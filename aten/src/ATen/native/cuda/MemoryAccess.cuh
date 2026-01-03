@@ -48,7 +48,7 @@ struct static_unroll {
 template<template<int i> typename func, int end>
 struct static_unroll<func, end, end> {
   template<typename... Args>
-  static inline C10_HOST_DEVICE void with_args(Args... args) {}
+  static inline C10_HOST_DEVICE void with_args(Args... /*args*/) {}
 };
 
 // helper structs to be used with static_unroll to load arguments
@@ -187,6 +187,30 @@ template <int vec_size, typename scalar_t>
 __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_ptr, uint32_t offset) {
   using vec_t = aligned_vector<scalar_t, vec_size>;
   auto *from = reinterpret_cast<const vec_t *>(base_ptr);
+#if defined(USE_ROCM) && defined(__gfx942__)
+  using longx2 = __attribute__((__vector_size__(4*sizeof(int)))) int;
+  if constexpr (sizeof(vec_t) == sizeof(int)) {
+   union {
+     vec_t v;
+     int   i;
+   } tmpt = { .i = __builtin_nontemporal_load(reinterpret_cast<const int *>(&(from[offset]))) };
+   return tmpt.v;
+  }
+  else if constexpr (sizeof(vec_t) == sizeof(long)) {
+   union {
+     vec_t v;
+     long   i;
+   } tmpt = { .i = __builtin_nontemporal_load(reinterpret_cast<const long *>(&(from[offset]))) };
+   return tmpt.v;
+  }
+  else if constexpr (sizeof(vec_t) == sizeof(longx2)) {
+   union {
+     vec_t v;
+     longx2  i;
+   } tmpt = { .i = __builtin_nontemporal_load(reinterpret_cast<const longx2 *>(&(from[offset]))) };
+   return tmpt.v;
+  }
+#endif
   return from[offset];
 }
 
@@ -346,7 +370,7 @@ struct vectorized {
 
 #ifdef USE_ROCM
 // This is similar to vectorized policy above, but this one supports
-// heterogenous input tensor types as templated parameters.
+// heterogeneous input tensor types as templated parameters.
 // Its use should be limited to frequently used heterogeneous data types
 // as each instantiation will generate a separate kernel, leading to code
 // bloating if applied to all combinations supported in PyTorch. Assumption: all
@@ -516,7 +540,7 @@ inline C10_HOST_DEVICE int can_vectorize_up_to(char *pointer) {
 template<int i>
 struct can_vectorize_up_to_helper {
   template <typename array_t, typename traits>
-  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits _) {
+  static C10_HOST_DEVICE void apply(int &result, array_t pointers, traits /*_*/) {
     using arg_t = typename traits::template arg<i>::type;
     // `pointers` hold the data_ptr for tensors [output, input0, input1, ...], so we
     // need a +1 offset to get the input

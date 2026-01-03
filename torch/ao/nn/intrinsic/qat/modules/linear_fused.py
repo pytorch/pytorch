@@ -76,9 +76,6 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         init.uniform_(self.bn.weight)
         init.zeros_(self.bn.bias)
 
-    def reset_parameters(self):
-        super().reset_parameters()
-
     def update_bn_stats(self):
         self.freeze_bn = False
         self.bn.training = True
@@ -147,10 +144,11 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
     def from_float(cls, mod, use_precomputed_fake_quant=False):
         r"""Create a qat module from a float module or qparams_dict
 
-        Args: `mod' a float module, either produced by torch.ao.quantization
-        utilities or directly from user
+        Args:
+            mod: A float module, either produced by torch.ao.quantization
+                utilities or directly from the user.
         """
-        assert type(mod) == nni.LinearBn1d, (
+        assert type(mod) is nni.LinearBn1d, (
             "qat."
             + cls.__name__
             + ".from_float only works for "
@@ -169,13 +167,13 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
             False,
             qconfig,
         )
-        qat_linearbn.weight = linear.weight
-        qat_linearbn.bias = linear.bias
-        qat_linearbn.bn.weight = bn.weight
-        qat_linearbn.bn.bias = bn.bias
-        qat_linearbn.bn.running_mean = bn.running_mean
-        qat_linearbn.bn.running_var = bn.running_var
-        qat_linearbn.bn.num_batches_tracked = bn.num_batches_tracked
+        qat_linearbn.weight = linear.weight  # type: ignore[assignment]
+        qat_linearbn.bias = linear.bias  # type: ignore[assignment]
+        qat_linearbn.bn.weight = bn.weight  # type: ignore[assignment]
+        qat_linearbn.bn.bias = bn.bias  # type: ignore[assignment]
+        qat_linearbn.bn.running_mean = bn.running_mean  # type: ignore[assignment]
+        qat_linearbn.bn.running_var = bn.running_var  # type: ignore[assignment]
+        qat_linearbn.bn.num_batches_tracked = bn.num_batches_tracked  # type: ignore[assignment]
         return qat_linearbn
 
     def to_float(self):

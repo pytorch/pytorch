@@ -57,7 +57,9 @@ C10_DECLARE_bool(caffe2_use_fatal_for_enforce);
 
 namespace c10 {
 
+#if !defined(C10_NODEPRECATED)
 using std::string;
+#endif
 
 // Functions that we use for initialization.
 C10_API bool InitCaffeLogging(int* argc, char** argv);
@@ -77,7 +79,7 @@ C10_API void UpdateLoggingLevelsFromFlags();
     const char* msg,
     const void* caller = nullptr);
 
-[[noreturn]] C10_API inline void ThrowEnforceNotMet(
+[[noreturn]] inline void ThrowEnforceNotMet(
     const char* file,
     const int line,
     const char* condition,
@@ -100,7 +102,7 @@ C10_API void UpdateLoggingLevelsFromFlags();
     const char* msg,
     const void* caller = nullptr);
 
-[[noreturn]] C10_API inline void ThrowEnforceFiniteNotMet(
+[[noreturn]] inline void ThrowEnforceFiniteNotMet(
     const char* file,
     const int line,
     const char* condition,
@@ -305,10 +307,11 @@ class C10_API EventSampledHandler {
 
 // Must be called in the main thread before any other threads are spawned.
 C10_API void InitEventSampledHandlers(
-    std::vector<
-        std::pair<std::string_view, std::unique_ptr<EventSampledHandler>>>);
+    std::vector<std::pair<
+        std::string_view,
+        std::unique_ptr<EventSampledHandler>>> /*handlers*/);
 C10_API const std::unique_ptr<EventSampledHandler>& GetEventSampledHandler(
-    std::string_view);
+    std::string_view /*event*/);
 
 /**
  * Very lightweight logging for the first time API usage. It's beneficial for

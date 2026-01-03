@@ -74,13 +74,9 @@ float reduce(vec::VectorizedN<Half, kF16RegistersPerIteration>& x) {
     }
   });
   const auto [t0, t1] = vec::convert_half_float(x[0]);
-#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
-  return vaddvq_f32(t0 + t1);
-#else
   return vec::vec_reduce_all<float>(
       std::plus<vec::Vectorized<float>>(),
       t0 + t1);
-#endif
 }
 
 float fp16_dot_with_fp16_arith(const Half* x, const Half* a, int len) {
@@ -130,13 +126,9 @@ static void fp16_gemv_trans_fp16_arith_by_dot_products(const int m, const int n,
 #endif // !defined(__aarch64__) || defined( __ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
 
 float reduce(vec::Vectorized<float> x) {
-#if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE)
-  return vaddvq_f32(x);
-#else
   return vec::vec_reduce_all<float>(
       std::plus<vec::Vectorized<float>>(),
       x);
-#endif
 }
 
 // The below reduce overload and fp16_dot_with_fp32_arith are adapted
@@ -157,6 +149,7 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
 // We would have to write a separate SVE-specific path to use SVE
 // BFDOT. Deferring that for now to get the NEON/ASIMD BFDOT path
 // working.
+#if __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
 #if defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
 // https://godbolt.org/z/z8P4Yncra
 #define COMPILER_SUPPORTS_BF16_TARGET 1
@@ -167,6 +160,9 @@ float reduce(vec::VectorizedN<float, kF32RegistersPerIteration>& x) {
 #else // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
 #define COMPILER_SUPPORTS_BF16_TARGET 0
 #endif // defined(__aarch64__) && !defined(CPU_CAPABILITY_SVE) && defined(__clang__) && __clang_major__ > 15
+#else // __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
+#define COMPILER_SUPPORTS_BF16_TARGET 0
+#endif // __ARM_FEATURE_BF16_VECTOR_ARITHMETIC
 
 #if COMPILER_SUPPORTS_BF16_TARGET
 #define TARGET_ARM_BF16_ATTRIBUTE __attribute__((target("arch=armv8.2-a+bf16")))
@@ -432,10 +428,11 @@ void fp16_gemv_trans(
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0);
 #if !defined(__aarch64__) || defined(__ARM_FEATURE_FP16_SCALAR_ARITHMETIC)
   if (at::globalContext().allowFP16ReductionCPU()) {
-    return fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
+    fp16_gemv_trans_fp16_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
+    return;
   }
 #endif
-  return fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
+  fp16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, beta, y, incy);
 }
 
 float bf16_dot_with_fp32_arith(const at::BFloat16* vec1, const at::BFloat16* vec2, int64_t len) {
@@ -469,14 +466,37 @@ void bf16_gemv_trans(
   at::BFloat16* y,
   const int incy) {
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && alpha == 1.0 && beta == 0.0);
-  return bf16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
+  bf16_gemv_trans_fp32_arith_by_dot_products(m, n, a, lda, x, y, incy);
 }
+
+float fp16_dot(
+  const int64_t n,
+  const at::Half* x,
+  const int64_t incx,
+  const at::Half* y,
+  const int64_t incy) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && incy == 1);
+  return fp16_dot_with_fp32_arith(x, y, n);
+}
+
+float bf16_dot(
+  const int64_t n,
+  const at::BFloat16* x,
+  const int64_t incx,
+  const at::BFloat16* y,
+  const int64_t incy) {
+  TORCH_INTERNAL_ASSERT_DEBUG_ONLY(incx == 1 && incy == 1);
+  return bf16_dot_with_fp32_arith(x, y, n);
+}
+
 #endif // !defined(C10_MOBILE)
 } // namespace CPU_CAPABILITY
 
 #if !defined(C10_MOBILE)
 REGISTER_DISPATCH(fp16_gemv_trans_stub, &fp16_gemv_trans)
 REGISTER_DISPATCH(bf16_gemv_trans_stub, &bf16_gemv_trans)
+REGISTER_DISPATCH(fp16_dot_stub, &fp16_dot)
+REGISTER_DISPATCH(bf16_dot_stub, &bf16_dot)
 #endif //!defined(C10_MOBILE)
 
 } // namespace at::native

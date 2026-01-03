@@ -424,7 +424,8 @@ void initModule(PyObject* module) {
              const py::args& args,
              const py::object& py_threads,
              const py::object& py_group_size,
-             const py::object& arg_casts) {
+             const py::object& arg_casts,
+             const py::object& error_buf_idx) {
             auto threads = optional_vec_from_pyobject(py_threads);
             auto group_size = optional_vec_from_pyobject(py_group_size);
             OptionalArgCaster caster(arg_casts);
@@ -441,9 +442,14 @@ void initModule(PyObject* module) {
                 }
                 caster.setValue(self, idx, args[idx]);
               }
+              // Set error buffer if error_buf_idx is provided
+              if (!error_buf_idx.is_none()) {
+                auto error_idx = error_buf_idx.cast<unsigned>();
+                self.setErrorBufferIndex(error_idx);
+              }
               TORCH_CHECK(
                   threads.has_value() && threads->size() < 4,
-                  "Number of threads is undefined or has wrong dimention");
+                  "Number of threads is undefined or has wrong dimension");
               TORCH_CHECK(
                   !group_size.has_value() ||
                   threads->size() == group_size->size());
@@ -478,7 +484,8 @@ void initModule(PyObject* module) {
           py::kw_only(),
           py::arg("threads") = py::none(),
           py::arg("group_size") = py::none(),
-          py::arg("arg_casts") = py::none())
+          py::arg("arg_casts") = py::none(),
+          py::arg("error_buf_idx") = py::none())
       .def_property_readonly(
           "max_threads_per_threadgroup",
           &MetalKernelFunction::getMaxThreadsPerThreadgroup)
@@ -501,6 +508,12 @@ void initModule(PyObject* module) {
     at::mps::getMPSProfiler().startCapture(fileName);
   });
   m.def("_mps_stopCapture", []() { at::mps::getMPSProfiler().stopCapture(); });
+  m.def("_mps_get_name", []() {
+    return at::mps::MPSDevice::getInstance()->getName();
+  });
+  m.def("_mps_get_core_count", []() {
+    return at::mps::MPSDevice::getInstance()->getCoreCount();
+  });
 }
 #endif /* USE_MPS */
 

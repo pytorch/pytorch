@@ -258,26 +258,26 @@ TORCH_META_FUNC(neg)(const Tensor& self) {
 
 TORCH_META_FUNC(trunc) (const Tensor& self) {
   // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
     "trunc is not supported for complex inputs");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(floor) (const Tensor& self) {
   // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
     "floor is not supported for complex inputs");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(sign) (const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
               "Unlike NumPy, torch.sign is not intended to support complex numbers. Please use torch.sgn instead.");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
 
 TORCH_META_FUNC(signbit) (const Tensor& self) {
-  TORCH_CHECK(!self.is_complex(), "signbit is not implemented for complex tensors.");
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(), "signbit is not implemented for complex tensors.");
   TORCH_CHECK(maybe_get_output().defined() ? maybe_get_output().dtype() == at::kBool : true,
               "signbit does not support non-boolean outputs.");
   build_borrowing_unary_force_boolean_op(maybe_get_output(), self);
@@ -285,7 +285,7 @@ TORCH_META_FUNC(signbit) (const Tensor& self) {
 
 TORCH_META_FUNC(ceil) (const Tensor& self) {
   // Note: this is consistent with NumPy
-  TORCH_CHECK(!self.is_complex(),
+  TORCH_CHECK_NOT_IMPLEMENTED(!self.is_complex(),
     "ceil is not supported for complex inputs");
   build_borrowing_unary_op(maybe_get_output(), self);
 }
@@ -904,19 +904,11 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
   return args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER);
 }
 
+// since mvlgamma_ has different signature from its
+// out and functional variant, we explicitly
+// define it (instead of using structured kernel).
 Tensor& mvlgamma_(Tensor& self, int64_t p) {
-  mvlgamma_check(self, p);
-  Tensor args = native::arange(
-      -p *HALF  + HALF,
-      HALF,
-      HALF,
-      optTypeMetaToScalarType(self.options().dtype_opt()),
-      self.options().layout_opt(),
-      self.options().device_opt(),
-      self.options().pinned_memory_opt());
-  args = args.add(self.unsqueeze(-1));
-  const auto p2_sub_p = static_cast<double>(p * (p - 1));
-  return self.copy_(args.lgamma_().sum(-1).add_(p2_sub_p * std::log(c10::pi<double>) * QUARTER));
+  return at::mvlgamma_out(self, self, p);
 }
 
 Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {

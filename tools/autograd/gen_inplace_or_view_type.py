@@ -2,7 +2,7 @@
 #
 # NOTE: If any changes are being made to the ADInplaceOrView codegen please also check
 # if updates are needed in torch/csrc/autograd/autograd_not_implemented_fallback.cpp
-# The fallback is expected to mimick this codegen, so we should keep the two in sync.
+# The fallback is expected to mimic this codegen, so we should keep the two in sync.
 
 from __future__ import annotations
 
@@ -340,7 +340,7 @@ def get_base_name(f: NativeFunction) -> str:
 
 def get_view_info(f: NativeFunction) -> str | None:
     base_name = get_base_name(f)
-    view_info = VIEW_FUNCTIONS.get(base_name, None)
+    view_info = VIEW_FUNCTIONS.get(base_name)
     if view_info is None and base_name in RETURNS_VIEWS_OF_INPUT:
         view_info = "self"
     return view_info

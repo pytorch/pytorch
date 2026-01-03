@@ -38,12 +38,6 @@ from quantization.core.test_workflow_module import TestDistributed  # noqa: F401
 from quantization.core.test_workflow_module import TestFusedObsFakeQuantModule  # noqa: F401
 from quantization.core.test_backend_config import TestBackendConfig  # noqa: F401
 from quantization.core.test_utils import TestUtils  # noqa: F401
-try:
-    # This test has extra data dependencies, so in some environments, e.g. Meta internal
-    # Buck, it has its own test runner.
-    from quantization.core.test_docs import TestQuantizationDocs  # noqa: F401
-except ImportError as e:
-    logging.warning(e)
 
 # Eager Mode Workflow. Tests for the functionality of APIs and different features implemented
 # using eager mode.
@@ -57,7 +51,7 @@ from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQAT  # n
 from quantization.eager.test_quantize_eager_qat import TestQuantizeEagerQATNumerics  # noqa: F401
 # 3. Eager mode fusion passes
 from quantization.eager.test_fuse_eager import TestFuseEager  # noqa: F401
-# 4. Testing model numerics between quanitzed and FP32 models
+# 4. Testing model numerics between quantized and FP32 models
 from quantization.eager.test_model_numerics import TestModelNumericsEager  # noqa: F401
 # 5. Tooling: numeric_suite
 from quantization.eager.test_numeric_suite_eager import TestNumericSuiteEager  # noqa: F401
@@ -66,6 +60,7 @@ from quantization.eager.test_equalize_eager import TestEqualizeEager  # noqa: F4
 from quantization.eager.test_bias_correction_eager import TestBiasCorrectionEager  # noqa: F401
 
 
+log = logging.getLogger(__name__)
 # FX GraphModule Graph Mode Quantization. Tests for the functionality of APIs and different features implemented
 # using fx quantization.
 try:
@@ -77,29 +72,7 @@ try:
 except ImportError as e:
     # In FBCode we separate FX out into a separate target for the sake of dev
     # velocity. These are covered by a separate test target `quantization_fx`
-    logging.warning(e)
-
-# PyTorch 2 Export Quantization
-try:
-    # To be moved to compiler side later
-    from quantization.pt2e.test_graph_utils import TestGraphUtils  # noqa: F401
-    from quantization.pt2e.test_duplicate_dq import TestDuplicateDQPass  # noqa: F401
-    from quantization.pt2e.test_metadata_porting import TestMetaDataPorting  # noqa: F401
-    from quantization.pt2e.test_numeric_debugger import TestNumericDebugger  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2E  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e import TestQuantizePT2EAffineQuantization  # noqa: F401
-    from quantization.pt2e.test_representation import TestPT2ERepresentation  # noqa: F401
-    from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizer  # noqa: F401
-    from quantization.pt2e.test_xnnpack_quantizer import TestXNNPACKQuantizerModels  # noqa: F401
-    from quantization.pt2e.test_x86inductor_quantizer import TestQuantizePT2EX86Inductor  # noqa: F401
-    # TODO: Figure out a way to merge all QAT tests in one TestCase
-    from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQAT_ConvBn1d  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQAT_ConvBn2d  # noqa: F401
-    from quantization.pt2e.test_quantize_pt2e_qat import TestQuantizePT2EQATModels  # noqa: F401
-except ImportError as e:
-    # In FBCode we separate PT2 out into a separate target for the sake of dev
-    # velocity. These are covered by a separate test target `quantization_pt2e`
-    logging.warning(e)
+    log.warning(e)  # noqa:G200
 
 try:
     from quantization.fx.test_numeric_suite_fx import TestFXGraphMatcher  # noqa: F401
@@ -108,7 +81,7 @@ try:
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteNShadows  # noqa: F401
     from quantization.fx.test_numeric_suite_fx import TestFXNumericSuiteCoreAPIsModels  # noqa: F401
 except ImportError as e:
-    logging.warning(e)
+    log.warning(e)  # noqa:G200
 
 # Test the model report module
 try:
@@ -120,19 +93,19 @@ try:
     from quantization.fx.test_model_report_fx import TestFxDetectOutliers  # noqa: F401
     from quantization.fx.test_model_report_fx import TestFxModelReportVisualizer  # noqa: F401
 except ImportError as e:
-    logging.warning(e)
+    log.warning(e)  # noqa:G200
 
 # Equalization for FX mode
 try:
     from quantization.fx.test_equalize_fx import TestEqualizeFx  # noqa: F401
 except ImportError as e:
-    logging.warning(e)
+    log.warning(e)  # noqa:G200
 
 # Backward Compatibility. Tests serialization and BC for quantized modules.
 try:
     from quantization.bc.test_backward_compatibility import TestSerialization  # noqa: F401
 except ImportError as e:
-    logging.warning(e)
+    log.warning(e)  # noqa:G200
 
 # JIT Graph Mode Quantization
 from quantization.jit.test_quantize_jit import TestQuantizeJit  # noqa: F401
@@ -151,29 +124,29 @@ from quantization.ao_migration.test_ao_migration import TestAOMigrationNNIntrins
 try:
     from quantization.ao_migration.test_quantization_fx import TestAOMigrationQuantizationFx  # noqa: F401
 except ImportError as e:
-    logging.warning(e)
+    log.warning(e)  # noqa:G200
 
 # Experimental functionality
 try:
     from quantization.core.experimental.test_bits import TestBitsCPU  # noqa: F401
 except ImportError as e:
-    logging.warning(e)
+    log.warning(e)  # noqa:G200
 try:
     from quantization.core.experimental.test_bits import TestBitsCUDA  # noqa: F401
 except ImportError as e:
-    logging.warning(e)
+    log.warning(e)  # noqa:G200
 try:
     from quantization.core.experimental.test_floatx import TestFloat8DtypeCPU  # noqa: F401
 except ImportError as e:
-    logging.warning(e)
+    log.warning(e)  # noqa:G200
 try:
     from quantization.core.experimental.test_floatx import TestFloat8DtypeCUDA  # noqa: F401
 except ImportError as e:
-    logging.warning(e)
+    log.warning(e)  # noqa:G200
 try:
     from quantization.core.experimental.test_floatx import TestFloat8DtypeCPUOnlyCPU  # noqa: F401
 except ImportError as e:
-    logging.warning(e)
+    log.warning(e)  # noqa:G200
 
 if __name__ == '__main__':
     run_tests()

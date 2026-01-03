@@ -37,7 +37,8 @@ extern "C" {
 // https://github.com/pytorch/pytorch/issues/51026
 __attribute__((weak)) int acc_get_device_type();
 __attribute__((weak)) int acc_get_device_type() {
-  throw std::runtime_error(
+  TORCH_CHECK(
+      false,
       "Dummy implementation of acc_get_device_type is not supposed to be called!");
 }
 } // extern "C"
@@ -221,7 +222,7 @@ struct AddTensorboardFields : public MetadataBase {
   }
 
   template <typename T>
-  void operator()(const T&) {}
+  void operator()(const T& /*unused*/) {}
 };
 
 struct AddGenericMetadata : public MetadataBase {
@@ -264,16 +265,38 @@ struct AddGenericMetadata : public MetadataBase {
         continue;
       }
 
-      // Until needed, lets limit the kwargs to only ints, doubles, strings and
-      // bools
-      if (!val.isInt() && !val.isDouble() && !val.isString() && !val.isBool()) {
-        LOG(WARNING) << "Inputted kwarg: " << key
-                     << " is not an int, double, string, or bool for op: "
-                     << op_event.name_ << " skipping";
+      // Until needed, lets limit the kwargs to only ints, doubles, strings,
+      // bools, and list of strings
+      bool isValidType =
+          val.isInt() || val.isDouble() || val.isString() || val.isBool();
+      bool isStringList = false;
+
+      if (!isValidType && val.isList()) {
+        // Check if it's a list of strings
+        auto list = val.toListRef();
+        isStringList =
+            std::all_of(list.begin(), list.end(), [](const c10::IValue& item) {
+              return item.isString();
+            });
+      }
+
+      if (!isValidType && !isStringList) {
+        LOG(WARNING)
+            << "Inputted kwarg: " << key
+            << " is not an int, double, string, bool, or list of strings for op: "
+            << op_event.name_ << " skipping";
         continue;
       }
-      bool isString = val.isString();
-      addMetadata(key, ivalueToStr(val, isString));
+
+      if (isStringList) {
+        // For list of strings, use ivalueListToStr
+        auto list = val.toListRef();
+        std::vector<c10::IValue> stringList(list.begin(), list.end());
+        addMetadata(key, ivalueListToStr(stringList));
+      } else {
+        bool isString = val.isString();
+        addMetadata(key, ivalueToStr(val, isString));
+      }
     }
     // Add extra metadata if any
     for (const auto& [key, val] : op_event.extra_meta_) {
@@ -323,7 +346,7 @@ struct AddGenericMetadata : public MetadataBase {
   }
 
   template <typename T>
-  void operator()(const T&) {}
+  void operator()(const T& /*unused*/) {}
 
  private:
   /* To get names of the performance events */
@@ -622,7 +645,7 @@ void prepareProfiler(
     /*
      * Sending a warning and passing the non-standard event to the backend
      * Backend can abort if the event is not supported.
-     * TODO Should we gracefully drop the invalid event if we have atleast one
+     * TODO Should we gracefully drop the invalid event if we have at least one
      * valid?
      */
     auto is_standard_event = [](const std::string& event) -> bool {
@@ -690,17 +713,20 @@ void toggleCollectionDynamic(
     const bool enable,
     const std::set<torch::profiler::impl::ActivityType>& activities) {
   if (activities.count(torch::autograd::profiler::ActivityType::CPU) > 0 &&
-      activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0) {
+      (activities.count(torch::autograd::profiler::ActivityType::CUDA) == 0 ||
+       activities.count(torch::autograd::profiler::ActivityType::XPU) == 0)) {
     LOG(WARNING)
-        << "Toggling CPU activity with CUDA activity on may result in traces with CUDA events on artibrary tracks";
+        << "Toggling CPU activity with GPU activity on may result in traces with GPU events on artibrary tracks";
   } else if (
-      activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 &&
+      (activities.count(torch::autograd::profiler::ActivityType::CUDA) > 0 ||
+       activities.count(torch::autograd::profiler::ActivityType::XPU) > 0) &&
       activities.count(torch::autograd::profiler::ActivityType::CPU) == 0) {
     LOG(WARNING)
-        << "Toggling CUDA activity with CPU activity on may result in traces with incorrect correlation between CPU and CUDA events";
+        << "Toggling GPU activity with CPU activity on may result in traces with incorrect correlation between CPU and GPU events";
   }
   for (auto act : activities) {
-    if (act == torch::autograd::profiler::ActivityType::CUDA) {
+    if (act == torch::autograd::profiler::ActivityType::CUDA ||
+        act == torch::autograd::profiler::ActivityType::XPU) {
       torch::profiler::impl::kineto::toggleCollectionDynamic(enable);
     } else if (act == torch::autograd::profiler::ActivityType::CPU) {
       toggleCPUCollectionDynamic(enable);
@@ -933,6 +959,10 @@ bool KinetoEvent::hasKwinputs() const {
   return !kwinputs_.empty();
 }
 
+bool KinetoEvent::isHiddenEvent() const {
+  return result_ && result_->hidden_;
+}
+
 const std::unordered_map<std::string, c10::IValue> KinetoEvent::kwinputs()
     const {
   return kwinputs_;
@@ -1036,6 +1066,17 @@ void KinetoEvent::getPerfEventCounters(std::vector<uint64_t>& in) const {
         }
       },
       [](const auto&) -> void { return; }));
+}
+
+std::string KinetoEvent::metadataJson() const {
+  return result_->visit(c10::overloaded(
+      [](const ExtraFields<EventType::TorchOp>& op) -> std::string {
+        return op.metadata_json_;
+      },
+      [](const ExtraFields<EventType::Kineto>& op) -> std::string {
+        return op.metadata_json_;
+      },
+      [](const auto&) -> std::string { return std::string(""); }));
 }
 
 #define FORWARD_FROM_RESULT(method_name, result_expr)                        \

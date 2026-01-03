@@ -261,8 +261,7 @@ PyTypeObject* _initFunctionPyTypeObject(
   type.tp_traverse = THPCppFunction_traverse;
   type.tp_clear = THPCppFunction_clear;
   if (PyType_Ready(&type) < 0) {
-    auto msg = std::string("Unable to instantiate PyTypeObject for ") + name;
-    throw std::runtime_error(msg);
+    TORCH_CHECK(false, "Unable to instantiate PyTypeObject for ", name);
   }
   return &type;
 }

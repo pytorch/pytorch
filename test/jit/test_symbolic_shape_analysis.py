@@ -9,16 +9,8 @@ import torch
 from torch import nn, Tensor
 from torch.testing import FileCheck
 from torch.testing._internal.common_methods_invocations import sample_inputs_cat_concat
-from torch.testing._internal.common_utils import make_tensor
+from torch.testing._internal.common_utils import make_tensor, raise_on_run_directly
 from torch.testing._internal.jit_utils import execWrapper, JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 # XXX: still in prototype
@@ -93,7 +85,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         def foo(a, b):
             return a * b
 
-        # broadcast appends cant be removed, so we bail on propagation
+        # broadcast appends can't be removed, so we bail on propagation
         torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
         FileCheck().check("Tensor = aten::mul").run(foo.graph)
 
@@ -529,7 +521,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             torch._C._jit_pass_propagate_shapes_on_graph_and_build_compute(mm.graph)
         )
         g = shape_compute_graph.partial_eval_shape_graph()
-        # to make into a jit function cant have multiple outputs
+        # to make into a jit function can't have multiple outputs
         g.makeMultiOutputIntoTuple()
         func = torch._C._create_function_from_graph("partial_eval_graph", g)
         out = func([20, 16, 5, 10])
@@ -551,7 +543,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             self.assertTrue(output_sizes[i] < 0)
         self.assertTrue(output_sizes[1] >= 0)
         g = shape_compute_graph.partial_eval_shape_graph()
-        # to make into a jit function cant have multiple outputs
+        # to make into a jit function can't have multiple outputs
         g.makeMultiOutputIntoTuple()
         func = torch._C._create_function_from_graph("partial_eval_graph", g)
         inp = torch.randn(20, 16, 5, 10)
@@ -675,7 +667,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
             outs[0].type().symbolic_sizes(), outs[1].type().symbolic_sizes()
         )
         g = shape_compute_graph.partial_eval_shape_graph()
-        # to make into a jit function cant have multiple outputs
+        # to make into a jit function can't have multiple outputs
         g.makeMultiOutputIntoTuple()
         func = torch._C._create_function_from_graph("partial_eval_graph", g)
         mapping = shape_compute_graph.graph_output_to_symbolic_shape_dim()  # noqa: F841
@@ -819,3 +811,7 @@ class TestSymbolicShapeAnalysis(JitTestCase):
         input.setType(input.type().with_sizes([1, 5, 8]))
         torch._C._jit_pass_propagate_shapes_on_graph(foo.graph)
         self.assertEqual(next(foo.graph.outputs()).type().symbolic_sizes(), [5, 8])
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

@@ -287,8 +287,7 @@ def error_on_missing_kernels(
     expected_backend_native_funcs: list[NativeFunction] = [
         f
         for f in native_functions
-        if f.func.name in expected_backend_op_names.keys()
-        and f.func.name not in full_codegen
+        if f.func.name in expected_backend_op_names and f.func.name not in full_codegen
     ]
     expected_backend_kernel_name_counts: dict[str, list[NativeFunction]] = defaultdict(
         list

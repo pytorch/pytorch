@@ -134,7 +134,7 @@ static inline std::tuple<std::shared_ptr<char>, size_t> get_file_content(
     // failed to open file, chances are it's no such file or directory.
     file_not_found_error();
   }
-  struct stat statbuf {};
+  struct stat statbuf{};
   fstat(fd, &statbuf);
   size_t size = statbuf.st_size;
   void* ptr = mmap(nullptr, statbuf.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
@@ -153,7 +153,8 @@ static inline std::tuple<std::shared_ptr<char>, size_t> get_file_content(
   size_t buffer_size = (size / kMaxAlignment + 1) * kMaxAlignment;
   std::shared_ptr<char> data(
       static_cast<char*>(c10::alloc_cpu(buffer_size)), c10::free_cpu);
-  fread(data.get(), size, 1, f);
+  auto nread = fread(data.get(), size, 1, f);
+  TORCH_CHECK(nread == 1, "Failed to read file: ", filename);
   fclose(f);
 #endif
   return std::make_tuple(data, size);

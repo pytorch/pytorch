@@ -1,9 +1,7 @@
 #include <torch/csrc/jit/passes/onnx.h>
 
-#include <ATen/core/functional.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/symbolic.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/jit_log.h>
@@ -13,7 +11,6 @@
 #include <torch/csrc/jit/passes/onnx/onnx_log.h>
 #include <torch/csrc/jit/passes/onnx/shape_type_inference.h>
 #include <torch/csrc/jit/python/python_ir.h>
-#include <torch/csrc/utils/pybind.h>
 #include <sstream>
 
 namespace torch::jit {
@@ -167,7 +164,7 @@ std::shared_ptr<Graph> ToONNX(
   ConstantValueMap::ClearMaps();
   auto new_graph = std::make_shared<Graph>(graph->current_scope());
   py::dict env;
-  // Kept identical to values in env. Used for constant-time existance check.
+  // Kept identical to values in env. Used for constant-time existence check.
   py::set values_in_env;
   try {
     BlockToONNX(
@@ -176,7 +173,7 @@ std::shared_ptr<Graph> ToONNX(
         operator_export_type,
         env,
         values_in_env);
-  } catch (std::runtime_error& ex) {
+  } catch (std::runtime_error&) {
     ONNX_LOG(
         "ONNX graph being constructed during exception:\n",
         new_graph->toString());
@@ -260,10 +257,12 @@ void NodeToONNX(
     ::torch::onnx::OperatorExportTypes operator_export_type,
     py::dict& env,
     py::set& values_in_env) {
-  py::object onnx = py::module::import("torch.onnx");
-  py::object onnx_globals = py::module::import("torch.onnx._globals");
-  py::object onnx_registration =
-      py::module::import("torch.onnx._internal.registration");
+  py::object onnx_utils =
+      py::module::import("torch.onnx._internal.torchscript_exporter.utils");
+  py::object onnx_globals =
+      py::module::import("torch.onnx._internal.torchscript_exporter._globals");
+  py::object onnx_registration = py::module::import(
+      "torch.onnx._internal.torchscript_exporter.registration");
 
   // Setup all the lambda helper functions.
 
@@ -290,7 +289,7 @@ void NodeToONNX(
       std::ostringstream ss;
       ss << "symbolic for " << op_name
          << " produced an incorrect number of outputs (expected ";
-      ss << num_old_outputs << ", but got " << outputs.size() << ")";
+      ss << num_old_outputs << ", but got " << outputs.size() << ')';
       throw std::runtime_error(ss.str());
     }
     // For const node, it does not need params_dict info, so set it to {}.
@@ -444,11 +443,12 @@ void NodeToONNX(
       } else {
         outputs = py::cast<std::vector<Value*>>(raw_output);
       }
-    } catch (const std::exception& ex) {
+    } catch (const std::exception&) {
       std::ostringstream ss;
       ss << "Error casting results of symbolic for " << op_name
          << ": expected to return list of op nodes, instead received type ''"
-         << py::str(raw_output.get_type()) << "': " << py::str(raw_output);
+         << py::str(py::type::handle_of(raw_output))
+         << "': " << py::str(raw_output);
       throw std::runtime_error(ss.str());
     }
 
@@ -473,7 +473,7 @@ void NodeToONNX(
     // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
     // Python. Check #87343 for details.
     py::list new_nodes = py::list();
-    py::object raw_output = onnx.attr("_run_symbolic_function")(
+    py::object raw_output = onnx_utils.attr("_run_symbolic_function")(
         g->shared_from_this(),
         new_block,
         n,
@@ -589,7 +589,7 @@ void NodeToONNX(
 
       // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
       // Python. Check #87343 for details.
-      py::object raw_output = onnx.attr("_run_symbolic_method")(
+      py::object raw_output = onnx_utils.attr("_run_symbolic_method")(
           new_block->owningGraph()->shared_from_this(),
           op->name(),
           pyobj.attr("symbolic"),
@@ -604,7 +604,7 @@ void NodeToONNX(
       // IMPORTANT: NEVER pass raw pointer of smart pointer managed objects to
       // Python. Check #87343 for details.
       py::list new_nodes = py::list();
-      py::object raw_output = onnx.attr("_run_symbolic_function")(
+      py::object raw_output = onnx_utils.attr("_run_symbolic_function")(
           new_block->owningGraph()->shared_from_this(),
           new_block,
           n,

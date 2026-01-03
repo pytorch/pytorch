@@ -10,6 +10,9 @@ on:
       - main
       - release/*
       - landchecks/*
+    tags:
+      - ciflow/pull/*
+      - ciflow/trunk/*
   workflow_dispatch:
 
 permissions: read-all
@@ -25,38 +28,101 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
 
+  get-changed-files:
+    if: github.repository_owner == 'pytorch'
+    name: Get changed files
+    uses: ./.github/workflows/_get-changed-files.yml
+    with:
+      all_files: ${{ contains(github.event.pull_request.labels.*.name, 'lint-all-files') || contains(github.event.pull_request.labels.*.name, 'Reverted') || github.event_name == 'push' }}
+
   lintrunner-clang:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
-    needs: get-label-type
+    # Needed to prevent deduping on HUD
+    name: lintrunner-clang-${{ needs.get-changed-files.outputs.changed-files == '*' && 'all' || 'partial' }}
+    needs: [get-label-type, get-changed-files]
+    # Only run if there are changed files relevant to clangtidy / clangformat
+    if: |
+      github.repository_owner == 'pytorch' && (
+        needs.get-changed-files.outputs.changed-files == '*' ||
+        contains(needs.get-changed-files.outputs.changed-files, '.h') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cpp') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cc') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cxx') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.hpp') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.hxx') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cu') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.cuh') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.mm') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.metal')
+      )
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
+      docker-image: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        if [ "$CHANGED_FILES" = "*" ]; then
+          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT --all-files"
+        else
+          export ADDITIONAL_LINTRUNNER_ARGS="--take CLANGTIDY,CLANGFORMAT $CHANGED_FILES"
+        fi
         export CLANG=1
         .github/scripts/lintrunner.sh
 
-  lintrunner-noclang:
+  # NOTE: mypy needs its own job because it depends on --all-files, without assessing all files it sometimes
+  #       fails to find types when it should
+  # NOTE: We should be able to disable this and consolidate with Pyrefly
+  lintrunner-pyrefly:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
-    needs: get-label-type
+    name: lintrunner-pyrefly-${{ needs.get-changed-files.outputs.changed-files == '*' && 'all' || 'partial' }}
+    needs: [get-label-type, get-changed-files]
+    # Only run if there are changed files relevant to pyrefly
+    if: |
+      github.repository_owner == 'pytorch' && (
+        needs.get-changed-files.outputs.changed-files == '*' ||
+        contains(needs.get-changed-files.outputs.changed-files, '.py') ||
+        contains(needs.get-changed-files.outputs.changed-files, '.pyi')
+      )
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter
+      docker-image: ci-image:pytorch-linux-jammy-linter
       # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
       # to run git rev-parse HEAD~:.ci/docker when a new image is needed
       fetch-depth: 0
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
-        export ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGFORMAT --all-files"
-        .github/scripts/lintrunner.sh
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        echo "Running pyrefly"
+        ADDITIONAL_LINTRUNNER_ARGS="--take PYREFLY --all-files" .github/scripts/lintrunner.sh
+
+  lintrunner-noclang:
+    uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
+    name: lintrunner-noclang-${{ needs.get-changed-files.outputs.changed-files == '*' && 'all' || 'partial' }}
+    needs: [get-label-type, get-changed-files]
+    with:
+      timeout: 120
+      runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
+      docker-image: ci-image:pytorch-linux-jammy-linter
+      # NB: A shallow checkout won't work here because calculate-docker-image requires a full checkout
+      # to run git rev-parse HEAD~:.ci/docker when a new image is needed
+      fetch-depth: 0
+      submodules: true
+      ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
+      script: |
+        CHANGED_FILES="${{ needs.get-changed-files.outputs.changed-files }}"
+        echo "Running all other linters"
+        if [ "$CHANGED_FILES" = '*' ]; then
+          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY --all-files" .github/scripts/lintrunner.sh
+        else
+          ADDITIONAL_LINTRUNNER_ARGS="--skip CLANGTIDY,CLANGTIDY_EXECUTORCH_COMPATIBILITY,CLANGFORMAT,PYREFLY ${CHANGED_FILES}" .github/scripts/lintrunner.sh
+        fi
 
   quick-checks:
     uses: pytorch/test-infra/.github/workflows/linux_job_v2.yml@main
@@ -64,7 +130,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-jammy-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
@@ -117,7 +183,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-jammy-linter
       fetch-depth: -1
       submodules: true
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
@@ -151,7 +217,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-jammy-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
@@ -187,7 +253,7 @@ jobs:
     with:
       timeout: 120
       runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge"
-      docker-image: pytorch-linux-focal-linter
+      docker-image: ci-image:pytorch-linux-jammy-linter
       fetch-depth: 0
       ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
       script: |
@@ -206,10 +272,10 @@ jobs:
         with:
           submodules: false
           fetch-depth: 1
-      - name: Setup Python 3.9
+      - name: Setup Python 3.10
         uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
         with:
-          python-version: '3.9'
+          python-version: '3.10'
           architecture: x64
           cache: pip
       - name: Install dependencies
@@ -259,6 +325,7 @@ jobs:
           check-latest: false
           cache: pip
           cache-dependency-path: |
+            **/requirements-build.txt
             **/requirements.txt
       - name: Setup Min Python version
         if: matrix.test_type != 'older_python_version'
@@ -269,6 +336,7 @@ jobs:
           check-latest: false
           cache: pip
           cache-dependency-path: |
+            **/requirements-build.txt
             **/requirements.txt
       - name: Install torch
         if: matrix.test_type == 'with_torch'
@@ -291,5 +359,5 @@ jobs:
     secrets: inherit
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}
   cancel-in-progress: true

@@ -14,11 +14,12 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
+    dtypesIfXPU,
     instantiate_device_type_tests,
     largeTensorTest,
     onlyCPU,
-    onlyCUDA,
     onlyNativeDeviceTypes,
+    onlyOn,
 )
 from torch.testing._internal.common_dtype import (
     all_types,
@@ -261,7 +262,7 @@ class TestShapeOps(TestCase):
             expected = xn.diagonal(*args)
             self.assertEqual(expected.shape, result.shape)
             self.assertEqual(expected, result)
-        # test non-continguous
+        # test non-contiguous
         xp = x.permute(1, 2, 3, 0)
         result = torch.diagonal(xp, 0, -2, -1)
         expected = xp.numpy().diagonal(0, -2, -1)
@@ -271,6 +272,7 @@ class TestShapeOps(TestCase):
     @onlyNativeDeviceTypes
     @dtypes(*all_types())
     @dtypesIfCUDA(*all_types_and(torch.half))
+    @dtypesIfXPU(*all_types_and(torch.half))
     def test_trace(self, device, dtype):
         def test(shape):
             tensor = make_tensor(shape, dtype=dtype, device=device, low=-9, high=9)
@@ -568,7 +570,7 @@ class TestShapeOps(TestCase):
                     np_fn = partial(np.flip, axis=flip_dim)
                     self.compare_with_numpy(torch_fn, np_fn, data)
 
-    @onlyCUDA  # CPU is too slow
+    @onlyOn(["cuda", "xpu"])  # CPU is too slow
     @largeTensorTest("17GB")  # 4 tensors of 4GB (in, out) x (torch, numpy) + 1GB
     @largeTensorTest(
         "81GB", "cpu"
@@ -715,6 +717,7 @@ class TestShapeOps(TestCase):
                 )
             if (
                 self.device_type == "cuda"
+                or self.device_type == "xpu"
                 or self.device_type == TEST_PRIVATEUSE1_DEVICE_TYPE
             ):
                 self.assertRaisesRegex(
@@ -839,6 +842,16 @@ class TestShapeOps(TestCase):
             x.unfold(0, -1, 1)
         with self.assertRaisesRegex(RuntimeError, "step is -1 but must be > 0"):
             x.unfold(0, 1, -1)
+
+    def test_unfold_backward_errors(self, device):
+        grad_in = torch.randn(2, 3, device=device)
+        input_sizes = [6]
+
+        with self.assertRaisesRegex(ValueError, "step is 0 but must be > 0"):
+            torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, 3, 0)
+
+        with self.assertRaisesRegex(RuntimeError, "size is -1 but must be >= 0"):
+            torch.ops.aten.unfold_backward(grad_in, input_sizes, 0, -1, 1)
 
 
 instantiate_device_type_tests(TestShapeOps, globals())

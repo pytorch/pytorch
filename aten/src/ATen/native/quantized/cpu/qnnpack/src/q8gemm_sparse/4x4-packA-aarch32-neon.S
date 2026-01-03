@@ -32,7 +32,7 @@
 #
 
 # Packed A format.
-# 4kx4m blocks for alls blocks given 4 rows (4m) are placed in contiguous memory.
+# 4kx4m blocks for all blocks given 4 rows (4m) are placed in contiguous memory.
 # Original A
 # --------- K -----------          -- (K + 4 - 1) / 4 --
 # |                     |          |                   |
@@ -53,7 +53,7 @@
 # This locality helps in loading 8kx4m blocks of activations
 # Note when M is not multiple of 4, the rest can contain arbitrary
 # data in packed A as we will not be writing those out.
-# This wil be taken care by just copying the appropriate valid data
+# This will be taken care by just copying the appropriate valid data
 
 # Also note that this packing is same as taking for 4x1 pattern.
 # This is because all the adjacent k's are laid next to each other
@@ -109,7 +109,7 @@ k_loop:
     VLD1.8 {d2}, [r6]!
     VLD1.8 {d3}, [r7]!
 
-    #  Now we have 4x8 block of values that we will tranpose
+    #  Now we have 4x8 block of values that we will transpose
     #  A matrix
     #  --------------------------------
     #  |                              |
@@ -155,7 +155,7 @@ k_loop:
     VTRN.32 d2, d3
     VSWP d1, d2
 
-    # Now store the tranposed values
+    # Now store the transposed values
     # d0, d1, d2, d3
     VST1.8 {q0}, [r2]!
     VST1.8 {q1}, [r2]!
@@ -172,7 +172,7 @@ k_loop:
     VLD1.32 {d2[]}, [r6]
     VLD1.32 {d3[]}, [r7]
 
-    #  Now we have 4x8 block of values that we will tranpose
+    #  Now we have 4x8 block of values that we will transpose
     #  _d{0-3} are arm neon vector registers
     #  va0 = _d0 = a0 a1 a2 a3
     #  va1 = _d1 = b0 b1 b2 b3
@@ -218,7 +218,7 @@ k_loop:
     VEXT.8 d0, d0, d1, #4
     VEXT.8 d1, d2, d3, #4
 
-    # Now store the tranposed values
+    # Now store the transposed values
     # d0, d1, d2, d3
     VST1.8 {q0}, [r2]
     .p2align 4

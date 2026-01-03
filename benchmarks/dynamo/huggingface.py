@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# flake8: noqa: F821
 
 import importlib
 import logging
@@ -6,6 +7,7 @@ import os
 import re
 import subprocess
 import sys
+import types
 import warnings
 
 
@@ -48,7 +50,6 @@ def pip_install(package):
 
 # Disable the flake warnings for the imports. Flake8 does not provide a way to
 # disable just warning for the entire file. Disabling flake8 entirely.
-# flake8: noqa
 imports = [
     "AlbertForPreTraining",
     "AutoConfig",
@@ -58,7 +59,6 @@ imports = [
     "BigBirdConfig",
     "BlenderbotForConditionalGeneration",
     "BlenderbotModel",
-    "BlenderbotSmallForConditionalGeneration",
     "BlenderbotSmallModel",
     "CLIPModel",
     "CLIPVisionModel",
@@ -72,7 +72,6 @@ imports = [
     "MarianForCausalLM",
     "MarianModel",
     "MarianMTModel",
-    "PegasusForConditionalGeneration",
     "PegasusModel",
     "ReformerConfig",
     "ViTForImageClassification",
@@ -106,19 +105,32 @@ finally:
 # on A100 GPUs - 40 GB.
 BATCH_SIZE_KNOWN_MODELS = {}
 
+# Run only this selected group of models, leave this empty to run everything
+TORCHBENCH_ONLY_MODELS = [
+    m.strip() for m in os.getenv("TORCHBENCH_ONLY_MODELS", "").split(",") if m.strip()
+]
+
 
 # TODO(sdym): use batch-size-file parameter of common.main, like torchbench.py
 # Get the list of models and their batch sizes
 MODELS_FILENAME = os.path.join(os.path.dirname(__file__), "huggingface_models_list.txt")
 assert os.path.exists(MODELS_FILENAME)
-with open(MODELS_FILENAME, "r") as fh:
+with open(MODELS_FILENAME) as fh:
     lines = fh.readlines()
     lines = [line.rstrip() for line in lines]
     for line in lines:
         model_name, batch_size = line.split(",")
+        if TORCHBENCH_ONLY_MODELS and model_name not in TORCHBENCH_ONLY_MODELS:
+            continue
         batch_size = int(batch_size)
         BATCH_SIZE_KNOWN_MODELS[model_name] = batch_size
-assert len(BATCH_SIZE_KNOWN_MODELS)
+assert BATCH_SIZE_KNOWN_MODELS
+
+
+try:
+    from .huggingface_llm_models import HF_LLM_MODELS
+except ImportError:
+    from huggingface_llm_models import HF_LLM_MODELS
 
 
 def get_module_cls_by_model_name(model_cls_name):
@@ -153,7 +165,7 @@ def get_sequence_length(model_cls, model_name):
             "Bert",
             "Roberta",
         )
-    ) or model_name in ("DistillGPT2", "GoogleFnet", "YituTechConvBert", "CamemBert"):
+    ) or model_name in ("DistillGPT2", "GoogleFnet", "YituTechConvBert"):
         seq_length = 512
     elif model_name in ("TrOCRForCausalLM"):
         seq_length = 256
@@ -166,7 +178,7 @@ def get_sequence_length(model_cls, model_name):
         seq_length = 10000  # NB: a more realistic size is 155136
     else:
         log.info(
-            f"Sequence Length not defined for {model_name}. Choosing 128 arbitrarily"
+            f"Sequence Length not defined for {model_name}. Choosing 128 arbitrarily"  # noqa: G004
         )
         seq_length = 128
     return seq_length
@@ -204,22 +216,14 @@ def generate_inputs_for_model(
 
     input_dict = {"input_ids": input}
 
-    if (
-        model_name.startswith("T5")
-        or model_name.startswith("M2M100")
-        or model_name.startswith("MT5")
-        or model_cls
-        in [
-            BlenderbotModel,
-            BlenderbotSmallModel,
-            BlenderbotForConditionalGeneration,
-            BlenderbotSmallForConditionalGeneration,
-            PegasusModel,
-            PegasusForConditionalGeneration,
-            MarianModel,
-            MarianMTModel,
-        ]
-    ):
+    if model_name.startswith(("T5", "M2M100", "MT5")) or model_cls in [
+        BlenderbotModel,
+        BlenderbotSmallModel,
+        BlenderbotForConditionalGeneration,
+        PegasusModel,
+        MarianModel,
+        MarianMTModel,
+    ]:
         input_dict["decoder_input_ids"] = input
 
     if model_name.startswith("Lxmert"):
@@ -251,11 +255,8 @@ def generate_inputs_for_model(
                 device, 0, seq_length, (bs,)
             )
             input_dict["end_positions"] = rand_int_tensor(device, 0, seq_length, (bs,))
-        elif (
-            model_name.endswith("MaskedLM")
-            or model_name.endswith("HeadModel")
-            or model_name.endswith("CausalLM")
-            or model_name.endswith("DoubleHeadsModel")
+        elif model_name.endswith(
+            ("MaskedLM", "HeadModel", "CausalLM", "DoubleHeadsModel")
         ):
             input_dict["labels"] = rand_int_tensor(
                 device, 0, vocab_size, (bs, seq_length)
@@ -328,10 +329,6 @@ EXTRA_MODELS = {
         AutoConfig.from_pretrained("YituTech/conv-bert-base"),
         AutoModelForMaskedLM,
     ),
-    "CamemBert": (
-        AutoConfig.from_pretrained("camembert-base"),
-        AutoModelForMaskedLM,
-    ),
 }
 
 
@@ -370,8 +367,7 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return name in [
-            "ElectraForQuestionAnswering",
-            "MegatronBertForQuestionAnswering",
+            "GPT2ForSequenceClassification",
         ]
 
     def _get_model_cls_and_config(self, model_name):
@@ -419,17 +415,14 @@ class HuggingfaceRunner(BenchmarkRunner):
         use_eval_mode = self.args.use_eval_mode
         dtype = torch.float32
         reset_rng_state()
-        model_cls, config = self._get_model_cls_and_config(model_name)
-        model = self._download_model(model_name)
-        model = model.to(device, dtype=dtype)
-        if self.args.enable_activation_checkpointing:
-            model.gradient_checkpointing_enable()
+
+        # Get batch size
         if model_name in BATCH_SIZE_KNOWN_MODELS:
             batch_size_default = BATCH_SIZE_KNOWN_MODELS[model_name]
         elif batch_size is None:
             batch_size_default = 16
             log.info(
-                f"Batch size not specified for {model_name}. Setting batch_size=16"
+                f"Batch size not specified for {model_name}. Setting batch_size=16"  # noqa: G004
             )
 
         if batch_size is None:
@@ -438,17 +431,49 @@ class HuggingfaceRunner(BenchmarkRunner):
             if model_name in batch_size_divisors:
                 batch_size = max(int(batch_size / batch_size_divisors[model_name]), 1)
                 log.info(
-                    f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"
+                    f"Running smaller batch size={batch_size} for {model_name}, orig batch_size={batch_size_default}"  # noqa: G004
                 )
 
-        example_inputs = generate_inputs_for_model(
-            model_cls, model, model_name, batch_size, device, include_loss_args=True
-        )
+        # Get model and example inputs
+        if model_name in HF_LLM_MODELS:
+            benchmark_cls = HF_LLM_MODELS[model_name]
+            model, example_inputs = benchmark_cls.get_model_and_inputs(
+                model_name, device
+            )
 
-        # So we can check for correct gradients without eliminating the dropout computation
-        for attr in dir(config):
-            if "drop" in attr and isinstance(getattr(config, attr), float):
-                setattr(config, attr, 1e-30)
+            # Set this flag so that when we test for speedup, we use
+            # model.generate instead of using model.forward
+            self.hf_llm = True
+
+            def generate(self, _, example_inputs, collect_outputs=True):
+                return model.generate(**example_inputs)
+
+            self.generate = types.MethodType(generate, self)
+
+        else:
+            self.hf_llm = False
+
+            model_cls, config = self._get_model_cls_and_config(model_name)
+            model = self._download_model(model_name)
+            model = model.to(device, dtype=dtype)
+
+            example_inputs = generate_inputs_for_model(
+                model_cls, model, model_name, batch_size, device, include_loss_args=True
+            )
+
+            # So we can check for correct gradients without eliminating the dropout computation
+            for attr in dir(config):
+                if "drop" in attr and isinstance(getattr(config, attr), float):
+                    setattr(config, attr, 1e-30)
+
+            # Turning off kv cache for torchbench models. This is not the right
+            # thing to do, but the pt2 dashboard is outdated. Real transformers
+            # benchmarks will be added soon using a different infra.
+            if hasattr(model, "config") and hasattr(model.config, "use_cache"):
+                model.config.use_cache = False
+
+        if self.args.enable_activation_checkpointing:
+            model.gradient_checkpointing_enable()
 
         if (
             is_training
@@ -474,8 +499,8 @@ class HuggingfaceRunner(BenchmarkRunner):
             if index < start or index >= end:
                 continue
             if (
-                not re.search("|".join(args.filter), model_name, re.I)
-                or re.search("|".join(args.exclude), model_name, re.I)
+                not re.search("|".join(args.filter), model_name, re.IGNORECASE)
+                or re.search("|".join(args.exclude), model_name, re.IGNORECASE)
                 or model_name in args.exclude_exact
                 or model_name in self.skip_models
             ):
@@ -525,7 +550,8 @@ class HuggingfaceRunner(BenchmarkRunner):
 
     def forward_pass(self, mod, inputs, collect_outputs=True):
         with self.autocast(**self.autocast_arg):
-            return mod(**inputs)
+            res = mod(**inputs)
+        return res.logits if self.hf_llm else res
 
     def forward_and_backward_pass(self, mod, inputs, collect_outputs=True):
         cloned_inputs = clone_inputs(inputs)
@@ -621,7 +647,7 @@ def refresh_model_names_and_batch_sizes():
                 + [f"--output={MODELS_FILENAME}"]
             )
         except subprocess.SubprocessError:
-            log.warning(f"Failed to find suitable batch size for {model_name}")
+            log.warning(f"Failed to find suitable batch size for {model_name}")  # noqa: G004
 
 
 def huggingface_main():

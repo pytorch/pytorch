@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import itertools
 from typing import TYPE_CHECKING
+from typing_extensions import assert_never
 
 from torchgen.api import cpp
 from torchgen.api.types import ArgName, Binding, CType, NamedCType
@@ -13,7 +14,7 @@ from torchgen.model import (
     TensorOptionsArguments,
     Type,
 )
-from torchgen.utils import assert_never, concatMap
+from torchgen.utils import concatMap
 
 
 if TYPE_CHECKING:

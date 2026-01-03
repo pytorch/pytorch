@@ -10,12 +10,8 @@ fi
 
 source "$(dirname "${BASH_SOURCE[0]}")/common_utils.sh"
 
-get_conda_version() {
-  as_jenkins conda list -n py_$ANACONDA_PYTHON_VERSION | grep -w $* | head -n 1 | awk '{print $2}'
-}
-
-conda_reinstall() {
-  as_jenkins conda install -q -n py_$ANACONDA_PYTHON_VERSION -y --force-reinstall $*
+get_pip_version() {
+  conda_run pip list | grep -w $* | head -n 1 | awk '{print $2}'
 }
 
 if [ -n "${XPU_VERSION}" ]; then
@@ -37,11 +33,9 @@ if [ -n "${UBUNTU_VERSION}" ];then
     apt-get install -y gpg-agent
 fi
 
-if [ -n "${CONDA_CMAKE}" ]; then
-  # Keep the current cmake and numpy version here, so we can reinstall them later
-  CMAKE_VERSION=$(get_conda_version cmake)
-  NUMPY_VERSION=$(get_conda_version numpy)
-fi
+# Keep the current cmake and numpy version here, so we can reinstall them later
+CMAKE_VERSION=$(get_pip_version cmake)
+NUMPY_VERSION=$(get_pip_version numpy)
 
 if [ -z "${MAX_JOBS}" ]; then
     export MAX_JOBS=$(nproc)
@@ -57,8 +51,13 @@ as_jenkins git clone --recursive ${TRITON_REPO} triton
 cd triton
 as_jenkins git checkout ${TRITON_PINNED_COMMIT}
 as_jenkins git submodule update --init --recursive
-cd python
-pip_install pybind11==2.13.6
+
+# Old versions of python have setup.py in ./python; newer versions have it in ./
+if [ ! -f setup.py ]; then
+  cd python
+fi
+
+pip_install pybind11==3.0.1
 
 # TODO: remove patch setup.py once we have a proper fix for https://github.com/triton-lang/triton/issues/4527
 as_jenkins sed -i -e 's/https:\/\/tritonlang.blob.core.windows.net\/llvm-builds/https:\/\/oaitriton.blob.core.windows.net\/public\/llvm-builds/g' setup.py
@@ -67,15 +66,15 @@ if [ -n "${UBUNTU_VERSION}" ] && [ -n "${GCC_VERSION}" ] && [[ "${GCC_VERSION}" 
   # Triton needs at least gcc-9 to build
   apt-get install -y g++-9
 
-  CXX=g++-9 conda_run python setup.py bdist_wheel
+  CXX=g++-9 conda_run python -m build --wheel --no-isolation
 elif [ -n "${UBUNTU_VERSION}" ] && [ -n "${CLANG_VERSION}" ]; then
   # Triton needs <filesystem> which surprisingly is not available with clang-9 toolchain
   add-apt-repository -y ppa:ubuntu-toolchain-r/test
   apt-get install -y g++-9
 
-  CXX=g++-9 conda_run python setup.py bdist_wheel
+  CXX=g++-9 conda_run python -m build --wheel --no-isolation
 else
-  conda_run python setup.py bdist_wheel
+  conda_run python -m build --wheel --no-isolation
 fi
 
 # Copy the wheel to /opt for multi stage docker builds
@@ -83,17 +82,26 @@ cp dist/*.whl /opt/triton
 # Install the wheel for docker builds that don't use multi stage
 pip_install dist/*.whl
 
-if [ -n "${CONDA_CMAKE}" ]; then
-  # TODO: This is to make sure that the same cmake and numpy version from install conda
-  # script is used. Without this step, the newer cmake version (3.25.2) downloaded by
-  # triton build step via pip will fail to detect conda MKL. Once that issue is fixed,
-  # this can be removed.
-  #
-  # The correct numpy version also needs to be set here because conda claims that it
-  # causes inconsistent environment.  Without this, conda will attempt to install the
-  # latest numpy version, which fails ASAN tests with the following import error: Numba
-  # needs NumPy 1.20 or less.
-  conda_reinstall cmake="${CMAKE_VERSION}"
-  # Note that we install numpy with pip as conda might not have the version we want
-  pip_install --force-reinstall numpy=="${NUMPY_VERSION}"
+# TODO: This is to make sure that the same cmake and numpy version from install conda
+# script is used. Without this step, the newer cmake version (3.25.2) downloaded by
+# triton build step via pip will fail to detect conda MKL. Once that issue is fixed,
+# this can be removed.
+#
+# The correct numpy version also needs to be set here because conda claims that it
+# causes inconsistent environment.  Without this, conda will attempt to install the
+# latest numpy version, which fails ASAN tests with the following import error: Numba
+# needs NumPy 1.20 or less.
+# Note that we install numpy with pip as conda might not have the version we want
+if [ -n "${CMAKE_VERSION}" ]; then
+  pip_install "cmake==${CMAKE_VERSION}"
+fi
+if [ -n "${NUMPY_VERSION}" ]; then
+  pip_install "numpy==${NUMPY_VERSION}"
+fi
+
+# IMPORTANT: helion needs to be installed without dependencies.
+# It depends on torch and triton. We don't want to install
+# triton and torch from production on Docker CI images
+if [[ "$ANACONDA_PYTHON_VERSION" != 3.9* ]]; then
+  pip_install helion --no-deps
 fi

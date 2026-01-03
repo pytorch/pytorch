@@ -1,8 +1,9 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
+from collections.abc import Callable
 from functools import partial
-from typing import Any, Callable, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -46,6 +47,7 @@ def _check_args_kwargs_length(
 
 class _MaskedContiguous(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(ctx, input):
         if not is_masked_tensor(input):
             raise ValueError("MaskedContiguous forward: input must be a MaskedTensor.")
@@ -59,12 +61,14 @@ class _MaskedContiguous(torch.autograd.Function):
         return MaskedTensor(data.contiguous(), mask.contiguous())
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         return grad_output
 
 
 class _MaskedToDense(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(ctx, input):
         if not is_masked_tensor(input):
             raise ValueError("MaskedToDense forward: input must be a MaskedTensor.")
@@ -79,6 +83,7 @@ class _MaskedToDense(torch.autograd.Function):
         return MaskedTensor(data.to_dense(), mask.to_dense())
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         layout = ctx.layout
 
@@ -93,6 +98,7 @@ class _MaskedToDense(torch.autograd.Function):
 
 class _MaskedToSparse(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(ctx, input):
         if not is_masked_tensor(input):
             raise ValueError("MaskedToSparse forward: input must be a MaskedTensor.")
@@ -109,12 +115,14 @@ class _MaskedToSparse(torch.autograd.Function):
         return MaskedTensor(sparse_data, sparse_mask)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         return grad_output.to_dense()
 
 
 class _MaskedToSparseCsr(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(ctx, input):
         if not is_masked_tensor(input):
             raise ValueError("MaskedToSparseCsr forward: input must be a MaskedTensor.")
@@ -135,18 +143,21 @@ class _MaskedToSparseCsr(torch.autograd.Function):
         return MaskedTensor(sparse_data, sparse_mask)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         return grad_output.to_dense()
 
 
 class _MaskedWhere(torch.autograd.Function):
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def forward(ctx, cond, self, other):
         ctx.mark_non_differentiable(cond)
         ctx.save_for_backward(cond)
         return torch.ops.aten.where(cond, self, other)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def backward(ctx, grad_output):
         (cond,) = ctx.saved_tensors
 
@@ -285,7 +296,9 @@ def layout(func, *args, **kwargs):
     return _get_data(args[0]).layout
 
 
-@register_dispatch_func([torch.ops.aten.is_contiguous])
+@register_dispatch_func(
+    [torch.ops.aten.is_contiguous, torch.ops.aten.sym_is_contiguous]
+)
 def is_contiguous(func, *args, **kwargs):
     data = _get_data(args[0])
     if data.is_sparse:
@@ -351,7 +364,10 @@ def _apply_fn_on_data(func, *args, **kwargs):
 @register_dispatch_func([torch.ops.aten._to_copy])
 def _to_copy(func, *args, **kwargs):
     new_data = func(_get_data(args[0]), *args[1:], **kwargs)
-    return MaskedTensor(new_data, _maybe_get_mask(args[0]))
+    cloned_kwargs = kwargs.copy()
+    cloned_kwargs["dtype"] = torch.bool
+    new_mask = func(_maybe_get_mask(args[0]), *args[1:], **cloned_kwargs)
+    return MaskedTensor(new_data, new_mask)
 
 
 @register_dispatch_func([torch.ops.aten._softmax])
@@ -379,7 +395,7 @@ def _softmax_backward_data(func, *args, **kwargs):
     if is_masked_tensor(grad) and is_masked_tensor(output):
         if not _masks_match(grad, output):
             raise ValueError(
-                "__torch_dispatch__, {func}: expected the masks of grad and output to match"
+                f"__torch_dispatch__, {func}: expected the masks of grad and output to match"
             )
         grad_data = _get_data(grad)
         new_grad_data = torch.ops.aten._masked_softmax_backward(
@@ -411,7 +427,7 @@ def where(func, *args, **kwargs):
         args, kwargs, f"__torch_dispatch__, {func}", len_args=3, len_kwargs=0
     )
     if not torch.is_tensor(args[0]):
-        raise ValueError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
+        raise ValueError(f"__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mx = args[1]
     my = args[2]
     if not is_masked_tensor(mx):
@@ -429,7 +445,7 @@ def _to_sparse(func, *args, **kwargs):
         args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
     )
     if not torch.is_tensor(args[0]):
-        raise TypeError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
+        raise TypeError(f"__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
     if not is_masked_tensor(mt):
         mt = MaskedTensor(mt, torch.ones_like(mt, dtype=torch.bool))
@@ -446,7 +462,7 @@ def _to_sparse_csr(func, *args, **kwargs):
         args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
     )
     if not torch.is_tensor(args[0]):
-        raise ValueError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
+        raise ValueError(f"__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
     if not is_masked_tensor(mt):
         mt = MaskedTensor(mt, torch.ones_like(mt).bool())
@@ -463,7 +479,7 @@ def _to_dense(func, *args, **kwargs):
         args, kwargs, f"__torch_dispatch__, {func}", len_args=1, len_kwargs=0
     )
     if not torch.is_tensor(args[0]):
-        raise ValueError("__torch_dispatch__, {func}: expected args[0] to be a tensor")
+        raise ValueError(f"__torch_dispatch__, {func}: expected args[0] to be a tensor")
     mt = args[0]
     if not is_masked_tensor(mt):
         mt = MaskedTensor(mt, torch.ones_like(mt).bool())

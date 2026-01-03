@@ -1,57 +1,39 @@
-import builtins
-import copy
-import dataclasses
-import inspect
+import logging
 import os
-import sys
-import typing
 import warnings
 import zipfile
-from collections.abc import Iterator
-from enum import auto, Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Mapping
+from typing import Any
+from typing_extensions import deprecated
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
-from torch.fx.passes.infra.pass_manager import PassManager
 from torch.types import FileLike
-from torch.utils._pytree import (
-    FlattenFunc,
-    FromDumpableContextFn,
-    ToDumpableContextFn,
-    UnflattenFunc,
-)
-
-
-if TYPE_CHECKING:
-    # Import the following modules during type checking to enable code intelligence features,
-    # Do not import unconditionally, as they import sympy and importing sympy is very slow
-    from torch._ops import OpOverload
-    from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
 
 __all__ = [
+    "AdditionalInputs",
     "Constraint",
-    "Dim",
-    "ExportBackwardSignature",
-    "ExportGraphSignature",
-    "ExportedProgram",
     "CustomDecompTable",
+    "default_decompositions",
+    "Dim",
+    "dims",
+    "draft_export",
+    "export_for_training",
+    "export",
+    "ExportBackwardSignature",
+    "ExportedProgram",
+    "ExportGraphSignature",
+    "FlatArgsAdapter",
+    "load",
     "ModuleCallEntry",
     "ModuleCallSignature",
-    "default_decompositions",
-    "dims",
-    "export",
-    "export_for_training",
-    "load",
     "register_dataclass",
     "save",
+    "ShapesCollection",
     "unflatten",
-    "FlatArgsAdapter",
     "UnflattenedModule",
-    "AdditionalInputs",
 ]
 
 # To make sure export specific custom ops are loaded
@@ -69,17 +51,25 @@ from .graph_signature import ExportBackwardSignature, ExportGraphSignature
 from .unflatten import FlatArgsAdapter, unflatten, UnflattenedModule
 
 
-PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
+PassType = Callable[[torch.fx.GraphModule], PassResult | None]
+
+log: logging.Logger = logging.getLogger(__name__)
 
 
+@deprecated(
+    "`torch.export.export_for_training` is deprecated and will be removed in PyTorch 2.10. "
+    "Please use `torch.export.export` instead, which is functionally equivalent.",
+    category=FutureWarning,
+)
 def export_for_training(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: Mapping[str, Any] | None = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
 ) -> ExportedProgram:
     """
     :func:`export_for_training` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -168,17 +158,19 @@ def export_for_training(
         dynamic_shapes,
         strict=strict,
         preserve_module_call_signature=preserve_module_call_signature,
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
     )
 
 
 def export(
     mod: torch.nn.Module,
     args: tuple[Any, ...],
-    kwargs: Optional[dict[str, Any]] = None,
+    kwargs: Mapping[str, Any] | None = None,
     *,
-    dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]] = None,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
     strict: bool = False,
     preserve_module_call_signature: tuple[str, ...] = (),
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
 ) -> ExportedProgram:
     """
     :func:`export` takes any nn.Module along with example inputs, and produces a traced graph representing
@@ -290,6 +282,7 @@ def export(
             strict=strict,
             preserve_module_call_signature=preserve_module_call_signature,
             pre_dispatch=True,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
         )
     except Exception as e:
         draft_export_msg = (
@@ -325,8 +318,8 @@ def save(
     ep: ExportedProgram,
     f: FileLike,
     *,
-    extra_files: Optional[dict[str, Any]] = None,
-    opset_version: Optional[dict[str, int]] = None,
+    extra_files: dict[str, Any] | None = None,
+    opset_version: dict[str, int] | None = None,
     pickle_protocol: int = DEFAULT_PICKLE_PROTOCOL,
 ) -> None:
     """
@@ -357,22 +350,24 @@ def save(
         import torch
         import io
 
+
         class MyModule(torch.nn.Module):
             def forward(self, x):
                 return x + 10
 
+
         ep = torch.export.export(MyModule(), (torch.randn(5),))
 
         # Save to file
-        torch.export.save(ep, 'exported_program.pt2')
+        torch.export.save(ep, "exported_program.pt2")
 
         # Save to io.BytesIO buffer
         buffer = io.BytesIO()
         torch.export.save(ep, buffer)
 
         # Save with extra files
-        extra_files = {'foo.txt': b'bar'.decode('utf-8')}
-        torch.export.save(ep, 'exported_program.pt2', extra_files=extra_files)
+        extra_files = {"foo.txt": b"bar".decode("utf-8")}
+        torch.export.save(ep, "exported_program.pt2", extra_files=extra_files)
 
     """
     if not isinstance(ep, ExportedProgram):
@@ -380,42 +375,31 @@ def save(
             f"The 'ep' parameter must be an instance of 'ExportedProgram', got '{type(ep).__name__}' instead."
         )
 
-    from torch._export.serde.schema import SCHEMA_VERSION
-    from torch._export.serde.serialize import serialize, SerializedArtifact
+    from torch.export.pt2_archive._package import package_pt2
 
-    artifact: SerializedArtifact = serialize(ep, opset_version, pickle_protocol)
-
-    if isinstance(f, (str, os.PathLike)):
-        f = os.fspath(f)
-
-    with zipfile.ZipFile(f, "w") as zipf:
-        # Save every field in the SerializedArtifact to a file.
-        assert isinstance(artifact.exported_program, bytes)
-        zipf.writestr("serialized_exported_program.json", artifact.exported_program)
-        zipf.writestr("serialized_state_dict.pt", artifact.state_dict)
-        zipf.writestr("serialized_constants.pt", artifact.constants)
-        zipf.writestr("serialized_example_inputs.pt", artifact.example_inputs)
-
-        zipf.writestr("version", ".".join(map(str, SCHEMA_VERSION)))
-
-        # Add extra files if provided
-        if extra_files:
-            for extra_file_name, content in extra_files.items():
-                encoded_content = content.encode("utf-8")
-                zipf.writestr(f"extra_files/{extra_file_name}", encoded_content)
+    package_pt2(
+        f,
+        exported_programs={"model": ep},
+        extra_files=extra_files,
+        pickle_protocol=pickle_protocol,
+        opset_version=opset_version,
+    )
 
 
 def load(
     f: FileLike,
     *,
-    extra_files: Optional[dict[str, Any]] = None,
-    expected_opset_version: Optional[dict[str, int]] = None,
+    extra_files: dict[str, Any] | None = None,
+    expected_opset_version: dict[str, int] | None = None,
 ) -> ExportedProgram:
     """
 
     .. warning::
         Under active development, saved files may not be usable in newer versions
         of PyTorch.
+
+    .. warning::
+        :func:`torch.export.load()` uses pickle under the hood to load models. **Never load data from an untrusted source.**
 
     Loads an :class:`ExportedProgram` previously saved with
     :func:`torch.export.save <torch.export.save>`.
@@ -440,18 +424,18 @@ def load(
         import io
 
         # Load ExportedProgram from file
-        ep = torch.export.load('exported_program.pt2')
+        ep = torch.export.load("exported_program.pt2")
 
         # Load ExportedProgram from io.BytesIO object
-        with open('exported_program.pt2', 'rb') as f:
+        with open("exported_program.pt2", "rb") as f:
             buffer = io.BytesIO(f.read())
         buffer.seek(0)
         ep = torch.export.load(buffer)
 
         # Load with extra files.
-        extra_files = {'foo.txt': ''}  # values will be replaced with data
-        ep = torch.export.load('exported_program.pt2', extra_files=extra_files)
-        print(extra_files['foo.txt'])
+        extra_files = {"foo.txt": ""}  # values will be replaced with data
+        ep = torch.export.load("exported_program.pt2", extra_files=extra_files)
+        print(extra_files["foo.txt"])
         print(ep(torch.randn(5)))
     """
     if isinstance(f, (str, os.PathLike)):
@@ -459,12 +443,45 @@ def load(
 
     extra_files = extra_files or {}
 
+    from torch.export.pt2_archive._package import load_pt2, PT2ArchiveContents
+
+    try:
+        pt2_contents = load_pt2(
+            f,
+            expected_opset_version=expected_opset_version,
+        )
+    except RuntimeError:
+        log.warning("Ran into the following error when deserializing", exc_info=True)
+        pt2_contents = PT2ArchiveContents({}, {}, {})
+
+    if len(pt2_contents.exported_programs) > 0 or len(pt2_contents.extra_files) > 0:
+        for k, v in pt2_contents.extra_files.items():
+            extra_files[k] = v
+
+        return pt2_contents.exported_programs["model"]
+
+    # TODO: For backward compatibility, we support loading a zip file from 2.7. Delete this path in 2.9(?)
     with zipfile.ZipFile(f, "r") as zipf:
+        if "version" not in zipf.namelist():
+            raise RuntimeError(
+                "We ran into an error when deserializing the saved file. "
+                "Please check the warnings above for possible errors. "
+            )
+
+        log.warning(
+            "Trying to deserialize for the older format. This version of file is "
+            "deprecated. Please generate a new pt2 saved file."
+        )
+
         # Check the version
         version = zipf.read("version").decode().split(".")
-        from torch._export.serde.schema import SCHEMA_VERSION
+        from torch._export.serde.schema import (
+            SCHEMA_VERSION,  # todo change archive version to schema version
+        )
 
-        assert len(version) == len(SCHEMA_VERSION)
+        assert len(version) == len(SCHEMA_VERSION), (
+            "Version in the saved file has incorrect length, double check if the file is generated by torch.export.save()"
+        )
         if version[0] != str(SCHEMA_VERSION[0]):
             raise RuntimeError(
                 f"Serialized version {version} does not match our current "
@@ -475,10 +492,10 @@ def load(
 
         # Load serialized_ep and serialized_state_dict from the zip file
 
-        serialized_exported_program: Optional[bytes] = None
-        serialized_state_dict: Optional[bytes] = None
-        serialized_constants: Optional[bytes] = None
-        serialized_example_inputs: Optional[bytes] = None
+        serialized_exported_program: bytes | None = None
+        serialized_state_dict: bytes | None = None
+        serialized_constants: bytes | None = None
+        serialized_example_inputs: bytes | None = None
 
         for file_info in zipf.infolist():
             file_content = zipf.read(file_info.filename)
@@ -486,10 +503,10 @@ def load(
             if file_info.filename == "serialized_exported_program.json":
                 serialized_exported_program = file_content
             elif file_info.filename == "serialized_state_dict.json":
-                warnings.warn("This version of file is deprecated")
+                warnings.warn("This version of file is deprecated", stacklevel=2)
                 serialized_state_dict = file_content
             elif file_info.filename == "serialized_constants.json":
-                warnings.warn("This version of file is deprecated")
+                warnings.warn("This version of file is deprecated", stacklevel=2)
                 serialized_constants = file_content
             elif file_info.filename == "serialized_state_dict.pt":
                 serialized_state_dict = file_content
@@ -518,10 +535,38 @@ def load(
         return ep
 
 
+def draft_export(
+    mod: torch.nn.Module,
+    args: tuple[Any, ...],
+    kwargs: Mapping[str, Any] | None = None,
+    *,
+    dynamic_shapes: dict[str, Any] | tuple[Any, ...] | list[Any] | None = None,
+    preserve_module_call_signature: tuple[str, ...] = (),
+    strict: bool = False,
+    prefer_deferred_runtime_asserts_over_guards: bool = False,
+) -> ExportedProgram:
+    """
+    A version of torch.export.export which is designed to consistently produce
+    an ExportedProgram, even if there are potential soundness issues, and to
+    generate a report listing the issues found.
+    """
+    from ._draft_export import draft_export
+
+    return draft_export(
+        mod=mod,
+        args=args,
+        kwargs=kwargs,
+        dynamic_shapes=dynamic_shapes,
+        preserve_module_call_signature=preserve_module_call_signature,
+        strict=strict,
+        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
+    )
+
+
 def register_dataclass(
     cls: type[Any],
     *,
-    serialized_type_name: Optional[str] = None,
+    serialized_type_name: str | None = None,
 ) -> None:
     """
     Registers a dataclass as a valid input/output type for :func:`torch.export.export`.
@@ -537,24 +582,29 @@ def register_dataclass(
         import torch
         from dataclasses import dataclass
 
+
         @dataclass
         class InputDataClass:
             feature: torch.Tensor
             bias: int
 
+
         @dataclass
         class OutputDataClass:
             res: torch.Tensor
 
+
         torch.export.register_dataclass(InputDataClass)
         torch.export.register_dataclass(OutputDataClass)
+
 
         class Mod(torch.nn.Module):
             def forward(self, x: InputDataClass) -> OutputDataClass:
                 res = x.feature + x.bias
                 return OutputDataClass(res=res)
 
-        ep = torch.export.export(Mod(), (InputDataClass(torch.ones(2, 2), 1), ))
+
+        ep = torch.export.export(Mod(), (InputDataClass(torch.ones(2, 2), 1),))
         print(ep)
 
     """

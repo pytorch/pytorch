@@ -23,6 +23,9 @@
  * To work around this difference in behavior, a separate handle pool is available for ROCm builds.
  * For CUDA builds, getCurrentCUDABlasLtHandle will alias for getCurrentCUDABlasHandle,
  * whereas for ROCm builds, it is a distinct function.
+ *
+ * The workspace pools are separate for ROCm. On CUDA, the env var
+ * TORCH_CUBLASLT_UNIFIED_WORKSPACE can be used to opt-in to unifying the workspace pools.
  */
 
 namespace at::cuda {
@@ -96,7 +99,7 @@ void destroyCublasHandle(cublasHandle_t handle) {
 //   - Comments of @soumith copied from cuDNN handle pool implementation
 #ifdef NO_CUDNN_DESTROY_HANDLE
 #else
-    cublasDestroy(handle);
+  cublasDestroy(handle);
 #endif
 }
 
@@ -104,13 +107,27 @@ using CuBlasPoolType = DeviceThreadHandlePool<cublasHandle_t, createCublasHandle
 
 } // namespace
 
-std::map<std::tuple<void *, void *>, at::DataPtr>& cublas_handle_stream_to_workspace() {
-  static auto& instance = *new std::map<std::tuple<void *, void *>, at::DataPtr>;
+WorkspaceMapWithMutex& cublas_handle_stream_to_workspace() {
+  static auto& instance = *new WorkspaceMapWithMutex;
+  return instance;
+}
+
+WorkspaceMapWithMutex& cublaslt_handle_stream_to_workspace() {
+  static auto& instance = *new WorkspaceMapWithMutex;
   return instance;
 }
 
 void clearCublasWorkspaces() {
-  cublas_handle_stream_to_workspace().clear();
+  {
+    auto& workspace = cublas_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    workspace.map.clear();
+  }
+  {
+    auto& workspace = cublaslt_handle_stream_to_workspace();
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    workspace.map.clear();
+  }
 }
 
 size_t parseChosenWorkspaceSize() {
@@ -146,8 +163,8 @@ size_t parseChosenWorkspaceSize() {
     while (next != end) {
       std::smatch match = *next;
       TORCH_CHECK(match.size() == 3, "Expected CUBLAS_WORKSPACE_SPACE_CONFIG match of size 3 (Format :SIZE:COUNT)");
-      size_t curr_size = (size_t) std::stoi(match.str(1));
-      size_t count = (size_t) std::stoi(match.str(2));
+      size_t curr_size = std::stoull(match.str(1));
+      size_t count = std::stoull(match.str(2));
       total_size += curr_size * 1024 * count;
       next++;
     }
@@ -157,13 +174,147 @@ size_t parseChosenWorkspaceSize() {
   }
 }
 
+size_t parseCUDABlasLtWorkspaceSize() {
+  auto val = c10::utils::get_env("CUBLASLT_WORKSPACE_SIZE");
+#ifdef USE_ROCM
+  if (!val.has_value()) {
+    // accept either env var
+    val = c10::utils::get_env("HIPBLASLT_WORKSPACE_SIZE");
+  }
+  size_t workspace_size = 76*1024; /* Use 76 MB for hipBLASLt */
+#else
+  size_t workspace_size = 1024; /* default size in KiB according to #73328 */
+#endif
+
+  if (val.has_value()) {
+    try {
+      workspace_size = std::stoi(val.value());
+    } catch (std::invalid_argument const&) {
+      TORCH_WARN(
+          "invalid CUBLASLT_WORKSPACE_SIZE,",
+          " using default workspace size of ",
+          workspace_size,
+          " KiB.");
+    } catch (std::out_of_range const&) {
+      TORCH_WARN(
+          "CUBLASLT_WORKSPACE_SIZE out of range,",
+          " using default workspace size of ",
+          workspace_size,
+          " KiB.");
+    }
+  }
+  return workspace_size * 1024;
+}
+
 size_t getChosenWorkspaceSize() {
   size_t pool_size = parseChosenWorkspaceSize();
   return pool_size;
 }
 
+#define TORCH_CUBLASLT_UNIFIED_WORKSPACE "TORCH_CUBLASLT_UNIFIED_WORKSPACE"
+
+size_t getCUDABlasLtWorkspaceSize() {
+  size_t pool_size = parseCUDABlasLtWorkspaceSize();
+#ifndef USE_ROCM
+  static bool unified = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE) == true;
+  if (unified) {
+    auto cublasWorkspaceSize = getChosenWorkspaceSize();
+    if (cublasWorkspaceSize < pool_size) {
+      TORCH_WARN_ONCE("Requested unified CUBLASLT workspace size of ", pool_size,
+                      " bytes exceeds CUBLAS workspace size of ", cublasWorkspaceSize,
+                      " bytes. Please increase CUBLAS workspace size",
+                      " via CUBLAS_WORKSPACE_CONFIG or decrease requested"
+                      " CUBLASLT_WORKSPACE_SIZE. Otherwise CUBLASLT workspace"
+                      " size will be limited to the CUBLAS workspace size.");
+      pool_size = cublasWorkspaceSize;
+    }
+  }
+#endif
+  return pool_size;
+}
+
 at::DataPtr getNewWorkspace() {
   return c10::cuda::CUDACachingAllocator::get()->allocate(getChosenWorkspaceSize());
+}
+
+at::DataPtr getNewCUDABlasLtWorkspace() {
+  return c10::cuda::CUDACachingAllocator::get()->allocate(getCUDABlasLtWorkspaceSize());
+}
+
+void setWorkspaceForHandle(cublasHandle_t handle, c10::cuda::CUDAStream stream) {
+  cudaStream_t _stream = stream;
+  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+
+  auto& workspace = cublas_handle_stream_to_workspace();
+
+  size_t workspace_size = getChosenWorkspaceSize();
+
+  // Fast path: check if workspace already exists
+  {
+    std::shared_lock<std::shared_mutex> lock(workspace.mutex);
+    auto workspace_it = workspace.map.find(key);
+    if (workspace_it != workspace.map.end()) {
+      TORCH_CUDABLAS_CHECK(cublasSetWorkspace(
+          handle, workspace_it->second.get(), workspace_size));
+      return;
+    }
+  }
+
+  // Slow path: allocate workspace outside the lock
+  auto new_workspace = getNewWorkspace();
+
+  // Insert with lock (double-check in case another thread inserted while we
+  // were allocating)
+  {
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    auto workspace_it = workspace.map.try_emplace(key, std::move(new_workspace)).first;
+    TORCH_CUDABLAS_CHECK(
+        cublasSetWorkspace(handle, workspace_it->second.get(), workspace_size));
+  }
+}
+
+void* getCUDABlasLtWorkspace() {
+#ifndef USE_ROCM
+  static bool unified = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE) == true;
+  if (unified) {
+    cublasHandle_t handle = at::cuda::getCurrentCUDABlasHandle();
+    auto stream = c10::cuda::getCurrentCUDAStream();
+    cudaStream_t _stream = stream;
+    auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+    auto& workspace = at::cuda::cublas_handle_stream_to_workspace();
+    std::shared_lock<std::shared_mutex> lock(workspace.mutex);
+    auto workspace_it = workspace.map.find(key);
+    TORCH_INTERNAL_ASSERT(workspace_it != workspace.map.end());
+    return workspace_it->second.mutable_get();
+  }
+#endif
+  cublasLtHandle_t handle = getCurrentCUDABlasLtHandle();
+  auto stream = c10::cuda::getCurrentCUDAStream();
+  cudaStream_t _stream = stream;
+  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
+
+  auto& workspace = cublaslt_handle_stream_to_workspace();
+
+  // Fast path: check if workspace already exists
+  {
+    std::shared_lock<std::shared_mutex> lock(workspace.mutex);
+    auto workspace_it = workspace.map.find(key);
+    if (workspace_it != workspace.map.end()) {
+      return workspace_it->second.mutable_get();
+    }
+  }
+
+  // Slow path: allocate workspace outside the lock
+  auto new_workspace = getNewCUDABlasLtWorkspace();
+
+  // Insert with lock (double-check in case another thread inserted while we
+  // were allocating)
+  {
+    std::unique_lock<std::shared_mutex> lock(workspace.mutex);
+    auto workspace_it =
+          workspace.map.try_emplace(key, std::move(new_workspace)).first;
+    return workspace_it->second.mutable_get();
+  }
 }
 
 cublasHandle_t getCurrentCUDABlasHandle() {
@@ -207,18 +358,14 @@ cublasHandle_t getCurrentCUDABlasHandle() {
   // will allocate memory dynamically (even if they're cheap) outside
   // PyTorch's CUDA caching allocator. It's possible that CCA used up
   // all the memory and cublas's cudaMallocAsync will return OOM
-  cudaStream_t _stream = stream;
-  auto key = std::make_tuple(static_cast<void *>(handle), static_cast<void *>(_stream));
-  auto workspace_it = cublas_handle_stream_to_workspace().find(key);
-  if (workspace_it == cublas_handle_stream_to_workspace().end()) {
-    workspace_it = cublas_handle_stream_to_workspace().insert(workspace_it, {key, getNewWorkspace()});
-  }
-  TORCH_CUDABLAS_CHECK(cublasSetWorkspace(handle, workspace_it->second.get(), getChosenWorkspaceSize()));
+  setWorkspaceForHandle(handle, stream);
+
 #if !defined(USE_ROCM)
   // On CUDA >= 11, and architecture >= Ampere, cuBLAS can use TF32 to speedup
   // FP32 data type calculations based on the value of the allow_tf32 flag.
   // To enable TF32, set the math mode of the handle to CUBLAS_TF32_TENSOR_OP_MATH.
-  if (!NoTF32Guard::should_disable_tf32() && at::globalContext().allowTF32CuBLAS()) {
+  if (!NoTF32Guard::should_disable_tf32() &&
+      at::globalContext().float32Precision(at::Float32Backend::CUDA, at::Float32Op::MATMUL) == at::Float32Precision::TF32) {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_TF32_TENSOR_OP_MATH));
   } else {
     TORCH_CUDABLAS_CHECK(cublasSetMathMode(handle, CUBLAS_DEFAULT_MATH));

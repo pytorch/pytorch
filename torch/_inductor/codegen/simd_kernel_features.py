@@ -24,6 +24,8 @@ from ..virtualized import V
 if typing.TYPE_CHECKING:
     from collections.abc import Iterable, Sequence
 
+    from torch._inductor.tiling_utils import CoalesceVarAnalysis
+
 
 class NodeScheduleMarker:
     @staticmethod
@@ -80,12 +82,14 @@ class SIMDKernelFeatures:
         node_schedule: list[NodeScheduleEntry],
         numel: sympy.Expr,
         reduction_numel: sympy.Expr = sympy.S.One,
+        coalesce_analysis: Optional[CoalesceVarAnalysis] = None,
     ):
         self.node_schedule = node_schedule
         # numel excludes reduction_numel
         self.numel: sympy.Expr = V.graph.sizevars.simplify(numel)
         self.reduction_numel: sympy.Expr = V.graph.sizevars.simplify(reduction_numel)
         self._stats_cache: dict[tuple[sympy.Expr, ...], MemoryStats] = {}
+        self.coalesce_analysis = coalesce_analysis
 
     @cache_on_self
     def is_reduction(self) -> bool:
@@ -119,7 +123,7 @@ class SIMDKernelFeatures:
         return bool(self.op_counts().get(op_name))
 
     def get_mutations(self) -> OrderedSet[str]:
-        mutations = OrderedSet[str]()
+        mutations: OrderedSet[str] = OrderedSet()
         for node in self.scheduler_nodes():
             for buf in node.get_outputs():
                 mutations.update(buf.get_mutations())
@@ -128,7 +132,7 @@ class SIMDKernelFeatures:
     @cache_on_self
     def select_index_dtype(self) -> torch.dtype:
         # Gather all used buffer names
-        buffer_names = OrderedSet[str]()
+        buffer_names: OrderedSet[str] = OrderedSet()
         for node in self.scheduler_nodes():
             buffer_names.update(node.get_buffer_names())
             buffer_names.update(node.used_buffer_names())
@@ -286,7 +290,8 @@ class MemoryEstimator:
             )
 
             for dep in rw._reads:
-                assert isinstance(dep, MemoryDep)
+                if not isinstance(dep, MemoryDep):
+                    continue
                 dep = dep.simplify_with_ranges()
                 if not self.persistent.writes.get(dep.name):  # cache miss?
                     self.persistent.reads[dep.name].add(dep)
@@ -304,7 +309,8 @@ class MemoryEstimator:
                         self.must_keep_buffers.add(dep.name)
 
             for dep in rw._writes:
-                assert isinstance(dep, MemoryDep)
+                if not isinstance(dep, MemoryDep):
+                    continue
                 dep = dep.simplify_with_ranges()
                 self.store_buffer_names.add(dep.name)
                 self.persistent.writes[dep.name].add(dep)

@@ -2,10 +2,6 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,eager_fail_to_run,0
-
-
-
 BERT_pytorch,pass,0
 
 
@@ -98,18 +94,6 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,fail_to_run,0
-
-
-
-doctr_reco_predictor,fail_to_run,0
-
-
-
-drq,fail_to_run,0
-
-
-
 functorch_dp_cifar10,pass,0
 
 
@@ -118,67 +102,7 @@ functorch_maml_omniglot,pass,0
 
 
 
-hf_Albert,pass,0
-
-
-
-hf_Bart,pass,0
-
-
-
-hf_Bert,pass,0
-
-
-
-hf_Bert_large,pass,0
-
-
-
-hf_BigBird,fail_accuracy,0
-
-
-
-hf_DistilBert,pass,0
-
-
-
-hf_GPT2,pass,0
-
-
-
-hf_GPT2_large,pass_due_to_skip,0
-
-
-
-hf_Roberta_base,pass,0
-
-
-
-hf_T5,pass,0
-
-
-
-hf_T5_base,eager_fail_to_run,0
-
-
-
-hf_T5_large,pass_due_to_skip,0
-
-
-
-hf_Whisper,pass,0
-
-
-
-hf_distil_whisper,pass,0
-
-
-
 lennard_jones,pass,0
-
-
-
-llama,fail_to_run,0
 
 
 
@@ -290,15 +214,7 @@ sam,pass,0
 
 
 
-sam_fast,fail_to_run,0
-
-
-
 shufflenet_v2_x1_0,pass,0
-
-
-
-soft_actor_critic,fail_to_run,0
 
 
 
@@ -306,51 +222,19 @@ squeezenet1_1,pass,0
 
 
 
-stable_diffusion_text_encoder,pass,0
-
-
-
-stable_diffusion_unet,pass_due_to_skip,0
-
-
-
-timm_efficientnet,pass,0
-
-
-
-timm_regnet,pass,0
-
-
-
-timm_resnest,pass,0
-
-
-
-timm_vision_transformer,pass,0
-
-
-
-timm_vision_transformer_large,pass_due_to_skip,0
-
-
-
-timm_vovnet,pass,0
-
-
-
 torch_multimodal_clip,pass,0
 
 
 
-tts_angular,pass,0
+torchrec_dlrm,eager_fail_to_run,0
+
+
+
+tts_angular,fail_to_run,0
 
 
 
 vgg16,pass,0
-
-
-
-vision_maskrcnn,fail_to_run,0
 
 
 

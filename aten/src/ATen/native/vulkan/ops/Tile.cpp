@@ -18,7 +18,7 @@ namespace {
 using namespace api::utils;
 
 Tensor tile(const Tensor& self, const IntArrayRef repeats) {
-  // If self.size() > len(reps), reps is promoted to self.size() by pre-pending
+  // If self.size() > len(reps), reps is promoted to self.size() by prepending
   // 1’s to it to keep the same behaviour as `numpy.tile`.
   // Thus for a tensor of shape (2, 3, 4, 5), a dims of (2, 2) is treated
   // as (1, 1, 2, 2).

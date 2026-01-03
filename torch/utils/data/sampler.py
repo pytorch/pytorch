@@ -1,9 +1,15 @@
 # mypy: allow-untyped-defs
 import itertools
 from collections.abc import Iterable, Iterator, Sequence, Sized
-from typing import Generic, Optional, TypeVar, Union
+from typing import Generic, TypeVar
 
 import torch
+
+
+# Note: For benchmarking changes to samplers, see:
+# /benchmarks/data/samplers_bench.py
+# This benchmark compares the performance of different sampler implementations
+# and can be used to evaluate the impact of optimizations.
 
 
 __all__ = [
@@ -26,10 +32,6 @@ class Sampler(Generic[_T_co]):
     Every Sampler subclass has to provide an :meth:`__iter__` method, providing a
     way to iterate over indices or lists of indices (batches) of dataset elements,
     and may provide a :meth:`__len__` method that returns the length of the returned iterators.
-
-    Args:
-        data_source (Dataset): This argument is not used and will be removed in 2.2.0.
-            You may still have custom implementation that utilizes it.
 
     Example:
         >>> # xdoctest: +SKIP
@@ -61,15 +63,6 @@ class Sampler(Generic[_T_co]):
               :class:`~torch.utils.data.DataLoader`, but is expected in any
               calculation involving the length of a :class:`~torch.utils.data.DataLoader`.
     """
-
-    def __init__(self, data_source: Optional[Sized] = None) -> None:
-        if data_source is not None:
-            import warnings
-
-            warnings.warn(
-                "`data_source` argument is not used and will be removed in 2.2.0."
-                "You may still have custom implementation that utilizes it."
-            )
 
     def __iter__(self) -> Iterator[_T_co]:
         raise NotImplementedError
@@ -106,7 +99,7 @@ class SequentialSampler(Sampler[int]):
     r"""Samples elements sequentially, always in the same order.
 
     Args:
-        data_source (Dataset): dataset to sample from
+        data_source (Sized): data source to sample from. Must implement __len__.
     """
 
     data_source: Sized
@@ -132,7 +125,7 @@ class RandomSampler(Sampler[int]):
     If with replacement, then user can specify :attr:`num_samples` to draw.
 
     Args:
-        data_source (Dataset): dataset to sample from
+        data_source (Sized): data source to sample from. Must implement __len__.
         replacement (bool): samples are drawn on-demand with replacement if ``True``, default=``False``
         num_samples (int): number of samples to draw, default=`len(dataset)`.
         generator (Generator): Generator used in sampling.
@@ -145,7 +138,7 @@ class RandomSampler(Sampler[int]):
         self,
         data_source: Sized,
         replacement: bool = False,
-        num_samples: Optional[int] = None,
+        num_samples: int | None = None,
         generator=None,
     ) -> None:
         self.data_source = data_source
@@ -231,9 +224,17 @@ class WeightedRandomSampler(Sampler[int]):
 
     Example:
         >>> # xdoctest: +IGNORE_WANT("non-deterministic")
-        >>> list(WeightedRandomSampler([0.1, 0.9, 0.4, 0.7, 3.0, 0.6], 5, replacement=True))
+        >>> list(
+        ...     WeightedRandomSampler(
+        ...         [0.1, 0.9, 0.4, 0.7, 3.0, 0.6], 5, replacement=True
+        ...     )
+        ... )
         [4, 4, 1, 4, 5]
-        >>> list(WeightedRandomSampler([0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False))
+        >>> list(
+        ...     WeightedRandomSampler(
+        ...         [0.9, 0.4, 0.05, 0.2, 0.3, 0.1], 5, replacement=False
+        ...     )
+        ... )
         [0, 1, 4, 3, 2]
     """
 
@@ -293,15 +294,21 @@ class BatchSampler(Sampler[list[int]]):
             its size would be less than ``batch_size``
 
     Example:
-        >>> list(BatchSampler(SequentialSampler(range(10)), batch_size=3, drop_last=False))
+        >>> list(
+        ...     BatchSampler(
+        ...         SequentialSampler(range(10)), batch_size=3, drop_last=False
+        ...     )
+        ... )
         [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9]]
-        >>> list(BatchSampler(SequentialSampler(range(10)), batch_size=3, drop_last=True))
+        >>> list(
+        ...     BatchSampler(SequentialSampler(range(10)), batch_size=3, drop_last=True)
+        ... )
         [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
     """
 
     def __init__(
         self,
-        sampler: Union[Sampler[int], Iterable[int]],
+        sampler: Sampler[int] | Iterable[int],
         batch_size: int,
         drop_last: bool,
     ) -> None:
@@ -325,12 +332,11 @@ class BatchSampler(Sampler[list[int]]):
         self.drop_last = drop_last
 
     def __iter__(self) -> Iterator[list[int]]:
-        # Implemented based on the benchmarking in https://github.com/pytorch/pytorch/pull/76951
         sampler_iter = iter(self.sampler)
         if self.drop_last:
             # Create multiple references to the same iterator
             args = [sampler_iter] * self.batch_size
-            for batch_droplast in zip(*args):
+            for batch_droplast in zip(*args, strict=False):
                 yield [*batch_droplast]
         else:
             batch = [*itertools.islice(sampler_iter, self.batch_size)]

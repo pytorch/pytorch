@@ -3,13 +3,19 @@
 {
   "name": "PyTorch - CPU",
   "build": {
-    "context": "../..",
+    "context": "./",
     "dockerfile": "../Dockerfile",
     "args": {
       "USERNAME": "vscode",
       "BUILDKIT_INLINE_CACHE": "0",
       "CLANG_VERSION": ""
     }
+  },
+  // Mount the full repo only after the container starts
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/pytorch,type=bind,consistency=cached",
+  "workspaceFolder": "/workspace/pytorch",
+  "containerEnv": {
+    "PIP_USER": "0" // <‑‑ disable implicit --user
   },
 
   // Features to add to the dev container. More info: https://containers.dev/features.

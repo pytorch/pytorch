@@ -11,8 +11,9 @@ import enum
 import inspect
 import io
 import logging
+from collections.abc import Callable
 from itertools import chain
-from typing import Any, Callable, Optional, Union
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -99,15 +100,19 @@ def _broadcast_object(
         data = bytearray(buffer.getbuffer())
         length_tensor = torch.LongTensor([len(data)]).to(device)
         data_send_tensor = torch.ByteTensor(data).to(device)
+        # pyrefly: ignore [bad-argument-type]
         dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
+        # pyrefly: ignore [bad-argument-type]
         dist.broadcast(data_send_tensor, src=src_rank, group=group, async_op=False)
     else:
         # Receive the object
         length_tensor = torch.LongTensor([0]).to(device)
+        # pyrefly: ignore [bad-argument-type]
         dist.broadcast(length_tensor, src=src_rank, group=group, async_op=False)
         data_recv_tensor = torch.empty(
             [int(length_tensor.item())], dtype=torch.uint8, device=device
         )
+        # pyrefly: ignore [bad-argument-type]
         dist.broadcast(data_recv_tensor, src=src_rank, group=group, async_op=False)
         buffer = io.BytesIO(data_recv_tensor.cpu().numpy())
         obj = torch.load(buffer, map_location=device, weights_only=False)
@@ -166,8 +171,9 @@ class _DDPBucketAssignment:
         if len(self.parameters) == 0:
             raise ValueError("Empty bucket assignment")
         # DDP guarantees all parameters in the bucket have the same device
+        # pyrefly: ignore [read-only]
         self.device: torch.device = self.parameters[0].device
-        self.tensor: Optional[torch.Tensor] = None
+        self.tensor: torch.Tensor | None = None
 
 
 class _OverlapStatus(enum.IntEnum):
@@ -246,7 +252,7 @@ class _OverlapInfo:
         # Group Ranks
         self.assigned_ranks_per_bucket: list[set[int]] = []
         self.num_bucket_assignments: int = 0
-        self.total_size: Optional[int] = None
+        self.total_size: int | None = None
 
         # Modified per iteration
         self.broadcast_handles: list[Any] = []
@@ -284,7 +290,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     r"""
     Wrap an arbitrary :class:`optim.Optimizer <torch.optim.Optimizer>` and shards its states across ranks in the group.
 
-    The sharing is done as described by ZeRO_.
+    The sharing is done as described by `ZeRO <https://arxiv.org/abs/1910.02054>`_.
 
     The local optimizer instance in each rank is only
     responsible for updating approximately ``1 / world_size`` parameters and
@@ -365,16 +371,13 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         is to prepend dummy inputs.
 
     .. warning:: ZeroRedundancyOptimizer is experimental and subject to change.
-
-    .. _ZeRO: https://arxiv.org/abs/1910.02054
-
     """
 
     def __init__(
         self,
         params,
         optimizer_class: type[Optimizer],
-        process_group: Optional[Any] = None,
+        process_group: Any | None = None,
         parameters_as_bucket_view: bool = False,
         overlap_with_ddp: bool = False,
         **defaults: Any,
@@ -417,7 +420,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         self.world_size: int = dist.get_world_size(self.process_group)
         self.rank: int = dist.get_rank(self.process_group)
         self.global_rank: int = dist.distributed_c10d.get_global_rank(
-            self.process_group, self.rank
+            # pyrefly: ignore [bad-argument-type]
+            self.process_group,
+            self.rank,
         )
 
         self._overlap_with_ddp: bool = overlap_with_ddp
@@ -537,7 +542,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         self._all_state_dicts = []
         for rank in range(self.world_size):
             global_rank = dist.distributed_c10d.get_global_rank(
-                self.process_group, rank
+                # pyrefly: ignore [bad-argument-type]
+                self.process_group,
+                rank,
             )
             if self.rank == to:
                 # Consolidate all local `state_dict`s on this rank, storing on
@@ -642,7 +649,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
     def _partition_parameters(
         self,
-        params_per_rank: Optional[list[list[torch.Tensor]]] = None,
+        params_per_rank: list[list[torch.Tensor]] | None = None,
     ) -> list[list[dict]]:
         r"""
         Partitions parameters across distributed data parallel ranks.
@@ -769,7 +776,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
             for dev_i_buckets in self._buckets:
                 bucket = dev_i_buckets[rank]
                 global_rank = dist.distributed_c10d.get_global_rank(
-                    self.process_group, rank
+                    # pyrefly: ignore [bad-argument-type]
+                    self.process_group,
+                    rank,
                 )
                 handles.append(
                     dist.broadcast(
@@ -782,7 +791,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
         else:
             param_groups = self._partition_parameters()[rank]
             global_rank = dist.distributed_c10d.get_global_rank(
-                self.process_group, rank
+                # pyrefly: ignore [bad-argument-type]
+                self.process_group,
+                rank,
             )
             for param_group in param_groups:
                 handles.extend(
@@ -858,7 +869,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     def _get_min_index(
         self,
         values: list[int],
-        disallowed_indices: Optional[set[int]] = None,
+        disallowed_indices: set[int] | None = None,
     ) -> int:
         r"""
         Return ``values.index(min(values))``, except only uses one pass.
@@ -981,11 +992,14 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 for param_index, param in enumerate(bucket_params):
                     param_numel = param.numel()
                     if (
+                        # pyrefly: ignore [unbound-name]
                         assignment_size + param_numel >= threshold
                         and param_index > bucket_offset
                     ):
                         assigned_rank = self._get_min_index(
-                            size_per_rank, assigned_ranks_per_bucket[bucket_index]
+                            # pyrefly: ignore [unbound-name]
+                            size_per_rank,
+                            assigned_ranks_per_bucket[bucket_index],
                         )
                         # Include up to but not including the parameter that
                         # exceeded the threshold
@@ -996,6 +1010,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                             assigned_rank,
                             assigned_ranks_per_bucket,
                         )
+                        # pyrefly: ignore [unbound-name]
                         size_per_rank[assigned_rank] += assignment_size
                         bucket_offset = param_index
                         assignment_size = 0
@@ -1003,7 +1018,9 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                 # Assign the remainder of the bucket so that no assignment
                 # spans across two buckets
                 assigned_rank = self._get_min_index(
-                    size_per_rank, assigned_ranks_per_bucket[bucket_index]
+                    # pyrefly: ignore [unbound-name]
+                    size_per_rank,
+                    assigned_ranks_per_bucket[bucket_index],
                 )
                 self._assign_bucket_subset_to_rank(
                     bucket_index,
@@ -1012,16 +1029,17 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
                     assigned_rank,
                     assigned_ranks_per_bucket,
                 )
+                # pyrefly: ignore [unbound-name]
                 size_per_rank[assigned_rank] += assignment_size
 
         return self._bucket_assignments_per_rank_cache
 
     def _local_step(
         self,
-        gradients: Optional[list[Optional[torch.Tensor]]] = None,
-        closure: Optional[Callable[[], float]] = None,
+        gradients: list[torch.Tensor | None] | None = None,
+        closure: Callable[[], float] | None = None,
         **kwargs: Any,
-    ) -> Optional[float]:
+    ) -> float | None:
         r"""
         Perform a single optimizer step without syncing parameters across ranks.
 
@@ -1090,11 +1108,12 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
         return loss
 
+    # pyrefly: ignore [bad-override]
     def step(
         self,
-        closure: Optional[Callable[[], float]] = None,
+        closure: Callable[[], float] | None = None,
         **kwargs: Any,
-    ) -> Optional[float]:
+    ) -> float | None:
         r"""
         Perform a single optimizer step and syncs parameters across all ranks.
 
@@ -1121,7 +1140,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
 
         return loss
 
-    def join_hook(self, **kwargs):
+    def join_hook(self, **_kwargs: Any) -> JoinHook:
         r"""
         Return the ZeRO join hook.
 
@@ -1384,7 +1403,7 @@ class ZeroRedundancyOptimizer(Optimizer, Joinable):
     def _verify_and_init_params(
         self,
         params: Any,
-    ) -> Union[list[torch.Tensor], list[dict]]:
+    ) -> list[torch.Tensor] | list[dict]:
         r"""
         Verify the type of ``params`` and initializes ``self._all_params`` as a :class:`list` of all parameters.
 

@@ -36,7 +36,18 @@ on:
         required: false
         type: boolean
         default: true
-
+      monitor-log-interval:
+        description: |
+          Set the interval for the monitor script to log utilization.
+        required: false
+        type: number
+        default: 5
+      monitor-data-collect-interval:
+        description: |
+          Set the interval for the monitor script to collect data.
+        required: false
+        type: number
+        default: 1
 env:
   GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
 
@@ -59,14 +70,12 @@ jobs:
         run: |
           git config --global core.longpaths true
           git config --global core.symlinks true
+          git config --global core.ignorecase false
 
           # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
           # the directory on Windows and prevent GHA from checking out as reported
           # in https://github.com/actions/checkout/issues/1018
           git config --global core.fsmonitor false
-
-      - name: Clean up leftover processes on non-ephemeral Windows runner
-        uses: pytorch/test-infra/.github/actions/cleanup-runner@main
 
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -80,7 +89,7 @@ jobs:
             To start tests locally, change working folder to \actions-runner\_work\pytorch\pytorch\test,
             Activate miniconda and Visual Studio environment and set PYTHON_PATH, by running:
               call C:\Jenkins\Miniconda3\Scripts\activate.bat C:\Jenkins\Miniconda3
-              call "C:\Program Files (x86)\Microsoft Visual Studio\2019\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
+              call "C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\VC\Auxiliary\Build\vcvarsall.bat" x64
               set PYTHONPATH=C:\actions-runner\_work\pytorch\pytorch\build\win_tmp\build
 
       # [see note: pytorch repo ref]
@@ -94,26 +103,29 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
-      # TODO: Move to a requirements.txt file for windows
-      - name: Install pip dependencies
-        uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
         with:
-          shell: bash
-          timeout_minutes: 5
-          max_attempts: 5
-          retry_wait_seconds: 30
-          command: |
-            set -eu
-            python3 -m pip install 'xdoctest>=1.1.0'
+          github-token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Start monitoring script
         id: monitor-script
+        env:
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          WORKFLOW_RUN_ID: ${{github.run_id}}
+          MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
+          MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         shell: bash
         if: ${{ !inputs.disable-monitor }}
         continue-on-error: true
         run: |
           # Windows conda doesn't have python3 binary, only python, but it's python3
-          ${CONDA_RUN} python -m tools.stats.monitor > usage_log.txt 2>&1 &
+          ${CONDA_RUN} python -m pip install psutil==5.9.8 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
+          ${CONDA_RUN} python -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download PyTorch Build Artifacts
@@ -131,15 +143,8 @@ jobs:
         continue-on-error: true
         uses: ./.github/actions/download-td-artifacts
 
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Check for keep-going label and re-enabled test issues
-        # This uses the filter-test-configs action because it conviniently
+        # This uses the filter-test-configs action because it conveniently
         # checks for labels and re-enabled test issues.  It does not actually do
         # any filtering.  All filtering is done in the build step.
         id: keep-going
@@ -164,7 +169,7 @@ jobs:
         env:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           INSTALL_WINDOWS_SDK: 1
-          PYTHON_VERSION: 3.9
+          PYTHON_VERSION: "3.10"
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
@@ -172,8 +177,8 @@ jobs:
           NO_TD: ${{ steps.keep-going.outputs.ci-no-td }}
           VC_PRODUCT: "BuildTools"
           VC_VERSION: ""
-          VS_VERSION: "16.8.6"
-          VC_YEAR: "2019"
+          VS_VERSION: "17.4.1"
+          VC_YEAR: "2022"
           AWS_DEFAULT_REGION: us-east-1
           PR_NUMBER: ${{ github.event.pull_request.number }}
           GITHUB_REPOSITORY: ${{ github.repository }}
@@ -236,19 +241,21 @@ jobs:
         with:
           file-suffix: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
 
+      - name: Upload utilization stats
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
+        continue-on-error: true
+        uses: ./.github/actions/upload-utilization-stats
+        with:
+          job_id: ${{ steps.get-job-id.outputs.job-id }}
+          job_name: ${{ steps.get-job-id.outputs.job-name }}
+          workflow_name: ${{ github.workflow }}
+          workflow_run_id: ${{github.run_id}}
+          workflow_attempt: ${{github.run_attempt}}
+
       - name: Parse ref
         id: parse-ref
         shell: bash
         run: python3 .github/scripts/parse_ref.py
-
-      - name: Uninstall PyTorch
-        if: always()
-        continue-on-error: true
-        shell: bash
-        run: |
-          # This step removes PyTorch installed by the test to give a clean slate
-          # to the next job
-          python3 -mpip uninstall -y torch
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win

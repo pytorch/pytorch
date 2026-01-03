@@ -1,9 +1,9 @@
 # mypy: allow-untyped-defs
 import inspect
 import logging
+from collections.abc import Callable
 from functools import wraps
 from queue import Queue
-from typing import Callable
 
 import torch.nn as nn
 from torch.fx._compatibility import compatibility
@@ -31,6 +31,7 @@ def pass_result_wrapper(fn: Callable) -> Callable:
         wrapped_fn (Callable[Module, PassResult])
     """
     if fn is None:
+        # pyrefly: ignore [bad-return]
         return None
 
     @wraps(fn)
@@ -78,7 +79,7 @@ def _topological_sort_passes(
     if len(constraints) == 0:
         return passes
 
-    # Contruct a graph mapping nodes to a list of their users
+    # Construct a graph mapping nodes to a list of their users
     graph: dict[Callable, list[Callable]] = {p: [] for p in passes}
     indegree_map: dict[Callable, int] = dict.fromkeys(passes, 0)
     candidates: Queue = Queue()

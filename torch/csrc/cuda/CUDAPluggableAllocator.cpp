@@ -7,23 +7,6 @@
 
 namespace torch::cuda::CUDAPluggableAllocator {
 
-CUDAPluggableAllocatorDeleterContext::CUDAPluggableAllocatorDeleterContext(
-    std::function<FreeFuncType> free_fn,
-    void* data,
-    size_t size,
-    int device,
-    cudaStream_t stream)
-    : free_fn_(std::move(free_fn)),
-      data_(data),
-      size_(size),
-      device_(device),
-      stream_(stream) {}
-
-void CUDAPluggableAllocatorDeleterContext::free() {
-  free_fn_(data_, size_, device_, stream_);
-  delete this;
-}
-
 int device_count = 0;
 
 void custom_raw_deleter(void* ptr);
@@ -41,8 +24,8 @@ _AllocationMetadata::_AllocationMetadata(
 // This avoids having to link against libtorch for C++ based custom allocators
 // And also use this from python
 CUDAPluggableAllocator::CUDAPluggableAllocator(
-    std::function<MallocFuncType> alloc_fn,
-    std::function<FreeFuncType> free_fn)
+    std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
+    std::function<void(void*, size_t, int, cudaStream_t)> free_fn)
     : alloc_fn_(std::move(alloc_fn)), free_fn_(std::move(free_fn)) {}
 
 CUDAPluggableAllocator::CUDAPluggableAllocator(CUDAPluggableAllocator& other)
@@ -114,10 +97,8 @@ c10::DataPtr CUDAPluggableAllocator::allocate(size_t size) {
   C10_CUDA_CHECK(c10::cuda::GetDevice(&device));
   cudaStream_t stream = c10::cuda::getCurrentCUDAStream(device);
   void* r = this->malloc(size, device, stream);
-  auto* ctx = new CUDAPluggableAllocatorDeleterContext(
-      free_fn_, r, size, device, stream);
   c10::DataPtr data_ptr = {
-      r, ctx, raw_deleter(), c10::Device(c10::DeviceType::CUDA, device)};
+      r, r, raw_deleter(), c10::Device(c10::DeviceType::CUDA, device)};
   return data_ptr;
 }
 
@@ -184,7 +165,15 @@ void CUDAPluggableAllocator::setMemoryFraction(
   }
 }
 
-void CUDAPluggableAllocator::emptyCache() {
+std::vector<c10::cuda::CUDACachingAllocator::StreamSegmentSize>
+CUDAPluggableAllocator::getExpandableSegmentSizes(c10::DeviceIndex device) {
+  TORCH_CHECK(
+      false,
+      "CUDAMallocAsyncAllocator does not yet support getExpandableSegmentSizes.");
+}
+
+void CUDAPluggableAllocator::emptyCache(
+    /*unused*/ c10::cuda::MempoolId_t mempool_id) {
   if (reset_fn_) {
     return reset_fn_();
   }
@@ -237,8 +226,8 @@ void CUDAPluggableAllocator::resetPeakStats(c10::DeviceIndex device) {
       "If you need it, please file an issue describing your use case.");
 }
 
-c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::
-    snapshot() {
+c10::cuda::CUDACachingAllocator::SnapshotInfo CUDAPluggableAllocator::snapshot(
+    c10::cuda::MempoolId_t mempool_id) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support snapshot. "
@@ -291,7 +280,8 @@ void CUDAPluggableAllocator::recordHistory(
     c10::cuda::CUDACachingAllocator::CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
     c10::cuda::CUDACachingAllocator::RecordContext when,
-    bool clearHistory) {
+    bool clearHistory,
+    const std::vector<std::string>& skip_actions) {
   TORCH_CHECK(
       false,
       "CUDAPluggableAllocator does not yet support recordHistory. "
@@ -381,8 +371,8 @@ getCurrentAllocator() {
 // TODO: add more functions in the argument
 std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator>
 createCustomAllocator(
-    std::function<MallocFuncType> alloc_fn,
-    std::function<FreeFuncType> free_fn) {
+    std::function<void*(size_t, int, cudaStream_t)> alloc_fn,
+    std::function<void(void*, size_t, int, cudaStream_t)> free_fn) {
   std::shared_ptr<CUDAPluggableAllocator> allocator(
       new CUDAPluggableAllocator(std::move(alloc_fn), std::move(free_fn)));
   allocator->init(device_count);
@@ -399,8 +389,8 @@ void changeCurrentAllocator(
   current_custom_allocator = allocator;
 }
 
-void custom_raw_deleter(void* ctx) {
-  reinterpret_cast<CUDAPluggableAllocatorDeleterContext*>(ctx)->free();
+void custom_raw_deleter(void* ptr) {
+  current_custom_allocator->raw_delete(ptr);
 }
 
 } // namespace torch::cuda::CUDAPluggableAllocator

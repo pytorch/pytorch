@@ -1,24 +1,23 @@
 # ${generated_comment}
 # mypy: disable-error-code="type-arg"
 # mypy: allow-untyped-defs
+# ruff: noqa: F401,PYI054
 
-import builtins
-from typing import (
-    Any,
-    Callable,
-    ContextManager,
-    Iterator,
-    Literal,
-    NamedTuple,
-    Optional,
-    overload,
-    Sequence,
-    TypeVar,
-    Union,
-)
+from collections.abc import Callable, Sequence
+from types import EllipsisType
+from typing import Any, Literal, overload, TypeVar
 
 import torch
-from torch import contiguous_format, Generator, inf, memory_format, strided, SymInt, Tensor
+from torch import (
+    contiguous_format,
+    Generator,
+    inf,
+    memory_format,
+    strided,
+    SymInt,
+    Tensor,
+)
+from torch._prims_common import DeviceLikeType
 from torch.types import (
     _bool,
     _complex,
@@ -33,8 +32,6 @@ from torch.types import (
     Number,
 )
 
-from torch._prims_common import DeviceLikeType
+${all_directive}
 
 ${function_hints}
-
-${all_directive}

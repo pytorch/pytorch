@@ -15,13 +15,15 @@ import base64
 import copy
 import dataclasses
 import enum
+import functools
 import logging
 import os
 import pickle
 import re
+import zlib
 from collections import defaultdict
 from typing import Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import Self
+from typing_extensions import override, Self
 
 import torch._dynamo.config
 import torch._utils_internal
@@ -35,6 +37,12 @@ from torch._dynamo.utils import (
 )
 from torch._environment import is_fbcode
 from torch._logging._internal import trace_structured_artifact
+from torch.compiler._cache import (
+    CacheArtifact,
+    CacheArtifactFactory,
+    CacheArtifactManager,
+)
+from torch.utils._ordered_set import OrderedSet
 
 
 if TYPE_CHECKING:
@@ -103,26 +111,71 @@ LOCK_TIMEOUT = 10
 # across attempts.  No need to have one mechanism to do everything.
 
 
+@functools.cache
+def _hash_containing_file(filepath: str) -> str:
+    # if the file does not exists we consider filepath to be the hash.
+    if not os.path.exists(filepath):
+        return filepath
+
+    with open(filepath, "rb") as file:
+        content = file.read()
+        crc32_value = zlib.crc32(content)
+        hash = format(crc32_value & 0xFFFFFFFF, "08x")
+        return hash
+
+
 @dataclasses.dataclass(frozen=True)
 class CodeId:
     filename: str
     firstlineno: int
     name: str
+    # When a job restart, the code can be copied to a different path than the previous attempt. In that case
+    # self.filename will have a different value,  we do not want to consider those differences. Instead we
+    # hash the content of the file and use it as an identifier of the file.
+    #
+    # self.filename is kept in the object to give readable information/pointer to the actual file, in a local
+    # code state it will refer to the first seen file path.
+    file_hash: str
+
+    # Exclude file name.
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, CodeId):
+            return False
+        return (
+            self.file_hash == other.file_hash
+            and self.firstlineno == other.firstlineno
+            and self.name == other.name
+        )
+
+    # Ensure if two CodeIds are the same, then they have the same hash by excluding filename.
+    def __hash__(self) -> int:
+        return hash((self.file_hash, self.name, self.firstlineno))
+
+    def __str__(self) -> str:
+        return f"hash({self.file_hash}){self.filename}:{self.firstlineno}:{self.name}"
 
     @staticmethod
     def make(code: types.CodeType) -> CodeId:
-        return CodeId(code.co_filename, code.co_firstlineno, code.co_name)
+        return CodeId(
+            code.co_filename,
+            code.co_firstlineno,
+            code.co_name,
+            _hash_containing_file(code.co_filename),
+        )
 
 
 @dataclasses.dataclass
 class CodeState:
     automatic_dynamic: defaultdict[str, FrameStateSizeEntry] = dataclasses.field(
+        # pyrefly: ignore [unbound-name]
         default_factory=lambda: defaultdict(FrameStateSizeEntry)
     )
 
 
 _INIT_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
 _CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
+_LOGGED_DYNAMIC_ALLOWLIST: bool = False
+_KNOWN_DYNAMIC_SOURCES: set[str] = set()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -212,7 +265,7 @@ class FrameStateSizeEntry:
                 return f"tensor size={render_tuple(self.size)} stride={render_tuple(self.stride)}"
 
         # Fallback
-        return "unusual {repr(self)}"
+        return f"unusual {repr(self)}"
 
     def __post_init__(self) -> None:
         assert not isinstance(self.scalar, torch.SymInt), self.scalar
@@ -324,90 +377,101 @@ def update_automatic_dynamic(
 ) -> FrameStateSizeEntry:
     code_id = CodeId.make(tx.f_code)
     frame_state = get_code_state()[code_id]
-    is_update = name in frame_state.automatic_dynamic
-    mut_entry = frame_state.automatic_dynamic[name]
-    old_entry = copy.copy(mut_entry)
-    mut_entry |= entry
+    if torch._dynamo.config.automatic_dynamic_shapes:
+        is_update = name in frame_state.automatic_dynamic
+        mut_entry = frame_state.automatic_dynamic[name]
+        old_entry = copy.copy(mut_entry)
+        mut_entry |= entry
 
-    # Do some logs (damn, I spend more code logging than I do actually doing
-    # the updates lol)
-    if is_update and old_entry.scalar != mut_entry.scalar:
-        log.debug(
-            "automatic dynamic int %s val %s != %s",
-            name,
-            entry.scalar,
-            old_entry.scalar,
-        )
-        CompileEventLogger.instant(
-            "automatic_dynamic",
-            {
-                "name": name,
-                "dim_changed": "scalar",
-                "reason": "scalar change",
-                "cached": str(old_entry.scalar),
-                "new": str(entry.scalar),
-            },
-        )
-        if is_unspecialized_nn_module:
-            log.info(
-                "%s is converted to a symbolic integer. It is an attribute of a "
-                "user defined nn module class. If you wish to keep it static, you can "
-                "mark the nn module class as `torch._dynamo.mark_static`.",
+        # Do some logs (damn, I spend more code logging than I do actually doing
+        # the updates lol)
+        if is_update and old_entry.scalar != mut_entry.scalar:
+            log.debug(
+                "automatic dynamic int %s val %s != %s",
                 name,
+                entry.scalar,
+                old_entry.scalar,
+            )
+            CompileEventLogger.instant(
+                "automatic_dynamic",
+                {
+                    "name": name,
+                    "dim_changed": "scalar",
+                    "reason": "scalar change",
+                    "cached": str(old_entry.scalar),
+                    "new": str(entry.scalar),
+                },
+            )
+            if is_unspecialized_nn_module:
+                log.info(
+                    "%s is converted to a symbolic integer. It is an attribute of a "
+                    "user defined nn module class. If you wish to keep it static, you can "
+                    "mark the nn module class as `torch._dynamo.mark_static`.",
+                    name,
+                )
+
+        def log_tup(
+            tup_name: str, short_reason: str, long_reason: str, i: Optional[int] = None
+        ) -> None:
+            entry_tup = (
+                getattr(entry, tup_name) if i is None else getattr(entry, tup_name)[i]
+            )
+            old_entry_tup = (
+                getattr(old_entry, tup_name)
+                if i is None
+                else getattr(old_entry, tup_name)[i]
+            )
+            log.debug(
+                "automatic dynamic %s %s %s %s != %s",
+                tup_name,
+                name,
+                short_reason,
+                # NB: We used to only report len(...) here for dim mismatch
+                entry_tup,
+                old_entry_tup,
+            )
+            CompileEventLogger.instant(
+                "automatic_dynamic",
+                {
+                    "name": name,
+                    "dim_changed": "all" if i is None else i,
+                    "reason": long_reason,
+                    "cached": str(old_entry_tup),
+                    "new": str(entry_tup),
+                },
             )
 
-    def log_tup(
-        tup_name: str, short_reason: str, long_reason: str, i: Optional[int] = None
-    ) -> None:
-        entry_tup = (
-            getattr(entry, tup_name) if i is None else getattr(entry, tup_name)[i]
-        )
-        old_entry_tup = (
-            getattr(old_entry, tup_name)
-            if i is None
-            else getattr(old_entry, tup_name)[i]
-        )
+        if is_update and old_entry.size != mut_entry.size:
+            if isinstance(old_entry.size, tuple) and isinstance(entry.size, tuple):
+                if len(old_entry.size) != len(entry.size):
+                    log_tup("size", "dim", "dimensionality change")
+                else:
+                    for i in range(len(entry.size)):
+                        if old_entry.size[i] != entry.size[i]:
+                            log_tup("size", f"size({i})", "size change", i)
+            else:
+                log_tup("size", "other", "other")
+
+        if is_update and old_entry.stride != mut_entry.stride:
+            if isinstance(old_entry.stride, tuple) and isinstance(entry.stride, tuple):
+                if len(old_entry.stride) != len(entry.stride):
+                    log_tup("stride", "dim", "dimensionality change")
+                else:
+                    for i in range(len(entry.stride)):
+                        if old_entry.stride[i] != entry.stride[i]:
+                            log_tup("stride", f"stride({i})", "stride change", i)
+            else:
+                log_tup("stride", "other", "other")
+    else:
+        old_entry = frame_state.automatic_dynamic[name]
         log.debug(
-            "automatic dynamic %s %s %s %s != %s",
-            tup_name,
+            "automatic dynamic is off, overwriting int %s val %s -> %s",
             name,
-            short_reason,
-            # NB: We used to only report len(...) here for dim mismatch
-            entry_tup,
-            old_entry_tup,
+            old_entry.scalar,
+            entry.scalar,
         )
-        CompileEventLogger.instant(
-            "automatic_dynamic",
-            {
-                "name": name,
-                "dim_changed": "all" if i is None else i,
-                "reason": long_reason,
-                "cached": str(old_entry_tup),
-                "new": str(entry_tup),
-            },
-        )
-
-    if is_update and old_entry.size != mut_entry.size:
-        if isinstance(old_entry.size, tuple) and isinstance(entry.size, tuple):
-            if len(old_entry.size) != len(entry.size):
-                log_tup("size", "dim", "dimensionality change")
-            else:
-                for i in range(len(entry.size)):
-                    if old_entry.size[i] != entry.size[i]:
-                        log_tup("size", f"size({i})", "size change", i)
-        else:
-            log_tup("size", "other", "other")
-
-    if is_update and old_entry.stride != mut_entry.stride:
-        if isinstance(old_entry.stride, tuple) and isinstance(entry.stride, tuple):
-            if len(old_entry.stride) != len(entry.stride):
-                log_tup("stride", "dim", "dimensionality change")
-            else:
-                for i in range(len(entry.stride)):
-                    if old_entry.stride[i] != entry.stride[i]:
-                        log_tup("stride", f"stride({i})", "stride change", i)
-        else:
-            log_tup("stride", "other", "other")
+        frame_state.automatic_dynamic[name] = entry
+        mut_entry = entry
 
     return mut_entry
 
@@ -458,14 +522,7 @@ def process_automatic_dynamic(
         return res
 
 
-def get_cache_key() -> Optional[str]:
-    # TODO: info versions of these logs that log only once
-    if torch._inductor.config.force_disable_caches:
-        warn_once(
-            "dynamo_pgo force disabled by torch._inductor.config.force_disable_caches"
-        )
-        return None
-
+def format_cache_key(key: str) -> str:
     # NB: We always use global rank for keys, even though they are overkill
     # for local only cache
     rank = None
@@ -473,6 +530,16 @@ def get_cache_key() -> Optional[str]:
         rank = dist.get_rank()
 
     tag = torch.compiler.config.cache_key_tag
+    return f"{key}:{rank}:{tag}"
+
+
+def get_cache_key() -> Optional[str]:
+    # TODO: info versions of these logs that log only once
+    if torch.compiler.config.force_disable_caches:
+        warn_once(
+            "dynamo_pgo force disabled by torch.compiler.config.force_disable_caches"
+        )
+        return None
 
     # NB: We namespace the cache keys so that only user-specified job id
     # can alias with each other.
@@ -483,27 +550,23 @@ def get_cache_key() -> Optional[str]:
                 "automatically generated job id associated with a specific MAST job "
                 "name and version."
             )
-        return f"{r}:{rank}:{tag}"
+        return format_cache_key(r)
 
     if (name_version := torch._utils_internal.get_mast_job_name_version()) is not None:
         mast_job_name, mast_job_version = name_version
-        return f"mast:{mast_job_name}:{mast_job_version}:{rank}:{tag}"
+        return format_cache_key(f"mast:{mast_job_name}:{mast_job_version}")
 
     return None
 
 
-def rewrite_cache_key_for_mega_cache(original_key: str) -> str:
-    """
-    The PGO cache artifact key for a MAST job contains the job name and the version.
-    When we want to use the cache artifact on a different MAST job, we need to
-    update the key to use the new MAST job's name and version.
-    """
-    if not original_key.startswith("mast:"):
-        # if original_key is overriden, then dont change it
-        return original_key
-    if (new_key := get_cache_key()) is not None:
-        return new_key
-    return original_key
+def get_extra_cache_key(sticky_key: str) -> Optional[str]:
+    if torch.compiler.config.force_disable_caches:
+        warn_once(
+            "dynamo_pgo force disabled by torch.compiler.config.force_disable_caches"
+        )
+        return None
+
+    return format_cache_key(sticky_key)
 
 
 # This solely controls local PGO
@@ -519,7 +582,7 @@ def code_state_path(cache_key: str) -> Optional[str]:
 
 
 def should_use_remote_dynamo_pgo_cache() -> bool:
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         return False
 
     if (r := torch._dynamo.config.automatic_dynamic_remote_pgo) is not None:
@@ -555,44 +618,129 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
     )
 
 
+def _collect_dynamic_sources(code_state: CodeState) -> OrderedSet[str]:
+    dynamic_sources: OrderedSet[str] = OrderedSet()
+    for src, fs in code_state.automatic_dynamic.items():
+        dynamic = False
+        if isinstance(fs.size, tuple):
+            dynamic = auto_dynamic in fs.size  # type: ignore[operator]
+        elif fs.scalar == auto_dynamic:
+            dynamic = True
+        if dynamic:
+            dynamic_sources.add(src)
+    return dynamic_sources
+
+
+def _collect_missing_sources(all_sources: OrderedSet[str]) -> OrderedSet[str]:
+    from torch._dynamo.variables.builder import is_dynamic_source
+
+    global _KNOWN_DYNAMIC_SOURCES
+    missing_sources: OrderedSet[str] = OrderedSet()
+    for src in all_sources:
+        if src in _KNOWN_DYNAMIC_SOURCES:
+            continue
+        elif is_dynamic_source(src):
+            _KNOWN_DYNAMIC_SOURCES.add(src)
+            continue
+        missing_sources.add(src)
+    return missing_sources
+
+
+def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
+    global _KNOWN_DYNAMIC_SOURCES
+    code_id = CodeId.make(f_code)
+    frame_state = get_code_state()[code_id]
+    all_dynamic_sources = _collect_dynamic_sources(frame_state)
+    frame_whitelist = ",".join(all_dynamic_sources)
+    missing_whitelist = ",".join(_collect_missing_sources(all_dynamic_sources))
+    if frame_whitelist:
+        with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
+            CompileEventLogger.pt2_compile(
+                name,
+                recompile_dynamic_whitelist=frame_whitelist,
+                missing_dynamic_whitelist=missing_whitelist,
+            )
+
+
+def _log_size_mismatch_recompile() -> None:
+    global _LOGGED_DYNAMIC_ALLOWLIST
+    if not _LOGGED_DYNAMIC_ALLOWLIST:
+        torch._utils_internal.add_mlhub_insight(
+            category="dynamic_shapes_analysis",
+            insight="Dynamic shape recompilation detected",
+            insight_description="PGO detected a recompilation due to dynamic shapes. \
+            Please follow the instruction from the action link to reduce \
+            recompilation overhead.",
+        )
+        # add mlhub insight only once per rank
+        _LOGGED_DYNAMIC_ALLOWLIST = True
+
+
 def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
-    return "\n".join(
-        f"{k.filename}:{k.firstlineno}:{k.name}:\n"
+    code_state_str = "\n".join(
+        f"{k}:\n"
         + "\n".join(
             f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()
         )
         for k, v in cs.items()
     )
-
-
-def get_code_state() -> defaultdict[CodeId, CodeState]:
-    global _CODE_STATE, _INIT_CODE_STATE
-    if _CODE_STATE is not None:
-        return _CODE_STATE
-
-    # Initialize it (even if we don't look up profile)
-    _CODE_STATE = defaultdict(CodeState)
-
-    cache_key = get_cache_key()
-    if cache_key is None:
-        return _CODE_STATE
-
-    def hit(ty: str) -> defaultdict[CodeId, CodeState]:
-        global _INIT_CODE_STATE
-        assert isinstance(_CODE_STATE, defaultdict)
-        log.info("get_code_state %s hit %s, %d entries", path, ty, len(_CODE_STATE))
-        trace_structured_artifact(
-            f"get_{ty}_code_state",
-            "string",
-            lambda: render_code_state(_CODE_STATE),
+    dynamic_sources: OrderedSet[str] = OrderedSet()
+    for state in cs.values():
+        dynamic_sources.update(_collect_dynamic_sources(state))
+    if dynamic_sources:
+        code_state_str += (
+            "\n\nPGO detected a recompilation due to dynamic shapes. "
+            "To reduce shape recompilations by compiling dynamically to start, "
+            f'set environment variable TORCH_COMPILE_DYNAMIC_SOURCES="{",".join(dynamic_sources)}"'
         )
-        set_feature_use("pgo", True)
-        _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
-        return _CODE_STATE
+    return code_state_str
 
-    from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
 
-    # Attempt local
+@CacheArtifactFactory.register
+class PGOCacheArtifact(CacheArtifact):
+    @override
+    def populate_cache(self) -> None:
+        meta = write_local_impl(
+            self._rewrite_cache_key_for_mega_cache(self.key), self.content
+        )
+        assert meta is not None
+
+    @override
+    @staticmethod
+    def type() -> str:
+        return "pgo"
+
+    @staticmethod
+    def _rewrite_cache_key_for_mega_cache(original_key: str) -> str:
+        """
+        The PGO cache artifact key for a MAST job contains the job name and the version.
+        When we want to use the cache artifact on a different MAST job, we need to
+        update the key to use the new MAST job's name and version.
+        """
+        if not original_key.startswith("mast:"):
+            # if original_key is overridden, then dont change it
+            return original_key
+        if (new_key := get_cache_key()) is not None:
+            return new_key
+        return original_key
+
+
+def hit(key: str, ty: str) -> defaultdict[CodeId, CodeState]:
+    global _INIT_CODE_STATE
+    assert isinstance(_CODE_STATE, defaultdict)
+    log.info("get_code_state %s hit %s, %d entries", key, ty, len(_CODE_STATE))
+    trace_structured_artifact(
+        f"get_{ty}_code_state",
+        "string",
+        lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
+    )
+    set_feature_use("pgo", True)
+    _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
+    return _CODE_STATE
+
+
+def get_local_code_state(cache_key: str) -> Optional[defaultdict[CodeId, CodeState]]:
+    global _CODE_STATE
     path = code_state_path(cache_key)
     if path is not None and os.path.exists(path):
         with dynamo_timed(
@@ -612,11 +760,51 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
                     )
                 else:
                     CacheArtifactManager.record_artifact(
-                        CacheArtifactType.PGO, cache_key, content
+                        PGOCacheArtifact.type(), cache_key, content
                     )
-                    return hit("local")
+                    return hit(path, "local")
+    return None
 
-    # Attempt remote
+
+def lookup_remote_cache_entry(
+    remote_cache: RemoteCache[JsonDataTy],
+    cache_key: str,
+    event_name: Optional[str] = None,
+) -> Optional[defaultdict[CodeId, CodeState]]:
+    code_state = None
+    try:
+        cache_data = remote_cache.get(cache_key)
+    except Exception:
+        log.warning("get_code_state failed remote read on %s", cache_key, exc_info=True)
+    else:
+        if cache_data is not None:
+            try:
+                assert isinstance(cache_data, dict)
+                data = cache_data["data"]
+                assert isinstance(data, str)
+                payload = base64.b64decode(data)
+                if event_name is not None:
+                    CompileEventLogger.pt2_compile(
+                        event_name, cache_size_bytes=len(payload)
+                    )
+                code_state = pickle.loads(payload)
+            except Exception:
+                log.warning(
+                    "get_code_state failed parsing remote result on %s",
+                    cache_key,
+                    exc_info=True,
+                )
+            else:
+                CacheArtifactManager.record_artifact(
+                    PGOCacheArtifact.type(), cache_key, payload
+                )
+        else:
+            log.info("get_code_state remote miss on %s", cache_key)
+    return code_state
+
+
+def get_remote_code_state(cache_key: str) -> Optional[defaultdict[CodeId, CodeState]]:
+    global _CODE_STATE
     remote_cache = get_remote_cache()
     if remote_cache is not None:
         with dynamo_timed(
@@ -625,37 +813,72 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
             dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
         ):
             CompileEventLogger.pt2_compile(name, cache_key=cache_key)
-            # TODO: I don't really understand why there's a JSON container format
-            try:
-                cache_data = remote_cache.get(cache_key)
-            except Exception:
-                log.warning(
-                    "get_code_state failed remote read on %s", cache_key, exc_info=True
+            code_state = lookup_remote_cache_entry(remote_cache, cache_key, name)
+            if code_state is not None:
+                _CODE_STATE = code_state
+                return hit(cache_key, "remote")
+    return None
+
+
+def get_extra_remote_code_state(cache_key: str) -> None:
+    """
+    Reads an additional PGO profile from the given cache key, and merges it with the default PGO profile.
+    """
+    global _CODE_STATE
+    assert _CODE_STATE is not None
+
+    remote_cache = get_remote_cache()
+    if remote_cache is not None:
+        with dynamo_timed(
+            name := "pgo.get_extra_remote_code_state",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
+        ):
+            CompileEventLogger.pt2_compile(name, cache_key=cache_key)
+            code_state = lookup_remote_cache_entry(remote_cache, cache_key)
+            log.info(
+                "get_extra_code_state %s hit, %d entries",
+                cache_key,
+                len(code_state) if code_state is not None else 0,
+            )
+            if code_state is not None:
+                assert not _CODE_STATE
+                _CODE_STATE = code_state
+                # log to tlparse
+                trace_structured_artifact(
+                    "get_extra_remote_code_state",
+                    "string",
+                    lambda: render_code_state(code_state),
                 )
-            else:
-                if cache_data is not None:
-                    try:
-                        assert isinstance(cache_data, dict)
-                        data = cache_data["data"]
-                        assert isinstance(data, str)
-                        payload = base64.b64decode(data)
-                        CompileEventLogger.pt2_compile(
-                            name, cache_size_bytes=len(payload)
-                        )
-                        _CODE_STATE = pickle.loads(payload)
-                    except Exception:
-                        log.warning(
-                            "get_code_state failed parsing remote result on %s",
-                            cache_key,
-                            exc_info=True,
-                        )
-                    else:
-                        CacheArtifactManager.record_artifact(
-                            CacheArtifactType.PGO, cache_key, payload
-                        )
-                        return hit("remote")
-                else:
-                    log.info("get_code_state remote miss on %s", cache_key)
+
+
+def get_code_state() -> defaultdict[CodeId, CodeState]:
+    global _CODE_STATE, _INIT_CODE_STATE
+    if _CODE_STATE is not None:
+        return _CODE_STATE
+
+    # Initialize it (even if we don't look up profile)
+    _CODE_STATE = defaultdict(CodeState)
+
+    cache_key = get_cache_key()
+    if cache_key is None:
+        return _CODE_STATE
+
+    # Attempt local
+    local_code_state = get_local_code_state(cache_key)
+
+    # Attempt remote
+    if local_code_state is None:
+        get_remote_code_state(cache_key)
+
+    # Attempt additional remote if neither local/default remote succeeded
+    if (
+        not _CODE_STATE
+        and (sticky_read := torch.compiler.config.pgo_extra_read_key) is not None
+    ):
+        extra_read_key = get_extra_cache_key(sticky_read)
+        if extra_read_key is not None:
+            get_extra_remote_code_state(extra_read_key)
 
     log.info("get_code_state using default")
 
@@ -679,6 +902,10 @@ def put_code_state() -> None:
 
     put_local_code_state(cache_key)
     put_remote_code_state(cache_key)
+    if (sticky_write := torch.compiler.config.pgo_extra_write_key) is not None:
+        extra_write_key = get_extra_cache_key(sticky_write)
+        if extra_write_key is not None:
+            put_remote_code_state(extra_write_key)
 
 
 def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[tuple[str, int]]:
@@ -713,10 +940,8 @@ def put_local_code_state(cache_key: str) -> None:
 
         pickled_code = pickle.dumps(_CODE_STATE)
 
-        from torch.compiler._cache import CacheArtifactManager, CacheArtifactType
-
         CacheArtifactManager.record_artifact(
-            CacheArtifactType.PGO, cache_key, pickled_code
+            PGOCacheArtifact.type(), cache_key, pickled_code
         )
 
         meta = write_local_impl(cache_key, pickled_code)
@@ -734,9 +959,14 @@ def put_local_code_state(cache_key: str) -> None:
         )
 
 
-def put_remote_code_state(cache_key: str) -> None:
+def put_remote_code_state(cache_key: str, extra_code_state: bool = False) -> None:
+    event_name = (
+        "put_remote_code_state"
+        if not extra_code_state
+        else "put_extra_remote_code_state"
+    )
     with dynamo_timed(
-        name := "pgo.put_remote_code_state",
+        name := f"pgo.{event_name}",
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pgo_put_remote_code_state_time_us",
     ):
@@ -746,7 +976,7 @@ def put_remote_code_state(cache_key: str) -> None:
         remote_cache = get_remote_cache()
 
         if remote_cache is None:
-            log.info("put_code_state: remote cache disabled")
+            log.info("%s: remote cache disabled", event_name)
             return
 
         content = pickle.dumps(_CODE_STATE)
@@ -756,11 +986,11 @@ def put_remote_code_state(cache_key: str) -> None:
         }
         remote_cache.put(cache_key, cache_data)
         log.info(
-            "put_code_state: wrote remote %s, %d entries", cache_key, len(_CODE_STATE)
+            "%s: wrote remote %s, %d entries", event_name, cache_key, len(_CODE_STATE)
         )
         # TODO: don't log this multiple times
         trace_structured_artifact(
-            "put_remote_code_state",
+            event_name,
             "string",
             lambda: render_code_state(_CODE_STATE),
         )
@@ -768,6 +998,7 @@ def put_remote_code_state(cache_key: str) -> None:
 
 # NB: this does NOT reset the cached code state on disk
 def reset_code_state() -> None:
-    global _CODE_STATE, _INIT_CODE_STATE
+    global _CODE_STATE, _INIT_CODE_STATE, _LOGGED_DYNAMIC_ALLOWLIST
     _CODE_STATE = None
     _INIT_CODE_STATE = None
+    _LOGGED_DYNAMIC_ALLOWLIST = False

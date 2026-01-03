@@ -1910,7 +1910,7 @@ REGISTER_OPERATOR_FUNCTOR(aten::div, aten_div, [](Node* n) -> SROperator {
     }
     auto& out_t = p_node->Output(0).toTensor();
 
-    if (in0_t.sizes() == in1_t.sizes() &&
+    if (te && te->checkInput<float>(in0_t) && in0_t.sizes() == in1_t.sizes() &&
         in0_t.scalar_type() == in1_t.scalar_type() &&
         in0_t.strides() == in1_t.strides() && in0_t.is_contiguous() &&
         in0_t.scalar_type() == at::kFloat) {

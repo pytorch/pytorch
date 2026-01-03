@@ -91,13 +91,6 @@
 "ciflow/trunk":
 - .ci/docker/ci_commit_pins/triton.txt
 
-"oncall: distributed":
-- torch/csrc/distributed/**
-- torch/distributed/**
-- torch/nn/parallel/**
-- test/distributed/**
-- torch/testing/_internal/distributed/**
-
 "release notes: distributed (checkpoint)":
 - torch/distributed/checkpoint/**
 - test/distributed/checkpoint/**
@@ -116,7 +109,6 @@
 "release notes: inductor (aoti)":
 - torch/_C/_aoti.pyi
 - torch/_dynamo/repro/aoti.py
-- torch/_export/serde/aoti_schema.py
 - torch/_higher_order_ops/aoti_call_delegate.py
 - torch/_inductor/codegen/aoti_runtime/**
 - torch/_inductor/codegen/aoti_hipify_utils.py
@@ -131,3 +123,57 @@
 - torch/csrc/inductor/aoti_include/**
 - torchgen/aoti/**
 - torchgen/gen_aoti_c_shim.py
+
+"ciflow/vllm":
+- .github/ci_commit_pins/vllm.txt
+
+"ciflow/inductor-pallas":
+- torch/_inductor/codegen/pallas.py
+- test/inductor/test_pallas.py
+- test/inductor/pallas_expected_failures/**
+- .github/workflows/inductor-pallas.yml
+
+"ciflow/b200":
+- test/test_matmul_cuda.py
+- test/test_scaled_matmul_cuda.py
+- test/inductor/test_fp8.py
+- aten/src/ATen/native/cuda/*Blas.cpp
+- aten/src/ATen/cuda/CUDA*Blas.*
+- torch/**/*cublas*
+- torch/_inductor/kernel/mm.py
+- test/inductor/test_max_autotune.py
+- third_party/fbgemm
+
+"ciflow/h100":
+- test/test_matmul_cuda.py
+- test/test_scaled_matmul_cuda.py
+- test/inductor/test_fp8.py
+- aten/src/ATen/native/cuda/*Blas.cpp
+- aten/src/ATen/cuda/CUDA*Blas.*
+- torch/**/*cublas*
+- torch/_inductor/kernel/mm.py
+- test/inductor/test_max_autotune.py
+- third_party/fbgemm
+
+"ciflow/rocm-mi300":
+- test/test_matmul_cuda.py
+- test/test_scaled_matmul_cuda.py
+- test/inductor/test_fp8.py
+- aten/src/ATen/native/cuda/*Blas.cpp
+- aten/src/ATen/cuda/CUDA*Blas.*
+- torch/_inductor/kernel/mm.py
+- test/inductor/test_max_autotune.py
+- third_party/fbgemm
+
+"ciflow/mps":
+- aten/src/ATen/mps/**
+- aten/src/ATen/native/mps/**
+- torch/_inductor/codegen/mps.py
+- test/test_mps.py
+- test/inductor/test_mps_basic.py
+
+"ciflow/h100-symm-mem":
+- torch/csrc/distributed/c10d/symm_mem/**
+- torch/distributed/_symmetric_memory/**
+- test/distributed/**/*mem*
+- test/distributed/**/*mem*/**

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 # Note [Manual Backend kernels]
 # For these ops, we want to manually register to dispatch key Backend and
-# skip codegen-ed registeration to all keys before Backend.
+# skip codegen-ed registration to all keys before Backend.
 # For codegen this means:
 #   - op set below must match ops with manual_kernel_registration=True in native_functions.yaml
 #     where we skip codegen backend kernels
@@ -182,6 +182,7 @@ def format_trace_inputs(f: NativeFunction) -> str:
             ADD_TRACE_INPUT.substitute(
                 name=f.func.arguments.out[i].name, input=f.func.arguments.out[i].name
             )
+            # pyrefly: ignore [unbound-name]
             for i in range(num_out_args)
         ]
 

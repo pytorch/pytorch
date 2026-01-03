@@ -1,7 +1,7 @@
-from torch._C import (  # type: ignore[attr-defined]
+from torch._C import (  # type: ignore[attr-defined]  # pyrefly: ignore  # missing-module-attribute
     _add_docstr,
     _linalg,
-    _LinAlgError as LinAlgError,
+    _LinAlgError as LinAlgError,  # pyrefly: ignore  # missing-module-attribute
 )
 
 
@@ -1369,21 +1369,21 @@ Whether this function computes a vector or matrix norm is determined as follows:
 
 :attr:`ord` defines the norm that is computed. The following norms are supported:
 
-======================     =========================  ========================================================
-:attr:`ord`                norm for matrices          norm for vectors
-======================     =========================  ========================================================
-`None` (default)           Frobenius norm             `2`-norm (see below)
-`'fro'`                    Frobenius norm             -- not supported --
-`'nuc'`                    nuclear norm               -- not supported --
-`inf`                      `max(sum(abs(x), dim=1))`  `max(abs(x))`
-`-inf`                     `min(sum(abs(x), dim=1))`  `min(abs(x))`
-`0`                        -- not supported --        `sum(x != 0)`
-`1`                        `max(sum(abs(x), dim=0))`  as below
-`-1`                       `min(sum(abs(x), dim=0))`  as below
-`2`                        largest singular value     as below
-`-2`                       smallest singular value    as below
-other `int` or `float`     -- not supported --        `sum(abs(x)^{ord})^{(1 / ord)}`
-======================     =========================  ========================================================
+======================     ==========================   ======================================================
+:attr:`ord`                norm for matrices            norm for vectors
+======================     ==========================   ======================================================
+`None` (default)           Frobenius norm               `2`-norm (see below)
+`'fro'`                    Frobenius norm               -- not supported --
+`'nuc'`                    nuclear norm                 -- not supported --
+`inf`                      `max(sum(abs(x), dim=1))`    `max(abs(x))`
+`-inf`                     `min(sum(abs(x), dim=1))`    `min(abs(x))`
+`0`                        -- not supported --          `sum(x != 0)`
+`1`                        `max(sum(abs(x), dim=0))`    as below
+`-1`                       `min(sum(abs(x), dim=0))`    as below
+`2`                        largest `singular value`_    as below
+`-2`                       smallest `singular value`_   as below
+other `int` or `float`     -- not supported --          `sum(abs(x)^{ord})^{(1 / ord)}`
+======================     ==========================   ======================================================
 
 where `inf` refers to `float('inf')`, NumPy's `inf` object, or any equivalent object.
 
@@ -1483,6 +1483,9 @@ Using the :attr:`dim` argument to compute matrix norms::
     tensor([ 3.7417, 11.2250])
     >>> LA.norm(A[0, :, :]), LA.norm(A[1, :, :])
     (tensor(3.7417), tensor(11.2250))
+
+.. _singular value:
+    https://en.wikipedia.org/wiki/Singular_value_decomposition#Singular_values,_singular_vectors,_and_their_relation_to_the_SVD
 """,
 )
 

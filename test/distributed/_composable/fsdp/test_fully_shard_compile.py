@@ -17,7 +17,7 @@ from torch import nn
 from torch._dynamo.utils import counters
 from torch._inductor import comms
 from torch._inductor.utils import is_fallback_op, run_and_get_code
-from torch.distributed._tensor import init_device_mesh
+from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.fsdp import (
     fully_shard,
     FullyShardedDataParallel as FSDP,
@@ -31,14 +31,16 @@ from torch.testing._internal.common_distributed import (
     skip_if_lt_x_gpu,
     sm_is_or_higher_than,
 )
-from torch.testing._internal.common_fsdp import FSDPTest, MLP
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_fsdp import FSDPTest, get_devtype, MLP
+from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
 )
 from torch.testing._internal.inductor_utils import HAS_GPU
 
+
+device_type = torch.device(get_devtype())
 
 log = logging.getLogger(__name__)
 
@@ -59,9 +61,9 @@ class Mod(torch.nn.Module):
         super().__init__()
 
         self.encoder = torch.nn.Sequential(
-            torch.nn.Linear(28 * 28, 1024, device="cuda"),
-            torch.nn.Linear(1024, 1024, device="cuda"),
-            torch.nn.Linear(1024, 4096, device="cuda"),
+            torch.nn.Linear(28 * 28, 1024, device=device_type),
+            torch.nn.Linear(1024, 1024, device=device_type),
+            torch.nn.Linear(1024, 4096, device=device_type),
         )
 
     def forward(self, x):
@@ -104,10 +106,10 @@ class TestFullyShardCompileCompute(FSDPTest):
         torch.distributed.barrier()
         torch._dynamo.config.skip_fsdp_hooks = skip_fsdp_hooks
         torch._dynamo.trace_rules.check = patched_trace_rules_check
-        model = MLP(4)
+        model = MLP(4).to(device_type)
         fully_shard(model)
         model.compile()
-        model(torch.randn((4, 4), device="cuda"))
+        model(torch.randn((4, 4), device=device_type))
         torch.distributed.barrier()
         torch._dynamo.config.skip_fsdp_hooks = original_skip_fsdp_hooks
         torch._dynamo.trace_rules.check = orig_trace_rules_check
@@ -127,8 +129,15 @@ class TestFullyShardCompile(FSDPTest):
     def skipTestForOldSm(self):
         # Assumption: This test class is only run on GPU. See `HAS_GPU` check at
         # the top of the class.
-        device = torch.device("cuda", self.rank % torch.cuda.device_count())
-        if not sm_is_or_higher_than(device, 8, 0):
+        device = torch.device(
+            device_type.type,
+            self.rank % torch.get_device_module(device_type).device_count(),
+        )
+        if (
+            device_type.type == "cuda"
+            and not torch.version.hip
+            and not sm_is_or_higher_than(device, 8, 0)
+        ):
             self.skipTest("bf16 requires sm >= 8.0")
 
     def test_dynamo_trace_use_training_state(self):
@@ -139,7 +148,7 @@ class TestFullyShardCompile(FSDPTest):
             (torch.nn.Linear(1, 1),),  # module: Tuple[nn.Module, ...],
             None,  # mesh_info: FSDPMeshInfo,
             None,  # post_forward_mesh_info: Optional[FSDPMeshInfo],
-            torch.device("cuda"),  # device: torch.device,
+            device_type,  # device: torch.device,
             None,  # shard_placement_fn: Optional[Callable],
             None,  # mp_policy: MixedPrecisionPolicy,
             None,  # offload_policy: OffloadPolicy,
@@ -217,9 +226,7 @@ class TestFullyShardCompile(FSDPTest):
             ):
                 unsharded_param_graph_inputs.add(node.args[0])
         assert len(unsharded_param_graph_inputs) > 0
-        assert len(unsharded_param_graph_inputs) == len(
-            list(model.parameters())
-        ), """\
+        assert len(unsharded_param_graph_inputs) == len(list(model.parameters())), """\
 Expected all model parameters to be wrapped by FSDP2 and
 have their unsharded version as graph input, but it's not true!
 """
@@ -232,7 +239,7 @@ have their unsharded version as graph input, but it's not true!
                 no_aliased_unsharded_params_in_graph_inputs = False
                 err_msg += f"""\n
 Found aliased unsharded param in graph inputs: {aliased_graph_inputs},
-val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
+val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
 """
         self.assertTrue(no_aliased_unsharded_params_in_graph_inputs, err_msg)
 
@@ -296,12 +303,20 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
     def _reinplace_all_gather_with_optional_checks(self, fwd_fullgraph):
         def _run_with_checks(graph, orig_fn):
-            self.assertGreater(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor.default
-                ),
-                0,
-            )
+            if self.world_size > 1:
+                self.assertGreater(
+                    _count_op_in_graph(
+                        graph, torch.ops._c10d_functional.all_gather_into_tensor.default
+                    ),
+                    0,
+                )
+            elif self.world_size == 1:
+                self.assertEqual(
+                    _count_op_in_graph(
+                        graph, torch.ops._c10d_functional.all_gather_into_tensor.default
+                    ),
+                    0,
+                )
 
             orig_fn(graph)
 
@@ -312,12 +327,22 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 0,
             )
 
-            self.assertGreater(
-                _count_op_in_graph(
-                    graph, torch.ops._c10d_functional.all_gather_into_tensor_out.default
-                ),
-                0,
-            )
+            if self.world_size > 1:
+                self.assertGreater(
+                    _count_op_in_graph(
+                        graph,
+                        torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    ),
+                    0,
+                )
+            else:
+                self.assertEqual(
+                    _count_op_in_graph(
+                        graph,
+                        torch.ops._c10d_functional.all_gather_into_tensor_out.default,
+                    ),
+                    0,
+                )
 
         if fwd_fullgraph:
             return mock.patch.object(
@@ -457,14 +482,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         file_check = file_check.check("torch.ops._c10d_functional.wait_tensor.")
         return file_check
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_compiled_autograd_ctx(self):
         self.skipTestForOldSm()
-        with torch._dynamo.config.patch(
-            skip_fsdp_hooks=False,
-        ), torch._functorch.config.patch(
-            recompute_views=True,
+        with (
+            torch._dynamo.config.patch(skip_fsdp_hooks=False),
+            torch._functorch.config.patch(
+                recompute_views=True,
+            ),
         ):
             inputs = torch.randn(8, 8)
             model = torch.nn.Linear(8, 8)
@@ -538,7 +563,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 )
                 if fwd_fullgraph:
                     self.assertEqual(len(counters["graph_break"]), 1)
-                    self.assertIn("Tensor.backward", counters["graph_break"])
+                    self.assertExpectedInline(
+                        next(iter(counters["graph_break"].keys())),
+                        """\
+Unsupported Tensor.backward() call
+  Explanation: Dynamo currently does not support tracing `Tensor.backward()`.
+  Hint: This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround.
+
+  Developer debug context: call_method TensorVariable() backward () {}
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0123.html""",  # noqa: B950
+                    )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
                 return res
@@ -552,24 +587,28 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         torch._dynamo.reset()
         torch._dynamo.compiled_autograd.reset()
-        with torch._dynamo.config.patch(
-            compiled_autograd=True,
-            compiled_autograd_kwargs_override={
-                "fullgraph": True,
-            },
-            inline_inbuilt_nn_modules=True,
-            skip_fsdp_hooks=False,
-        ), torch._functorch.config.patch(
-            enable_autograd_cache=False,
-            recompute_views=True,
-        ), torch._inductor.config.patch(
-            force_disable_caches=True,
-            reorder_for_compute_comm_overlap=True,
-            reorder_for_compute_comm_overlap_passes=[
-                "sink_waits",
-                "raise_comms",
-                "reorder_compute_for_overlap",
-            ],
+        with (
+            torch._dynamo.config.patch(
+                compiled_autograd=True,
+                compiled_autograd_kwargs_override={
+                    "fullgraph": True,
+                },
+                inline_inbuilt_nn_modules=True,
+                skip_fsdp_hooks=False,
+            ),
+            torch._functorch.config.patch(
+                enable_autograd_cache=False,
+                recompute_views=True,
+            ),
+            torch._inductor.config.patch(
+                force_disable_caches=True,
+                reorder_for_compute_comm_overlap=True,
+                reorder_for_compute_comm_overlap_passes=[
+                    "sink_waits",
+                    "raise_comms",
+                    "reorder_compute_for_overlap",
+                ],
+            ),
         ):
             losses_compiled = test_compiled()
         losses_eager = test_eager()
@@ -592,11 +631,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             torch.manual_seed(self.rank)
             fsdp_config = {}
             model = nn.Sequential(
-                nn.Linear(hidden_dim, hidden_dim, device="cuda"),
+                nn.Linear(hidden_dim, hidden_dim, device=device_type),
                 nn.ReLU(),
-                nn.Linear(hidden_dim, hidden_dim, device="cuda"),
+                nn.Linear(hidden_dim, hidden_dim, device=device_type),
                 nn.ReLU(),
-                nn.Linear(hidden_dim, hidden_dim, device="cuda"),
+                nn.Linear(hidden_dim, hidden_dim, device=device_type),
             )
             fully_shard(model, reshard_after_forward=True, **fsdp_config)
             optim = torch.optim.SGD(model.parameters(), lr=1e-4)
@@ -604,19 +643,17 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         def input_creation_fn():
             torch.manual_seed(self.rank)
-            inp = torch.randn((2, hidden_dim), device="cuda", requires_grad=False)
+            inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
             return inp
 
         return model_init_fn, input_creation_fn
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager(self):
         self._test_traceable_fsdp(
             *self._create_simple_mlp_factory_fns(), "aot_eager", fwd_fullgraph=True
         )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_aot_eager_decomp_partition(self):
         self._test_traceable_fsdp(
@@ -625,7 +662,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             fwd_fullgraph=True,
         )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_simple_mlp_fullgraph_backend_inductor(self):
         self.skipTestForOldSm()
@@ -641,11 +677,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 super().__init__()
                 self.param1 = nn.Parameter(
                     torch.zeros(
-                        hidden_dim, hidden_dim, dtype=torch.float, device="cuda"
+                        hidden_dim, hidden_dim, dtype=torch.float, device=device_type
                     )
                 )
                 self.param2 = nn.Parameter(
-                    torch.zeros(hidden_dim, dtype=torch.float, device="cuda")
+                    torch.zeros(hidden_dim, dtype=torch.float, device=device_type)
                 )
 
             def forward(self, x):
@@ -680,7 +716,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         def model_init_fn():
             torch.manual_seed(self.rank)
             fsdp_config = {}
-            mesh = init_device_mesh("cuda", (self.world_size,))
+            mesh = init_device_mesh(device_type.type, (self.world_size,))
             model = TestModule(n_layers=3)
             for mod in model.layers:
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
@@ -692,12 +728,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
 
         def input_creation_fn():
             torch.manual_seed(self.rank)
-            inp = torch.randn((2, hidden_dim), device="cuda", requires_grad=False)
+            inp = torch.randn((2, hidden_dim), device=device_type, requires_grad=False)
             return inp
 
         return model_init_fn, input_creation_fn
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager(self):
         # TODO: fix fwd_fullgraph=False case
@@ -710,7 +745,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 fwd_fullgraph=fwd_fullgraph,
             )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_aot_eager_decomp_partition(self):
         # TODO: fix fwd_fullgraph=False case
@@ -723,23 +757,24 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 fwd_fullgraph=fwd_fullgraph,
             )
 
-    @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
+    def _test_nested_fully_shard_backend_inductor_fullgraph_True(self):
         self.skipTestForOldSm()
         for fwd_fullgraph in [True]:
-            with self._reinplace_all_gather_with_optional_checks(
-                fwd_fullgraph
-            ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=functools.partial(
-                    self._check_fsdp_copy_and_resize_ops_count_in_graph,
-                    fwd_copy_count=0,
-                    fwd_resize_count=0,
-                    bwd_copy_count=0,
-                    bwd_resize_count=0,
-                )
-                if fwd_fullgraph
-                else None
+            with (
+                self._reinplace_all_gather_with_optional_checks(fwd_fullgraph),
+                torch._inductor.config.patch(
+                    post_grad_custom_post_pass=(
+                        functools.partial(
+                            self._check_fsdp_copy_and_resize_ops_count_in_graph,
+                            fwd_copy_count=0,
+                            fwd_resize_count=0,
+                            bwd_copy_count=0,
+                            bwd_resize_count=0,
+                        )
+                        if fwd_fullgraph
+                        else None
+                    )
+                ),
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
@@ -758,7 +793,14 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
-                file_check = FileCheck().check("def call(args):")
+
+                extra_str_from_graph_partition = (
+                    "self, " if torch._inductor.config.graph_partition else ""
+                )
+
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for fwd_ag_block_info in [
                     dict(overlapped_compute_op_str=None),
                     dict(
@@ -794,7 +836,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 file_check.run(fwd_code)
 
                 bwd_code = triton_codes[1]
-                file_check = FileCheck().check("def call(args):")
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for bwd_ag_block_info in [
                     dict(overlapped_compute_op_str=None),
                     dict(
@@ -822,8 +866,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     pass
                 file_check.run(bwd_code)
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_nested_fully_shard_backend_inductor_fullgraph_True(self):
+        self._test_nested_fully_shard_backend_inductor_fullgraph_True()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_nested_fully_shard_backend_inductor_fullgraph_True_graph_partition(self):
+        self._test_nested_fully_shard_backend_inductor_fullgraph_True()
+
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_nested_fully_shard_backend_inductor_fullgraph_False(self):
         self.skipTestForOldSm()
@@ -852,7 +904,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         def model_init_fn():
             torch.manual_seed(self.rank)
             fsdp_config = {}
-            mesh = init_device_mesh("cuda", (self.world_size,))
+            mesh = init_device_mesh(device_type.type, (self.world_size,))
             model_args = ModelArgs(
                 vocab_size=vocab_size,
                 n_layers=n_layers,
@@ -873,7 +925,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             for _, mod in enumerate(model.layers):
                 fully_shard(mod, mesh=mesh, reshard_after_forward=True, **fsdp_config)
             model = fully_shard(
-                model, mesh=mesh, reshard_after_forward=True, **fsdp_config
+                model, mesh=mesh, reshard_after_forward=False, **fsdp_config
             )
             optim = torch.optim.SGD(model.parameters(), lr=1e-4)
             return model, optim
@@ -881,7 +933,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         def input_creation_fn():
             torch.manual_seed(self.rank)
             inp = torch.randint(
-                0, vocab_size, (2, seq_len), device="cuda", requires_grad=False
+                0, vocab_size, (2, seq_len), device=device_type, requires_grad=False
             )
             return inp
 
@@ -901,16 +953,16 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
         else:
             return contextlib.nullcontext()
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     def test_transformer_backend_aot_eager(self):
         # TODO: fix fwd_fullgraph=False case
         for fwd_fullgraph, all_requires_grad in itertools.product(
             [True], [True, False]
         ):
-            with self._maybe_add_graph_break_to_sdpa(
-                fwd_fullgraph
-            ), self._reinplace_all_gather_with_optional_checks(fwd_fullgraph):
+            with (
+                self._maybe_add_graph_break_to_sdpa(fwd_fullgraph),
+                self._reinplace_all_gather_with_optional_checks(fwd_fullgraph),
+            ):
                 self._test_traceable_fsdp(
                     *self._create_transformer_factory_fns(
                         all_requires_grad=all_requires_grad
@@ -919,7 +971,6 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     fwd_fullgraph=fwd_fullgraph,
                 )
 
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout has worse accuracy after decomp, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
@@ -937,11 +988,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     fwd_fullgraph=fwd_fullgraph,
                 )
 
-    @skipIfRocm
-    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    # TODO: native_dropout causes CUDA IMA error, need to figure out why
-    @torch._inductor.config.patch(fallback_random=True)
-    def test_transformer_backend_inductor_fullgraph_True(self):
+    def _test_transformer_backend_inductor_fullgraph_True(self):
         self.skipTestForOldSm()
         for (
             fwd_fullgraph,
@@ -951,21 +998,24 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
             log.warning(
                 f"fwd_fullgraph={fwd_fullgraph}, all_requires_grad={all_requires_grad}, activation_checkpoint={activation_checkpoint}"  # noqa: G004, G001, B950
             )
-            with self._reinplace_all_gather_with_optional_checks(
-                fwd_fullgraph
-            ), torch._inductor.config.patch(
-                post_grad_custom_post_pass=functools.partial(
-                    self._check_fsdp_copy_and_resize_ops_count_in_graph,
-                    # NOTE: For the root unsharded params, we don't reshard after forward since for training,
-                    # the parameters would be freed and all-gathered immediately. Hence we still have
-                    # their resize and copy ops in the graph.
-                    fwd_copy_count=4,
-                    fwd_resize_count=4,
-                    bwd_copy_count=0,
-                    bwd_resize_count=4,
-                )
-                if fwd_fullgraph
-                else None
+            with (
+                self._reinplace_all_gather_with_optional_checks(fwd_fullgraph),
+                torch._inductor.config.patch(
+                    post_grad_custom_post_pass=(
+                        functools.partial(
+                            self._check_fsdp_copy_and_resize_ops_count_in_graph,
+                            # NOTE: For the root unsharded params, we don't reshard after forward since for training,
+                            # the parameters would be freed and all-gathered immediately. Hence we still have
+                            # their resize and copy ops in the graph.
+                            fwd_copy_count=4,
+                            fwd_resize_count=4,
+                            bwd_copy_count=0,
+                            bwd_resize_count=4,
+                        )
+                        if fwd_fullgraph
+                        else None
+                    )
+                ),
             ):
                 _, triton_codes = run_and_get_code(
                     lambda: self._test_traceable_fsdp(
@@ -985,12 +1035,18 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     "Expected two separate lowerings to Triton code, one from FWD graph and one from Compiled Autograd BWD graph",
                 )
                 fwd_code = triton_codes[0]
-                file_check = FileCheck().check("def call(args):")
+                extra_str_from_graph_partition = (
+                    "self, " if torch._inductor.config.graph_partition else ""
+                )
+
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for fwd_ag_block_info in [
                     dict(
-                        overlapped_compute_op_str="triton_"
-                        if all_requires_grad
-                        else None,
+                        overlapped_compute_op_str=(
+                            "triton_" if all_requires_grad else None
+                        ),
                     ),
                     dict(
                         overlapped_compute_op_str="aten.native_dropout.",
@@ -1010,7 +1066,9 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 file_check.run(fwd_code)
 
                 bwd_code = triton_codes[1]
-                file_check = FileCheck().check("def call(args):")
+                file_check = FileCheck().check(
+                    f"def call({extra_str_from_graph_partition}args):"
+                )
                 for bwd_ag_block_info in [
                     dict(
                         overlapped_compute_op_str="extern_kernels.mm(",
@@ -1029,9 +1087,11 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     #     )
                     pass
                 for bwd_rs_block_info in [
-                    dict(overlapped_compute_op_str="extern_kernels.mm(")
-                    if all_requires_grad
-                    else None,
+                    (
+                        dict(overlapped_compute_op_str="extern_kernels.mm(")
+                        if all_requires_grad
+                        else None
+                    ),
                     dict(
                         overlapped_compute_op_str=None
                     ),  # TODO: improve compute/comm overlap, so that `overlapped_compute_op_str` is not None
@@ -1045,8 +1105,22 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                     pass
                 file_check.run(bwd_code)
 
+    @unittest.skip('"Traceable FSDP2" is not being maintained anymore.')
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    # TODO: native_dropout causes CUDA IMA error, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
+    def test_transformer_backend_inductor_fullgraph_True(self):
+        self._test_transformer_backend_inductor_fullgraph_True()
+
+    @unittest.skip('"Traceable FSDP2" is not being maintained anymore.')
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    # TODO: native_dropout causes CUDA IMA error, need to figure out why
+    @torch._inductor.config.patch(fallback_random=True)
+    @torch._inductor.config.patch("graph_partition", True)
+    def test_transformer_backend_inductor_fullgraph_True_graph_partition(self):
+        self._test_transformer_backend_inductor_fullgraph_True()
+
     @unittest.skip("TODO: fix fwd_fullgraph=False case")
-    @skipIfRocm
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     # TODO: native_dropout causes CUDA IMA error, need to figure out why
     @torch._inductor.config.patch(fallback_random=True)
@@ -1086,7 +1160,7 @@ val.shape: {[node.meta['val'].shape for node in aliased_graph_inputs]},
                 new_child = torch.compile(child)
                 setattr(m.encoder, name, new_child)
         m = FSDP(m, sharding_strategy=ShardingStrategy.FULL_SHARD, use_orig_params=True)
-        inp = torch.randn(32, 784, device="cuda")
+        inp = torch.randn(32, 784, device=device_type)
         m(inp)
 
 

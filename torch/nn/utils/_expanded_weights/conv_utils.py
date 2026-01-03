@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -14,12 +13,15 @@ THRESHOLD = 32
 
 
 def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
-    if func == F.conv1d:
+    if func is F.conv1d:
         return conv1dOpt
-    if func == F.conv2d:
+    if func is F.conv2d:
         return conv2dOpt
     else:
-        assert func == F.conv3d
+        if func is not F.conv3d:
+            raise AssertionError(
+                f"Expected func to be F.conv1d, F.conv2d, or F.conv3d, got {func}"
+            )
         return conv3dOpt
 
 
@@ -28,7 +30,7 @@ def conv_args_and_kwargs(kwarg_names, expanded_args_and_kwargs):
     kwargs = expanded_args_and_kwargs[
         len(expanded_args_and_kwargs) - len(kwarg_names) :
     ]
-    kwargs = dict(zip(kwarg_names, kwargs))
+    kwargs = dict(zip(kwarg_names, kwargs, strict=True))
 
     return conv_normalizer(*args, **kwargs)
 
@@ -143,7 +145,7 @@ def conv_backward(func, ctx, grad_output):
     kernel_size = [weight_shape[i] for i in range(2, conv_picker(func, 3, 4, 5))]
 
     batch_size = ctx.batch_size
-    results: list[Optional[torch.Tensor]] = []
+    results: list[torch.Tensor | None] = []
     results.append(None)  # for kwarg names
     results.append(None)  # for op reference
 
@@ -237,6 +239,7 @@ def conv_unfold_weight_grad_sample(
     # n=batch_sz; o=num_out_channels; p=(num_in_channels/groups)*kernel_sz
     weight_grad_sample = torch.einsum("noq,npq->nop", grad_output, input)
     # rearrange the above tensor and extract diagonals.
+    # pyrefly: ignore [no-matching-overload]
     weight_grad_sample = weight_grad_sample.view(
         n,
         groups,
@@ -314,7 +317,7 @@ def unfold3d(
     Example:
         >>> # xdoctest: +SKIP
         >>> B, C, D, H, W = 3, 4, 5, 6, 7
-        >>> tensor = torch.arange(1, B * C * D * H * W + 1.).view(B, C, D, H, W)
+        >>> tensor = torch.arange(1, B * C * D * H * W + 1.0).view(B, C, D, H, W)
         >>> unfold3d(tensor, kernel_size=2, padding=0, stride=1).shape
         torch.Size([3, 32, 120])
     """

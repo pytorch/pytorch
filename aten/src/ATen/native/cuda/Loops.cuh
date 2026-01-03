@@ -1,17 +1,16 @@
 #pragma once
 
+#include <ATen/OpMathType.h>
+#include <ATen/cuda/detail/OffsetCalculator.cuh>
 #include <ATen/detail/FunctionTraits.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/TensorIteratorDynamicCasting.h>
-#include <ATen/cuda/detail/OffsetCalculator.cuh>
-#include <ATen/OpMathType.h>
 #include <ATen/native/cuda/thread_constants.h>
-
-#include <thrust/tuple.h>
-
 #include <ATen/native/cuda/MemoryAccess.cuh>
 
 #include <tuple>
+
+
 
 namespace at::native {
 
@@ -62,7 +61,11 @@ __device__ inline void elementwise_kernel_helper(func_t f, policy_t policy) {
   #pragma unroll
   for (int i = 0; i < elems_per_thread; i++) {
     if (policy.check_inbounds(i)) {
+#if defined(__HIP__)
       results[i] = c10::guts::apply(f, args[i]);
+#else
+      results[i] = std::apply(f, args[i]);
+#endif
     }
   }
 

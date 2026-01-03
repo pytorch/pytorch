@@ -1,6 +1,6 @@
 from collections import OrderedDict
 from collections.abc import Iterator, Sequence
-from typing import cast, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import cast, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeIs
 
 import torch
@@ -49,7 +49,7 @@ def _is_jit_enabled() -> "EnabledProxy":
 #
 # currently a module cannot be replicated properly if the descendants of
 # any ScriptModule contains python module (type 1 above)
-def _replicatable_module(module: Module, memo: Optional[set[Module]] = None) -> bool:
+def _replicatable_module(module: Module, memo: set[Module] | None = None) -> bool:
     # module.modules() contains module itself as the first element
     def descendant_modules(module: Module) -> Iterator[Module]:
         gen = module.modules()
@@ -82,7 +82,7 @@ def _replicatable_module(module: Module, memo: Optional[set[Module]] = None) -> 
 
 def _broadcast_coalesced_reshape(
     tensors: Sequence[torch.Tensor],
-    devices: Sequence[Union[int, torch.device]],
+    devices: Sequence[int | torch.device],
     detach: bool = False,
 ) -> list[list[torch.Tensor]]:
     from torch.nn.parallel._functions import Broadcast
@@ -106,13 +106,12 @@ T = TypeVar("T", bound=Module)
 
 def replicate(
     network: T,
-    devices: Sequence[Union[int, torch.device]],
+    devices: Sequence[int | torch.device],
     detach: bool = False,
 ) -> list[T]:
     if not _replicatable_module(network):
         raise RuntimeError(
-            "Cannot replicate network where python modules are "
-            "childrens of ScriptModule"
+            "Cannot replicate network where python modules are children of ScriptModule"
         )
 
     if not devices:
@@ -184,7 +183,7 @@ def replicate(
                     # so setattr them as non-parameter attributes
                     setattr(replica, key, param_copy)
                     # expose the parameter for DDP
-                    replica._former_parameters[key] = param_copy
+                    replica._former_parameters[key] = param_copy  # type: ignore[operator, index]
         for key, buf in module._buffers.items():  # type: ignore[assignment]
             if buf is None:
                 for j in range(num_replicas):

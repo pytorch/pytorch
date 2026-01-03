@@ -2,15 +2,14 @@
 #include <torch/csrc/distributed/c10d/FileStore.hpp>
 
 #include <fcntl.h>
-#include <sys/stat.h>
 #include <cassert>
 #include <cstdint>
 
 #ifdef _WIN32
+#include <c10/util/FileSystem.h>
 #include <c10/util/win32-headers.h>
 #include <fileapi.h>
 #include <io.h>
-#include <filesystem>
 #else
 #include <sys/file.h>
 #include <unistd.h>
@@ -33,7 +32,11 @@
 #define LOCK_SH 0x00000010
 #define LOCK_UN 0x00000100
 
-int flock_(int fd, int op) {
+#if defined(_WIN32) && defined(USE_ROCM)
+static
+#endif
+    int
+    flock_(int fd, int op) {
   HANDLE hdl = (HANDLE)_get_osfhandle(fd);
   DWORD low = 1, high = 0;
   OVERLAPPED offset = {0, 0, 0, 0, NULL};
@@ -157,7 +160,7 @@ class File {
 #ifdef _WIN32
       // if the parent folder doesn't exist it will never be able to create the
       // file so we can skip the retry
-      if (!std::filesystem::exists(std::filesystem::path(path).parent_path())) {
+      if (!c10::filesystem::exists(c10::filesystem::path(path).parent_path())) {
         break;
       }
 #endif
@@ -221,7 +224,7 @@ class File {
     while (count > 0) {
       auto rv = syscall([this, buf, count] { return ::read(fd_, buf, count); });
       SYSASSERT(rv, "read");
-      buf = (uint8_t*)buf + rv;
+      buf = static_cast<uint8_t*>(buf) + rv;
       count -= rv;
     }
   }
@@ -323,7 +326,7 @@ FileStore::~FileStore() {
   auto numFinishedWorker = addHelper(cleanupKey_, 1);
   auto refCount = addHelper(refCountKey_, -1);
   // The last worker cleans up the file. If numWorkers was not initialized to
-  // a specific postive value (i.e. meaning that there was not a fixed number
+  // a specific positive value (i.e. meaning that there was not a fixed number
   // of workers), we don't attempt to clean.
   // Clean up the file if number of references is 0.
   if (refCount == 0 && numWorkers_ >= 0 && numFinishedWorker >= numWorkers_) {
@@ -486,6 +489,19 @@ void FileStore::wait(
     /* sleep override */
     std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
+}
+
+std::vector<std::string> FileStore::listKeys() {
+  std::unique_lock<std::mutex> l(activeFileOpLock_);
+  File file(path_, O_RDONLY, timeout_);
+  auto lock = file.lockShared();
+  pos_ = refresh(file, pos_, cache_, deletePrefix_);
+  std::vector<std::string> keys;
+  keys.reserve(cache_.size());
+  for (const auto& kv : cache_) {
+    keys.push_back(kv.first.substr(regularPrefix_.size()));
+  }
+  return keys;
 }
 
 } // namespace c10d

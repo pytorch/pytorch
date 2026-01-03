@@ -21,7 +21,7 @@ on:
       python-version:
         required: false
         type: string
-        default: "3.9"
+        default: "3.12"
         description: |
           The python version to be used. Will be 3.9 by default
       timeout-minutes:
@@ -38,6 +38,18 @@ on:
         required: false
         type: boolean
         default: true
+      monitor-log-interval:
+        description: |
+          Set the interval for the monitor script to log utilization.
+        required: false
+        type: number
+        default: 5
+      monitor-data-collect-interval:
+        description: |
+          Set the interval for the monitor script to collect data.
+        required: false
+        type: number
+        default: 1
     secrets:
       HUGGING_FACE_HUB_TOKEN:
         required: false
@@ -48,8 +60,6 @@ jobs:
   test:
     # Don't run on forked repos or empty test matrix
     if: github.repository_owner == 'pytorch' && toJSON(fromJSON(inputs.test-matrix).include) != '[]'
-    # For setup-miniconda, see https://github.com/conda-incubator/setup-miniconda/issues/179
-    # Also ensure that we always run with the right architecture
     defaults:
       run:
         shell: bash -e -l {0}
@@ -78,6 +88,14 @@ jobs:
             pkill "${PROCESS}" || true
           done
 
+      - name: Clean up brew miniconda, if installed
+        continue-on-error: true
+        run: |
+          if brew list miniconda; then
+            brew uninstall miniconda
+            echo "REINSTALL_BREW_MINICONDA=1" >> "${GITHUB_ENV}"
+          fi
+
       - name: Clean up leftover local python3 site-packages on MacOS pet runner
         continue-on-error: true
         run: |
@@ -93,12 +111,33 @@ jobs:
       - name: Checkout PyTorch
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
 
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: pytorch/test-infra/.github/actions/setup-python@main
+        with:
+          python-version: ${{ inputs.python-version }}
+          pip-requirements-file: .ci/docker/requirements-ci.txt
+
       - name: Start monitoring script
         id: monitor-script
         if: ${{ !inputs.disable-monitor }}
         continue-on-error: true
+        env:
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          WORKFLOW_NAME: ${{ github.workflow }}
+          WORKFLOW_RUN_ID: ${{github.run_id}}
+          MONITOR_LOG_INTERVAL: ${{ inputs.monitor-log-interval }}
+          MONITOR_DATA_COLLECT_INTERVAL: ${{ inputs.monitor-data-collect-interval }}
         run: |
-          ${CONDA_RUN} python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
+          "$VENV_PATH/bin/python3" -m pip install psutil==5.9.8 dataclasses_json==0.6.7
+          "$VENV_PATH/bin/python3" -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
       - name: Download build artifacts
@@ -113,26 +152,12 @@ jobs:
         with:
           use-gha: true
 
-      - name: Setup miniconda
-        uses: pytorch/test-infra/.github/actions/setup-miniconda@main
-        with:
-          python-version: ${{ inputs.python-version }}
-          environment-file: .github/requirements/conda-env-${{ runner.os }}-${{ runner.arch }}
-          pip-requirements-file: .github/requirements/pip-requirements-${{ runner.os }}.txt
-
       - name: Parse ref
         id: parse-ref
         run: .github/scripts/parse_ref.py
 
-      - name: Get workflow job id
-        id: get-job-id
-        uses: ./.github/actions/get-workflow-job-id
-        if: always()
-        with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-
       - name: Check for keep-going label and re-enabled test issues
-        # This uses the filter-test-configs action because it conviniently
+        # This uses the filter-test-configs action because it conveniently
         # checks for labels and re-enabled test issues.  It does not actually do
         # any filtering.  All filtering is done in the build step.
         id: keep-going
@@ -176,43 +201,45 @@ jobs:
           # shellcheck disable=SC1090
           set -ex
 
-          arch
-
-          if [[ -n "$CONDA_ENV" ]]; then
-            # Use binaries under conda environment
-            export PATH="$CONDA_ENV/bin":$PATH
-          fi
+          # TODO: Remove me later, and properly activate venv
+          PATH="$VENV_PATH/bin:$PATH"
+          export PATH
 
           # Print out some information about the test environment
-          which conda
-          conda --version
-          ${CONDA_RUN} which python3
-          ${CONDA_RUN} python3 --version
-          ${CONDA_RUN} which python
-          ${CONDA_RUN} python --version
+          for tool in python3 python; do
+            which $tool
+            $tool --version
+          done
 
-          ${CONDA_RUN} python3 -mpip install --no-index --no-deps dist/*.whl
+          python3 -mpip install --no-index --no-deps dist/*.whl
 
           set +e
           pushd "${RUNNER_TEMP}"
           # Install pip dependencies if they are not found. This is to mitigate a peculiar
           # flaky missing dependencies on MacOS
-          ${CONDA_RUN} python3 -c "import torch"
+          python3 -c "import torch"
           RC=$?
           popd
 
           if [ "${RC}" -ne 0 ]; then
-            ${CONDA_RUN} python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
+            python3 -mpip install --ignore-installed -r "${PIP_REQUIREMENTS_FILE}"
           fi
           set -e
 
-          ${CONDA_RUN} .ci/pytorch/macos-test.sh
+          .ci/pytorch/macos-test.sh
 
       - name: Print remaining test logs
         shell: bash
         if: always() && steps.test.conclusion
         run: |
           cat test/**/*_toprint.log || true
+
+      - name: Run OP benchmark
+        shell: bash
+        if: ${{ contains(steps.get-job-id.outputs.job-name, 'mps') }}
+        run: |
+          python3 test/bench_mps_ops.py
+
 
       - name: Stop monitoring script
         if: ${{ always() && steps.monitor-script.outputs.monitor-script-pid }}
@@ -236,6 +263,26 @@ jobs:
           dry-run: false
           schema-version: v3
           github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload utilization stats
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' && !inputs.disable-monitor }}
+        continue-on-error: true
+        uses: ./.github/actions/upload-utilization-stats
+        with:
+          job_id: ${{ steps.get-job-id.outputs.job-id }}
+          job_name: ${{ steps.get-job-id.outputs.job-name }}
+          workflow_name: ${{ github.workflow }}
+          workflow_run_id: ${{github.run_id}}
+          workflow_attempt: ${{github.run_attempt}}
+          local_path: usage_log.txt
+
+      - name: Reinstall brew miniconda, if was installed
+        if: always()
+        continue-on-error: true
+        run: |
+          if [[ -n "$REINSTALL_BREW_MINICONDA" ]]; then
+              brew install --cask miniconda
+          fi
 
       - name: Clean up disk space
         if: always()

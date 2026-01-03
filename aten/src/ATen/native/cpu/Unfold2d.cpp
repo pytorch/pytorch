@@ -13,7 +13,7 @@ namespace at::native {
 namespace {
 
 template <typename scalar_t>
-static inline void cadd(
+inline void cadd(
     scalar_t* z,
     const scalar_t* x,
     const scalar_t* y,
@@ -34,7 +34,7 @@ static inline void cadd(
 }
 
 template <typename scalar_t>
-static void unfolded2d_acc(
+void unfolded2d_acc(
     scalar_t* finput_data,
     scalar_t* input_data,
     int64_t kH,
@@ -113,7 +113,7 @@ static void unfolded2d_acc(
 }
 
 template <typename scalar_t>
-static void unfolded2d_acc_channels_last(
+void unfolded2d_acc_channels_last(
     scalar_t* finput_data,
     scalar_t* input_data,
     int64_t kH,
@@ -169,6 +169,10 @@ static void unfolded2d_acc_channels_last(
 
 /* note: due to write issues, this one cannot be parallelized as well as
  * unfolded2d_copy */
+#if defined(__GNUC__) && __GNUC__ == 14 && defined(__ARM_FEATURE_SVE) && !defined(__ARM_FEATURE_BF16)
+// Workaround for gcc-14.2.0 ICE during RTL pass: vregs when compiling for SVE without BF16
+__attribute__((optimize("no-tree-vectorize")))
+#endif
 void unfolded2d_acc_kernel(
     ScalarType dtype,
     void *finput_data,
@@ -221,7 +225,7 @@ void unfolded2d_acc_kernel(
 }
 
 template <typename scalar_t>
-static void unfolded2d_copy(
+void unfolded2d_copy(
     const scalar_t* input_data,
     scalar_t* finput_data,
     int64_t kH,
@@ -236,7 +240,7 @@ static void unfolded2d_copy(
     int64_t output_height,
     int64_t output_width) {
   at::parallel_for(
-      0, (int64_t)n_input_plane * kH * kW, 0, [&](int64_t start, int64_t end) {
+      0, n_input_plane * kH * kW, 0, [&](int64_t start, int64_t end) {
         for (const auto k : c10::irange(start, end)) {
           int64_t nip = k / (kH * kW);
           int64_t rest = k % (kH * kW);
@@ -294,7 +298,7 @@ static void unfolded2d_copy(
                       memcpy(
                           dst + (size_t)y * output_width + x,
                           src + (size_t)iy * input_width + ix,
-                          sizeof(scalar_t) * (1));
+                          sizeof(scalar_t) * 1);
                   }
                 }
               }
@@ -312,8 +316,8 @@ static void unfolded2d_copy(
                 for (int64_t x = 0; x < output_width; x++)
                   memcpy(
                       dst + (size_t)y * output_width + x,
-                      src + (size_t)iy * input_width + ix + (int64_t)x * dW,
-                      sizeof(scalar_t) * (1));
+                      src + (size_t)iy * input_width + ix + x * dW,
+                      sizeof(scalar_t) * 1);
               }
             }
           }
@@ -322,7 +326,7 @@ static void unfolded2d_copy(
 }
 
 template <typename scalar_t>
-static void unfolded2d_copy_channels_last(
+void unfolded2d_copy_channels_last(
     const scalar_t* input_data,
     scalar_t* finput_data,
     int64_t kH,

@@ -52,19 +52,18 @@ def test_sparse_coo_and_csr(m, n, k, nnz, test_count):
         start.record()
         coo.matmul(mat)
         stop.record()
-
         times.append(start.elapsed_time(stop))
 
-        coo_mean_time = sum(times) / len(times)
+    coo_mean_time = sum(times) / len(times)
 
-        times = []
-        for _ in range(test_count):
-            start.record()
-            csr.matmul(mat)
-            stop.record()
-            times.append(start.elapsed_time(stop))
+    times = []
+    for _ in range(test_count):
+        start.record()
+        csr.matmul(mat)
+        stop.record()
+        times.append(start.elapsed_time(stop))
 
-            csr_mean_time = sum(times) / len(times)
+    csr_mean_time = sum(times) / len(times)
 
     return coo_mean_time, csr_mean_time
 
@@ -84,10 +83,13 @@ if __name__ == "__main__":
 
     if args.outfile == "stdout":
         outfile = sys.stdout
+        need_close = False
     elif args.outfile == "stderr":
         outfile = sys.stderr
+        need_close = False
     else:
-        outfile = open(args.outfile, "a")
+        outfile = open(args.outfile, "a")  # noqa: SIM115
+        need_close = True
 
     test_count = args.test_count
     m = args.m
@@ -148,3 +150,5 @@ if __name__ == "__main__":
             time,
             file=outfile,
         )
+    if need_close:
+        outfile.close()

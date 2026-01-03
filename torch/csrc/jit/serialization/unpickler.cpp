@@ -5,7 +5,6 @@
 #endif
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
-#include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/storage_context.h>
 #include <torch/csrc/jit/serialization/unpickler.h>
 #include <torch/csrc/utils/byte_order.h>
@@ -45,7 +44,7 @@ void restoreAccurateTypeTags(const IValue& root, const TypePtr& type_tag) {
     to_process.pop_back();
     // ensure we only scan each pointer value once, otherwise this
     // can become exponential (and if we allow recursive data in the future,
-    // it would not terminiate).
+    // it would not terminate).
     if (w.value.isPtrType()) {
       const void* key = w.value.internalToPointer();
       auto it = scanned.find(key);
@@ -262,12 +261,9 @@ void Unpickler::run() {
 void Unpickler::setInput(size_t memo_id) {
   AT_ASSERT(!stack_.empty());
   if (memo_id >= memo_table_.size()) {
-    memo_table_.insert(
-        memo_table_.end(), memo_id - memo_table_.size(), IValue());
-    memo_table_.push_back(stack_.back());
-  } else {
-    memo_table_[memo_id] = stack_.back();
+    memo_table_.resize(memo_id + 1);
   }
+  memo_table_[memo_id] = stack_.back();
 }
 
 static std::vector<int64_t> tupleToIntList(const IValue& v) {
@@ -355,7 +351,6 @@ PickleOpCode Unpickler::readInstruction() {
       TORCH_CHECK(!marks_.empty(), "Parsing error: marks_ is empty");
       size_t start = marks_.back();
       marks_.pop_back();
-      std::vector<IValue> elements;
       TORCH_CHECK(
           stack_.size() >= start,
           "Parsing error: wrong start index ",
@@ -383,11 +378,10 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.emplace_back(c10::ivalue::Tuple::create(pop(stack_)));
           break;
         default: {
-          elements.reserve(stack_.size() - start);
           auto start_it = stack_.begin() + static_cast<std::ptrdiff_t>(start);
-          for (auto it = start_it; it != stack_.end(); ++it) {
-            elements.emplace_back(std::move(*it));
-          }
+          std::vector<IValue> elements{
+              std::make_move_iterator(start_it),
+              std::make_move_iterator(stack_.end())};
           stack_.erase(start_it, stack_.end());
           stack_.emplace_back(c10::ivalue::Tuple::create(std::move(elements)));
           break;
@@ -491,7 +485,7 @@ PickleOpCode Unpickler::readInstruction() {
           stack_.size(),
           " and start index is ",
           start,
-          ", but stack_ is iterated by two elemenst at a time");
+          ", but stack_ is iterated by two elements at a time");
       for (size_t i = start; i < stack_.size(); i += 2) {
         dict.insert_or_assign(stack_[i], stack_[i + 1]);
       }
@@ -670,6 +664,16 @@ void Unpickler::readGlobal(
     // See [NOTE] skip_next_read_global
     this->skip_next_read_global--;
     if (this->skip_next_read_global == 1) {
+      if (module_name == "torch" && class_name == "Tensor") {
+        // This is a special case when we are unpickling a subclassed tensor
+        // with type torch.nn.Buffer. We didn't frequently run into this because
+        // torch.nn.Buffer is introduced later in PyTorch 2 and this type IValue
+        // will not be used in C++.
+        rebuildTensor(false);
+        stack_.emplace_back(int64_t(globals_.size() - 1));
+        this->skip_next_read_global = 0;
+        return;
+      }
       // Pass through to the correct handler
     } else if (this->skip_next_read_global == 0) {
       // Corresponds to the type of `Tensor` being unpickled
@@ -774,6 +778,10 @@ void Unpickler::readGlobal(
     // Unpickle a Tensor with Python attributes or
     // a Subclassed Tensor.
     rebuildTensorFromTypeV2();
+  } else if (
+      module_name == "torch._utils" && (class_name == "_rebuild_parameter")) {
+    // Unpickle a Parameter
+    rebuildParameter();
   } else if (
       module_name == "torch._utils" && class_name == "_rebuild_sparse_tensor") {
     rebuildSparseTensor();
@@ -1025,6 +1033,18 @@ void Unpickler::rebuildTensorFromTypeV2() {
   });
 }
 
+void Unpickler::rebuildParameter() {
+  globals_.emplace_back([this] {
+    auto args = pop(stack_).toTuple();
+    size_t tup_idx = 0;
+    const auto args_elems = args->elements();
+    auto result = args_elems.at(tup_idx++).toTensor();
+    auto requires_grad = args_elems.at(tup_idx++).toBool();
+    result.requires_grad_(requires_grad);
+    stack_.emplace_back(std::move(result));
+  });
+}
+
 #ifdef USE_RPC
 void Unpickler::rebuildRRef() {
   globals_.emplace_back([this] {
@@ -1041,10 +1061,10 @@ void Unpickler::rebuildRRef() {
     // const reference will extend the lifetime of the temporary variable
     const auto& rrefId = distributed::rpc::RRefId(
         static_cast<int16_t>(args.at(distributed::rpc::RREFID_ON_IDX).toInt()),
-        static_cast<int64_t>(args.at(distributed::rpc::RREFID_ID_IDX).toInt()));
+        args.at(distributed::rpc::RREFID_ID_IDX).toInt());
     const auto& forkId = distributed::rpc::RRefId(
         static_cast<int16_t>(args.at(distributed::rpc::FORKID_ON_IDX).toInt()),
-        static_cast<int64_t>(args.at(distributed::rpc::FORKID_ID_IDX).toInt()));
+        args.at(distributed::rpc::FORKID_ID_IDX).toInt());
     auto parent =
         static_cast<int16_t>(args.at(distributed::rpc::PARENT_IDX).toInt());
     const auto& typeStr = static_cast<std::string>(

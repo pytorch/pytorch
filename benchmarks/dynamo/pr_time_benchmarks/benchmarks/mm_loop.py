@@ -3,7 +3,7 @@ import sys
 from benchmark_base import BenchmarkBase
 
 import torch
-from torch._inductor.utils import fresh_inductor_cache
+from torch._inductor.utils import fresh_cache
 
 
 class Benchmark(BenchmarkBase):
@@ -45,7 +45,7 @@ class Benchmark(BenchmarkBase):
                 z = torch.mm(z, b)
             return z
 
-        with fresh_inductor_cache(), torch._inductor.config.patch(max_autotune=True):
+        with fresh_cache(), torch._inductor.config.patch(max_autotune=True):
             f(self.a, self.b)
 
 

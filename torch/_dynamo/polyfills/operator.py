@@ -5,14 +5,18 @@ Python polyfills for operator
 from __future__ import annotations
 
 import operator
-from typing import Any, Callable, overload, TypeVar
+from typing import Any, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import TypeVarTuple, Unpack
 
 from ..decorators import substitute_in_graph
 
 
+if TYPE_CHECKING:
+    from collections.abc import Callable, Iterable
+
+
 # Most unary and binary operators are handled by BuiltinVariable (e.g., `pos`, `add`)
-__all__ = ["attrgetter", "itemgetter", "methodcaller"]
+__all__ = ["attrgetter", "itemgetter", "methodcaller", "countOf"]
 
 
 _T = TypeVar("_T")
@@ -26,10 +30,12 @@ _Us = TypeVarTuple("_Us")
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def attrgetter(attr: str, /) -> Callable[[Any], _U]: ...
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def attrgetter(
     attr1: str, attr2: str, /, *attrs: str
 ) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]: ...
@@ -64,10 +70,12 @@ def attrgetter(*attrs: str) -> Callable[[Any], Any | tuple[Any, ...]]:
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def itemgetter(item: _T, /) -> Callable[[Any], _U]: ...
 
 
 @overload
+# pyrefly: ignore [inconsistent-overload]
 def itemgetter(
     item1: _T1, item2: _T2, /, *items: Unpack[_Ts]
 ) -> Callable[[Any], tuple[_U1, _U2, Unpack[_Us]]]: ...
@@ -103,3 +111,9 @@ def methodcaller(name: str, /, *args: Any, **kwargs: Any) -> Callable[[Any], Any
         return getattr(obj, name)(*args, **kwargs)
 
     return caller
+
+
+# Reference: https://docs.python.org/3/library/operator.html#operator.countOf
+@substitute_in_graph(operator.countOf, can_constant_fold_through=True)  # type: ignore[arg-type,misc]
+def countOf(a: Iterable[_T], b: _T, /) -> int:
+    return sum(it is b or it == b for it in a)

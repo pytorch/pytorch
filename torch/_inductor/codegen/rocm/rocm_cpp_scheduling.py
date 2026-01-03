@@ -86,7 +86,7 @@ class ROCmCPPScheduling(BaseScheduling):
         _, (_numel, rnumel) = template_node.group
         assert rnumel == 1
         ctb: ROCmTemplateBuffer = cast(ROCmTemplateBuffer, template_node.node)
-        kernel, render = ctb.make_kernel_render(ctb)
+        kernel, render = ctb.make_kernel_render(ctb)  # type: ignore[misc]
         with kernel:
             template_node.mark_run()
             src_code = render()
@@ -94,6 +94,7 @@ class ROCmCPPScheduling(BaseScheduling):
         with V.set_kernel_handler(kernel):
             node_schedule = [template_node]
             kernel_name = self.define_kernel(src_code, node_schedule)
+        self.codegen_comment(node_schedule, kernel_name)
         kernel.call_kernel(kernel_name, ctb)
         V.graph.removed_buffers |= kernel.removed_buffers
         self.free_buffers_in_scheduler()

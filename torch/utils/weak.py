@@ -1,18 +1,50 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-import weakref
-from weakref import ref
-from _weakrefset import _IterationGuard  # type: ignore[attr-defined]
-from collections.abc import MutableMapping, Mapping
-from torch import Tensor
 import collections.abc as _collections_abc
+import weakref
+from collections.abc import Mapping, MutableMapping
+from weakref import ref
+
+from torch import Tensor
 
 
 WeakRef = ref
 
 
-__all__ = ['TensorWeakRef', 'WeakIdRef', 'WeakIdKeyDictionary', 'WeakTensorKeyDictionary']
+__all__ = [
+    "TensorWeakRef",
+    "WeakIdRef",
+    "WeakIdKeyDictionary",
+    "WeakTensorKeyDictionary",
+]
+
+
+# TODO: make weakref properly thread safe following
+# https://github.com/python/cpython/pull/125325
+class _IterationGuard:
+    # This context manager registers itself in the current iterators of the
+    # weak container, such as to delay all removals until the context manager
+    # exits.
+    # This technique should be relatively thread-safe (since sets are).
+
+    def __init__(self, weakcontainer) -> None:
+        # Don't create cycles
+        self.weakcontainer = ref(weakcontainer)
+
+    def __enter__(self):
+        w = self.weakcontainer()
+        if w is not None:
+            w._iterating.add(self)
+        return self
+
+    def __exit__(self, e, t, b):
+        w = self.weakcontainer()
+        if w is not None:
+            s = w._iterating
+            s.remove(self)
+            if not s:
+                w._commit_removals()
 
 
 # This file defines a variant of WeakKeyDictionary that overrides the hashing
@@ -41,9 +73,9 @@ __all__ = ['TensorWeakRef', 'WeakIdRef', 'WeakIdKeyDictionary', 'WeakTensorKeyDi
 # WeakIdRef(tensor) rather than weakref.ref(tensor); it handles a number of
 # easy to get wrong cases transparently for you.
 class WeakIdRef(weakref.ref):
-    __slots__ = ['_id']
+    __slots__ = ["_id"]
 
-    def __init__(self, key, callback=None):
+    def __init__(self, key, callback=None) -> None:
         # Unlike stock weakref, which preserves hash semantics of the
         # original object but lazily defers hash calls until the first
         # time the user attempts to hash the weakref, we can eagerly
@@ -55,7 +87,7 @@ class WeakIdRef(weakref.ref):
     def __call__(self):
         r = super().__call__()
         # Special logic for Tensor PyObject resurrection
-        if hasattr(r, '_fix_weakref'):
+        if hasattr(r, "_fix_weakref"):
             r._fix_weakref()  # type: ignore[union-attr]
         return r
 
@@ -81,12 +113,13 @@ class WeakIdRef(weakref.ref):
             return a is b
         return self is other
 
+
 # This is the same as WeakIdRef but equality is checked using hash() rather than id.
 # This will be equivalent to the one above except for classes where hash is not their id.
 class _WeakHashRef(weakref.ref):
-    __slots__ = ['_id']
+    __slots__ = ["_id"]
 
-    def __init__(self, key, callback=None):
+    def __init__(self, key, callback=None) -> None:
         # Unlike stock weakref, which preserves hash semantics of the
         # original object but lazily defers hash calls until the first
         # time the user attempts to hash the weakref, we can eagerly
@@ -98,7 +131,7 @@ class _WeakHashRef(weakref.ref):
     def __call__(self):
         r = super().__call__()
         # Special logic for Tensor PyObject resurrection
-        if hasattr(r, '_fix_weakref'):
+        if hasattr(r, "_fix_weakref"):
             r._fix_weakref()  # type: ignore[union-attr]
         return r
 
@@ -115,14 +148,15 @@ class _WeakHashRef(weakref.ref):
             return hash(a) == hash(b)
         return self is other
 
+
 # This is directly adapted from cpython/Lib/weakref.py
 class WeakIdKeyDictionary(MutableMapping):
-    def __init__(self, dict=None, ref_type=WeakIdRef):  # CHANGED
+    def __init__(self, dict=None, ref_type=WeakIdRef) -> None:  # CHANGED
         self.data = {}
 
         self.ref_type = ref_type  # CHANGED
 
-        def remove(k, selfref=ref(self)):
+        def remove(k, selfref=ref(self)) -> None:
             self = selfref()
             if self is not None:
                 if self._iterating:
@@ -132,6 +166,7 @@ class WeakIdKeyDictionary(MutableMapping):
                         del self.data[k]
                     except KeyError:
                         pass
+
         self._remove = remove
         # A list of dead weakrefs (keys to be removed)
         self._pending_removals = []
@@ -140,7 +175,7 @@ class WeakIdKeyDictionary(MutableMapping):
         if dict is not None:
             self.update(dict)
 
-    def _commit_removals(self):
+    def _commit_removals(self) -> None:
         # NOTE: We don't need to call this method before mutating the dict,
         # because a dead weakref never compares equal to a live weakref,
         # even if they happened to refer to equal objects.
@@ -158,29 +193,29 @@ class WeakIdKeyDictionary(MutableMapping):
             except KeyError:
                 pass
 
-    def _scrub_removals(self):
+    def _scrub_removals(self) -> None:
         d = self.data
         self._pending_removals = [k for k in self._pending_removals if k in d]
         self._dirty_len = False
 
-    def __delitem__(self, key):
+    def __delitem__(self, key) -> None:
         self._dirty_len = True
         del self.data[self.ref_type(key)]  # CHANGED
 
     def __getitem__(self, key):
         return self.data[self.ref_type(key)]  # CHANGED
 
-    def __len__(self):
+    def __len__(self) -> int:
         if self._dirty_len and self._pending_removals:
             # self._pending_removals may still contain keys which were
             # explicitly removed, we have to scrub them (see issue #21173).
             self._scrub_removals()
         return len(self.data) - len(self._pending_removals)
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"<{self.__class__.__name__} at {id(self):#x}>"
 
-    def __setitem__(self, key, value):
+    def __setitem__(self, key, value) -> None:
         self.data[self.ref_type(key, self._remove)] = value  # CHANGED
 
     def copy(self):
@@ -196,6 +231,7 @@ class WeakIdKeyDictionary(MutableMapping):
 
     def __deepcopy__(self, memo):
         from copy import deepcopy
+
         new = self.__class__()
         with _IterationGuard(self):
             for key, value in self.data.items():
@@ -207,7 +243,7 @@ class WeakIdKeyDictionary(MutableMapping):
     def get(self, key, default=None):
         return self.data.get(self.ref_type(key), default)  # CHANGED
 
-    def __contains__(self, key):
+    def __contains__(self, key) -> bool:
         try:
             wr = self.ref_type(key)  # CHANGED
         except TypeError:
@@ -256,21 +292,25 @@ class WeakIdKeyDictionary(MutableMapping):
             if o is not None:
                 return o, value
 
+    # pyrefly: ignore [bad-override]
     def pop(self, key, *args):
         self._dirty_len = True
+        # pyrefly: ignore [not-iterable]
         return self.data.pop(self.ref_type(key), *args)  # CHANGED
 
     def setdefault(self, key, default=None):
-        return self.data.setdefault(self.ref_type(key, self._remove), default)  # CHANGED
+        return self.data.setdefault(
+            self.ref_type(key, self._remove), default
+        )  # CHANGED
 
-    def update(self, dict=None, **kwargs):  # type: ignore[override]
+    def update(self, dict=None, **kwargs) -> None:  # type: ignore[override]
         d = self.data
         if dict is not None:
             if not hasattr(dict, "items"):
                 dict = type({})(dict)
             for key, value in dict.items():
                 d[self.ref_type(key, self._remove)] = value  # CHANGED
-        if len(kwargs):
+        if kwargs:
             self.update(kwargs)
 
     def __ior__(self, other):
@@ -297,7 +337,10 @@ class WeakIdKeyDictionary(MutableMapping):
     def __eq__(self, other):
         if not isinstance(other, Mapping):
             return NotImplemented
-        return {id(k): v for k, v in self.items()} == {id(k): v for k, v in other.items()}
+        return {id(k): v for k, v in self.items()} == {
+            id(k): v for k, v in other.items()
+        }
+
 
 # Convenience alias
 WeakTensorKeyDictionary = WeakIdKeyDictionary
@@ -308,15 +351,17 @@ class TensorWeakRef:
 
     ref: WeakRef[Tensor]
 
-    def __init__(self, tensor: Tensor):
-        assert isinstance(tensor, Tensor)
+    def __init__(self, tensor: Tensor) -> None:
+        if not isinstance(tensor, Tensor):
+            raise AssertionError(f"expected torch.Tensor, got {type(tensor)}.")
         self.ref = weakref.ref(tensor)
 
     def __call__(self):
         out = self.ref()
         if out is None:
             return out
-        assert isinstance(out, Tensor)
+        if not isinstance(out, Tensor):
+            raise AssertionError(f"expected torch.Tensor, got {type(out)}.")
         # TODO, add _fix_weakref type binding
         out._fix_weakref()  # type: ignore[attr-defined]
         return out

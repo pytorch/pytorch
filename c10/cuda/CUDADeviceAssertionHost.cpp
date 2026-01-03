@@ -1,11 +1,8 @@
 #include <c10/cuda/CUDADeviceAssertionHost.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAFunctions.h>
-#include <c10/util/Backtrace.h>
-#include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <cuda_runtime.h>
 
 #include <memory>
 #include <string>
@@ -138,7 +135,7 @@ std::string c10_retrieve_device_side_assertion_info() {
     // Something failed, let's talk about that
     oss << failures_found
         << " CUDA device-side assertion failures were found on GPU #"
-        << device_num << "!" << std::endl;
+        << device_num << '!' << std::endl;
     if (assertion_data_for_device.assertion_count >
         C10_CUDA_DSA_ASSERTION_COUNT) {
       oss << "But at least " << assertion_data_for_device.assertion_count
@@ -153,17 +150,17 @@ std::string c10_retrieve_device_side_assertion_info() {
       oss << "Assertion failure " << i << std::endl;
       oss << "  GPU assertion failure message = " << self.assertion_msg
           << std::endl;
-      oss << "  File containing assertion = " << self.filename << ":"
+      oss << "  File containing assertion = " << self.filename << ':'
           << self.line_number << std::endl;
       oss << "  Device function containing assertion = " << self.function_name
           << std::endl;
-      oss << "  Thread ID that failed assertion = [" << self.thread_id[0] << ","
-          << self.thread_id[1] << "," << self.thread_id[2] << "]" << std::endl;
-      oss << "  Block ID that failed assertion = [" << self.block_id[0] << ","
-          << self.block_id[1] << "," << self.block_id[2] << "]" << std::endl;
+      oss << "  Thread ID that failed assertion = [" << self.thread_id[0] << ','
+          << self.thread_id[1] << ',' << self.thread_id[2] << ']' << std::endl;
+      oss << "  Block ID that failed assertion = [" << self.block_id[0] << ','
+          << self.block_id[1] << ',' << self.block_id[2] << ']' << std::endl;
       if (launch_info.generation_number == self.caller) {
         oss << "  File containing kernel launch = "
-            << launch_info.launch_filename << ":" << launch_info.launch_linenum
+            << launch_info.launch_filename << ':' << launch_info.launch_linenum
             << std::endl;
         oss << "  Function containing kernel launch = "
             << launch_info.launch_function << std::endl;
@@ -177,7 +174,7 @@ std::string c10_retrieve_device_side_assertion_info() {
         if (launch_registry.gather_launch_stacktrace) {
           oss << "Launch stacktracing disabled." << std::endl;
         } else {
-          oss << "\n" << launch_info.launch_stacktrace << std::endl;
+          oss << '\n' << launch_info.launch_stacktrace << std::endl;
         }
       } else {
         oss << "  CPU launch site info: Unavailable, the circular queue wrapped around. Increase `CUDAKernelLaunchRegistry::max_size`."
@@ -213,11 +210,11 @@ bool CUDAKernelLaunchRegistry::check_env_for_dsa_enabled() const {
 }
 
 uint32_t CUDAKernelLaunchRegistry::insert(
-    const char* launch_filename,
-    const char* launch_function,
-    const uint32_t launch_linenum,
-    const char* kernel_name,
-    const int32_t stream_id) {
+    const char* launch_filename [[maybe_unused]],
+    const char* launch_function [[maybe_unused]],
+    const uint32_t launch_linenum [[maybe_unused]],
+    const char* kernel_name [[maybe_unused]],
+    const int32_t stream_id [[maybe_unused]]) {
 #ifdef TORCH_USE_CUDA_DSA
   if (!enabled_at_runtime) {
     return 0;
@@ -297,11 +294,19 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
   C10_CUDA_CHECK_WO_DSA(
       cudaMallocManaged(&uvm_assertions_ptr, sizeof(DeviceAssertionsData)));
 
+#if CUDART_VERSION >= 13000
+  cudaMemLocation cpuDevice;
+  cpuDevice.type = cudaMemLocationTypeDevice;
+  cpuDevice.id = cudaCpuDeviceId;
+#else
+  const auto cpuDevice = cudaCpuDeviceId;
+#endif
+
   C10_CUDA_CHECK_WO_DSA(cudaMemAdvise(
       uvm_assertions_ptr,
       sizeof(DeviceAssertionsData),
       cudaMemAdviseSetPreferredLocation,
-      cudaCpuDeviceId));
+      cpuDevice));
 
   // GPU will establish direct mapping of data in CPU memory, no page faults
   // will be generated
@@ -309,7 +314,7 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
       uvm_assertions_ptr,
       sizeof(DeviceAssertionsData),
       cudaMemAdviseSetAccessedBy,
-      cudaCpuDeviceId));
+      cpuDevice));
 
   // Initialize the memory from the CPU; otherwise, pages may have to be created
   // on demand. We think that UVM documentation indicates that first access may

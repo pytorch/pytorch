@@ -45,7 +45,9 @@ struct ConcretePyInterpreterVTable final
   std::string name() const override;
 
   void incref(PyObject* pyobj) const override;
-  void decref(PyObject* pyobj, bool has_pyobj_slot) const override;
+  void decref(PyObject* pyobj) const override;
+  bool try_incref(const c10::impl::PyObjectSlot& pyobj_slot) const override;
+  size_t refcnt(PyObject* pyobj) const override;
 
   // TODO: Need to make this work for StorageImpl too. I imagine I'll want to
   // operate upon a PyObjectSlot rather than a TensorImpl
@@ -57,7 +59,7 @@ struct ConcretePyInterpreterVTable final
   void reportErrorCallback(PyObject* callback, DispatchKey key) const override;
   void python_dispatcher(
       const c10::OperatorHandle& op,
-      c10::DispatchKeySet,
+      c10::DispatchKeySet /*ks*/,
       torch::jit::Stack* stack) const override;
   // NB: this is defined in python_dispatch.cpp
   void python_op_registration_trampoline(
@@ -80,10 +82,15 @@ struct ConcretePyInterpreterVTable final
             opname, pymodule, context);
   }
 
-  bool is_contiguous(const c10::TensorImpl* self, at::MemoryFormat)
-      const override;
-  bool is_strides_like(const c10::TensorImpl* self, at::MemoryFormat)
-      const override;
+  bool is_contiguous(
+      const c10::TensorImpl* self,
+      at::MemoryFormat /*memory_format*/) const override;
+  c10::SymBool sym_is_contiguous(
+      const c10::TensorImpl* self,
+      at::MemoryFormat /*memory_format*/) const override;
+  bool is_strides_like(
+      const c10::TensorImpl* self,
+      at::MemoryFormat /*memory_format*/) const override;
   bool is_non_overlapping_and_dense(const c10::TensorImpl* self) const override;
   c10::Device device(const c10::TensorImpl* self) const override;
   int64_t dim(const c10::TensorImpl* self) const override;
@@ -230,52 +237,13 @@ py::object torchDispatchFromTensorImpl(
           TorchFunctionName::TorchDispatch));
 }
 
-// NOTE [PyInterpreter::decref takes a `has_pyobj_slot` arg]
-// Before calling PyInterpreter::decref, we must statically know if the
-// pyobj has a PyObjectSlot or not.
-// - If it has a PyObjectSlot, we need to be careful about PyObject resurrection
-// - If it does not have a PyObjectSlot, we can freely decref
-// One alternative to this is using PyObject_IsInstance
-// to get at this information. However, we don't want to risk an incorrect
-// `__instancecheck__` changing the semantics here.
-void ConcretePyInterpreterVTable::decref(PyObject* pyobj, bool has_pyobj_slot)
-    const {
+void ConcretePyInterpreterVTable::decref(PyObject* pyobj) const {
   // Leak the pyobj if not initialized.  This can happen if we are running
   // exit handlers that are destructing tensors with residual (owned)
   // PyObjects stored in them.
   if (!Py_IsInitialized())
     return;
-
   pybind11::gil_scoped_acquire gil;
-  // Two possibilities:
-  // 1. We are decref-ing an object that has a PyObjectSlot, like a Tensor or
-  // Storage. Then we must be careful about PyObject resurrection (see
-  // THPVariable_clear).
-  // 2. We are decref-ing some other Python object. We don't do
-  // PyObject resurrection on non-Tensors, so we just carry on as usual
-  if (has_pyobj_slot && Py_REFCNT(pyobj) > 1) {
-    if (THPVariable_Check(pyobj)) {
-      // It's still alive!  This can happen if a weak ref resurrected
-      // the PyObject without flipping ownership.  At this point it is
-      // too late to rescue the object, so just stub out the PyObject
-      // so that it fails on subsequent uses.  Don't raise an error here;
-      // you're probably in a destructor.
-      TORCH_WARN(
-          "Deallocating Tensor that still has live PyObject references.  "
-          "This probably happened because you took out a weak reference to "
-          "Tensor and didn't call _fix_weakref() after dereferencing it.  "
-          "Subsequent accesses to this tensor via the PyObject will now fail.");
-      ((THPVariable*)pyobj)->cdata =
-          c10::MaybeOwned<torch::autograd::Variable>();
-    } else if (THPStorage_Check(pyobj)) {
-      TORCH_WARN(
-          "Deallocating UntypedStorage that still has live PyObject references.  "
-          "This probably happened because you took out a weak reference to "
-          "UntypedStorage and didn't call _fix_weakref() after dereferencing it.  "
-          "Subsequent accesses to this storage via the PyObject will now fail.");
-      ((THPStorage*)pyobj)->cdata = c10::MaybeOwned<c10::Storage>();
-    }
-  }
   Py_DECREF(pyobj);
 }
 
@@ -284,6 +252,25 @@ void ConcretePyInterpreterVTable::incref(PyObject* pyobj) const {
     return;
   pybind11::gil_scoped_acquire gil;
   Py_INCREF(pyobj);
+}
+
+bool ConcretePyInterpreterVTable::try_incref(
+    const c10::impl::PyObjectSlot& pyobj_slot) const {
+  if (!Py_IsInitialized())
+    return false;
+  pybind11::gil_scoped_acquire gil;
+  PyObject* pyobj = pyobj_slot.load_pyobj();
+  if (!pyobj) {
+    return false;
+  }
+  return PyUnstable_TryIncRef(pyobj);
+}
+
+size_t ConcretePyInterpreterVTable::refcnt(PyObject* pyobj) const {
+  if (!Py_IsInitialized() || pyobj == nullptr)
+    return 0;
+  pybind11::gil_scoped_acquire gil;
+  return Py_REFCNT(pyobj);
 }
 
 bool isPythonTensor(const at::Tensor& tensor) {
@@ -351,6 +338,8 @@ void ConcretePyInterpreterVTable::dispatch(
       nullptr,
       torch_api_function_overload.ptr(),
       nullptr,
+      &op,
+      &arguments,
       TorchFunctionName::TorchDispatch);
   pushPyOutToStack(
       op, stack, py::reinterpret_steal<py::object>(obj), "__torch_dispatch__");
@@ -476,6 +465,33 @@ bool ConcretePyInterpreterVTable::is_contiguous(
   return PyObject_IsTrue(out.ptr());
 }
 
+c10::SymBool ConcretePyInterpreterVTable::sym_is_contiguous(
+    const c10::TensorImpl* self,
+    at::MemoryFormat memory_format) const {
+  pybind11::gil_scoped_acquire gil;
+  at::impl::MaybeSetTLSOnEntryGuard guard;
+
+  py::object out;
+  out = torchDispatchFromTensorImpl(
+      self,
+      "sym_is_contiguous",
+      py::module::import("torch")
+          .attr("ops")
+          .attr("aten")
+          .attr("sym_is_contiguous")
+          .attr("default")
+          .ptr(),
+      "torch.ops.aten",
+      {py::cast(memory_format)});
+
+  if (out.is_none()) {
+    return self->sym_is_contiguous_default(memory_format);
+  }
+
+  return torch::is_symbool(out) ? out.cast<c10::SymBool>()
+                                : c10::SymBool{py::cast<bool>(out)};
+}
+
 bool ConcretePyInterpreterVTable::is_strides_like(
     const c10::TensorImpl* self,
     at::MemoryFormat memory_format) const {
@@ -585,11 +601,7 @@ static void set_tensor_attr_with_capsule(
     const c10::TensorImpl* tensor,
     py::capsule& capsule,
     const char* attr_name) {
-  std::optional<PyObject*> mb_obj = tensor->pyobj_slot()->check_pyobj(
-      getPyInterpreter(), /*ignore_hermetic_tls=*/false);
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  auto obj = mb_obj.value();
+  PyObject* obj = tensor->pyobj_slot()->load_pyobj();
   py::handle(obj).attr(attr_name) = capsule;
 }
 
@@ -613,11 +625,7 @@ static c10::ArrayRef<T> get_set_cached_attr(
     const c10::TensorImpl* tensor,
     const char* base_attr_name,
     const py::object& obj) {
-  std::optional<PyObject*> mb_obj =
-      tensor->pyobj_slot()->check_pyobj(getPyInterpreter());
-  TORCH_CHECK(
-      mb_obj.has_value(), "Tensor subclass's PyInterpreter has no value");
-  auto tensor_obj = mb_obj.value();
+  PyObject* tensor_obj = tensor->pyobj_slot()->load_pyobj();
   auto buffer_len_attr_name = std::string(base_attr_name) + std::string("_len");
 
   bool is_buffer_allocated = false;
@@ -986,8 +994,4 @@ py::handle getTorchApiFunction(const c10::OperatorHandle& op) {
 
 c10::impl::PyInterpreter* getPyInterpreter() {
   return torch::detail::self_interpreter.get();
-}
-
-bool isMainPyInterpreter() {
-  return torch::detail::self_interpreter.is_main_interpreter();
 }

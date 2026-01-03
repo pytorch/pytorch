@@ -275,7 +275,6 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
       {"Dense", c10::DispatchKey::Dense},
       {"FPGA", c10::DispatchKey::FPGA},
       {"MAIA", c10::DispatchKey::MAIA},
-      {"MPS", c10::DispatchKey::MPS},
       {"Vulkan", c10::DispatchKey::Vulkan},
       {"Metal", c10::DispatchKey::Metal},
       {"VE", c10::DispatchKey::VE},
@@ -354,6 +353,8 @@ c10::DispatchKey parseDispatchKey(const std::string& k) {
 
       {"SparseCPU", c10::DispatchKey::SparseCPU},
       {"SparseCUDA", c10::DispatchKey::SparseCUDA},
+      {"SparseMPS", c10::DispatchKey::SparseMPS},
+      {"SparseCsrMPS", c10::DispatchKey::SparseCsrMPS},
       {"SparseHIP", c10::DispatchKey::SparseHIP},
       {"SparseXPU", c10::DispatchKey::SparseXPU},
       {"SparseVE", c10::DispatchKey::SparseVE},

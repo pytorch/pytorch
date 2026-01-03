@@ -19,10 +19,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   unit-test:
@@ -40,17 +42,17 @@ jobs:
       issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
+      opt_out_experiments: lf
 
-  linux-focal-cuda12_6-py3_10-gcc9-inductor-build:
-    name: cuda12.6-py3.10-gcc9-sm86
+  inductor-build:
+    name: inductor-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '8.6'
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      sync-tag: linux-focal-cuda12_6-py3_10-gcc9-inductor-build
       test-matrix: |
         { include: [
           { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
@@ -59,46 +61,77 @@ jobs:
           { config: "inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
           { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
-  linux-focal-cuda12_6-py3_10-gcc9-inductor-test:
-    name: cuda12.6-py3.10-gcc9-sm86
+  inductor-test:
+    name: inductor-test
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-focal-cuda12_6-py3_10-gcc9-inductor-build
+    needs: inductor-build
     with:
-      build-environment: linux-focal-cuda12.6-py3.10-gcc9-sm86
-      docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc9-inductor-build.outputs.test-matrix }}
+      build-environment: ${{ needs.inductor-build.outputs.build-environment }}
+      docker-image: ${{ needs.inductor-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-inductor-build:
-    name: linux-jammy-cpu-py3.9-gcc11-inductor
+  inductor-build-cuda13:
+    name: inductor-build-cuda13
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image-name: pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks
+      cuda-arch-list: '8.6'
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      sync-tag: linux-jammy-cpu-py3_9-gcc11-inductor-build
       test-matrix: |
         { include: [
-          { config: "cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
-          { config: "cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
-          { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.8xlarge.amx" },
-          { config: "inductor_torchbench_cpu_smoketest_perf", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.24xl.spr-metal" },
+          { config: "inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
+          { config: "inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.g5.4xlarge.nvidia.gpu" },
         ]}
+      build-additional-packages: "vision audio torchao"
     secrets: inherit
 
-  linux-jammy-cpu-py3_9-gcc11-inductor-test:
-    name: linux-jammy-cpu-py3.9-gcc11-inductor
+  inductor-test-cuda13:
+    name: inductor-test-cuda13
     uses: ./.github/workflows/_linux-test.yml
-    needs: linux-jammy-cpu-py3_9-gcc11-inductor-build
+    needs: inductor-build-cuda13
     with:
-      build-environment: linux-jammy-py3.9-gcc11-build
-      docker-image: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-cpu-py3_9-gcc11-inductor-build.outputs.test-matrix }}
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
+      docker-image: ${{ needs.inductor-build-cuda13.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-build-cuda13.outputs.test-matrix }}
+    secrets: inherit
+
+  inductor-cpu-build:
+    name: inductor-cpu-build
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      build-environment: linux-jammy-py3.10-gcc11-build
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-gcc11-inductor-benchmarks
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      test-matrix: |
+        { include: [
+          { config: "cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "dynamic_cpu_inductor_huggingface", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "dynamic_cpu_inductor_timm", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "dynamic_cpu_inductor_timm", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 1, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "dynamic_cpu_inductor_torchbench", shard: 2, num_shards: 2, runner: "${{ needs.get-label-type.outputs.label-type }}linux.2xlarge.amx" },
+          { config: "inductor_torchbench_cpu_smoketest_perf", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}linux.24xl.spr-metal" },
+        ]}
+      build-additional-packages: "vision audio torchao"
+    secrets: inherit
+
+  inductor-cpu-test:
+    name: inductor-cpu-test
+    uses: ./.github/workflows/_linux-test.yml
+    needs: inductor-cpu-build
+    with:
+      build-environment: ${{ needs.inductor-cpu-build.outputs.build-environment }}
+      docker-image: ${{ needs.inductor-cpu-build.outputs.docker-image }}
+      test-matrix: ${{ needs.inductor-cpu-build.outputs.test-matrix }}
     secrets: inherit

@@ -2,9 +2,25 @@
 
 from unittest import mock
 
+import torch
 import torch.distributed as c10d
-from torch.distributed.collective_utils import all_gather, broadcast
+from torch.distributed.collective_utils import (
+    _check_rng_sync,
+    _check_rng_sync_internal,
+    _summarize_ranks,
+    all_gather,
+    broadcast,
+)
+from torch.distributed.device_mesh import init_device_mesh
+from torch.testing import FileCheck
 from torch.testing._internal.common_distributed import MultiProcessTestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 class TestCollectiveUtils(MultiProcessTestCase):
@@ -89,9 +105,9 @@ class TestCollectiveUtils(MultiProcessTestCase):
 
         res = all_gather(data_or_fn=func, pg=pg)
         func.assert_called_once()
-        assert res == list(
-            range(self.world_size)
-        ), f"Expect res to be list of 0 through {self.world_size} (got {res})"
+        assert res == list(range(self.world_size)), (
+            f"Expect res to be list of 0 through {self.world_size} (got {res})"
+        )
 
     def test_all_gather_result_no_pg(self) -> None:
         """
@@ -114,3 +130,87 @@ class TestCollectiveUtils(MultiProcessTestCase):
         expected_exception = "test exception"
         with self.assertRaisesRegex(Exception, expected_exception):
             all_gather(data_or_fn=func)
+
+    @parametrize("device", ["cpu", "cuda"])
+    def test_check_rng_sync(
+        self,
+        device,
+    ) -> None:
+        if device == "cuda" and not torch.cuda.is_available():
+            self.skipTest("Cuda is not available")
+        store = c10d.FileStore(self.file_name, self.world_size)
+        c10d.init_process_group(
+            backend="gloo", store=store, rank=self.rank, world_size=self.world_size
+        )
+        group = torch.distributed.distributed_c10d._get_default_group()
+        generator = torch.Generator(device=device)
+        generator.manual_seed(123)
+        value_ranks, _ = _check_rng_sync_internal(generator, group)
+        self.assertEqual(len(value_ranks), 1, value_ranks)
+        for actual, expected in zip(value_ranks.values(), [{0, 1, 2, 3}]):
+            self.assertEqual(actual, expected, actual)
+
+        if torch.distributed.get_rank() == 1:
+            torch.randn((10,), device=device, generator=generator)
+        value_ranks, _ = _check_rng_sync_internal(generator, group)
+        self.assertEqual(len(value_ranks), 2, value_ranks)
+        for actual, expected in zip(value_ranks.values(), [{0, 2, 3}, {1}]):
+            self.assertEqual(actual, expected, actual)
+
+        if torch.distributed.get_rank() == 0:
+            generator.manual_seed(456)
+        value_ranks, _ = _check_rng_sync_internal(generator, group)
+        self.assertEqual(len(value_ranks), 3, value_ranks)
+        for actual, expected in zip(value_ranks.values(), [{0}, {1}, {2, 3}]):
+            self.assertEqual(actual, expected, actual)
+
+        log_str = _check_rng_sync(generator, group)
+        FileCheck().check("Generator desync detected").check("Ranks").check("0").check(
+            "1"
+        ).check("2:4").run(log_str)
+
+
+class TestUtils(TestCase):
+    def setUp(self):
+        super().setUp()
+
+        if not c10d.is_initialized():
+            self.rank = 0
+            self.world_size = 4096
+
+            store = FakeStore()
+            c10d.init_process_group(
+                backend="fake",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=store,
+            )
+
+    def tearDown(self):
+        c10d.destroy_process_group()
+
+    def test_summarize_ranks(self):
+        mesh_dim_names = ("pp", "dp", "tp")
+        mesh = init_device_mesh("cpu", (8, 64, 8), mesh_dim_names=mesh_dim_names)
+        ranks_lists = {name: mesh[name].mesh.tolist() for name in mesh_dim_names}
+        summaries = {
+            name: _summarize_ranks(ranks_lists[name]) for name in mesh_dim_names
+        }
+        self.assertEqual(summaries["pp"], "0:4096:512")
+        self.assertEqual(summaries["dp"], "0:512:8")
+        self.assertEqual(summaries["tp"], "0:8")
+
+        self.assertEqual(
+            _summarize_ranks([1, 2, 3, 6, 7, 8, 10, 12, 14, 16]),
+            "1:4,6:9,10:18:2",
+        )
+        self.assertEqual(
+            _summarize_ranks([1]),
+            "1",
+        )
+
+
+instantiate_parametrized_tests(TestCollectiveUtils)
+
+if __name__ == "__main__":
+    run_tests()

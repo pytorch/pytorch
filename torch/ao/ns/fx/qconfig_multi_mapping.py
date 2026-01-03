@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import copy
-from typing import Any, Callable, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 from torch.ao.quantization import QConfigMapping
@@ -10,6 +10,8 @@ from torch.ao.quantization.qconfig_mapping import _QCONFIG_STYLE_ORDER
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from torch.ao.quantization.qconfig import QConfigAny
 
 __all__ = ["QConfigMultiMapping"]
@@ -109,7 +111,7 @@ class QConfigMultiMapping:
                         target_qconfigs_dict[key] = None
                 break
 
-            # insert copies of this new QConfigMapping until all entires
+            # insert copies of this new QConfigMapping until all entries
             # in qconfig_list can fit among the QConfigMappings
             while len(qconfig_list) > len(self.qconfig_mappings_list):
                 self.qconfig_mappings_list.append(copy.deepcopy(new_qconfig_mapping))
@@ -124,7 +126,7 @@ class QConfigMultiMapping:
     def _insert_qconfig_list(
         self,
         style: str,
-        args: list[Union[str, int, Callable]],
+        args: list[str | int | Callable],
         qconfig_list: list[QConfigAny],
     ) -> None:
         # we remove duplicates and None to make the ordering of qconfigs
@@ -147,7 +149,7 @@ class QConfigMultiMapping:
         return self
 
     def set_object_type(
-        self, object_type: Union[Callable, str], qconfig_list: list[QConfigAny]
+        self, object_type: Callable | str, qconfig_list: list[QConfigAny]
     ) -> QConfigMultiMapping:
         """
         Set object type QConfigs

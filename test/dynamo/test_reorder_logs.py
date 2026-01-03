@@ -54,7 +54,7 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
         counters.clear()
         x = torch.randn(3, 3)
         orig_out = fn(x)
-        with torch._dynamo.config.patch(ignore_logger_methods={ignore_method}):
+        with torch._dynamo.config.patch(ignore_logging_functions={ignore_method}):
             opt_f = torch.compile(backend="eager")(fn)
             with self.assertLogs(logger, level="INFO") as captured:
                 logger.info("call logger info to avoid error")
@@ -67,7 +67,95 @@ class IgnoreLogsTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(len(counters["graph_break"]), 0)
         else:
             self.assertIn("moo", printed_output)
-            self.assertEqual(len(counters["graph_break"]), 1)
+            self.assertGreater(len(counters["graph_break"]), 0)
+
+    def test_ignore_arbitrary_function_noop(self):
+        counters.clear()
+        calls = []
+
+        def dbg_fn(x):
+            calls.append("ran")
+
+        def f(x):
+            dbg_fn(x)  # must be no-op inside Dynamo
+            return x + 1
+
+        x = torch.randn(3, 3)
+
+        with torch._dynamo.config.patch(ignore_logging_functions={dbg_fn}):
+            opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+            opt_out = opt_f(x)
+
+        # function must never run
+        self.assertEqual(calls, [])
+
+        # output must match eager
+        self.assertTrue(same(opt_out, x + 1))
+
+        # no graph breaks allowed
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_ignore_function_returns_none(self):
+        counters.clear()
+        calls = []
+
+        def ignore_me(x):
+            calls.append("ran")
+            return "should_not_run"
+
+        with torch._dynamo.config.patch(ignore_logging_functions={ignore_me}):
+
+            def f(x):
+                y = ignore_me(x)  # Dynamo must replace with Constant(None)
+                return x * 2, y
+
+            x = torch.randn(3, 3)
+            opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+            opt_out = opt_f(x)
+
+        # ignored function must NOT run
+        self.assertEqual(calls, [])
+
+        # y must be None
+        self.assertIs(opt_out[1], None)
+
+        # output correct
+        self.assertTrue(same(opt_out[0], x * 2))
+
+        # no graph breaks
+        self.assertEqual(len(counters["graph_break"]), 0)
+
+    def test_ignore_function_does_not_conflict_with_reorderable(self):
+        counters.clear()
+        log = []
+
+        def ignored(x):
+            log.append("ignored")
+
+        def reordered(x):
+            log.append("reordered")
+
+        def f(x):
+            ignored(x)
+            reordered(x)
+            return x + 1
+
+        x = torch.ones(3, 3)
+
+        with torch._dynamo.config.patch(
+            ignore_logging_functions={ignored},
+            reorderable_logging_functions={reordered},
+        ):
+            opt_f = torch.compile(backend="eager", fullgraph=True)(f)
+            opt_out = opt_f(x)
+
+        # ignored must NOT run
+        self.assertNotIn("ignored", log)
+
+        # reordered MUST run
+        self.assertIn("reordered", log)
+        # output is correct
+        self.assertTrue(same(opt_out, x + 1))
 
 
 class ReorderLogsTests(torch._dynamo.test_case.TestCase):
@@ -202,7 +290,17 @@ class ReorderLogsTests(torch._dynamo.test_case.TestCase):
 
         graph_break_key = counters["graph_break"].keys()
         self.assertEqual(len(graph_break_key), 1)
-        self.assertEqual(next(iter(graph_break_key)), "Tensor.item")
+        self.assertExpectedInline(
+            next(iter(graph_break_key)),
+            """\
+Unsupported Tensor.item() call with capture_scalar_outputs=False
+  Explanation: Dynamo does not support tracing `Tensor.item()` with config.capture_scalar_outputs=False.
+  Hint: Set `torch._dynamo.config.capture_scalar_outputs = True` or `export TORCHDYNAMO_CAPTURE_SCALAR_OUTPUTS=1` to include these operations in the captured graph.
+
+  Developer debug context: call_method TensorVariable() item () {}
+
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0124.html""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":

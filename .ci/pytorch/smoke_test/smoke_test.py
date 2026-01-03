@@ -276,7 +276,7 @@ def smoke_test_cuda(
             torch_nccl_version = ".".join(str(v) for v in torch.cuda.nccl.version())
             print(f"Torch nccl; version: {torch_nccl_version}")
 
-        # Pypi dependencies are installed on linux ony and nccl is availbale only on Linux.
+        # Pypi dependencies are installed on linux only and nccl is available only on Linux.
         if pypi_pkg_check == "enabled" and sys.platform in ["linux", "linux2"]:
             compare_pypi_to_torch_versions(
                 "cudnn", find_pypi_package_version("nvidia-cudnn"), torch_cudnn_version
@@ -297,7 +297,8 @@ def smoke_test_conv2d() -> None:
     m = nn.Conv2d(16, 33, 3, stride=2)
     # non-square kernels and unequal stride and with padding
     m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
-    assert m is not None
+    if m is None:
+        raise AssertionError("Conv2d with non-square kernels returned None")
     # non-square kernels and unequal stride and with padding and dilation
     basic_conv = nn.Conv2d(
         16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1)
@@ -311,7 +312,8 @@ def smoke_test_conv2d() -> None:
         x = torch.randn(1, 3, 24, 24, device="cuda")
         with torch.cuda.amp.autocast():
             out = conv(x)
-        assert out is not None
+        if out is None:
+            raise AssertionError("Conv2d with cuda autocast returned None")
 
         supported_dtypes = [torch.float16, torch.float32, torch.float64]
         for dtype in supported_dtypes:
@@ -319,26 +321,33 @@ def smoke_test_conv2d() -> None:
             conv = basic_conv.to(dtype).cuda()
             input = torch.randn(20, 16, 50, 100, device="cuda").type(dtype)
             output = conv(input)
-            assert output is not None
+            if output is None:
+                raise AssertionError(f"Conv2d with cuda for {dtype} returned None")
 
 
 def test_linalg(device="cpu") -> None:
     print(f"Testing smoke_test_linalg on {device}")
     A = torch.randn(5, 3, device=device)
     U, S, Vh = torch.linalg.svd(A, full_matrices=False)
-    assert (
+    if not (
         U.shape == A.shape
         and S.shape == torch.Size([3])
         and Vh.shape == torch.Size([3, 3])
-    )
+    ):
+        raise AssertionError(
+            f"SVD shapes mismatch: U.shape={U.shape}, S.shape={S.shape}, Vh.shape={Vh.shape}"
+        )
     torch.dist(A, U @ torch.diag(S) @ Vh)
 
     U, S, Vh = torch.linalg.svd(A)
-    assert (
+    if not (
         U.shape == torch.Size([5, 5])
         and S.shape == torch.Size([3])
         and Vh.shape == torch.Size([3, 3])
-    )
+    ):
+        raise AssertionError(
+            f"SVD full_matrices shapes mismatch: U.shape={U.shape}, S.shape={S.shape}, Vh.shape={Vh.shape}"
+        )
     torch.dist(A, U[:, :3] @ torch.diag(S) @ Vh)
 
     A = torch.randn(7, 5, 3, device=device)
@@ -351,6 +360,18 @@ def test_linalg(device="cpu") -> None:
             print(f"Testing smoke_test_linalg with cuda for {dtype}")
             A = torch.randn(20, 16, 50, 100, device=device, dtype=dtype)
             torch.linalg.svd(A)
+
+
+def test_sdpa(device="cpu", dtype=torch.float16) -> None:
+    """Regression test for https://github.com/pytorch/pytorch/issues/167602
+    Without nvrtc_builtins on CuDNN-9.13 on CUDA-13 fails with ` No valid execution plans built.`
+    """
+    print(f"Testing SDPA on {device} using type {dtype}")
+    k, q, v = torch.rand(3, 1, 16, 77, 64, dtype=dtype, device=device).unbind(0)
+    attn = torch.rand(1, 1, 77, 77, dtype=dtype, device=device)
+    rc = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn)
+    if rc.isnan().any().item() is not False:
+        raise AssertionError("SDPA output contains NaN values")
 
 
 def smoke_test_compile(device: str = "cpu") -> None:
@@ -383,6 +404,31 @@ def smoke_test_compile(device: str = "cpu") -> None:
     x = torch.rand(64, 1, 28, 28, device=device).type(torch.float32)
     model = Net().to(device=device)
     x_pt2 = torch.compile(model, mode="max-autotune")(x)
+
+
+def smoke_test_nvshmem() -> None:
+    if not torch.cuda.is_available() or target_os == "windows":
+        print("Windows platform or CUDA is not available, skipping NVSHMEM test")
+        return
+
+    # Check if NVSHMEM is compiled in current build
+    try:
+        from torch._C._distributed_c10d import _is_nvshmem_available
+    except ImportError:
+        # Not built with NVSHMEM support.
+        # torch is not compiled with NVSHMEM prior to 2.9
+        from torch.torch_version import TorchVersion
+
+        if TorchVersion(torch.__version__) < (2, 9):
+            return
+        else:
+            # After 2.9: NVSHMEM is expected to be compiled in current build
+            raise RuntimeError("torch not compiled with NVSHMEM") from None
+
+    print("torch compiled with NVSHMEM")
+
+    # Check if NVSHMEM is available on current system.
+    print(f"NVSHMEM available at run time: {_is_nvshmem_available()}")
 
 
 def smoke_test_modules():
@@ -464,10 +510,12 @@ def main() -> None:
     smoke_test_conv2d()
     test_linalg()
     test_numpy()
+    test_sdpa()
 
     if is_cuda_system:
         test_linalg("cuda")
         test_cuda_gds_errors_captured()
+        test_sdpa("cuda")
 
     if options.package == "all":
         smoke_test_modules()
@@ -478,6 +526,8 @@ def main() -> None:
         options.torch_compile_check,
         options.pypi_pkg_check,
     )
+
+    smoke_test_nvshmem()
 
 
 if __name__ == "__main__":

@@ -1,14 +1,17 @@
 # mypy: allow-untyped-defs
 import itertools
 import unittest.mock
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from typing import TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._C
 import torch._ops
 import torch.utils._python_dispatch
 import torch.utils._pytree as pytree
+from torch._C import DispatchKey
 
 
 __all__ = ["enable_python_dispatcher", "no_python_dispatcher", "enable_pre_dispatch"]
@@ -18,6 +21,9 @@ enable_python_dispatcher = torch._C._EnablePythonDispatcher
 enable_pre_dispatch = torch._C._EnablePreDispatch
 
 CROSSREF_FUNCTIONALIZE = False
+
+_P = ParamSpec("_P")
+_T = TypeVar("_T")
 
 
 def all_py_loaded_overloads() -> Iterator[torch._ops.OpOverload]:
@@ -62,24 +68,30 @@ def suspend_functionalization():
 
 
 def check_tensor_metadata_matches(nv, rv, desc):
-    assert callable(desc)
-    assert nv.size() == rv.size(), f"{desc()}: sizes {nv.size()} != {rv.size()}"
-    assert nv.dtype == rv.dtype, f"{desc()}: dtype {nv.dtype} != {rv.dtype}"
+    if not callable(desc):
+        raise AssertionError(f"desc must be callable, got {type(desc)}")
+    if nv.size() != rv.size():
+        raise AssertionError(f"{desc()}: sizes {nv.size()} != {rv.size()}")
+    if nv.dtype != rv.dtype:
+        raise AssertionError(f"{desc()}: dtype {nv.dtype} != {rv.dtype}")
     same_strides, idx = torch._prims_common.check_significant_strides(
         nv, rv, only_cuda=False
     )
-    assert same_strides, (
-        f"{desc()}: strides {nv.stride()} != {rv.stride()} (mismatch at index {idx})"
-    )
+    if not same_strides:
+        raise AssertionError(
+            f"{desc()}: strides {nv.stride()} != {rv.stride()} (mismatch at index {idx})"
+        )
 
 
 def check_metadata_matches(n, r, desc):
-    assert callable(desc)
+    if not callable(desc):
+        raise AssertionError(f"desc must be callable, got {type(desc)}")
     n_vals, _n_spec = pytree.tree_flatten(n)
     r_vals, _r_spec = pytree.tree_flatten(r)
     # TODO: test the specs match; empirically  sometimes we have a tuple
     # on one side and a list on the other
-    assert len(n_vals) == len(r_vals), f"{len(n_vals)} != {len(r_vals)}"
+    if len(n_vals) != len(r_vals):
+        raise AssertionError(f"{len(n_vals)} != {len(r_vals)}")
     for i, nv, rv in zip(range(len(n_vals)), n_vals, r_vals):
         if not isinstance(rv, torch.Tensor):
             continue
@@ -103,14 +115,16 @@ def _fmt(a: object) -> object:
         return a
 
 
-def make_crossref_functionalize(op, final_key):
+def make_crossref_functionalize(
+    op: torch._ops.OpOverload[_P, _T], final_key: DispatchKey
+) -> Union[Callable[_P, _T], DispatchKey]:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
     # This case is pretty weird, suppress it for now
-    if op == torch.ops.aten.lift_fresh.default:
+    if op is torch.ops.aten.lift_fresh.default:
         return final_key
 
-    def handler(*args, **kwargs):
+    def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         fake_mode = FakeTensorMode()
 
         def fakeify_defun(t):
@@ -121,8 +135,12 @@ def make_crossref_functionalize(op, final_key):
                     # the outer tensor sizes/strides.  This doesn't necessarily have to
                     # be the case, see discussion at
                     # https://github.com/pytorch/pytorch/pull/87610/files/401ddeda1d769bedc88a12de332c7357b60e51a4#r1007264456
-                    assert t.size() == r.size()
-                    assert t.stride() == r.stride()
+                    if t.size() != r.size():
+                        raise AssertionError(f"size mismatch: {t.size()} != {r.size()}")
+                    if t.stride() != r.stride():
+                        raise AssertionError(
+                            f"stride mismatch: {t.stride()} != {r.stride()}"
+                        )
                 else:
                     r = t
                 # TODO: suppress guards
@@ -146,7 +164,7 @@ def make_crossref_functionalize(op, final_key):
                 maybe_detach, (f_args, f_kwargs)
             )
             with fake_mode:
-                f_r = op(*f_args, **f_kwargs)
+                f_r = op(*f_args, **f_kwargs)  # pyrefly: ignore [invalid-param-spec]
         r = op._op_dk(final_key, *args, **kwargs)
 
         def desc():

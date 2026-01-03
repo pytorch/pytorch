@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import operator
+from collections.abc import Callable
 from functools import reduce
-from typing import Callable, Optional, Union
 
 import torch
 import torch.nn.functional as F
@@ -52,7 +52,7 @@ class WeightNormSparsifier(BaseSparsifier):
 
     Note::
         All arguments to the WeightNormSparsifier constructor are "default"
-        arguments and could be overriden by the configuration provided in the
+        arguments and could be overridden by the configuration provided in the
         `prepare` step.
     """
 
@@ -60,8 +60,8 @@ class WeightNormSparsifier(BaseSparsifier):
         self,
         sparsity_level: float = 0.5,
         sparse_block_shape: tuple[int, int] = (1, 4),
-        zeros_per_block: Optional[int] = None,
-        norm: Optional[Union[Callable, int]] = None,
+        zeros_per_block: int | None = None,
+        norm: Callable | int | None = None,
     ):
         if zeros_per_block is None:
             zeros_per_block = reduce(operator.mul, sparse_block_shape)
@@ -94,7 +94,8 @@ class WeightNormSparsifier(BaseSparsifier):
     ):
         r"""Creates patches of size `block_shape` after scattering the indices."""
         if mask is None:
-            assert input_shape is not None
+            if input_shape is None:
+                raise AssertionError("input_shape must be provided when mask is None")
             mask = torch.ones(input_shape, device=device)
         mask.scatter_(dim=dim, index=indices, value=0)
         mask.data = F.fold(
@@ -142,7 +143,7 @@ class WeightNormSparsifier(BaseSparsifier):
 
         data = data.repeat(1, values_per_block, 1)
 
-        threshold_idx = int(round(sparsity_level * num_blocks))
+        threshold_idx = round(sparsity_level * num_blocks)
         threshold_idx = max(0, min(num_blocks - 1, threshold_idx))  # Sanity check
         _, sorted_idx = torch.topk(data, k=threshold_idx, dim=2, largest=False)
 
@@ -234,6 +235,7 @@ class WeightNormSparsifier(BaseSparsifier):
             ww = self.norm_fn(getattr(module, tensor_name))
             tensor_mask = self._make_tensor_mask(
                 data=ww,
+                # pyrefly: ignore [missing-attribute]
                 input_shape=ww.shape,
                 sparsity_level=sparsity_level,
                 sparse_block_shape=sparse_block_shape,

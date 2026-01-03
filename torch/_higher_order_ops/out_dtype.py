@@ -68,6 +68,7 @@ class OutDtypeOperator(HigherOrderOperator):
                 f"out_dtype only allows the following operators: {ALLOWABLE_OPS}."
             )
 
+        # pyrefly: ignore [missing-attribute]
         res = super().__call__(op, output_dtype, *args)
 
         return res
@@ -106,13 +107,13 @@ def out_dtype_dense(op: torch._ops.OpOverload, output_dtype: torch.dtype, *args)
 
 def is_int_mm(op, output_dtype, args):
     return (
-        op == torch.ops.aten.mm.default
+        op is torch.ops.aten.mm.default
         and output_dtype == torch.int32
         and len(args) == 2
         and args[0].dtype == torch.int8
         and args[1].dtype == torch.int8
-        and args[0].is_cuda
-        and args[1].is_cuda
+        and (args[0].is_cuda or args[0].is_xpu)
+        and (args[1].is_cuda or args[1].is_xpu)
     )
 
 

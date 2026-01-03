@@ -33,11 +33,14 @@ jobs:
       - name: Setup Linux
         uses: ./pytorch/.github/actions/setup-linux
 
+      - name: Login to ECR
+        uses: ./pytorch/.github/actions/ecr-login
+
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-          docker-image-name: pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9
+          docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
           working-directory: pytorch
 
       - name: Use following to pull public copy of the image
@@ -46,7 +49,7 @@ jobs:
           ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
         shell: bash
         run: |
-          tag=${ECR_DOCKER_IMAGE##*/}
+          tag=${ECR_DOCKER_IMAGE##*:}
           echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
 
       - name: Pull docker image
@@ -100,8 +103,10 @@ jobs:
           AWS_DEFAULT_REGION: us-east-1
         run: |
           # detached container should get cleaned up by teardown_ec2_linux
+          # Disable shellcheck warning for GPU_FLAG
+          # shellcheck disable=SC2086
           container_name=$(docker run \
-            "${GPU_FLAG:-}" \
+            ${GPU_FLAG:-} \
             -e MAX_JOBS="$(nproc --ignore=2)" \
             -e AWS_DEFAULT_REGION \
             --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \

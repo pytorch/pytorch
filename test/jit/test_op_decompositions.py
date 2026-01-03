@@ -2,15 +2,8 @@
 
 import torch
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import raise_on_run_directly
 from torch.testing._internal.jit_utils import JitTestCase
-
-
-if __name__ == "__main__":
-    raise RuntimeError(
-        "This test file is not meant to be run directly, use:\n\n"
-        "\tpython test/test_jit.py TESTNAME\n\n"
-        "instead."
-    )
 
 
 class TestOpDecompositions(JitTestCase):
@@ -42,3 +35,7 @@ class TestOpDecompositions(JitTestCase):
         FileCheck().check_not("aten::square").check("aten::pow").run(foo.graph)
         x = torch.rand([4])
         self.assertEqual(foo(x), torch.square(x))
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_jit.py")

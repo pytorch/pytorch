@@ -7,8 +7,8 @@
 import contextlib
 import copy
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterable, Sequence
-from typing import Any, Callable, cast, Optional, Union
+from collections.abc import Callable, Generator, Iterable, Sequence
+from typing import Any, cast
 
 import torch.nn as nn
 
@@ -30,7 +30,7 @@ __all__ = [
 # non-FSDP-specific folder and/or make it public in the future.
 def _post_order_apply(
     root_module: nn.Module,
-    fn: Callable[[nn.Module], Optional[nn.Module]],
+    fn: Callable[[nn.Module], nn.Module | None],
 ):
     """
     This applies ``fn`` to every module in the module tree of ``root_module``
@@ -45,7 +45,7 @@ def _post_order_apply(
     def _post_order_apply_inner(
         module: nn.Module,
         module_name: str,
-        parent_module: Optional[nn.Module],
+        parent_module: nn.Module | None,
     ):
         for child_module_name, child_module in module.named_children():
             if child_module not in visited_modules:
@@ -53,17 +53,20 @@ def _post_order_apply(
                 _post_order_apply_inner(child_module, child_module_name, module)
         optional_module = fn(module)
         if optional_module is not None:
-            assert isinstance(parent_module, nn.Module), (
-                "Non-root modules should have their parent module set but got "
-                f"{parent_module} for {module}"
-            )
-            assert module_name, (
-                "Non-root modules should have their module name set but got "
-                f"an empty module name for {module}"
-            )
-            assert isinstance(optional_module, nn.Module), (
-                f"fn should return None or an nn.Module but got {optional_module}"
-            )
+            if not isinstance(parent_module, nn.Module):
+                raise AssertionError(
+                    "Non-root modules should have their parent module set but got "
+                    f"{parent_module} for {module}"
+                )
+            if not module_name:
+                raise AssertionError(
+                    "Non-root modules should have their module name set but got "
+                    f"an empty module name for {module}"
+                )
+            if not isinstance(optional_module, nn.Module):
+                raise AssertionError(
+                    f"fn should return None or an nn.Module but got {optional_module}"
+                )
             setattr(parent_module, module_name, optional_module)
 
     _post_order_apply_inner(root_module, "", None)
@@ -73,14 +76,14 @@ def _construct_wrap_fn(
     root_module: nn.Module,
     target_module_to_kwargs: dict[nn.Module, dict[str, Any]],
     fsdp_fn: Callable,
-) -> Callable[[nn.Module], Optional[nn.Module]]:
+) -> Callable[[nn.Module], nn.Module | None]:
     """
     This constructs the "wrap" function to pass to :func:`_post_order_apply`
     based on ``target_module_to_kwargs``, which should be constructed from the
     wrapping policy.
     """
 
-    def fn(module: nn.Module) -> Optional[nn.Module]:
+    def fn(module: nn.Module) -> nn.Module | None:
         # Explicitly avoid wrapping the root module since for FSDP, it is
         # handled by the caller
         if module in target_module_to_kwargs and module is not root_module:
@@ -234,7 +237,7 @@ class CustomPolicy(_Policy):
         >>> fsdp_model = FSDP(model, auto_wrap_policy=policy)
     """
 
-    def __init__(self, lambda_fn: Callable[[nn.Module], Union[bool, dict[str, Any]]]):
+    def __init__(self, lambda_fn: Callable[[nn.Module], bool | dict[str, Any]]):
         self._lambda_fn = lambda_fn
 
     def _run_policy(
@@ -341,8 +344,8 @@ def size_based_auto_wrap_policy(
     nonwrapped_numel: int,
     # Additional custom arguments
     min_num_params: int = int(1e8),
-    force_leaf_modules: Optional[set[type[nn.Module]]] = None,
-    exclude_wrap_modules: Optional[set[type[nn.Module]]] = None,
+    force_leaf_modules: set[type[nn.Module]] | None = None,
+    exclude_wrap_modules: set[type[nn.Module]] | None = None,
 ) -> bool:
     """
     A size-based auto wrap policy.
@@ -456,7 +459,8 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
             the values provided by the :func:`enable_wrap` context
     """
     if _ConfigAutoWrap.in_autowrap_context:
-        assert _ConfigAutoWrap.wrapper_cls is not None
+        if _ConfigAutoWrap.wrapper_cls is None:
+            raise AssertionError("Expected _ConfigAutoWrap.wrapper_cls to be set")
 
         wrap_overrides = {**_ConfigAutoWrap.kwargs, **wrap_overrides}
         return _wrap(
@@ -468,7 +472,8 @@ def wrap(module: nn.Module, **wrap_overrides: Any) -> nn.Module:
 
 
 def _wrap(module: nn.Module, wrapper_cls: Callable, **kwargs) -> nn.Module:
-    assert wrapper_cls is not None
+    if wrapper_cls is None:
+        raise AssertionError("Expected wrapper_cls to be set")
     if hasattr(module, "_wrap_overrides"):
         # If module has a _wrap_overrides attribute, we force overriding the
         # FSDP config with these attributes for this module. Currently this
@@ -506,14 +511,19 @@ def _recursive_wrap(
         (nn.Module, int):
             ``module`` after wrapping and the numel recursively wrapped.
     """
-    assert auto_wrap_policy is not None, "Must specify auto_wrap_policy."
-    assert wrapper_cls is not None, "Must specify wrapper_cls"
+    if auto_wrap_policy is None:
+        raise AssertionError("Must specify auto_wrap_policy.")
+    if wrapper_cls is None:
+        raise AssertionError("Must specify wrapper_cls")
     # Make sure no child is already wrapped.
     for _, child in module.named_modules():
         if child in ignored_modules:
             continue
         try:
-            assert not isinstance(child, cast(type, wrapper_cls))
+            if isinstance(child, cast(type, wrapper_cls)):
+                raise AssertionError(
+                    f"Child module {child} is already wrapped by {wrapper_cls}"
+                )
         except TypeError:
             # wrapper_cls is a function as opposed to a class type, just bypass above check.
             pass
@@ -523,7 +533,8 @@ def _recursive_wrap(
         p.numel() for p in module.parameters() if p not in ignored_params
     )
 
-    assert auto_wrap_policy is not None
+    if auto_wrap_policy is None:
+        raise AssertionError("Expected auto_wrap_policy to be set")
     if auto_wrap_policy(module=module, recurse=True, nonwrapped_numel=nonwrapped_numel):
         total_wrapped_numel = 0
         # Iterate through the children, recursively wrap if necessary
@@ -561,7 +572,7 @@ class _ConfigAutoWrap:
     """
 
     in_autowrap_context: bool = False  # Context flag
-    wrapper_cls: Optional[Callable] = None  # The wrapper class
+    wrapper_cls: Callable | None = None  # The wrapper class
     kwargs: dict[str, Any] = {}  # Wrapper's args
 
     def __init__(self, **kwargs: dict[str, Any]):
@@ -575,9 +586,10 @@ class _ConfigAutoWrap:
             )
         _ConfigAutoWrap.in_autowrap_context = True
         # Get and save the wrapper cls for the context.
-        assert "wrapper_cls" in kwargs.keys(), (
-            "Expected to pass in wrapper_cls arg into _ConfigAutoWrap."
-        )
+        if "wrapper_cls" not in kwargs:
+            raise AssertionError(
+                "Expected to pass in wrapper_cls arg into _ConfigAutoWrap."
+            )
         _ConfigAutoWrap.wrapper_cls = cast(Callable, kwargs["wrapper_cls"])
         del kwargs["wrapper_cls"]
         # Save the rest.

@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Optional
+from typing import Any, cast, Optional
 
 import torch
 import torch.fx
@@ -95,7 +96,7 @@ class _MinimizerBase:
 
     Currently we provides two ways to traverse the graph and generate submodules.
         1. Sequential traversal: this will traverse the graph node by node and generate
-           one submodule with one sigle node.
+           one submodule with one single node.
         2. Binary searching: this will do a binary search style traversal on the graph.
 
     For internal Users, a guide can be found here https://fb.quip.com/HDtuAgiKGfkP.
@@ -395,18 +396,26 @@ class _MinimizerBase:
             report.append(f"Result mismatch for {result_key}")  # type: ignore[possibly-undefined]
             if self.module_exporter:
                 if isinstance(result_key, tuple):  # type: ignore[possibly-undefined]
+                    # pyrefly: ignore [unbound-name]
                     result_key = result_key[-1]
+                # If the result is still a tuple (happens in non-sequential mode),
+                # we only use the first element as name.
+                if isinstance(result_key, tuple):  # type: ignore[possibly-undefined]
+                    # pyrefly: ignore [unbound-name]
+                    result_key = str(result_key[0])
                 # pyre-ignore[29]: not a function
                 self.module_exporter(
                     a_input,
                     submodule,
-                    str(result_key[0]) + "_cpu",  # type: ignore[index]
+                    # pyrefly: ignore [unbound-name]
+                    result_key + "_cpu",
                 )
                 # pyre-ignore[29]: not a function
                 self.module_exporter(
                     b_input,
                     submodule,
-                    str(result_key[0]) + "_acc",  # type: ignore[index]
+                    # pyrefly: ignore [unbound-name]
+                    result_key + "_acc",
                 )
             raise FxNetMinimizerResultMismatchError(f"Result mismatch for {result_key}")  # type: ignore[possibly-undefined]
 
@@ -535,7 +544,7 @@ class _MinimizerBase:
 
     def _block_traverse_impl(
         self, nodes: NodeList, start_idx: int, end_idx: int, find_last_node: bool
-    ) -> int:
+    ) -> Optional[int]:
         """
         Recursive block search implementation.
         find_last_node: If True, search for the last node which result in numerics difference
@@ -584,7 +593,7 @@ class _MinimizerBase:
                 f"Culprits found from node {first_node_name} to {last_node_name}."
             )
 
-            if start_idx == mid:
+            if start_idx == mid == end_idx:
                 report.extend(
                     [
                         "This is the last node in the sub-module. ",
@@ -612,16 +621,19 @@ class _MinimizerBase:
                 f"Culprits not found from node start to {mid}:{nodes[mid].name}."
             )
 
-            if start_idx == mid:
-                report.extend(
-                    [
-                        "This is the last node in the sub-module. ",
-                        "Search in the current branch is successful with node",
-                        f"{start_idx}, node name: {nodes[start_idx].name}.",
-                    ]
-                )
-                self.print_report(report)
-                return start_idx + 1 if find_last_node else start_idx - 1
+            if start_idx == mid == end_idx:
+                # We did not find anything if the pointers have not moved
+                if (start_idx == 0 and not find_last_node) or (
+                    start_idx == len(nodes) - 1 and find_last_node
+                ):
+                    report.append(
+                        f"At {'last' if find_last_node else 'first'} node, no culprits found."
+                    )
+                    self.print_report(report)
+                    return None
+
+                # Otherwise, we have converged on the border between discrepancy and valid
+                return start_idx + (1 if find_last_node else -1)
 
             report.append(
                 "Proceed to split and lower the halves of the current "
@@ -641,7 +653,7 @@ class _MinimizerBase:
     ) -> NodeSet:
         """
         Traverse topologically sorted node list
-        Find minimium block (start_idx, end_idx) which contains the culprit
+        Find minimum block (start_idx, end_idx) which contains the culprit
         1st pass: search for end_idx by finding the last node in culprit block
         where Numerical accuracy (0, end_idx) > threshold
         2nd pass: search for start_idx by finding the first node in culprit block
@@ -657,15 +669,28 @@ class _MinimizerBase:
 
         start_idx = 0
         end_idx = len(nodes) - 1
-        run_both = True if find_last_node is None else False
+
+        final_start_idx: Optional[int] = start_idx
+        final_end_idx: Optional[int] = end_idx
+
+        run_both = find_last_node is None
 
         # step 1: find (0, end_idx) of culprit block
         if run_both or find_last_node:
             last_node_report.append("Start searching for last node in culprit")
             self.print_report(last_node_report)
-            end_idx = self._block_traverse_impl(nodes, start_idx, end_idx, True)
+            final_end_idx = self._block_traverse_impl(nodes, start_idx, end_idx, True)
+
+            if final_end_idx is None:
+                last_node_report.append("No culprits found")
+                self.print_report(last_node_report)
+                return culprits
+
             last_node_report.extend(
-                ["Finish Pass 1", f"Find end_idx = {end_idx}:{nodes[end_idx].name}"]
+                [
+                    "Finish Pass 1",
+                    f"Find end_idx = {final_end_idx}:{nodes[final_end_idx].name}",
+                ]
             )
             self.print_report(last_node_report)
 
@@ -673,23 +698,30 @@ class _MinimizerBase:
         if run_both or not find_last_node:
             first_node_report = ["Start searching for first node in culprit"]
             self.print_report(first_node_report)
-            start_idx = self._block_traverse_impl(
-                nodes[0 : end_idx + 1], start_idx, end_idx, False
+            final_start_idx = self._block_traverse_impl(
+                nodes[0 : end_idx + 1], start_idx, final_end_idx or end_idx, False
             )
+
+            if final_start_idx is None:
+                last_node_report.append("No culprits found")
+                self.print_report(last_node_report)
+                return culprits
+
             first_node_report.append("*" * 50)
             self.reports.append(first_node_report)
             first_node_report.extend(
                 [
                     "Finish Pass 2",
-                    f"Find start_idx = {start_idx}:{nodes[start_idx].name}",
+                    f"Find start_idx = {final_start_idx}:{nodes[final_start_idx].name}",
                 ]
             )
             self.print_report(first_node_report)
 
-        # step 3: form module with minimum culprits
-        culprits.update(nodes[start_idx : end_idx + 1])
+        # step 3: form module with minimum culprits. These indexes are guaranteed to exist
+        range_start, range_end = cast(int, final_start_idx), cast(int, final_end_idx)
+        culprits.update(nodes[range_start : range_end + 1])
         result_report = [
-            f"Finish searching, found minimum block ({nodes[start_idx]},{nodes[end_idx]})"
+            f"Finish searching, found minimum block ({nodes[range_start]},{nodes[range_end]})"
         ]
         self.reports.append(result_report)
         self.print_report(result_report)
@@ -743,9 +775,9 @@ class _MinimizerBase:
             node_name = node.name
             if node_name is not None and isinstance(node_name, tuple):
                 node_name = node_name[0]
-            assert node_name is not None and isinstance(
-                node_name, str
-            ), f"minimize: node_name: {node_name}"
+            assert node_name is not None and isinstance(node_name, str), (
+                f"minimize: node_name: {node_name}"
+            )
 
             report.append(f"Add node: {node_name}")
 

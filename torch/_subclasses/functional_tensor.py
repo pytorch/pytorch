@@ -3,17 +3,20 @@ import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import AbstractContextManager
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
+import torch.fx.traceback as fx_traceback
 import torch.utils._pytree as pytree
 from torch._C import _functionalization_reapply_views_tls as _reapply_views
-from torch._ops import _get_dispatch_mode_pre_dispatch
+from torch._ops import _get_dispatch_mode_pre_dispatch, TorchBindOpOverload
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.utils._python_dispatch import (
     _detect_infra_mode,
     _disable_infra_mode,
+    autograd_would_have_decomposed,
     return_and_correct_aliasing,
     TorchDispatchMode,
 )
@@ -67,7 +70,7 @@ class FunctionalTensor(torch.Tensor):
     # later, as long as it doesn't break anything).
     # FunctionalTensorWrapper copies **all** dispatch keys from the inner tensor
     # to the wrapper, excluding functorch and python dispatch keys.
-    # Here I'm trying to re-use the keyset the functorch wrapper subclasses copy,
+    # Here I'm trying to reuse the keyset the functorch wrapper subclasses copy,
     # except that they don't include ZeroTensor so I'm manually adding it in.
     _extra_dispatch_keys = torch._C._additional_keys_to_prop_for_wrapper_tensors.add(
         torch._C.DispatchKey.ZeroTensor
@@ -118,7 +121,7 @@ class FunctionalTensor(torch.Tensor):
             FunctionalTensor._extra_dispatch_keys & torch._C._dispatch_keys(elem)
         )
 
-        out = torch.Tensor._make_wrapper_subclass(  # type: ignore[arg-type, attr-defined]
+        out = torch.Tensor._make_wrapper_subclass(
             # TODO: right now, _make_wrapper_subclass's dynamic shape interaction is not great.
             # Calling the overload that has kwargs causes us to go down the first overload path,
             # which will **always** specialize sizes.
@@ -144,7 +147,7 @@ class FunctionalTensor(torch.Tensor):
         out.elem = elem
 
         if (
-            not mode.export
+            torch._export.config.enable_auto_functionalized_v2_for_export
             and torch.is_inference_mode_enabled()
             and torch._inductor.config.enable_auto_functionalized_v2
         ):
@@ -160,7 +163,7 @@ class FunctionalTensor(torch.Tensor):
                 assert out._inference_mode_base is not None
         return out
 
-    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):  # type: ignore[override]
         unrecognized_types = [
             t
             for t in types
@@ -266,6 +269,7 @@ class FunctionalTensor(torch.Tensor):
                 device=self.device,
                 layout=self.layout,
             )
+        # pyrefly: ignore [not-iterable]
         return super().to(*args, **kwargs)
 
     def cuda(self, device=None, *args, **kwargs):
@@ -291,7 +295,7 @@ class FunctionalTensor(torch.Tensor):
         return self.elem.to_dense()
 
     @property
-    def layout(self):
+    def layout(self):  # type: ignore[override]
         return self.elem.layout
 
     def __bool__(self):
@@ -373,7 +377,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         def _can_decompose(func):
             # See https://github.com/pytorch/pytorch/pull/115258#issuecomment-1900755832
             # Never decompose dropout in export
-            if self.export and func == torch.ops.aten.dropout.default:
+            if self.export and func is torch.ops.aten.dropout.default:
                 return False
 
             # We unconditionally decompose ops that are maybe aliasing or mutating ops
@@ -403,13 +407,19 @@ class FunctionalTensorMode(TorchDispatchMode):
                         warnings.warn(
                             f"At pre-dispatch tracing, we assume that any custom op marked with "
                             f"CompositeImplicitAutograd and have functional schema are safe to not decompose. "
-                            f"Found {func} to be one such op."
+                            f"Found {func} to be one such op.",
+                            stacklevel=2,
                         )
                     return False
                 return True
 
-            # in normal torch.compile IR, we decompose functional composite ops
-            return True
+            # in normal torch.compile IR, we only decompose an op if autograd
+            # would have decomposed it (NB: autograd may have been skipped if
+            # we are in inference mode)
+            # TODO: the flatten here can potentially be deduped with the
+            # unwrapping pytree_map later
+            flat_args_kwargs, _ = pytree.tree_flatten((args, kwargs))
+            return autograd_would_have_decomposed(func, flat_args_kwargs)
 
         if (
             func not in FunctionalTensor.metadata_fns
@@ -446,16 +456,22 @@ class FunctionalTensorMode(TorchDispatchMode):
         ) and not torch._C._dispatch_has_kernel_for_dispatch_key(
             func.name(), torch._C.DispatchKey.Functionalize
         ):
+            import torch._export.config as export_config
             import torch._inductor.config as inductor_config
 
-            if self.export or not inductor_config.enable_auto_functionalized_v2:
+            if torch.compiler.is_exporting():
+                if export_config.enable_auto_functionalized_v2_for_export:
+                    return do_auto_functionalize_v2(self, func, args, kwargs)
+
                 return do_auto_functionalize(self, func, args, kwargs)
-            else:
+
+            if inductor_config.enable_auto_functionalized_v2:
                 return do_auto_functionalize_v2(self, func, args, kwargs)
+            return do_auto_functionalize(self, func, args, kwargs)
 
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
-        if has_effects(func, args, kwargs):
+        if has_effects(func):
             assert not torch._C._dispatch_has_kernel_for_dispatch_key(
                 func.name(), torch._C.DispatchKey.Functionalize
             )
@@ -488,41 +504,81 @@ class FunctionalTensorMode(TorchDispatchMode):
             - FunctionalTensor._extra_dispatch_keys
         )
 
-        # All we want to do here is re-use the existing C++ functionalization logic.
-        # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
-        with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
-            try:
-                # By default for python functionalization (for AOTAutograd), we reapply views.
-                old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
+        if isinstance(func, TorchBindOpOverload):
+            # When the function is a TorchBindOpOverload, meaning some of the
+            # inputs are FakeScriptObjects, we need to skip c++ dispatcher and
+            # dispatch in python because C++ dispatcher will check the schema
+            # and cannot recognize FakeScriptObject.
+            ctx = PythonFunctionalizeAPI()
+            fully_unwrapped_args = ctx.unwrap_tensors(args)
+            fully_unwrapped_kwargs = ctx.unwrap_tensors(
+                kwargs  # pyrefly: ignore[bad-argument-type]
+            )
+            outs_unwrapped = func(
+                *fully_unwrapped_args,
+                **fully_unwrapped_kwargs,
+            )
+            outs_wrapped = ctx.wrap_tensors(outs_unwrapped)
+        else:
+            # All we want to do here is reuse the existing C++ functionalization logic.
+            # This requires swizzling our TLS dispatch keys so that the Functionalize key is active.
+            with torch._C._ForceDispatchKeyGuard(include_to_set, exclude_to_set):
+                try:
+                    # By default for python functionalization (for AOTAutograd), we reapply views.
+                    old_apply_views = torch._functionalize_enable_reapply_views(True)  # type: ignore[attr-defined]
 
-                # Sometimes these functions cannot be directly dispatched to functionalize key
-                # because args are sometimes not functional tensors for some reason?
-                if func in FunctionalTensor.metadata_fns:
-                    outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
-                    outs_wrapped = pytree.tree_map_only(
-                        torch.Tensor, wrap, outs_unwrapped
-                    )
-                else:
-                    # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
-                    # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
-                    # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
-                    # from the TLS in order to avoid infinite looping, but this would prevent us from coming
-                    # back to PreDispatch later
-                    outs_unwrapped = func._op_dk(
-                        torch._C.DispatchKey.Functionalize,
-                        *args_unwrapped,
-                        **kwargs_unwrapped,
-                    )
+                    # Sometimes these functions cannot be directly dispatched to functionalize key
+                    # because args are sometimes not functional tensors for some reason?
+                    if func in FunctionalTensor.metadata_fns:
+                        outs_unwrapped = func(*args_unwrapped, **kwargs_unwrapped)
+                        outs_wrapped = pytree.tree_map_only(
+                            torch.Tensor, wrap, outs_unwrapped
+                        )
+                    else:
+                        # Note: [Functionalization View Replay Annotation]
+                        # When functionalization encounters a mutation, it handles aliases by lazily regenerating the aliases
+                        # at the first time they are next used.
+                        # This is a problem when plumbing user annotations during tracing. We want the view ops from view replay
+                        # to have the same annotation that the user specified on the original views. But view replay in
+                        # functionalization happens the next time the alias is used (e.g. second_op(alias_with_pending_mutation)),
+                        # so when we regenerate views before calling into second_op, those views will end up getting the metadata
+                        # for second_op!
+                        #
+                        # Instead, we need to remember the node metadata from the original views, and ensure that this node metadata
+                        # is globally set when we lazily perform view replay.
+                        # The globally set metadata will be used to populate the fx node created for the replayed operation.
+                        if m := torch._C._get_dispatch_mode(
+                            torch._C._TorchDispatchModeKey.PROXY
+                        ):
+                            for a in pytree.tree_leaves([args, kwargs]):
+                                if not isinstance(a, FunctionalTensor):
+                                    continue
+                                curr_node = m.tracer.tensor_tracker[
+                                    torch._from_functional_tensor(a.elem)
+                                ].proxy.node
+                                with fx_traceback.set_current_replay_node(curr_node):
+                                    torch._sync(a)
 
-                    if self.export:
-                        if func == torch.ops.aten.dropout.default:
-                            torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
-                    outs_wrapped = pytree.tree_map_only(
-                        torch.Tensor, wrap, outs_unwrapped
-                    )
-            finally:
-                torch._disable_functionalization()
-                torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
+                        # When we dispatch to the C++ functionalization kernel, we might need to jump back to the
+                        # PreDispatch mode stack afterwards, to handle any other PreDispatch modes underneath
+                        # FunctionalTensorMode. If we call func() directly, we would need to exclude PreDispatch
+                        # from the TLS in order to avoid infinite looping, but this would prevent us from coming
+                        # back to PreDispatch later
+                        outs_unwrapped = func._op_dk(
+                            torch._C.DispatchKey.Functionalize,
+                            *args_unwrapped,
+                            **kwargs_unwrapped,
+                        )
+
+                        if self.export:
+                            if func is torch.ops.aten.dropout.default:
+                                torch._freeze_functional_tensor(outs_unwrapped)  # type: ignore[attr-defined]
+                        outs_wrapped = pytree.tree_map_only(
+                            torch.Tensor, wrap, outs_unwrapped
+                        )
+                finally:
+                    torch._disable_functionalization()
+                    torch._functionalize_enable_reapply_views(old_apply_views)  # type: ignore[attr-defined]
 
         is_included = torch._C._dispatch_tls_is_dispatch_key_included(
             torch._C.DispatchKey.Functionalize
@@ -542,7 +598,7 @@ class FunctionalTensorMode(TorchDispatchMode):
             # aliasing correction step. Otherwise, we would be setting the storage of a
             # lifted tensor to that of an unlifted tensor.
             # Ref: https://github.com/pytorch/pytorch/issues/111506
-            or func == torch.ops.aten.lift_fresh.default
+            or func is torch.ops.aten.lift_fresh.default
         ):
             return outs_wrapped
         # for metadata mutations, need to manually mutate the metadata of the FunctionalTensor wrapper

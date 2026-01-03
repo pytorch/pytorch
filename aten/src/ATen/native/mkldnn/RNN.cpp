@@ -439,7 +439,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor> mkldnn_rnn_la
 // I. Memory Formats
 //   a. mkldnn will use plain formats for input, hx/cx, output, hy/cy
 //      and possibly use blocked formats for weights depending shape info.
-//   b. All mkldnn memorys are created (in plain format) as views on ATen tensor,
+//   b. All mkldnn memories are created (in plain format) as views on ATen tensor,
 //      the weight reorder(if any) is handed automatically inside ideep (mkldnn bridge)
 //
 // II. MKLDNN Primitive Mapping
@@ -457,7 +457,7 @@ static std::tuple<Tensor, Tensor, Tensor> mkldnn_rnn(
     int64_t mode, int64_t hidden_size,
     int64_t num_layers, bool has_biases, bool batch_first, double dropout_p,
     bool train, bool bidirectional, IntArrayRef batch_sizes) {
-  TORCH_CHECK(batch_sizes.size() == 0, "mkldnn_rnn doesn't support packed input");
+  TORCH_CHECK(batch_sizes.empty(), "mkldnn_rnn doesn't support packed input");
   if (static_cast<ideep::rnn_kind>(mode) != ideep::rnn_kind::LSTM) {
     TORCH_CHECK(!cx_.defined(), "mkldnn_rnn: illegal defined cx for non-LSTM RNN");
   }

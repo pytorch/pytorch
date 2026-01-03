@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import numbers
 import warnings
@@ -137,7 +136,8 @@ class RNNBase(torch.nn.Module):
                 "dropout option adds dropout after all but last "
                 "recurrent layer, so non-zero dropout expects "
                 f"num_layers greater than 1, but got dropout={dropout} and "
-                f"num_layers={num_layers}"
+                f"num_layers={num_layers}",
+                stacklevel=2,
             )
 
         if mode == "LSTM":
@@ -521,6 +521,8 @@ class LSTM(RNNBase):
         >>> c0 = torch.randn(2, 3, 20)
         >>> output, (hn, cn) = rnn(input, (h0, c0))
     """
+
+    # pyrefly: ignore [bad-override]
     _FLOAT_MODULE = nn.LSTM
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -805,6 +807,8 @@ class GRU(RNNBase):
         >>> h0 = torch.randn(2, 3, 20)
         >>> output, hn = rnn(input, h0)
     """
+
+    # pyrefly: ignore [bad-override]
     _FLOAT_MODULE = nn.GRU
 
     __overloads__ = {"forward": ["forward_packed", "forward_tensor"]}
@@ -1036,8 +1040,10 @@ class RNNCellBase(torch.nn.Module):
             torch.nn.LSTMCell,
             torch.nn.GRUCell,
             torch.nn.RNNCell,
-        }, "nn.quantized.dynamic.RNNCellBase.from_float \
+        }, (
+            "nn.quantized.dynamic.RNNCellBase.from_float \
                                  only works for nn.LSTMCell, nn.GRUCell and nn.RNNCell"
+        )
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
 
         if mod.qconfig is not None and mod.qconfig.weight is not None:
@@ -1059,15 +1065,15 @@ class RNNCellBase(torch.nn.Module):
 
         qRNNCellBase: Union[LSTMCell, GRUCell, RNNCell]
 
-        if type(mod) == torch.nn.LSTMCell:
+        if type(mod) is torch.nn.LSTMCell:
             qRNNCellBase = LSTMCell(
                 mod.input_size, mod.hidden_size, bias=mod.bias, dtype=dtype
             )
-        elif type(mod) == torch.nn.GRUCell:
+        elif type(mod) is torch.nn.GRUCell:
             qRNNCellBase = GRUCell(
                 mod.input_size, mod.hidden_size, bias=mod.bias, dtype=dtype
             )
-        elif type(mod) == torch.nn.RNNCell:
+        elif type(mod) is torch.nn.RNNCell:
             qRNNCellBase = RNNCell(
                 mod.input_size,
                 mod.hidden_size,
@@ -1210,6 +1216,7 @@ class RNNCell(RNNCellBase):
         ...     hx = rnn(input[i], hx)
         ...     output.append(hx)
     """
+
     __constants__ = ["input_size", "hidden_size", "bias", "nonlinearity"]
 
     def __init__(

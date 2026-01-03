@@ -82,7 +82,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,20
+detectron2_fcos_r_50_fpn,pass,22
 
 
 
@@ -106,11 +106,11 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,eager_fail_to_run,5
+doctr_det_predictor,pass,3
 
 
 
-doctr_reco_predictor,eager_fail_to_run,4
+doctr_reco_predictor,pass,1
 
 
 
@@ -130,66 +130,6 @@ functorch_maml_omniglot,pass,0
 
 
 
-hf_Albert,pass,0
-
-
-
-hf_Bart,pass,0
-
-
-
-hf_Bert,pass,0
-
-
-
-hf_Bert_large,pass,0
-
-
-
-hf_BigBird,fail_accuracy,0
-
-
-
-hf_DistilBert,pass,0
-
-
-
-hf_GPT2,pass,0
-
-
-
-hf_GPT2_large,pass_due_to_skip,0
-
-
-
-hf_Reformer,pass,5
-
-
-
-hf_T5,pass,0
-
-
-
-hf_T5_base,eager_fail_to_run,0
-
-
-
-hf_T5_generate,pass,5
-
-
-
-hf_T5_large,pass_due_to_skip,0
-
-
-
-hf_Whisper,pass,0
-
-
-
-hf_distil_whisper,pass,0
-
-
-
 lennard_jones,pass,0
 
 
@@ -198,7 +138,7 @@ llama,pass,0
 
 
 
-llama_v2_7b_16h,model_fail_to_load,0
+llama_v2_7b_16h,pass_due_to_skip,0
 
 
 
@@ -334,30 +274,6 @@ stable_diffusion_unet,pass_due_to_skip,0
 
 
 
-timm_efficientnet,pass,0
-
-
-
-timm_regnet,pass,0
-
-
-
-timm_resnest,pass,0
-
-
-
-timm_vision_transformer,pass,0
-
-
-
-timm_vision_transformer_large,pass_due_to_skip,0
-
-
-
-timm_vovnet,pass,0
-
-
-
 torch_multimodal_clip,pass,0
 
 
@@ -370,7 +286,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,18
+vision_maskrcnn,pass,20
 
 
 

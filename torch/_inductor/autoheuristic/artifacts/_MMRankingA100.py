@@ -17,7 +17,7 @@ from torch._inductor.autoheuristic.learnedheuristic_interface import (
 class MMRankingA100(LearnedHeuristicDecision):
 
     def __init__(self) -> None:
-        self.choices: List[Choice] = []
+        self.choices: list[Choice] = []
         self.fill_choices()
 
     def check_precondition(self, metadata: AHMetadata, context: AHContext,) -> bool:
@@ -238,7 +238,7 @@ class MMRankingA100(LearnedHeuristicDecision):
     def get_name(self) -> str:
         return 'mm'
 
-    def get_best_choices(self, context: AHContext) -> Optional[List[tuple[float, int]]]:
+    def get_best_choices(self, context: AHContext) -> Optional[list[tuple[float, int]]]:
         if context.get_value('arith_intensity') <= 52.6245059967041:
             if context.get_value('n') <= 34.0:
                 if context.get_value('n') <= 18.0:

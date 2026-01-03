@@ -12,7 +12,7 @@
 #include <ATen/native/cuda/jit_utils.h>
 #include <ATen/cuda/llvm_jit_strings.h>
 #include <ATen/native/cuda/reduction_template.cuh>
-
+#include <c10/util/Exception.h>
 #include <sstream>
 #include <fstream>
 #include <cstdio>
@@ -45,7 +45,7 @@ namespace at::cuda::jit {
 // Copied from aten/src/ATen/cuda/llvm_basic.cpp, then modified as above.
 // If not compiling for ROCm, return the original get_traits_string().
 std::string get_traits_string_but_hiprtc_safe() {
-#ifdef USE_ROCM
+#if defined(USE_ROCM) && HIP_VERSION_MAJOR < 7
     return R"ESCAPE(
 namespace std {
 
@@ -912,10 +912,6 @@ void codegenOutputQuery(
     compile_to_sass = true;
   }
 
-  #if defined(CUDA_VERSION) && CUDA_VERSION < 11010
-    // compile to sass is not allowed prior to CUDA 11.1
-    compile_to_sass = false;
-  #endif
 #endif
 }
 
@@ -1045,8 +1041,8 @@ std::string generate_code(
   // and `extra_args` for computation call if
   // extra arguments to capture runtime state are passed.
   // (look at polygamma for example).
-  std::string extra_params = "";
-  std::string extra_args = "";
+  std::string extra_params;
+  std::string extra_args;
   for (size_t i = 0; i < extra_args_typenames.size(); i++) {
     auto type = std::string(extra_args_typenames[i]);
     auto name = "extra_arg_" + std::to_string(i);
@@ -1061,14 +1057,14 @@ std::string generate_code(
     // TODO these arrays are potentially of the different types, use function
     // traits to determine the types
     declare_load_arrays << f_inputs_type << " arg" << std::to_string(i)
-                        << "[" << std::to_string(thread_work_size) << "];\n";
+                        << '[' << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_load_arrays", declare_load_arrays.str());
 
   std::stringstream declare_store_arrays;
   for (int i = 0; i < nOutputs; i++) {
     declare_store_arrays << result_type << " out" << std::to_string(i)
-                        << "[" << std::to_string(thread_work_size) << "];\n";
+                        << '[' << std::to_string(thread_work_size) << "];\n";
   }
   env.s("declare_store_arrays", declare_store_arrays.str());
 
@@ -1221,7 +1217,7 @@ std::string generate_code(
   for (const auto i : c10::irange(nInputs)){
     auto i_string = std::to_string(i);
     vector_inputs << "auto * input" << i_string <<
-        " = reinterpret_cast<const scalar_t*>(data[" << i_string << "+" << nOutputs << "])" <<
+        " = reinterpret_cast<const scalar_t*>(data[" << i_string << '+' << nOutputs << "])" <<
         " + block_work_size * idx;\n";
   }
   env.s("vector_inputs", vector_inputs.str());
@@ -1356,7 +1352,7 @@ std::string generate_reduction_code(
     int vec_size,
     int max_threads_codegen) {
   TORCH_INTERNAL_ASSERT(desc.nInputs == 1);
-  TORCH_INTERNAL_ASSERT(desc.extra_args_types.size() == 0);
+  TORCH_INTERNAL_ASSERT(desc.extra_args_types.empty());
 
   return generate_reduction_code(
       desc.nOutputs,
@@ -1455,7 +1451,7 @@ std::optional<std::string> get_cache_dir() {
   std::string cache_dir;
   char* ptkcp = std::getenv("PYTORCH_KERNEL_CACHE_PATH");
   // Create kernel_cache_dir if needed as we do not want to create the base directory passed by the user
-  std::string kernels_cache_dir = "";
+  std::string kernels_cache_dir;
   if (ptkcp != nullptr) {
     cache_dir = std::string(ptkcp);
   } else {
@@ -1536,7 +1532,7 @@ NvrtcFunction jit_pwise_function(
 
   std::string file_path;
   if (cache_dir.has_value()) {
-    // Attemps to read from the cache.
+    // Attempts to read from the cache.
     // Cubin name is <kernel name>_arch<major>.<minor>_nvrtc<major>.<minor>_<ptx or sass>_<program length>_<string hash>
     // Note that the SHA1 hash used in the file name is NOT the SHA1 hash of the file's contents,
     //   because we hash on the CUDA code, but we save the compiled ptx or sass
@@ -1547,32 +1543,32 @@ NvrtcFunction jit_pwise_function(
 
     // Constructs file path by appending constructed cubin name to cache path
     std::stringstream ss;
-    ss << *cache_dir << "/";
+    ss << *cache_dir << '/';
     ss << kernel_name;
 #ifdef USE_ROCM
     ss << "_arch" << prop->gcnArchName;
 #else
-    ss << "_arch" << cuda_major << "." << cuda_minor;
+    ss << "_arch" << cuda_major << '.' << cuda_minor;
 #endif
-    ss << "_nvrtc" << nvrtc_major << "." << nvrtc_minor;
+    ss << "_nvrtc" << nvrtc_major << '.' << nvrtc_minor;
     ss << (compile_to_sass ? "_sass" : "_ptx");
-    ss << "_" << code.length();
-    ss << "_" << hash_code;
+    ss << '_' << code.length();
+    ss << '_' << hash_code;
     file_path = ss.str();
 
-    std::ifstream readin{file_path, std::ios::in | std::ifstream::binary};
-    if (readin.fail()) {
+    std::ifstream read_stream{file_path, std::ios::in | std::ifstream::binary};
+    if (read_stream.fail()) {
       // NOTE: this does not warn because the file might not exist
       // TODO: consider if this should explicitly check for the file's existence or not to throw
       //   an informative warning
-      readin.close();
+      read_stream.close();
     } else {
       // TODO: try passing the "mapped" file directly to cuModuleLoadCall instead of using an intermediate buffer
-      std::vector<char> buffer(std::istreambuf_iterator<char>(readin), {});
+      std::vector<char> buffer(std::istreambuf_iterator<char>(read_stream), {});
       AT_CUDA_DRIVER_CHECK(nvrtc.cuModuleLoadData(&(compiled_kernel_.module), buffer.data()));
       AT_CUDA_DRIVER_CHECK(
         nvrtc.cuModuleGetFunction(&(compiled_kernel_.function), compiled_kernel_.module, name.c_str()));
-      readin.close();
+      read_stream.close();
       return compiled_kernel_;
     }
   }
@@ -1619,12 +1615,12 @@ NvrtcFunction jit_pwise_function(
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLogSize(program, &logsize));
     std::string log(logsize, '\0');
     AT_CUDA_NVRTC_CHECK(nvrtc.nvrtcGetProgramLog(program, &log[0]));
-    throw std::runtime_error(code + log);
+    TORCH_CHECK(false, code + log);
   }
 
   size_t ptx_size = 0;
   std::vector<char> ptx;
-  #if defined(CUDA_VERSION) && CUDA_VERSION >= 11010
+  #if !defined(USE_ROCM)
     // compile_to_sass determines whether we are generating SASS or PTX, hence
     // the different API.
     const auto getSize = compile_to_sass

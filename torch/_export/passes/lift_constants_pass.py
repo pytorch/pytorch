@@ -1,12 +1,13 @@
 # mypy: allow-untyped-defs
 import collections
 import logging
-from typing import Any, Union
+from typing import Any, Optional, Union
 
 import torch
 from torch._export.verifier import SpecViolationError
 from torch._guards import detect_fake_mode
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_reference_type
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch.export.exported_program import (
     ArgumentSpec,
@@ -16,6 +17,7 @@ from torch.export.exported_program import (
     InputSpec,
     TensorArgument,
 )
+from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.graph_module import _get_attr
 
 
@@ -33,30 +35,27 @@ class ConstantAttrMap(collections.abc.MutableMapping):
     def __init__(self) -> None:
         # Underlying dict that we use to implement this mapping.
         self._constant_attrs: dict[
-            Union[int, torch.Tensor, FakeScriptObject], list[Any]
+            Union[int, torch.Tensor, FakeScriptObject, torch.utils._pytree.TreeSpec],
+            list[Any],
         ] = {}
         # Map from the hash(ScriptObject) to the ScriptObject itself. Used for
         # APIs like `__iter__` that should look like they're returning the
         # original ScriptObjects.
         self._script_object_map: dict[int, torch.ScriptObject] = {}
 
-    def __getitem__(
-        self, key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
-    ) -> Any:
+    def __getitem__(self, key: _ConstantAttributeType) -> Any:
         real_key = hash(key) if isinstance(key, torch.ScriptObject) else key
         assert isinstance(real_key, (int, torch.Tensor, FakeScriptObject))
         return self._constant_attrs[real_key]
 
-    def __setitem__(self, key: Union[torch.Tensor, torch.ScriptObject], value):
+    def __setitem__(self, key: _ConstantAttributeType, value):
         # we shouldn't actually call this, should go to add() instead to handle aliasing
         raise NotImplementedError(
             """Directly setting values for ConstantAttrMap is not supported, please use add(key, value) instead.
 The same key can be mapped to multiple values, for handling constant aliasing."""
         )
 
-    def add(
-        self, key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject], value: Any
-    ) -> None:
+    def add(self, key: _ConstantAttributeType, value: Any) -> None:
         if isinstance(key, torch.ScriptObject):
             if hash(key) not in self._constant_attrs:
                 self._constant_attrs[hash(key)] = []
@@ -71,7 +70,7 @@ The same key can be mapped to multiple values, for handling constant aliasing.""
                 f"Expected key to be a tensor or ScriptObject, got {type(key)}"
             )
 
-    def __delitem__(self, key):
+    def __delitem__(self, key: _ConstantAttributeType):
         real_key = hash(key) if isinstance(key, torch.ScriptObject) else key
 
         del self._constant_attrs[real_key]
@@ -106,19 +105,73 @@ def get_constant_fqn(node: torch.fx.Node, constant_name: str) -> str:
 
 def _get_first_fqn(
     const_attrs: ConstantAttrMap,
-    key: Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],
+    key: _ConstantAttributeType,
 ) -> Any:
     fqns = const_attrs.get(key)
     return fqns[0] if fqns else None
+
+
+def _unused_constant(node: torch.fx.Node) -> Optional[list[torch.fx.Node]]:
+    """
+    If there is a tensor constant created while tracing, here is how the graph
+    looks like:
+
+        %_tensor_constant0 : [num_users=1] = get_attr[target=_tensor_constant0]
+        %lift_fresh_copy : [num_users=1] = call_function[target=torch.ops.aten.lift_fresh_copy.default](args = (%_tensor_constant0,))
+        %detach_ : [num_users=?] = call_function[target=torch.ops.aten.detach_.default](args = (%lift_fresh_copy,))
+
+    To check to see if the tensor constant is being used, we want to traverse to
+    the detach node to see if it's actually being used.
+
+    This function returns None if this constant is being used, otherwise it returns the
+    lift_fresh and detach node to be removed later.
+    """  # noqa: B950
+    if len(node.users) > 1:
+        return None
+
+    lift_fresh_node = next(iter(node.users.keys()))
+    if not (
+        lift_fresh_node.op == "call_function"
+        and lift_fresh_node.target
+        in (
+            torch.ops.aten.lift_fresh.default,
+            torch.ops.aten.lift_fresh_copy.default,
+        )
+    ):
+        return None
+
+    if len(lift_fresh_node.users) > 1:
+        return None
+
+    # Case 1: lift node is not used anywhere
+    if len(lift_fresh_node.users) == 0:
+        return [lift_fresh_node, node]
+
+    detach_node = next(iter(lift_fresh_node.users.keys()))
+    if not (
+        detach_node.op == "call_function"
+        and detach_node.target
+        in (
+            torch.ops.aten.detach_.default,
+            torch.ops.aten.detach.default,
+        )
+    ):
+        return None
+
+    if len(detach_node.users) > 0:
+        return None
+    else:
+        # Case 2: Lift node's child is not used anywhere
+        return [detach_node, lift_fresh_node, node]
 
 
 def lift_constants_pass(
     gm: torch.fx.GraphModule,
     graph_signature: ExportGraphSignature,
     constant_attrs: ConstantAttrMap,
-) -> dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]]:
+) -> dict[str, _ConstantAttributeType]:
     """
-    Takes a graph module, graph signature, and modifies them implace to lift any
+    Takes a graph module, graph signature, and modifies them inplace to lift any
     constants (tensors or custom classes) as inputs to the graph. Returns a
     dictionary of names to constants.
 
@@ -134,16 +187,14 @@ def lift_constants_pass(
     Returns:
         A dictionary of fqn => constant value.
     """
-    all_constants: dict[
-        str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject]
-    ] = {}
+    all_constants: dict[str, _ConstantAttributeType] = {}
 
-    inputs = graph_signature.input_specs
+    input_specs = graph_signature.input_specs
     num_custom_obj = sum(
-        input_specs.kind == InputKind.CUSTOM_OBJ for input_specs in inputs
+        input_spec.kind == InputKind.CUSTOM_OBJ for input_spec in input_specs
     )
     num_tensor_constants = sum(
-        input_specs.kind == InputKind.CONSTANT_TENSOR for input_specs in inputs
+        input_spec.kind == InputKind.CONSTANT_TENSOR for input_spec in input_specs
     )
 
     fake_mode = detect_fake_mode(
@@ -152,25 +203,26 @@ def lift_constants_pass(
 
     first_user_input_loc, first_user_input = 0, next(iter(gm.graph.nodes))
     used_target_names = set()
-    for node in gm.graph.nodes:
-        if node.op == "placeholder":
-            if node.name in graph_signature.user_inputs:
-                first_user_input = node
-                break
-            used_target_names.add(inputs[first_user_input_loc].target)
-            first_user_input_loc += 1
-        # If we ever hit here, it means that
-        # there was no user input so the constants
-        # should be inserted right before the first
-        # non-placeholder node.
-        if node.op != "placeholder":
+
+    input_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
+    assert len(input_nodes) == len(input_specs)
+    for i, (node, input_spec) in enumerate(zip(input_nodes, input_specs)):
+        used_target_names.add(input_spec.target)
+        if input_spec.kind == InputKind.USER_INPUT:
             first_user_input = node
+            first_user_input_loc = i
             break
 
     lifted_objs = ConstantAttrMap()
     renamed_targets = {}
-    for node in gm.graph.nodes:
+    for node in list(gm.graph.nodes):
         if node.op == "get_attr":
+            if nodes_to_remove := _unused_constant(node):
+                # Remove the node if it's not being used
+                for node_rm in nodes_to_remove:
+                    gm.graph.erase_node(node_rm)
+                continue
+
             constant_val = _get_attr(gm, node.target)
             # These are not hashable and not gonna be lifted
             # so we can skip them earlier
@@ -202,7 +254,9 @@ def lift_constants_pass(
             # constant (e.g. x + torch.tensor(0)), and thus did not have a
             # specific location in the eager module. In that case, just generate
             # some name and attach it to the module in which it was used.
-            if isinstance(constant_val, (torch.ScriptObject, FakeScriptObject)):
+            if isinstance(
+                constant_val, (torch.ScriptObject, FakeScriptObject)
+            ) or is_opaque_reference_type(type(constant_val)):
                 constant_kind = InputKind.CUSTOM_OBJ
                 constant_fqn = _get_first_fqn(constant_attrs, constant_val)
                 if constant_fqn is not None:
@@ -322,7 +376,7 @@ def lift_constants_pass(
 
 def rewrite_script_object_meta(
     gm: torch.fx.GraphModule,
-) -> dict[str, Union[torch.Tensor, torch.ScriptObject, FakeScriptObject],]:
+) -> dict[str, _ConstantAttributeType]:
     """When tracing, we produce a graph with FakeScriptObject in the
     meta["val"].
 
@@ -330,11 +384,7 @@ def rewrite_script_object_meta(
     """
     constants: dict[
         str,
-        Union[
-            torch.Tensor,
-            torch.ScriptObject,
-            FakeScriptObject,
-        ],
+        _ConstantAttributeType,
     ] = {}
     for node in gm.graph.nodes:
         if "val" not in node.meta:
@@ -357,7 +407,11 @@ def rewrite_script_object_meta(
     return constants
 
 
-def _materialize_and_lift_constants(gm, export_graph_signature, constant_attrs):
+def _materialize_and_lift_constants(
+    gm: torch.fx.GraphModule,
+    export_graph_signature: ExportGraphSignature,
+    constant_attrs: ConstantAttrMap,
+) -> dict[str, _ConstantAttributeType]:
     constants = rewrite_script_object_meta(gm)
     constants.update(lift_constants_pass(gm, export_graph_signature, constant_attrs))
     return constants

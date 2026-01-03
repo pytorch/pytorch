@@ -1,8 +1,10 @@
 import functools
-from typing import Any, Optional
+import os
+from typing import Any
 from typing_extensions import Unpack
 
-from .triton_compat import ASTSource, CompiledKernel, knobs
+from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
+from .triton_helpers import get_constexprs
 
 
 class StaticallyLaunchedCudaKernel:
@@ -33,49 +35,77 @@ class StaticallyLaunchedCudaKernel:
     """
 
     def __init__(self, kernel: CompiledKernel) -> None:
+        # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
+        # pyrefly: ignore [missing-attribute]
+        self.cubin_raw = kernel.asm.get("cubin", None)
+        # pyrefly: ignore [missing-attribute]
         self.cubin_path = kernel._cubin_path
 
         # Used by torch.compile to filter constants in older triton versions
+        # pyrefly: ignore [missing-attribute]
         self.arg_names = kernel.src.fn.arg_names
 
         # Const exprs that are declared by the triton kernel directly
         # Used to generate the kernel launcher's def args
-        self.declared_constexprs = kernel.src.fn.constexprs
+        # pyrefly: ignore [missing-attribute]
+        self.declared_constexprs = get_constexprs(kernel.src.fn)
 
+        # pyrefly: ignore [missing-attribute]
         self.hash = kernel.hash
 
-        if knobs is None:
+        if triton_knobs is None:
+            # pyrefly: ignore [missing-attribute]
             launch_enter = kernel.__class__.launch_enter_hook
+            # pyrefly: ignore [missing-attribute]
             launch_exit = kernel.__class__.launch_exit_hook
         else:
-            launch_enter = knobs.runtime.launch_enter_hook
-            launch_exit = knobs.runtime.launch_exit_hook
+            launch_enter = triton_knobs.runtime.launch_enter_hook
+            launch_exit = triton_knobs.runtime.launch_exit_hook
 
-        if launch_enter is not None or launch_exit is not None:
+        def hook_is_empty(hook: Any) -> bool:
+            if hook is None:
+                return True
+            if (
+                triton_knobs
+                and (HookChain := getattr(triton_knobs, "HookChain", None)) is not None
+                and isinstance(hook, HookChain)
+            ):
+                # Support hooks after https://github.com/triton-lang/triton/pull/7866
+                return len(hook.calls) == 0
+            return False
+
+        if not hook_is_empty(launch_enter) or not hook_is_empty(launch_exit):
             raise NotImplementedError(
                 "We don't support launch enter or launch exit hooks"
             )
+        # pyrefly: ignore [missing-attribute]
         self.num_warps = kernel.metadata.num_warps
         self.shared = (
+            # pyrefly: ignore [missing-attribute]
             kernel.shared if hasattr(kernel, "shared") else kernel.metadata.shared
         )
+
+        def needs_scratch_arg(scratch_name: str, param_name: str) -> bool:
+            # pyrefly: ignore [missing-attribute]
+            if hasattr(kernel.metadata, param_name):
+                if getattr(kernel.metadata, param_name) > 0:
+                    raise NotImplementedError(
+                        f"{scratch_name} scratch not yet supported"
+                    )
+                return True
+            return False
 
         # Newer triton versions pass an extra global scratch parameter to the compiled cuda kernel.
         # Inductor never uses this field or enables it, but we still have to pass
         # an extra None into the set of params if its enabled
-        if hasattr(kernel.metadata, "global_scratch_size"):
-            if kernel.metadata.global_scratch_size > 0:
-                raise NotImplementedError("Global scratch not yet supported")
-            else:
-                self.has_global_scratch = True
-        else:
-            self.has_global_scratch = False
+        self.has_global_scratch = needs_scratch_arg("Global", "global_scratch_size")
+        # same situation for profile scratch - triton-lang/triton#7258
+        self.has_profile_scratch = needs_scratch_arg("Profile", "profile_scratch_size")
 
+        # pyrefly: ignore [missing-attribute]
         self.arg_tys = self.arg_ty_from_signature(kernel.src)
-        self.function: Optional[int] = (
-            None  # Loaded by load_kernel(on the parent process)
-        )
+        self.function: int | None = None  # Loaded by load_kernel(on the parent process)
         num_ctas = 1
         if hasattr(kernel, "num_ctas"):
             num_ctas = kernel.num_ctas
@@ -86,6 +116,19 @@ class StaticallyLaunchedCudaKernel:
             raise NotImplementedError(
                 "Static cuda launcher only supports num_ctas == 1"
             )
+
+    def reload_cubin_from_raw(self, filepath: str) -> str:
+        """
+        If the cubin file triton generated gets deleted under us, we can
+        reload it from the raw cubin file.
+        """
+        if self.cubin_path is None:
+            assert self.cubin_raw is not None
+            os.makedirs(os.path.dirname(filepath), exist_ok=True)
+            with open(filepath, "wb") as f:
+                f.write(self.cubin_raw)
+                self.cubin_path = filepath
+        return self.cubin_path
 
     def load_kernel(self, device: int) -> None:
         from torch._C import _StaticCudaLauncher
@@ -100,6 +143,7 @@ class StaticallyLaunchedCudaKernel:
         )
         # Don't need the cubin path anymore now that we've loaded
         self.cubin_path = None
+        self.cubin_raw = None
 
     @staticmethod
     @functools.lru_cache
@@ -139,6 +183,7 @@ class StaticallyLaunchedCudaKernel:
     def arg_ty_from_signature(self, src: ASTSource) -> str:
         def index_key(i: Any) -> int:
             if isinstance(i, str):
+                # pyrefly: ignore [missing-attribute]
                 return src.fn.arg_names.index(i)
             elif isinstance(i, tuple):
                 # In triton 3.3, src.fn.constants has tuples as a key
@@ -146,6 +191,7 @@ class StaticallyLaunchedCudaKernel:
             else:
                 return i
 
+        # pyrefly: ignore [missing-attribute]
         signature = {index_key(key): value for key, value in src.signature.items()}
         # Triton uses these as the main way to filter out constants passed to their cubin
         constants = [index_key(key) for key in getattr(src, "constants", dict())]
@@ -167,6 +213,7 @@ class StaticallyLaunchedCudaKernel:
             if ty == "constexpr" or i in constants:
                 pass
             else:
+                # pyrefly: ignore [bad-argument-type]
                 params.append(self.extract_type(ty))
         return "".join(params)
 
@@ -198,12 +245,13 @@ class StaticallyLaunchedCudaKernel:
         # thing, it should always match.
         # Get rid of constants before passing to cubin launcher
 
-        # Add a None if triton wants an extra parameter to the cubin
-        if self.has_global_scratch:
-            arg_tys = self.arg_tys + "O"
-            args = (*args, None)
-        else:
-            arg_tys = self.arg_tys
+        # Add a None if triton wants extra parameters for scratch spaces
+        arg_tys = self.arg_tys
+        for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
+            if has_scratch:
+                arg_tys = arg_tys + "O"
+                args = (*args, None)
+        # pyrefly: ignore [bad-argument-type]
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
@@ -216,6 +264,7 @@ class StaticallyLaunchedCudaKernel:
             self.num_warps,
             self.shared,
             arg_tys,
+            # pyrefly: ignore [bad-argument-type]
             args,
             stream,
         )

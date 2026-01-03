@@ -2,7 +2,7 @@
 from collections import defaultdict
 
 import torch
-from torch.distributed._tensor.experimental._tp_transform import (
+from torch.distributed.tensor.experimental._tp_transform import (
     tensor_parallel_transformation,
 )
 from torch.distributed.tensor.parallel.style import (
@@ -85,7 +85,7 @@ class TensorParallelTest(DTensorTestBase):
         with torch.no_grad():
             tp_res = tp_model(*inputs)
         self.assertEqual(res, tp_res)
-        # Expect all_gather to be inserted to distributed sharded fc resutls
+        # Expect all_gather to be inserted to distributed sharded fc results
         self.assert_has_c10d_ops(
             tp_exported_program.graph_module,
             {

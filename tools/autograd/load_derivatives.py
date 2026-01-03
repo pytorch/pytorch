@@ -95,8 +95,11 @@ def add_view_copy_derivatives(
             else:
                 break
         # prefer manually-defined derivatives if any
+        # pyrefly: ignore [unbound-name]
         if len(view_copy_differentiability_infos) > 0 and fn_schema not in infos:
+            # pyrefly: ignore [unbound-name]
             assert fn_schema is not None
+            # pyrefly: ignore [unbound-name]
             view_infos[fn_schema] = view_copy_differentiability_infos
 
     infos.update(view_infos)
@@ -336,7 +339,7 @@ def postprocess_forward_derivatives(
             # This transformation is based on the observation that for element-wise functions, the Jacobian
             # matrix is diagonal and thus doing J * v is the same as (v^T J)^T (in practice, we ignore the transpositions)
             # For the complex case, we use hermitian transpose and get (v.conj() J).conj()
-            # So here we are going to re-use the backward formula and replace two things:
+            # So here we are going to reuse the backward formula and replace two things:
             # 1) all occurrences of "grad" with "foo_t.conj()", where foo is the name of the unique differentiable input.
             # 2) all usage of an original input "foo" with its primal value "foo_p".
             # 3) conjugate the final result
@@ -398,6 +401,7 @@ def postprocess_forward_derivatives(
             for arg_name in all_arg_names:
                 if arg_name in diff_arg_names:
                     arg_name = arg_name + "_t"
+                # pyrefly: ignore [bad-argument-type]
                 new_args.append(arg_name)
 
             # TODO we are trolling
@@ -938,6 +942,7 @@ def saved_variables(
             + f".sym_strides(), which returned a c10::SymIntArrayRef. formula={formula}"
         )
     for nctype in nctypes:
+        # pyrefly: ignore [bad-assignment]
         name = (
             nctype.name.name if isinstance(nctype.name, SpecialArgName) else nctype.name
         )
@@ -947,6 +952,7 @@ def saved_variables(
 
             def repl(m: re.Match[str]) -> str:
                 suffix: str = (
+                    # pyrefly: ignore [bad-assignment]
                     info["suffix"](m) if callable(info["suffix"]) else info["suffix"]
                 )
                 expr: str = info["expr"](name) if "expr" in info else m.group(0)
@@ -986,7 +992,7 @@ def saved_variables(
 
 
 def _create_op_prefix(name: str) -> str:
-    """Takes a native function name converts to a op prefix name.
+    r"""Takes a native function name converts to an op prefix name.
 
     Note that the "name" parameter must be the native function name
     without the optional variant suffix, so "add" instead of
@@ -995,8 +1001,9 @@ def _create_op_prefix(name: str) -> str:
     OP names correspond to classes, hence the change to title case.
 
     Example::
-    >>> _create_op_prefix("add")
-    'AddBackward'
+
+        >>> _create_op_prefix("add")
+        'AddBackward'
     """
     camel_case = "".join([p.title() for p in name.split("_")])
     return (camel_case + "Backward").replace("ForwardBackward", "Backward")

@@ -140,7 +140,17 @@ class RendezvousParametersTest(TestCase):
                 self.assertFalse(params.get_as_bool("dummy_param"))
 
     def test_get_as_bool_raises_error_if_value_is_invalid(self) -> None:
-        for value in ["01", "Flse", "Ture", "g", "4", "_", "truefalse", 2, -1]:
+        for value in [
+            "01",
+            "Flse",  # codespell:ignore
+            "Ture",  # codespell:ignore
+            "g",
+            "4",
+            "_",
+            "truefalse",
+            2,
+            -1,
+        ]:
             with self.subTest(value=value):
                 self._kwargs["dummy_param"] = value
 

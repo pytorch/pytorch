@@ -1,5 +1,8 @@
 # Owner(s): ["module: intel"]
 
+import ctypes
+import gc
+import re
 import subprocess
 import sys
 import tempfile
@@ -12,28 +15,22 @@ from torch.testing import make_tensor
 from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestAutocast
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
-    onlyXPU,
     OpDTypes,
     ops,
-    skipXPUIf,
 )
 from torch.testing._internal.common_methods_invocations import ops_and_refs
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_LINUX,
     IS_WINDOWS,
-    NoTest,
     run_tests,
+    serialTest,
     suppress_warnings,
     TEST_XPU,
     TestCase,
 )
 from torch.utils.checkpoint import checkpoint_sequential
 
-
-if not TEST_XPU:
-    print("XPU not available, skipping tests", file=sys.stderr)
-    TestCase = NoTest  # noqa: F811
 
 TEST_MULTIXPU = torch.xpu.device_count() > 1
 
@@ -74,7 +71,10 @@ _xpu_computation_ops = [
 ]
 
 
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpu(TestCase):
+    expandable_segments = False
+
     def test_device_behavior(self):
         current_device = torch.xpu.current_device()
         torch.xpu.set_device(current_device)
@@ -104,6 +104,7 @@ class TestXpu(TestCase):
         self.assertEqual(device_name, torch.xpu.get_device_name())
 
         device_capability = torch.xpu.get_device_capability(current_device)
+        self.assertTrue(device_capability["device_id"] > 0)
         self.assertTrue(device_capability["max_work_group_size"] > 0)
         self.assertTrue(device_capability["max_num_sub_groups"] > 0)
         self.assertEqual(
@@ -135,6 +136,24 @@ class TestXpu(TestCase):
                 device_properties.architecture,
                 device_capability["architecture"],
             )
+        self.assertEqual(
+            len(str(device_properties.uuid)), 36
+        )  # xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+        self.assertEqual(len(device_properties.uuid.bytes), 16)
+
+    def test_get_device_capability(self):
+        device_capability = torch.xpu.get_device_capability()
+        acc_capability = torch.accelerator.get_device_capability()
+        supported_dtypes = acc_capability["supported_dtypes"]
+        self.assertIn(torch.bool, supported_dtypes)
+        self.assertIn(torch.int, supported_dtypes)
+        self.assertIn(torch.float, supported_dtypes)
+        if device_capability["has_fp16"]:
+            self.assertIn(torch.float16, supported_dtypes)
+        if device_capability["has_fp64"]:
+            self.assertIn(torch.double, supported_dtypes)
+        if torch.xpu.is_bf16_supported(including_emulation=True):
+            self.assertIn(torch.bfloat16, supported_dtypes)
 
     @unittest.skipIf(IS_WINDOWS, "not applicable to Windows (only fails with fork)")
     def test_wrong_xpu_fork(self):
@@ -202,7 +221,8 @@ if __name__ == "__main__":
     test_multi_process(model, input)
     print(torch.xpu.device_count())
 """
-        rc = check_output(test_script)
+        # XPU have extra lines, so get the last line, refer https://github.com/intel/torch-xpu-ops/issues/2261
+        rc = check_output(test_script).splitlines()[-1]
         self.assertEqual(rc, str(torch.xpu.device_count()))
 
     def test_streams(self):
@@ -251,7 +271,7 @@ if __name__ == "__main__":
         stream.record_event(end_event)
         torch.xpu.synchronize()
         if int(torch.version.xpu) >= 20250000:
-            start_event.elapsed_time(end_event)
+            self.assertGreater(start_event.elapsed_time(end_event), 0)
         else:
             with self.assertRaisesRegex(
                 NotImplementedError,
@@ -302,7 +322,7 @@ if __name__ == "__main__":
         self.assertNotEqual(event1.event_id, event2.event_id)
         self.assertEqual(c_xpu.cpu(), a + b)
         if int(torch.version.xpu) >= 20250000:
-            event1.elapsed_time(event2)
+            self.assertGreater(event1.elapsed_time(event2), 0)
         else:
             with self.assertRaisesRegex(
                 NotImplementedError,
@@ -334,13 +354,13 @@ if __name__ == "__main__":
         self.assertEqual(torch.xpu.current_device(), prev_device)
 
     @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
-    def test_device_context_manager_with_set_device(self):
+    def test_multi_device_context_manager(self):
         src_device = 0
         dst_device = 1
         torch.xpu.set_device(src_device)
         with torch.accelerator.device_index(dst_device):
             self.assertEqual(torch.xpu.current_device(), 1)
-        self.assertEqual(torch.xpu.set_device(), src_device)
+        self.assertEqual(torch.xpu.current_device(), src_device)
 
     def test_stream_context_manager(self):
         prev_stream = torch.xpu.current_stream()
@@ -381,56 +401,6 @@ if __name__ == "__main__":
         torch.xpu.set_rng_state(g_state0)
         self.assertEqual(2024, torch.xpu.initial_seed())
 
-    @onlyXPU
-    @suppress_warnings
-    @ops(_xpu_computation_ops, dtypes=any_common_cpu_xpu_one)
-    def test_compare_cpu(self, device, dtype, op):
-        def to_cpu(arg):
-            if isinstance(arg, torch.Tensor):
-                return arg.to(device="cpu")
-            return arg
-
-        samples = op.reference_inputs(device, dtype)
-
-        for sample in samples:
-            cpu_sample = sample.transform(to_cpu)
-            xpu_results = op(sample.input, *sample.args, **sample.kwargs)
-            cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
-
-            xpu_results = sample.output_process_fn_grad(xpu_results)
-            cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
-
-            # Lower tolerance because we are running this as a `@slowTest`
-            # Don't want the periodic tests to fail frequently
-            self.assertEqual(xpu_results, cpu_results, atol=1e-4, rtol=1e-4)
-
-    @onlyXPU
-    @ops(_xpu_computation_ops, allowed_dtypes=(torch.bool,))
-    def test_non_standard_bool_values(self, device, dtype, op):
-        # Test boolean values other than 0x00 and 0x01 (gh-54789)
-        def convert_boolean_tensors(x):
-            if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
-                return x
-
-            # Map False -> 0 and True -> Random value in [2, 255]
-            true_vals = torch.randint(
-                2, 255, x.shape, dtype=torch.uint8, device=x.device
-            )
-            false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
-            x_int = torch.where(x, true_vals, false_vals)
-
-            ret = x_int.view(torch.bool)
-            self.assertEqual(ret, x)
-            return ret
-
-        for sample in op.sample_inputs(device, dtype):
-            expect = op(sample.input, *sample.args, **sample.kwargs)
-
-            transformed = sample.transform(convert_boolean_tensors)
-            actual = op(transformed.input, *transformed.args, **transformed.kwargs)
-
-            self.assertEqual(expect, actual)
-
     def test_serialization_array_with_storage(self):
         x = torch.randn(5, 5).xpu()
         y = torch.zeros(2, 5, dtype=torch.int, device="xpu")
@@ -466,6 +436,8 @@ if __name__ == "__main__":
             self.assertEqual(copy.get_device(), original.get_device())
 
     def test_out_of_memory(self):
+        if self.expandable_segments:
+            self.skipTest("Skipping OOM test for expandable segments allocator.")
         tensor = torch.zeros(1024, device="xpu")  # noqa: F841
 
         with self.assertRaisesRegex(RuntimeError, "Tried to allocate 800000000.00 GiB"):
@@ -475,9 +447,62 @@ if __name__ == "__main__":
             torch.empty(1024 * 1024 * 1024 * 8000000000, dtype=torch.int8, device="xpu")
 
     def test_raises_oom(self):
+        if self.expandable_segments:
+            self.skipTest("Skipping OOM test for expandable segments allocator.")
         torch.xpu.memory.empty_cache()
         with self.assertRaises(torch.OutOfMemoryError):
             torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
+
+    @serialTest()
+    def test_1mb_allocation_uses_small_block(self):
+        gc.collect()
+        torch.xpu.empty_cache()
+        prev_allocated = torch.xpu.memory_allocated()
+        prev_reserved = torch.xpu.memory_reserved()
+
+        # Allocate a 1MB float32 tensor
+        one_mb = 1024 * 1024
+        a = torch.ones(one_mb // 4, device="xpu")
+
+        b = a.clone()
+        for _ in range(5):
+            b = b.clone() + 1
+
+        torch.xpu.synchronize()
+        current_allocated = torch.xpu.memory_allocated()
+        current_reserved = torch.xpu.memory_reserved()
+        # Two live tensors remain (a and b), each 1MB
+        self.assertEqual(current_allocated, prev_allocated + 2 * 1024 * 1024)
+        self.assertEqual(current_reserved, prev_reserved + 4 * 1024 * 1024)  # 4MB
+
+    @serialTest()
+    def test_set_per_process_memory_fraction(self):
+        gc.collect()
+        torch.xpu.empty_cache()
+        total_memory = torch.xpu.get_device_properties().total_memory
+        fraction = 0.5
+        orig_fraction = torch.xpu.get_per_process_memory_fraction()
+        with self.assertRaisesRegex(ValueError, "invalid fraction:"):
+            torch.xpu.set_per_process_memory_fraction(-0.1)
+        with self.assertRaisesRegex(ValueError, "invalid fraction:"):
+            torch.xpu.set_per_process_memory_fraction(1.1)
+
+        torch.xpu.set_per_process_memory_fraction(fraction)
+        allowed_memory = int(total_memory * 0.49)
+        reserved_memory = torch.xpu.memory_reserved()
+        application_memory = allowed_memory - reserved_memory
+        tensor = torch.empty(application_memory, dtype=torch.int8, device="xpu")
+        del tensor
+        gc.collect()
+        torch.xpu.empty_cache()
+
+        self.assertEqual(fraction, torch.xpu.get_per_process_memory_fraction())
+
+        application_memory = int(total_memory * 0.51)
+        with self.assertRaises(torch.OutOfMemoryError):
+            _ = torch.empty(application_memory, dtype=torch.int8, device="xpu")
+
+        torch.xpu.set_per_process_memory_fraction(orig_fraction)
 
     def test_memory_allocation(self):
         torch.xpu.empty_cache()
@@ -522,7 +547,43 @@ if __name__ == "__main__":
         )
         del a
 
-    @skipXPUIf(
+    def test_memory_stats(self):
+        gc.collect()
+        torch.xpu.empty_cache()
+        torch.xpu.reset_peak_memory_stats()
+        torch.xpu.reset_accumulated_memory_stats()
+        prev_allocated = torch.accelerator.memory_allocated()
+        prev_reserved = torch.accelerator.memory_reserved()
+        prev_max_allocated = torch.accelerator.max_memory_allocated()
+        prev_max_reserved = torch.accelerator.max_memory_reserved()
+        self.assertEqual(prev_allocated, prev_max_allocated)
+        self.assertEqual(prev_reserved, prev_max_reserved)
+        # Activate 1kB memory
+        prev_active_current = torch.accelerator.memory_stats()[
+            "active_bytes.all.current"
+        ]
+        tmp = torch.randn(256, device="xpu")
+        # Detect if the current active memory is 1kB
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            1024 + prev_active_current,
+        )
+        self.assertEqual(torch.accelerator.memory_stats()["active_bytes.all.freed"], 0)
+        del tmp
+        gc.collect()
+        torch.accelerator.empty_cache()
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.current"],
+            prev_active_current,
+        )
+        self.assertEqual(
+            torch.accelerator.memory_stats()["active_bytes.all.freed"], 1024
+        )
+        torch.accelerator.reset_peak_memory_stats()
+        self.assertEqual(torch.accelerator.max_memory_allocated(), prev_max_allocated)
+        self.assertEqual(torch.accelerator.max_memory_reserved(), prev_max_reserved)
+
+    @unittest.skipIf(
         int(torch.version.xpu) < 20250000,
         "Test requires SYCL compiler version 2025.0.0 or newer.",
     )
@@ -546,6 +607,152 @@ if __name__ == "__main__":
         for arch in arch_list:
             self.assertTrue(arch in flags)
 
+    @unittest.skipIf(not TEST_MULTIXPU, "only one GPU detected")
+    def test_can_device_access_peer(self):
+        device_count = torch.xpu.device_count()
+        for device in range(device_count):
+            for peer in range(device_count):
+                self.assertEqual(
+                    torch.xpu.can_device_access_peer(device, peer),
+                    torch.xpu.can_device_access_peer(peer, device),
+                )
+
+    def get_dummy_allocator(self, check_vars):
+        dummy_allocator_source_vars = """
+        #include <torch/extension.h>
+        #include <c10/xpu/XPUFunctions.h>
+
+        extern "C" {
+          C10_EXPORT int called_dummy_alloc = 0;
+          C10_EXPORT int called_dummy_free = 0;
+
+          C10_EXPORT void* dummy_alloc(size_t size, int device, sycl::queue* queue) {
+            called_dummy_alloc = 123;
+            auto& sycl_device = c10::xpu::get_raw_device(device);
+            auto& sycl_context = c10::xpu::get_device_context();
+            void* ptr = sycl::malloc_shared(size, sycl_device, sycl_context);
+            return ptr;
+          }
+
+          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, sycl::queue* queue) {
+            called_dummy_free = 321;
+            sycl::free(ptr, c10::xpu::get_device_context());
+          }
+        }
+        """
+        dummy_allocator_source_no_vars = """
+        #include <torch/extension.h>
+        #include <c10/xpu/XPUFunctions.h>
+
+        extern "C" {
+          C10_EXPORT void* dummy_alloc(size_t size, int device, sycl::queue* queue) {
+            auto& sycl_device = c10::xpu::get_raw_device(device);
+            auto& sycl_context = c10::xpu::get_device_context();
+            void* ptr = sycl::malloc_shared(size, sycl_device, sycl_context);
+            return ptr;
+          }
+
+          C10_EXPORT void dummy_free(void* ptr, size_t size, int device, sycl::queue* queue) {
+            sycl::free(ptr, c10::xpu::get_device_context());
+          }
+        }
+        """
+
+        from torch.utils.cpp_extension import load_inline
+
+        dummy_allocator_libname = "dummy_allocator"
+        dummy_allocator = load_inline(
+            name=dummy_allocator_libname,
+            cpp_sources=dummy_allocator_source_vars
+            if check_vars
+            else dummy_allocator_source_no_vars,
+            is_python_module=False,
+            keep_intermediates=False,
+            verbose=True,
+            with_sycl=True,
+        )
+        allocator = torch.xpu.memory.XPUPluggableAllocator(
+            dummy_allocator,
+            "dummy_alloc",
+            "dummy_free",
+        )
+        return allocator, dummy_allocator
+
+    def test_xpu_pluggable_allocator(self):
+        torch.xpu.init()
+        allocator, dummy_allocator = self.get_dummy_allocator(True)
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
+        self.assertEqual(called_dummy_alloc.value, 0)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        with self.assertRaises(RuntimeError):
+            torch.xpu.memory.change_current_allocator(allocator)
+
+        def check_output(script: str) -> str:
+            return (
+                subprocess.check_output([sys.executable, "-c", script])
+                .decode("ascii")
+                .strip()
+            )
+
+        test_script = """\
+import ctypes
+import torch
+from torch.utils.cpp_extension import load_inline
+
+dummy_allocator_source_vars = \"\"\"\
+#include <torch/extension.h>
+#include <c10/xpu/XPUFunctions.h>
+
+extern "C" {
+  C10_EXPORT int called_dummy_alloc = 0;
+  C10_EXPORT int called_dummy_free = 0;
+
+  C10_EXPORT void* dummy_alloc(size_t size, int device, sycl::queue* queue) {
+    called_dummy_alloc = 123;
+    auto& sycl_device = c10::xpu::get_raw_device(device);
+    auto& sycl_context = c10::xpu::get_device_context();
+    void* ptr = sycl::malloc_shared(size, sycl_device, sycl_context);
+    return ptr;
+  }
+
+  C10_EXPORT void dummy_free(void* ptr, size_t size, int device, sycl::queue* queue) {
+    called_dummy_free = 321;
+    sycl::free(ptr, c10::xpu::get_device_context());
+  }
+}
+\"\"\"
+
+if __name__ == "__main__":
+    dummy_allocator = load_inline(
+        name='dummy_allocator',
+        cpp_sources=dummy_allocator_source_vars,
+        is_python_module=False,
+        keep_intermediates=False,
+        verbose=True,
+        with_sycl=True,
+    )
+
+    allocator = torch.xpu.memory.XPUPluggableAllocator(
+        dummy_allocator,
+        "dummy_alloc",
+        "dummy_free",
+    )
+    torch.xpu.memory.change_current_allocator(allocator)
+    tensor = torch.randn(100, device='xpu')
+    del tensor
+    allocator_lib = ctypes.CDLL(dummy_allocator)
+    called_dummy_alloc = ctypes.c_int.in_dll(allocator_lib, "called_dummy_alloc")
+    called_dummy_free = ctypes.c_int.in_dll(allocator_lib, "called_dummy_free")
+    print(called_dummy_alloc.value, called_dummy_free.value)
+"""
+        rc = check_output(test_script).splitlines()[-1]
+        called_dummy_alloc_value, called_dummy_free_value = rc.split()
+        self.assertEqual(called_dummy_alloc_value, "123")
+        self.assertEqual(called_dummy_free_value, "321")
+
     def test_torch_version_xpu(self):
         self.assertEqual(len(torch.version.xpu), 8)
         compiler_version = int(torch.version.xpu)
@@ -554,17 +761,14 @@ if __name__ == "__main__":
             library = find_library_location("libtorch_xpu.so")
             cmd = f"ldd {library} | grep libsycl"
             results = subprocess.check_output(cmd, shell=True).strip().split(b"\n")
-            # There should be only one libsycl.so or libsycl-preview.so
+            # There should be only one libsycl.so
             self.assertEqual(len(results), 1)
             for result in results:
-                if b"libsycl.so" in result:
-                    self.assertGreaterEqual(compiler_version, 20250000)
-                elif b"libsycl-preview.so" in result:
-                    self.assertLess(compiler_version, 20250000)
-                else:
-                    self.fail("Unexpected libsycl library")
+                self.assertTrue(b"libsycl.so" in result)
 
     def test_dlpack_conversion(self):
+        if self.expandable_segments:
+            self.skipTest("Skipping DLPack test for expandable segments allocator.")
         x = make_tensor((5,), dtype=torch.float32, device="xpu")
         if IS_WINDOWS and int(torch.version.xpu) < 20250000:
             with self.assertRaisesRegex(
@@ -578,9 +782,61 @@ if __name__ == "__main__":
             self.assertEqual(z, x)
 
 
-instantiate_device_type_tests(TestXpu, globals(), only_for="xpu", allow_xpu=True)
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
+class TestXpuOps(TestCase):
+    @suppress_warnings
+    @ops(_xpu_computation_ops, dtypes=any_common_cpu_xpu_one)
+    def test_compare_cpu(self, device, dtype, op):
+        def to_cpu(arg):
+            if isinstance(arg, torch.Tensor):
+                return arg.to(device="cpu")
+            return arg
+
+        samples = op.reference_inputs(device, dtype)
+
+        for sample in samples:
+            cpu_sample = sample.transform(to_cpu)
+            xpu_results = op(sample.input, *sample.args, **sample.kwargs)
+            cpu_results = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+
+            xpu_results = sample.output_process_fn_grad(xpu_results)
+            cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
+
+            # Lower tolerance because we are running this as a `@slowTest`
+            # Don't want the periodic tests to fail frequently
+            self.assertEqual(xpu_results, cpu_results, atol=1e-4, rtol=1e-4)
+
+    @ops(_xpu_computation_ops, allowed_dtypes=(torch.bool,))
+    def test_non_standard_bool_values(self, device, dtype, op):
+        # Test boolean values other than 0x00 and 0x01 (gh-54789)
+        def convert_boolean_tensors(x):
+            if not isinstance(x, torch.Tensor) or x.dtype != torch.bool:
+                return x
+
+            # Map False -> 0 and True -> Random value in [2, 255]
+            true_vals = torch.randint(
+                2, 255, x.shape, dtype=torch.uint8, device=x.device
+            )
+            false_vals = torch.zeros((), dtype=torch.uint8, device=x.device)
+            x_int = torch.where(x, true_vals, false_vals)
+
+            ret = x_int.view(torch.bool)
+            self.assertEqual(ret, x)
+            return ret
+
+        for sample in op.sample_inputs(device, dtype):
+            expect = op(sample.input, *sample.args, **sample.kwargs)
+
+            transformed = sample.transform(convert_boolean_tensors)
+            actual = op(transformed.input, *transformed.args, **transformed.kwargs)
+
+            self.assertEqual(expect, actual)
 
 
+instantiate_device_type_tests(TestXpuOps, globals(), only_for="xpu", allow_xpu=True)
+
+
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuAutocast(TestAutocast):
     # These operators are not implemented on XPU backend and we can NOT fall back
     # them to CPU. So we have to skip them at this moment.
@@ -661,6 +917,7 @@ class TestXpuAutocast(TestAutocast):
             self.assertEqual(result.dtype, torch.float16)
 
 
+@unittest.skipIf(not TEST_XPU, "XPU not available, skipping tests")
 class TestXpuTrace(TestCase):
     def setUp(self):
         torch._C._activate_gpu_trace()
@@ -721,6 +978,40 @@ class TestXpuTrace(TestCase):
         event.record()
         event.synchronize()
         self.mock.assert_called_once_with(event._as_parameter_.value)
+
+
+class TestXPUAPISanity(TestCase):
+    def test_is_bf16_supported(self):
+        self.assertEqual(
+            torch.xpu.is_bf16_supported(including_emulation=True),
+            torch.xpu.is_available(),
+        )
+
+    def test_is_tf32_supported(self):
+        if not torch.xpu.is_available():
+            self.assertFalse(torch.xpu.is_tf32_supported())
+
+    def test_get_arch_list(self):
+        if not torch.xpu._is_compiled():
+            self.assertEqual(len(torch.xpu.get_arch_list()), 0)
+
+    def test_torch_config_for_xpu(self):
+        config = torch.__config__.show()
+        value = re.search(r"USE_XPU=([^,]+)", config)
+        self.assertIsNotNone(value)
+        if torch.xpu._is_compiled():
+            self.assertTrue(value.group(1) in ["ON", "1"])
+            value = re.search(r"USE_XCCL=([^,]+)", config)
+            if torch.distributed.is_xccl_available():
+                self.assertTrue(value.group(1) in ["ON", "1"])
+            else:
+                self.assertTrue(value.group(1) in ["OFF", "0"])
+        else:
+            self.assertTrue(value.group(1) in ["OFF", "0"])
+            self.assertFalse(torch.distributed.is_xccl_available())
+            value = re.search(r"USE_XCCL=([^,]+)", config)
+            self.assertIsNotNone(value)
+            self.assertTrue(value.group(1) in ["OFF", "0"])
 
 
 if __name__ == "__main__":

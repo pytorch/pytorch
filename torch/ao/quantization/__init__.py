@@ -1,6 +1,8 @@
 # mypy: allow-untyped-defs
 
-from typing import Callable, Optional, Union
+import sys
+from collections.abc import Callable
+from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -9,19 +11,8 @@ from .fake_quantize import *  # noqa: F403
 from .fuse_modules import fuse_modules, fuse_modules_qat  # noqa: F403
 from .fuser_method_mappings import *  # noqa: F403
 from .observer import *  # noqa: F403
-from .pt2e._numeric_debugger import (  # noqa: F401
-    compare_results,
-    CUSTOM_KEY,
-    extract_results_from_loggers,
-    generate_numeric_debug_handle,
-    NUMERIC_DEBUG_HANDLE_KEY,
-    prepare_for_propagation_comparison,
-)
-from .pt2e.export_utils import (
-    _allow_exported_model_train_eval as allow_exported_model_train_eval,
-    _move_exported_model_to_eval as move_exported_model_to_eval,
-    _move_exported_model_to_train as move_exported_model_to_train,
-)
+
+# pyrefly: ignore [deprecated]
 from .qconfig import *  # noqa: F403
 from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403
@@ -32,15 +23,16 @@ from .stubs import *  # noqa: F403
 
 
 # ensure __module__ is set correctly for public APIs
-ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
-ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
-for _f in [
-    compare_results,
-    extract_results_from_loggers,
-    generate_numeric_debug_handle,
-    prepare_for_propagation_comparison,
-]:
-    _f.__module__ = "torch.ao.quantization"
+if sys.version_info < (3, 12):
+    ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
+    ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
+else:
+    from typing import TypeAliasType
+
+    ObserverOrFakeQuantize = TypeAliasType(
+        "ObserverOrFakeQuantize", ObserverBase | FakeQuantizeBase
+    )
+
 
 __all__ = [
     "DeQuantStub",
@@ -142,9 +134,6 @@ __all__ = [
     "get_quantized_operator",
     "get_static_quant_module_class",
     "load_observer_state_dict",
-    "move_exported_model_to_eval",
-    "move_exported_model_to_train",
-    "allow_exported_model_train_eval",
     "no_observer_set",
     "per_channel_weight_observer_range_neg_127_to_127",
     "prepare",
@@ -162,12 +151,6 @@ __all__ = [
     "script_qconfig_dict",
     "swap_module",
     "weight_observer_range_neg_127_to_127",
-    "generate_numeric_debug_handle",
-    "CUSTOM_KEY",
-    "NUMERIC_DEBUG_HANDLE_KEY",
-    "prepare_for_propagation_comparison",
-    "extract_results_from_loggers",
-    "compare_results",
     # from torchao, should be merged with torchao
     # in the future
     "AffineQuantizedObserverBase",
@@ -207,10 +190,10 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
         derive_qparams_fn: Callable[
             [list[ObserverOrFakeQuantize]], tuple[Tensor, Tensor]
         ],
-        quant_min: Optional[int] = None,
-        quant_max: Optional[int] = None,
-        qscheme: Optional[torch.qscheme] = None,
-        ch_axis: Optional[int] = None,
+        quant_min: int | None = None,
+        quant_max: int | None = None,
+        qscheme: torch.qscheme | None = None,
+        ch_axis: int | None = None,
     ):
         super().__init__(dtype)
         self.obs_or_fqs = obs_or_fqs
@@ -223,9 +206,10 @@ class _DerivedObserverOrFakeQuantize(ObserverBase):
         from .utils import is_per_channel
 
         if is_per_channel(self.qscheme):
-            assert (
-                self.ch_axis is not None
-            ), "Must provide a valid ch_axis if qscheme is per channel"
+            if self.ch_axis is None:
+                raise AssertionError(
+                    "Must provide a valid ch_axis if qscheme is per channel"
+                )
 
     def forward(self, x: Tensor) -> Tensor:
         return x

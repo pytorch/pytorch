@@ -1,15 +1,11 @@
 #include <ATen/cuda/CachingHostAllocator.h>
 
-#include <ATen/DeviceGuard.h>
 #include <ATen/cuda/CUDAEvent.h>
-#include <ATen/cuda/detail/CUDAHooks.h>
-#include <ATen/detail/CUDAHooksInterface.h>
 #include <c10/core/thread_pool.h>
 #include <c10/cuda/CUDAAllocatorConfig.h>
 
 #include <cuda_runtime_api.h>
 #include <future>
-#include <unordered_map>
 
 namespace at::cuda {
 namespace {
@@ -72,9 +68,20 @@ using Block = HostBlock<CUDAStream>;
 struct CUDACachingHostAllocatorImpl
     : public CachingHostAllocatorImpl<CUDAStream, EventPool::Event> {
  private:
-  std::unordered_map<void*, bool> use_host_register;
+  ska::flat_hash_map<void*, bool> use_host_register;
 
   void allocate_host_memory(size_t size, void** ptr) override {
+    // try allocating from reserve segment first before calling into expensive APIs
+    if (get_reserve_segment().initialized()) {
+      *ptr = get_reserve_segment().allocate(size);
+      if (*ptr != nullptr) {
+        return;
+      }
+    }
+    allocate_host_memory_slowpath(size, ptr);
+  }
+
+  void allocate_host_memory_slowpath(size_t size, void** ptr) {
     // Pinned memory pointers allocated by any device can be directly used by
     // any other device, regardless of the current device at the time of
     // allocation, since we assume unified addressing. So we grab any existing
@@ -91,48 +98,66 @@ struct CUDACachingHostAllocatorImpl
           at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
     }
 
-    auto start = std::chrono::system_clock::now();
+    auto start = std::chrono::steady_clock::now();
     bool use_register = c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_use_cuda_host_register();
     if (use_register) {
       allocWithCudaHostRegister(ptr, size);
     } else {
       // Use cudaHostAlloc for allocating pinned memory (global lock in driver)
+      at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
       C10_CUDA_CHECK(cudaHostAlloc(ptr, size, cudaHostAllocDefault));
     }
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(*ptr) == 0);
-    use_host_register[*ptr] = use_register;
 
-    auto end = std::chrono::system_clock::now();
+    auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
     // Update the statistics on the time spent on cudaHostAlloc/hostRegister
     {
       std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(*ptr) == 0);
+      use_host_register[*ptr] = use_register;
       stats_.host_alloc_time.increase(duration.count());
     }
   }
 
   void free_block(Block* block) override {
-    auto start = std::chrono::system_clock::now();
+    // We never free blocks from the reserve segment
+    if (get_reserve_segment().initialized()) {
+      // Check if the block is from the reserve segment
+      if (get_reserve_segment().owns(block->ptr_)) {
+        return;
+      }
+    }
+
+    free_block_slowpath(block);
+  }
+
+  void free_block_slowpath(Block* block) {
+    auto start = std::chrono::steady_clock::now();
     // Users may change the allocator config at will. torch unit tests do this.
-    // However, allocations using cudaHostRegister should use corresonding
+    // However, allocations using cudaHostRegister should use corresponding
     // cudaHostUnregister and similarly for cudaHostAlloc / cudaFreeHost.
     void* ptr = block->ptr_;
-    TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(ptr) == 1);
-    if (use_host_register[ptr]) {
+    bool use_register = false;
+    {
+      std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      TORCH_INTERNAL_ASSERT_DEBUG_ONLY(use_host_register.count(ptr) == 1);
+      use_register = use_host_register[ptr];
+    }
+    if (use_register) {
       AT_CUDA_CHECK(cudaHostUnregister(ptr));
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
       std::free(ptr);
     } else {
       AT_CUDA_CHECK(cudaFreeHost(ptr));
     }
-    use_host_register.erase(ptr);
-    auto end = std::chrono::system_clock::now();
+    auto end = std::chrono::steady_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(end - start);
 
     // Update the statistics on the time spent on cudaFreeHost/hostUnregister
     {
       std::lock_guard<std::mutex> g(stats_.timing_mutex_);
+      use_host_register.erase(ptr);
       stats_.host_free_time.increase(duration.count());
     }
   }
@@ -156,15 +181,24 @@ struct CUDACachingHostAllocatorImpl
     return true;
   }
 
-  bool pinned_use_background_threads() override {
-    return c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::
-        pinned_use_background_threads();
-  }
-
   EventPool::Event create_event_internal(DeviceIndex idx) {
     // Leak the event pool to avoid shutdown issue.
     static auto* event_pool = new EventPool();
     return event_pool->get(idx);
+  }
+
+  PinnedReserveSegment& get_reserve_segment() {
+    static auto reserve_segment = [&]() {
+      if (c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_reserve_segment_size_mb() > 0) {
+        void *ptr;
+        size_t sz = c10::cuda::CUDACachingAllocator::CUDAAllocatorConfig::pinned_reserve_segment_size_mb() * 1024 * 1024;
+        allocate_host_memory_slowpath(sz, &ptr);
+        return PinnedReserveSegment(ptr, sz);
+      } else {
+        return PinnedReserveSegment();
+      }
+    } ();
+    return reserve_segment;
   }
 
   TaskThreadPool* getThreadPool() {
@@ -181,15 +215,15 @@ struct CUDACachingHostAllocatorImpl
       size_t numThreads,
       size_t pageSize) {
     uintptr_t start = (uintptr_t)ptr + (size * i / numThreads);
-    uintptr_t end = (uintptr_t)start + (size / numThreads);
+    uintptr_t end = start + (size / numThreads);
     if (i == (numThreads - 1)) {
       end = (uintptr_t)ptr + size;
     }
 
     // pre-fault/map the pages by setting the first byte of the page
     uintptr_t alignedStart =
-        (((uintptr_t)start + pageSize - 1) & ~(pageSize - 1));
-    for (uintptr_t p = alignedStart; p < ((uintptr_t)end); p += pageSize) {
+        ((start + pageSize - 1) & ~(pageSize - 1));
+    for (uintptr_t p = alignedStart; p < end; p += pageSize) {
       // NOLINTNEXTLINE(performance-no-int-to-ptr)
       memset((void*)p, 0, 1);
     }
@@ -244,8 +278,29 @@ struct CUDACachingHostAllocatorImpl
     }
 
     // Register the mapped pages using cudaHostRegister
+    at::cuda::CUDAStreamCaptureModeGuard g{cudaStreamCaptureModeRelaxed};
     AT_CUDA_CHECK(
         cudaHostRegister(*ptr, roundSize, cudaHostRegisterDefault));
+  }
+
+  CUDAStream get_current_stream() const override {
+    // get_current_stream() is called in contexts (such as allocation)
+    // where a device may not already be set. Set it before
+    // continuing.
+    at::OptionalDeviceGuard device_guard;
+    auto primary_ctx_device_index =
+        c10::cuda::getDeviceIndexWithPrimaryContext();
+    if (primary_ctx_device_index.has_value()) {
+      device_guard.reset_device(
+          at::Device(at::DeviceType::CUDA, *primary_ctx_device_index));
+    }
+    return at::cuda::getCurrentCUDAStream();
+  }
+
+  bool stream_is_capturing(CUDAStream s) const override {
+    cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
+    C10_CUDA_CHECK(cudaStreamIsCapturing(s, &status));
+    return status != cudaStreamCaptureStatusNone;
   }
 };
 
@@ -253,7 +308,7 @@ DECLARE_HOST_ALLOCATOR(
     CUDACachingHostAllocator,
     CUDACachingHostAllocatorImpl,
     raw_local_deleter,
-    caching_host_allocator);
+    caching_host_allocator)
 
 REGISTER_HOST_ALLOCATOR(at::kCUDA, &caching_host_allocator)
 

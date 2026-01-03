@@ -27,6 +27,7 @@ import warnings
 
 from _codecs import encode
 from collections import Counter, OrderedDict
+from collections.abc import Callable
 from pickle import (
     APPEND,
     APPENDS,
@@ -68,7 +69,7 @@ from pickle import (
 )
 from struct import unpack
 from sys import maxsize
-from typing import Any, Callable, Union
+from typing import Any
 
 import torch
 from torch._utils import _sparse_tensors_to_validate, IMPORT_MAPPING, NAME_MAPPING
@@ -83,15 +84,15 @@ _blocklisted_modules = [
     "nt",
 ]
 
-_marked_safe_globals_set: set[Union[Callable, tuple[Callable, str]]] = set()
+_marked_safe_globals_set: set[Callable | tuple[Callable, str]] = set()
 
 
-def _add_safe_globals(safe_globals: list[Union[Callable, tuple[Callable, str]]]):
+def _add_safe_globals(safe_globals: list[Callable | tuple[Callable, str]]):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set.union(set(safe_globals))
 
 
-def _get_safe_globals() -> list[Union[Callable, tuple[Callable, str]]]:
+def _get_safe_globals() -> list[Callable | tuple[Callable, str]]:
     global _marked_safe_globals_set
     return list(_marked_safe_globals_set)
 
@@ -102,14 +103,14 @@ def _clear_safe_globals():
 
 
 def _remove_safe_globals(
-    globals_to_remove: list[Union[Callable, tuple[Callable, str]]],
+    globals_to_remove: list[Callable | tuple[Callable, str]],
 ):
     global _marked_safe_globals_set
     _marked_safe_globals_set = _marked_safe_globals_set - set(globals_to_remove)
 
 
 class _safe_globals:
-    def __init__(self, safe_globals: list[Union[Callable, tuple[Callable, str]]]):
+    def __init__(self, safe_globals: list[Callable | tuple[Callable, str]]):
         self.safe_globals = safe_globals
 
     def __enter__(self):
@@ -186,7 +187,7 @@ def _get_allowed_globals():
     }
 
     # dtype
-    for t in torch.storage._dtype_to_storage_type_map().keys():
+    for t in torch.storage._dtype_to_storage_type_map():
         rc[str(t)] = t
     for t in torch.storage._new_dtypes():
         rc[str(t)] = t
@@ -276,7 +277,8 @@ def get_globals_in_pkl(file) -> set[str]:
         key = read(1)
         if not key:
             raise EOFError
-        assert isinstance(key, bytes_types)
+        if not isinstance(key, bytes_types):
+            raise AssertionError(f"Expected bytes, got {type(key).__name__}")
         if key[0] == GLOBAL[0]:
             module, name = _read_global_instruction(readline)
             globals_in_checkpoint.add(f"{module}.{name}")
@@ -323,7 +325,8 @@ class Unpickler:
             key = read(1)
             if not key:
                 raise EOFError
-            assert isinstance(key, bytes_types)
+            if not isinstance(key, bytes_types):
+                raise AssertionError(f"Expected bytes, got {type(key).__name__}")
             # Risky operators
             if key[0] == GLOBAL[0]:
                 module, name = _read_global_instruction(self.readline)
@@ -403,9 +406,12 @@ class Unpickler:
                     func not in _get_allowed_globals().values()
                     and func not in _get_user_allowed_globals().values()
                 ):
-                    raise UnpicklingError(
+                    error_msg = (
                         f"Trying to call reduce for unrecognized function {func}"
                     )
+                    if hasattr(func, "__self__"):
+                        error_msg += f" which belongs to {func.__self__}"
+                    raise UnpicklingError(error_msg)
                 result = func(*args)
                 if func in torch._tensor_classes and "sparse" in func.__module__:
                     _sparse_tensors_to_validate.append(result)
@@ -415,6 +421,7 @@ class Unpickler:
                 inst = self.stack[-1]
                 if type(inst) is torch.Tensor:
                     # Legacy unpickling
+                    # pyrefly: ignore [not-iterable]
                     inst.set_(*state)
                 elif type(inst) is torch.nn.Parameter:
                     inst.__setstate__(state)
@@ -517,7 +524,7 @@ class Unpickler:
             elif key[0] == BINPERSID[0]:
                 pid = self.stack.pop()
                 # Only allow persistent load of storage
-                if type(pid) is not tuple and not type(pid) is not int:
+                if type(pid) is not tuple and type(pid) is not int:
                     raise UnpicklingError(
                         f"persistent_load id must be tuple or int, but got {type(pid)}"
                     )
@@ -550,7 +557,8 @@ class Unpickler:
                         f"Detected pickle protocol {self.proto} in the checkpoint, which was "
                         "not the default pickle protocol used by `torch.load` (2). The weights_only "
                         "Unpickler might not support all instructions implemented by this protocol, "
-                        "please file an issue for adding support if you encounter this."
+                        "please file an issue for adding support if you encounter this.",
+                        stacklevel=2,
                     )
             elif key[0] == STOP[0]:
                 rc = self.stack.pop()

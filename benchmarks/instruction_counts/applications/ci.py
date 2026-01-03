@@ -55,7 +55,7 @@ def main(argv: list[str]) -> None:
 
     results = Runner(work_orders, cadence=30.0).run()
 
-    # TODO: Annotate with TypedDict when 3.8 is the minimum supported verson.
+    # TODO: Annotate with TypedDict when 3.8 is the minimum supported version.
     grouped_results: dict[str, dict[str, list[Union[float, int]]]] = {
         key: {"times": [], "counts": []} for key in keys
     }

@@ -139,7 +139,7 @@ APIUsageLoggerType* GetAPIUsageLogger() {
 APIUsageMetadataLoggerType* GetAPIUsageMetadataLogger() {
   static APIUsageMetadataLoggerType func =
       [](const std::string&,
-         const std::map<std::string, std::string>& metadata_map) {};
+         const std::map<std::string, std::string>& /*metadata_map*/) {};
   return &func;
 }
 
@@ -291,6 +291,32 @@ namespace c10 {
 using fLB::FLAGS_logtostderr;
 using fLI::FLAGS_minloglevel;
 using fLI::FLAGS_v;
+
+MessageLogger::MessageLogger(
+    const char* file,
+    int line,
+    int severity,
+    bool exit_on_fatal)
+    : stream_(), severity_(severity), exit_on_fatal_(exit_on_fatal) {}
+
+MessageLogger::~MessageLogger() noexcept(false) {
+  if (severity_ == ::google::GLOG_FATAL) {
+    DealWithFatal();
+  }
+}
+
+std::stringstream& MessageLogger::stream() {
+  return stream_;
+}
+
+void MessageLogger::DealWithFatal() {
+  if (exit_on_fatal_) {
+    LOG(FATAL) << stream_.str();
+  } else {
+    throw c10::Error(stream_.str(), nullptr, nullptr);
+  }
+}
+
 } // namespace c10
 
 C10_DEFINE_int(
@@ -386,7 +412,7 @@ void initLogging() {
   detail::setLogLevelFlagFromEnv();
 }
 
-bool InitCaffeLogging(int* argc, char** argv) {
+bool InitCaffeLogging(int* argc, char** /*argv*/) {
   // When doing InitCaffeLogging, we will assume that caffe's flag parser has
   // already finished.
   if (*argc == 0)
@@ -412,17 +438,16 @@ void ShowLogInfoToStderr() {
   FLAGS_caffe2_log_level = GLOG_INFO;
 }
 
-MessageLogger::MessageLogger(const char* file, int line, int severity)
-    : severity_(severity) {
+MessageLogger::MessageLogger(
+    const char* file,
+    int line,
+    int severity,
+    bool exit_on_fatal)
+    : severity_(severity), exit_on_fatal_(exit_on_fatal) {
   if (severity_ < FLAGS_caffe2_log_level) {
     // Nothing needs to be logged.
     return;
   }
-#ifdef ANDROID
-  tag_ = "native";
-#else // !ANDROID
-  tag_ = "";
-#endif // ANDROID
 
   time_t rawtime = 0;
   time(&rawtime);
@@ -448,22 +473,22 @@ MessageLogger::MessageLogger(const char* file, int line, int severity)
   if (GLOBAL_RANK != -1) {
     stream_ << "[rank" << GLOBAL_RANK << "]:";
   }
-  stream_ << "[" << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
+  stream_ << '[' << CAFFE2_SEVERITY_PREFIX[std::min(4, GLOG_FATAL - severity_)]
           << (timeinfo->tm_mon + 1) * 100 + timeinfo->tm_mday
-          << std::setfill('0') << " " << std::setw(2) << timeinfo->tm_hour
-          << ":" << std::setw(2) << timeinfo->tm_min << ":" << std::setw(2)
-          << timeinfo->tm_sec << "." << std::setw(9) << ns << " "
-          << c10::detail::StripBasename(std::string(file)) << ":" << line
+          << std::setfill('0') << ' ' << std::setw(2) << timeinfo->tm_hour
+          << ':' << std::setw(2) << timeinfo->tm_min << ':' << std::setw(2)
+          << timeinfo->tm_sec << '.' << std::setw(9) << ns << ' '
+          << c10::detail::StripBasename(std::string(file)) << ':' << line
           << "] ";
 }
 
 // Output the contents of the stream to the proper channel on destruction.
-MessageLogger::~MessageLogger() {
+MessageLogger::~MessageLogger() noexcept(false) {
   if (severity_ < FLAGS_caffe2_log_level) {
     // Nothing needs to be logged.
     return;
   }
-  stream_ << "\n";
+  stream_ << '\n';
 #ifdef ANDROID
   static const int android_log_levels[] = {
       ANDROID_LOG_FATAL, // LOG_FATAL
@@ -495,6 +520,18 @@ MessageLogger::~MessageLogger() {
 #endif // ANDROID
   if (severity_ == GLOG_FATAL) {
     DealWithFatal();
+  }
+}
+
+std::stringstream& MessageLogger::stream() {
+  return stream_;
+}
+
+void MessageLogger::DealWithFatal() {
+  if (exit_on_fatal_) {
+    abort();
+  } else {
+    throw c10::Error(stream_.str(), nullptr, nullptr);
   }
 }
 

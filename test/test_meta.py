@@ -367,6 +367,7 @@ CHECK_STRIDES_SKIPS = {
     aten.div.Tensor_mode,
     aten.floor_divide.default,
     aten.heaviside.default,
+    aten.ldexp.Tensor,
     aten.lerp.Scalar,
     aten.lerp.Tensor,
     aten.logaddexp.default,
@@ -575,8 +576,8 @@ def run_meta_crossref(
         elif func in (torch.ops.aten.repeat_interleave.Tensor, torch.ops.aten.repeat_interleave.Tensor_out):
             if kwargs.get("output_size", None) is None:
                 meta_args = args
-            if func is torch.ops.aten.repeat_interleave.Tensor_out:
-                meta_kwargs["out"] = kwargs["out"]
+                if func is torch.ops.aten.repeat_interleave.Tensor_out:
+                    meta_kwargs["out"] = kwargs["out"]
         elif func in (torch.ops.aten.index.Tensor, torch.ops.aten.index.Tensor_out):
             # Don't convert boolean tensors to meta as they will have nonzero
             # called on them
@@ -681,7 +682,10 @@ meta_function_expected_failures = {
 }
 
 meta_function_expected_failures_conditional = {
-    torch.repeat_interleave : (lambda dtype, *args, **kwargs: not isinstance(kwargs.get("repeats", None), int)),
+    torch.repeat_interleave: lambda dtype, *args, **kwargs: (
+        not isinstance(kwargs.get("repeats", None), int)
+        and (kwargs.get("output_size", None) is None)
+    ),
 }
 
 """
@@ -1502,7 +1506,7 @@ class TestMeta(TestCase):
     def test_fill__alias_relationship(self):
         inps = torch.rand(2**52, device='meta')
         r = torch.ops.aten.fill_(inps, 1.0)
-        # aten.fill_ returns an aliase
+        # aten.fill_ returns an alias
         self.assertEqual(id(inps), id(r))
 
         # aten.fill returns a new tensor
@@ -1823,6 +1827,43 @@ class TestMeta(TestCase):
             f_out = f_x[f_i1, f_i2]
 
         self.assertEqual(out.stride(), f_out.stride())
+
+
+    @parametrize("in_dtype", [torch.float32, torch.float16])
+    @parametrize("bias_dtype", [torch.float32, torch.float16, None])
+    def test_mixed_dtype_for_native_layer_norm_backward(self, in_dtype, bias_dtype):
+        if in_dtype == torch.float16 and bias_dtype == torch.float32:
+            self.skipTest(f"not supported input dtype is {in_dtype} and bias dtype is {bias_dtype}")
+        device = "meta"
+
+        def fn(input, weight, bias, need_grad_input):
+            outputs = torch.nn.functional.layer_norm(input, input.shape[-1:], weight, bias)
+            grad_outs = torch.ones_like(outputs)
+            grad_ins = torch.autograd.grad(outputs, need_grad_input, grad_outs)
+            return grad_ins
+
+        input = torch.randn([4, 8, 5], dtype=in_dtype, device=device, requires_grad=True)
+        need_grad_input = [input]
+
+        if bias_dtype:
+            weight = torch.randn(
+                [5], dtype=bias_dtype, device=device, requires_grad=True
+            )
+            bias = torch.randn(
+                [5], dtype=bias_dtype, device=device, requires_grad=True
+            )
+            need_grad_input.append(weight)
+            need_grad_input.append(bias)
+        else:
+            weight = None
+            bias = None
+
+        outs = fn(input, weight, bias, need_grad_input)
+        out_dtype = [t.dtype for t in outs]
+        if bias_dtype:
+            self.assertEqual(out_dtype, [in_dtype, bias_dtype, bias_dtype])
+        else:
+            self.assertEqual(out_dtype, [in_dtype,])
 
 instantiate_device_type_tests(TestMeta, globals())
 

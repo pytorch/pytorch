@@ -1,9 +1,11 @@
 # mypy: allow-untyped-defs
 import logging
-from collections.abc import Sequence
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable, Sequence
+from typing import Any, Optional, TYPE_CHECKING, Union
 
+import torch._inductor.config as config
 from torch._inductor.codegen.cpp_wrapper_cpu import CppWrapperCpu
+from torch._inductor.utils import do_bench_using_profiling
 
 from ...ir import Buffer, ChoiceCaller, IRNode, Layout, PrimitiveInfoType, TensorBox
 from ...virtualized import V
@@ -11,6 +13,7 @@ from ..common import Kernel, OpOverrides, WorkspaceArg, WorkspaceZeroMode
 from ..cpp_utils import CppPrinter
 from .rocm_benchmark_request import ROCmBenchmarkRequest
 from .rocm_template_buffer import ROCmTemplateBuffer
+from .rocm_utils import DTYPE_TO_ROCM_TYPE
 
 
 if TYPE_CHECKING:
@@ -109,7 +112,7 @@ class ROCmTemplateKernel(ROCmKernel):
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
-        arg_defs, *_ = self.args.cpp_argdefs()
+        arg_defs, *_ = self.args.cpp_argdefs(DTYPE_TO_ROCM_TYPE)
 
         runtime_arg_defs = [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
 
@@ -141,7 +144,7 @@ class ROCmTemplateKernel(ROCmKernel):
             # Kinda hacky because we always originally initialize name with "KERNEL_NAME"
             # So, we replace with the real kernel name passed as an arg to this function.
             self.signature = self.signature.replace("KERNEL_NAME", name)
-            _, call_args, arg_types = self.args.cpp_argdefs()
+            _, call_args, arg_types = self.args.cpp_argdefs(DTYPE_TO_ROCM_TYPE)
         else:
             _, call_args, _, arg_types = self.args.python_argdefs()
 
@@ -246,7 +249,10 @@ class ROCmTemplateCaller(ChoiceCaller):
 
     def benchmark(self, *args, out) -> float:
         assert self.bmreq is not None
-        return self.bmreq.benchmark(*args, output_tensor=out)
+        if config.profile_bandwidth_with_do_bench_using_profiling:
+            algo = self.bmreq.make_run_fn(*args, out=out)
+            return do_bench_using_profiling(algo)
+        return self.bmreq.benchmark(*args, out=out)
 
     def __str__(self) -> str:
         return f"ROCmTemplateCaller(source_file={self.bmreq.source_file}, {self.info_dict()})"
@@ -272,12 +278,14 @@ class ROCmTemplateCaller(ChoiceCaller):
 
     def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()
-        return TensorBox.create(
-            ROCmTemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                workspace_size=self.bmreq.workspace_size,
-                template=self.template,
-            )
+        buffer = ROCmTemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            workspace_size=self.bmreq.workspace_size,
+            template=self.template,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return TensorBox.create(buffer)

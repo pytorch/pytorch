@@ -88,7 +88,7 @@ def get_size_of_node(fx_module: GraphModule, node: Node) -> size_bytes:
     """
     # Total num of elements
     total_num_of_elems = 0
-    # For a module, conside all parameters
+    # For a module, consider all parameters
     if node.op == "call_module":
         submodule_dict = dict(fx_module.named_modules())
         submodule = submodule_dict[node.target]

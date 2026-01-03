@@ -129,11 +129,8 @@ UPGRADER_CPP_SRC = CodeTemplate(
     MOBILE_UPGRADERS_HEADER_DESCRIPTION
     + """
 #include <caffe2/serialize/versions.h>
+#include <torch/csrc/jit/mobile/type_parser.h>
 #include <torch/csrc/jit/mobile/upgrader_mobile.h>
-
-namespace c10 {
-TypePtr parseType(const std::string& pythonStr);
-} // namespace c10
 
 namespace torch {
 namespace jit {
@@ -308,7 +305,7 @@ def get_upgrader_bytecode_function_to_index_map(
     upgrader_bytecode_function_to_index_map = {}
     index = 0
     for upgrader_bytecode in upgrader_dict:
-        for upgrader_name in upgrader_bytecode.keys():
+        for upgrader_name in upgrader_bytecode:
             if upgrader_name in EXCLUE_UPGRADER_SET:
                 continue
             upgrader_bytecode_function_to_index_map[upgrader_name] = index

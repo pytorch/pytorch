@@ -70,6 +70,7 @@ def _set_strategy(_strategy: str) -> None:
 
 
 def _get_strategy() -> str:
+    # pyrefly: ignore [bad-return]
     return strategy
 
 
@@ -100,9 +101,6 @@ def flags(enabled=None, strategy=None):
 
 
 class OptEinsumModule(PropModule):
-    def __init__(self, m, name):
-        super().__init__(m, name)
-
     global enabled
     enabled = ContextProp(_get_enabled, _set_enabled)
     global strategy
@@ -115,5 +113,5 @@ class OptEinsumModule(PropModule):
 # https://stackoverflow.com/questions/2447353/getattr-on-a-module/7668273#7668273
 sys.modules[__name__] = OptEinsumModule(sys.modules[__name__], __name__)
 
-enabled = True if is_available() else False
+enabled = bool(is_available())
 strategy = "auto" if is_available() else None

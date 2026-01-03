@@ -11,10 +11,22 @@ from torch._C import (
     _pop_torch_function_stack,
     _push_on_torch_function_stack,
 )
-from torch.overrides import _get_current_function_mode_stack, BaseTorchFunctionMode
-from torch.testing._internal.triton_utils import requires_cuda
+from torch._dynamo.utils import counters
+from torch.overrides import (
+    _get_current_function_mode_stack,
+    BaseTorchFunctionMode,
+    TorchFunctionMode,
+)
+from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.inductor_utils import GPU_TYPE
+from torch.testing._internal.triton_utils import requires_gpu
 from torch.utils._device import DeviceContext
 from torch.utils._python_dispatch import TorchDispatchMode
+
+
+device_type = (
+    acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+)
 
 
 class TestMode(BaseTorchFunctionMode):
@@ -28,6 +40,23 @@ class TestMode(BaseTorchFunctionMode):
         return super().__torch_function__(func, types, args, kwargs)
 
 
+class HopDetectionError(Exception):
+    pass
+
+
+class TestModeRaises(BaseTorchFunctionMode):
+    def __torch_function__(self, func, types, args, kwargs=None):
+        if not kwargs:
+            kwargs = {}
+
+        import torch._higher_order_ops
+
+        if func == torch._higher_order_ops.flex_attention:
+            raise HopDetectionError("test")
+
+        return super().__torch_function__(func, types, args, kwargs)
+
+
 class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
@@ -36,6 +65,54 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def tearDownClass(cls):
         super().tearDownClass()
+
+    def test_torch_dispatch_ignore_compile_internals(self):
+        counters.clear()
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        @torch.library.custom_op("mylib::modes_checksum", mutates_args=())
+        def foo(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        def checksum(x):
+            return x.abs().sum()
+
+        _checksums = []
+
+        class ChecksumFoo(TorchDispatchMode):
+            @classmethod
+            def ignore_compile_internals(cls):
+                return True
+
+            def __init__(self) -> None:
+                super().__init__()
+
+            def __torch_dispatch__(self, func, types, args, kwargs=None):
+                kwargs = kwargs or {}
+
+                if func is torch.ops.mylib.modes_checksum.default:
+                    # Do some compute, smoketest to see if there's a bad interaction
+                    _checksums.append(args[0].abs().sum())
+
+                return func(*args, **kwargs)
+
+        # test e2e, with Inductor, as smoketest.
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend="inductor")
+        def g(x):
+            return 2 * x.sin().cos()
+
+        x = torch.randn(3)
+
+        with ChecksumFoo():
+            foo(x)
+            g(x)
+            foo(x)
+
+        self.assertEqual(len(_checksums), 2)
+        # The correct result here is 1: Dynamo should capture the `g` frame.
+        self.assertEqual(counters["frames"]["total"], 1)
+        self.assertEqual(counters["frames"]["ok"], 1)
 
     def test_skip_torch_dispatch_modes(self):
         class RewriteAddToMul(TorchDispatchMode):
@@ -61,12 +138,20 @@ class TorchDispatchModeTests(torch._dynamo.test_case.TestCase):
 class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     @classmethod
     def setUpClass(cls):
-        cls.default_device_old = torch.get_default_device()
+        try:
+            cls.default_device_old = torch.get_default_device()
+        except AttributeError:
+            cls.default_device_old = torch.device("cpu")
+        global_default_ctx = getattr(
+            getattr(torch, "_GLOBAL_DEVICE_CONTEXT", None), "device_context", None
+        )
+        cls._had_global_default_device = global_default_ctx is not None
         super().setUpClass()
 
     @classmethod
     def tearDownClass(cls):
-        torch.set_default_device(cls.default_device_old)
+        if cls._had_global_default_device:
+            torch.set_default_device(cls.default_device_old)
         super().tearDownClass()
 
     def setUp(self):
@@ -116,6 +201,19 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
     def test_torch_function_mode_guards_cpp(self):
         self._run_torch_function_mode_guard_test()
+
+    @requires_gpu
+    def test_torch_function_mode_preserves_cuda_rng_state(self):
+        class ConstantReturnMode(TorchFunctionMode):
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                return -42
+
+        @torch._dynamo.optimize("eager")
+        def fn():
+            with ConstantReturnMode():
+                return 123
+
+        self.assertEqual(fn(), 123)
 
     def test_stack_state_mutation_default_device(self):
         m = BaseTorchFunctionMode()
@@ -227,7 +325,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            "Popping from an empty torch function mode stack",
+            "Attempted to pop from empty torch function mode stack",
             lambda: fn(torch.ones(2, 2)),
         )
 
@@ -499,11 +597,13 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
     # Needs larger cache size since we recompile for each op
     @patch.object(torch._dynamo.config, "recompile_limit", 48)
     def test_builtin_equivalent_funcs(self):
+        from torch._dynamo.variables.builtin import (
+            BUILTIN_TO_TENSOR_FN_MAP,
+            BUILTIN_TO_TENSOR_RFN_MAP,
+        )
         from torch._dynamo.variables.torch_function import (
             bin_int_ops,
             bin_ops,
-            BUILTIN_TO_TENSOR_FN_MAP,
-            BUILTIN_TO_TENSOR_RFN_MAP,
             tensor_and_int_ops,
             un_int_ops,
             un_ops,
@@ -613,12 +713,12 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
             func(torch.randn(3))
 
-    @requires_cuda
+    @requires_gpu
     def test_flex_attention(self):
         import torch
         from torch.nn.attention.flex_attention import create_block_mask, flex_attention
 
-        torch.set_default_device("cuda")
+        torch.set_default_device(device_type)
 
         flex_attention = torch.compile(flex_attention, dynamic=False)
 
@@ -628,7 +728,9 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
             return prefix_lengths[b] >= kv
 
         # This runs in fullgraph already
-        create_block_mask(prefix_lm, 8, None, 512, 512, _compile=True)
+        create_block_mask(
+            prefix_lm, 8, None, 512, 512, _compile=True, device=device_type
+        )
 
     def test_register_hook(self):
         import functools
@@ -650,6 +752,68 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
 
         with torch.device("cpu"):
             torch.compile(mod, fullgraph=True)(x)
+
+    @requires_gpu
+    @skipIfXpu(msg="XPU does not support flex attention")
+    def test_hop(self):
+        import torch
+        import torch._higher_order_ops
+        from torch.nn.attention.flex_attention import (
+            flex_attention as flex_attention_eager,
+        )
+
+        with torch.device(GPU_TYPE):
+            flex_attention = torch.compile(flex_attention_eager, dynamic=False)
+
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+            ):
+                # This runs in fullgraph already
+                with TestModeRaises():
+                    flex_attention(
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                    )
+
+    @requires_gpu
+    @skipIfXpu(msg="XPU does not support flex attention")
+    def test_hop_eager(self):
+        import torch
+        import torch._higher_order_ops
+        from torch.nn.attention.flex_attention import (
+            flex_attention as flex_attention_eager,
+        )
+
+        with torch.device(GPU_TYPE):
+            with self.assertRaisesRegex(
+                torch._dynamo.exc.Unsupported,
+                "raised exception HopDetectionError([ConstantVariable(str: 'test')])",
+            ):
+                with TestModeRaises():
+                    flex_attention_eager(
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                        torch.ones(2, 2, 2, 2),
+                    )
+
+
+class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
+    def test_default_device_restored_after_mode_tests(self):
+        case = TorchFunctionModeTests("test_stack_state_mutation_default_device")
+        TorchFunctionModeTests.setUpClass()
+        try:
+            case.setUp()
+            try:
+                case.test_stack_state_mutation_default_device()
+            finally:
+                case.tearDown()
+        finally:
+            TorchFunctionModeTests.tearDownClass()
+
+        stack = _get_current_function_mode_stack()
+        self.assertFalse(any(isinstance(mode, DeviceContext) for mode in stack))
 
 
 if __name__ == "__main__":

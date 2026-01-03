@@ -1,5 +1,5 @@
 # Owner(s): ["module: dynamo"]
-# flake8: noqa
+# flake8: noqa: B950
 import torch
 import torch._dynamo
 import torch._dynamo.test_case

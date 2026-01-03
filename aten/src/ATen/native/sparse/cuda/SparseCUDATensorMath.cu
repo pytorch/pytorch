@@ -37,10 +37,9 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#include <thrust/binary_search.h>
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
-#include <thrust/binary_search.h>
-#include <thrust/sort.h>
 #include <thrust/system/cuda/execution_policy.h>
 
 #include <bitset>
@@ -501,9 +500,7 @@ SparseTensor& mul_out_sparse_cuda(const Tensor& t_, const Tensor& src_, SparseTe
 // see NOTE [ sparse.sum() backward ]
 // --------------------------------------------------------------------
 template <typename scalar_t>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
-#endif
 __global__ void _sparse_sum_backward_cuda_kernel(
     int64_t total_threads,
     const TensorInfo<int64_t, int64_t> grad_indices_ti,
@@ -573,7 +570,7 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
   }
 
   const bool sum_all_sparse_dim = (input_sparse_dim == sparse_dims_to_sum_size);
-  const bool sum_dense_dim = (dense_dims_to_sum_v.size() > 0);
+  const bool sum_dense_dim = !dense_dims_to_sum_v.empty();
   const bool sum_sparse_dim = (sparse_dims_to_sum_size > 0);
 
   if (sum_all_sparse_dim) {
@@ -672,7 +669,6 @@ Tensor bmm_sparse_cuda(const SparseTensor& self, const Tensor& mat2) {
   return bmm_out_sparse_cuda(self, mat2, result);
 }
 
-#if defined(USE_ROCM) || !(defined(_MSC_VER) && CUSPARSE_VERSION < 11000)
 __global__ void search_end_matrix_indices_cuda_kernel(
   int64_t* mat_el_end_indices,
   int64_t num_matrices,
@@ -742,13 +738,8 @@ cudaDataType getTensorCudaDataType(Tensor self) {
   }
   return cuda_data_type;
 }
-#endif
 
 Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor& result) {
-#if defined(_MSC_VER) && (CUSPARSE_VERSION < 11000)
-  TORCH_CHECK(false, "bmm sparse-dense CUDA is not supported on Windows with cuda before 11.0");
-#elif defined(USE_ROCM) || (defined(CUDART_VERSION) && (CUDART_VERSION >= 10010))  // linux cuda >= 10.1 or windows cuda >= 11.0
-
   TORCH_CHECK(!mat2.is_sparse(), "bmm_sparse: Tensor 'mat2' must be dense");
   TORCH_CHECK(self.dense_dim() == 0, "bmm_sparse: Tensor 'self' must have 0 dense dims, but has ", self.dense_dim());
   TORCH_CHECK(self.sparse_dim() == 3, "bmm_sparse: Tensor 'self' must have 3 sparse dims, but has ", self.sparse_dim());
@@ -800,7 +791,7 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   Tensor indices_dim1 = indices[1].to(ScalarType::Int);
   Tensor indices_dim2 = indices[2].to(ScalarType::Int);
 
-  std::unique_ptr<int64_t[]> mat_el_end_indices_host(new int64_t[num_matrices]);
+  std::vector<int64_t> mat_el_end_indices_host(num_matrices);
 
   {
     auto& allocator = *::c10::cuda::CUDACachingAllocator::get();
@@ -809,14 +800,14 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
 
     search_end_matrix_indices(mat_el_end_indices_device, num_matrices, indices_dim0);
     AT_CUDA_CHECK(cudaMemcpy(
-      mat_el_end_indices_host.get(),
+      mat_el_end_indices_host.data(),
       mat_el_end_indices_device,
       num_matrices*sizeof(int64_t),
       cudaMemcpyDeviceToHost
     ));
   }
   // Need a pointer to an array to access within a lambda
-  int64_t* mat_el_end_indices = &mat_el_end_indices_host[0];
+  int64_t* mat_el_end_indices = mat_el_end_indices_host.data();
 
   Scalar beta = 0;
   Scalar alpha = 1;
@@ -943,10 +934,6 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
   // Need to transpose the result matrices since cusparse stores
   // them in column-major order in memory
   result.transpose_(1,2);
-
-#else
-  TORCH_CHECK(false, "bmm sparse-dense requires CUDA 10.1 or greater");
-#endif
 
   return result;
 }

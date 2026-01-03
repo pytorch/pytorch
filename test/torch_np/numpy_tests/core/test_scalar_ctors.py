@@ -3,6 +3,7 @@
 """
 Test the scalar constructors, which also do type-coercion
 """
+
 import functools
 from unittest import skipIf as skipif
 

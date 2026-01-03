@@ -4,8 +4,9 @@ import collections
 import io
 import sys
 import types
-from collections.abc import Iterator, Mapping
-from typing import Any, Callable, Optional, TypeVar, Union
+from collections.abc import Callable, Iterator, Mapping
+from typing import Any, TypeVar, Union
+from typing_extensions import Self
 
 import torch
 import torch.distributed.rpc as rpc
@@ -121,8 +122,8 @@ class _RemoteModule(nn.Module):
         self,
         remote_device: str,
         module_cls: type[nn.Module],
-        args: Optional[tuple] = None,
-        kwargs: Optional[dict[str, Any]] = None,
+        args: tuple | None = None,
+        kwargs: dict[str, Any] | None = None,
         _module_interface_cls: Any = None,
     ):
         """
@@ -309,76 +310,75 @@ class _RemoteModule(nn.Module):
         )
 
     def register_buffer(
-        self, name: str, tensor: Optional[Tensor], persistent: bool = True
+        self, name: str, tensor: Tensor | None, persistent: bool = True
     ) -> None:
         _raise_not_supported(self.register_buffer.__name__)
 
-    def register_parameter(self, name: str, param: Optional[Parameter]) -> None:
+    def register_parameter(self, name: str, param: Parameter | None) -> None:
         _raise_not_supported(self.register_parameter.__name__)
 
-    def add_module(self, name: str, module: Optional[Module]) -> None:
+    def add_module(self, name: str, module: Module | None) -> None:
         _raise_not_supported(self.add_module.__name__)
 
-    def apply(self: T, fn: Callable[[Module], None]) -> T:  # type: ignore[return]
+    def apply(self, fn: Callable[[Module], None]) -> Self:  # type: ignore[return]
         _raise_not_supported(self.apply.__name__)
 
-    def cuda(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
+    def cuda(self, device: int | device | None = None) -> Self:  # type: ignore[return]
         _raise_not_supported(self.cuda.__name__)
 
-    def ipu(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
+    def ipu(self, device: int | device | None = None) -> Self:  # type: ignore[return]
         _raise_not_supported(self.ipu.__name__)
 
-    def xpu(self: T, device: Optional[Union[int, device]] = None) -> T:  # type: ignore[return]
+    def xpu(self, device: int | device | None = None) -> Self:  # type: ignore[return]
         _raise_not_supported(self.xpu.__name__)
 
-    def cpu(self: T) -> T:  # type: ignore[return]
+    def cpu(self) -> Self:  # type: ignore[return]
         _raise_not_supported(self.cpu.__name__)
 
-    def type(self: T, dst_type: Union[dtype, str]) -> T:  # type: ignore[return]
+    def type(self, dst_type: dtype | str) -> Self:  # type: ignore[return]
         _raise_not_supported(self.type.__name__)
 
-    def float(self: T) -> T:  # type: ignore[return]
+    def float(self) -> Self:  # type: ignore[return]
         _raise_not_supported(self.float.__name__)
 
-    def double(self: T) -> T:  # type: ignore[return]
+    def double(self) -> Self:  # type: ignore[return]
         _raise_not_supported(self.double.__name__)
 
-    def half(self: T) -> T:  # type: ignore[return]
+    def half(self) -> Self:  # type: ignore[return]
         _raise_not_supported(self.half.__name__)
 
-    def bfloat16(self: T) -> T:  # type: ignore[return]
+    def bfloat16(self) -> Self:  # type: ignore[return]
         _raise_not_supported(self.bfloat16.__name__)
 
     def to(self, *args, **kwargs) -> T:  # type: ignore[misc, return, type-var]
         _raise_not_supported(self.to.__name__)
 
     def register_backward_hook(  # type: ignore[return]
-        self, hook: Callable[[Module, _grad_t, _grad_t], Union[None, _grad_t]]
+        self,
+        hook: Callable[[Module, _grad_t, _grad_t], _grad_t | None],
+        # pyrefly: ignore [bad-return]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)
 
     def register_forward_pre_hook(  # type: ignore[return]
         self,
-        hook: Union[
-            Callable[[T, tuple[Any, ...]], Optional[Any]],
-            Callable[
-                [T, tuple[Any, ...], dict[str, Any]],
-                Optional[tuple[Any, dict[str, Any]]],
-            ],
+        hook: Callable[[T, tuple[Any, ...]], Any | None]
+        | Callable[
+            [T, tuple[Any, ...], dict[str, Any]], tuple[Any, dict[str, Any]] | None
         ],
         prepend: bool = False,
         with_kwargs: bool = False,
+        # pyrefly: ignore [bad-return]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_pre_hook.__name__)
 
     def register_forward_hook(  # type: ignore[return, override]
         self,
-        hook: Union[
-            Callable[[T, tuple[Any, ...], Any], Optional[Any]],
-            Callable[[T, tuple[Any, ...], dict[str, Any], Any], Optional[Any]],
-        ],
+        hook: Callable[[T, tuple[Any, ...], Any], Any | None]
+        | Callable[[T, tuple[Any, ...], dict[str, Any], Any], Any | None],
         prepend: bool = False,
         with_kwargs: bool = False,
+        # pyrefly: ignore [bad-return]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_forward_hook.__name__)
 
@@ -399,7 +399,11 @@ class _RemoteModule(nn.Module):
         )
 
     def named_parameters(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+        remove_duplicate: bool = True,
+        # pyrefly: ignore [bad-return]
     ) -> Iterator[tuple[str, Parameter]]:
         _raise_not_supported(self.named_parameters.__name__)
 
@@ -407,7 +411,11 @@ class _RemoteModule(nn.Module):
         _raise_not_supported(self.buffers.__name__)
 
     def named_buffers(  # type: ignore[return]
-        self, prefix: str = "", recurse: bool = True, remove_duplicate: bool = True
+        self,
+        prefix: str = "",
+        recurse: bool = True,
+        remove_duplicate: bool = True,
+        # pyrefly: ignore [bad-return]
     ) -> Iterator[tuple[str, Tensor]]:
         _raise_not_supported(self.named_buffers.__name__)
 
@@ -422,25 +430,25 @@ class _RemoteModule(nn.Module):
 
     def named_modules(
         self,
-        memo: Optional[set[Module]] = None,
+        memo: set[Module] | None = None,
         prefix: str = "",
         remove_duplicate: bool = True,
     ):
         _raise_not_supported(self.named_modules.__name__)
 
-    def train(self: T, mode: bool = True) -> T:
+    def train(self, mode: bool = True) -> Self:
         return self.module_rref.rpc_sync().train()  # type: ignore[operator, union-attr]
 
-    def eval(self: T) -> T:
+    def eval(self) -> Self:
         return self.module_rref.rpc_sync().eval()  # type: ignore[operator, union-attr]
 
-    def requires_grad_(self: T, requires_grad: bool = True) -> T:  # type: ignore[return]
+    def requires_grad_(self, requires_grad: bool = True) -> Self:  # type: ignore[return]
         _raise_not_supported(self.requires_grad_.__name__)
 
     def zero_grad(self, set_to_none: bool = True) -> None:
         _raise_not_supported(self.zero_grad.__name__)
 
-    def share_memory(self: T) -> T:  # type: ignore[return]
+    def share_memory(self) -> Self:  # type: ignore[return]
         _raise_not_supported(self.share_memory.__name__)
 
     def extra_repr(self) -> str:  # type: ignore[return]
@@ -480,7 +488,7 @@ class _RemoteModule(nn.Module):
 
     def _check_attribute_picklability(self):
         """Check if all the attribute has explicitly defined whether to be pickled (i.e., picklability)."""
-        for k in self.__dict__.keys():
+        for k in self.__dict__:
             if (
                 k not in _REMOTE_MODULE_PICKLED_ATTRIBUTES
                 and k not in _REMOTE_MODULE_ATTRIBUTES_IGNORE_FOR_PICKLING
@@ -571,23 +579,31 @@ class _RemoteModule(nn.Module):
 
         remote_module = object.__new__(RemoteModule)
 
+        # pyrefly: ignore [missing-attribute]
         enable_moving_cpu_tensors_to_cuda = remote_module._prepare_init(remote_device)
 
         if _module_interface_cls is not None:
             # Users reply on this field to know if this generated RemoteModule is TorchScript-able.
+            # pyrefly: ignore [missing-attribute]
             remote_module.is_scriptable = True
 
+            # pyrefly: ignore [missing-attribute]
             remote_module._init_template(
                 _module_interface_cls, enable_moving_cpu_tensors_to_cuda
             )
         else:
+            # pyrefly: ignore [missing-attribute]
             remote_module.is_scriptable = False
+            # pyrefly: ignore [missing-attribute]
             remote_module.generated_methods = (
                 _NON_SCRIPTABLE_REMOTE_MODULE_MODULE._generated_methods
             )
+        # pyrefly: ignore [missing-attribute]
         remote_module.module_rref = module_rref
 
+        # pyrefly: ignore [missing-attribute]
         remote_module._install_generated_methods()
+        # pyrefly: ignore [missing-attribute]
         remote_module._check_attribute_picklability()
 
         return remote_module
@@ -673,8 +689,8 @@ class RemoteModule(_RemoteModule):
         self,
         remote_device: str,
         module_cls: type[nn.Module],
-        args: Optional[tuple] = None,
-        kwargs: Optional[dict[str, Any]] = None,
+        args: tuple | None = None,
+        kwargs: dict[str, Any] | None = None,
     ):
         super().__init__(remote_device, module_cls, args, kwargs)
 
@@ -690,9 +706,11 @@ def _remote_module_receiver(
     m.__dict__.update(serialized_remote_module._asdict())
 
     # Unpickling the attribute `module_rref` must invoke RRef's `_deserialize()` method.
+    # pyrefly: ignore [missing-attribute]
     m.module_rref = rpc.PyRRef._deserialize(m.module_rref)
 
     # Install generated methods when unpickled.
+    # pyrefly: ignore [missing-attribute]
     for method in m.generated_methods:
         method_name = method.__name__
         method = torch.jit.export(method)

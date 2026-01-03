@@ -7,8 +7,8 @@ ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
 
-ARG DEVTOOLSET_VERSION=11
-RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel yum-utils gcc-toolset-${DEVTOOLSET_VERSION}-toolchain
+ARG DEVTOOLSET_VERSION=13
+RUN yum install -y sudo wget curl perl util-linux xz bzip2 git patch which perl zlib-devel yum-utils gcc-toolset-${DEVTOOLSET_VERSION}-gcc gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran gcc-toolset-${DEVTOOLSET_VERSION}-gdb
 ENV PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/bin:$PATH
 ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib:$LD_LIBRARY_PATH
 
@@ -26,20 +26,20 @@ ADD ./common/install_openssl.sh install_openssl.sh
 RUN bash ./install_openssl.sh && rm install_openssl.sh
 
 
-# remove unncessary python versions
+# remove unnecessary python versions
 RUN rm -rf /opt/python/cp26-cp26m /opt/_internal/cpython-2.6.9-ucs2
 RUN rm -rf /opt/python/cp26-cp26mu /opt/_internal/cpython-2.6.9-ucs4
 RUN rm -rf /opt/python/cp33-cp33m /opt/_internal/cpython-3.3.6
 RUN rm -rf /opt/python/cp34-cp34m /opt/_internal/cpython-3.4.6
 
 FROM base as cuda
-ARG BASE_CUDA_VERSION=11.8
+ARG BASE_CUDA_VERSION=12.6
 # Install CUDA
 ADD ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
-COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
+COPY ./ci_commit_pins/nccl* /ci_commit_pins/
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
-RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh install_nccl.sh ci_commit_pins/nccl-cu* install_cusparselt.sh
+RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh install_nccl.sh ci_commit_pins/nccl* install_cusparselt.sh
 
 FROM base as intel
 # MKL
@@ -47,7 +47,7 @@ ADD ./common/install_mkl.sh install_mkl.sh
 RUN bash ./install_mkl.sh && rm install_mkl.sh
 
 FROM base as magma
-ARG BASE_CUDA_VERSION=10.2
+ARG BASE_CUDA_VERSION=12.6
 # Install magma
 ADD ./common/install_magma.sh install_magma.sh
 RUN bash ./install_magma.sh ${BASE_CUDA_VERSION} && rm install_magma.sh
@@ -64,7 +64,7 @@ ADD ./common/install_libpng.sh install_libpng.sh
 RUN bash ./install_libpng.sh && rm install_libpng.sh
 
 FROM ${GPU_IMAGE} as common
-ARG DEVTOOLSET_VERSION=11
+ARG DEVTOOLSET_VERSION=13
 ENV LC_ALL en_US.UTF-8
 ENV LANG en_US.UTF-8
 ENV LANGUAGE en_US.UTF-8
@@ -87,13 +87,12 @@ RUN yum install -y \
         wget \
         which \
         xz \
-        gcc-toolset-${DEVTOOLSET_VERSION}-toolchain \
-        glibc-langpack-en
-RUN yum install -y \
-    https://repo.ius.io/ius-release-el7.rpm \
-    https://ossci-linux.s3.amazonaws.com/epel-release-7-14.noarch.rpm
+        glibc-langpack-en \
+        gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
+        gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
+        gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \
+        gcc-toolset-${DEVTOOLSET_VERSION}-gdb
 
-RUN yum swap -y git git236-core
 # git236+ would refuse to run git commands in repos owned by other users
 # Which causes version check to fail, as pytorch repo is bind-mounted into the image
 # Override this behaviour by treating every folder as safe
@@ -104,6 +103,7 @@ ENV SSL_CERT_FILE=/opt/_internal/certs.pem
 # Install LLVM version
 COPY --from=openssl            /opt/openssl                          /opt/openssl
 COPY --from=base               /opt/python                           /opt/python
+COPY --from=base               /usr/local/lib/                       /usr/local/lib/
 COPY --from=base               /opt/_internal                        /opt/_internal
 COPY --from=base               /usr/local/bin/auditwheel             /usr/local/bin/auditwheel
 COPY --from=intel              /opt/intel                            /opt/intel
@@ -117,8 +117,8 @@ COPY --from=libpng             /usr/local/lib/pkgconfig              /usr/local/
 COPY --from=jni                /usr/local/include/jni.h              /usr/local/include/jni.h
 
 FROM common as cpu_final
-ARG BASE_CUDA_VERSION=11.8
-ARG DEVTOOLSET_VERSION=11
+ARG BASE_CUDA_VERSION=12.6
+ARG DEVTOOLSET_VERSION=13
 # Install Anaconda
 ADD ./common/install_conda_docker.sh install_conda.sh
 RUN bash ./install_conda.sh && rm install_conda.sh
@@ -130,7 +130,8 @@ ENV LD_LIBRARY_PATH=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64:/op
 RUN for cpython_version in "cp312-cp312" "cp313-cp313" "cp313-cp313t"; do \
     /opt/python/${cpython_version}/bin/python -m pip install setuptools wheel; \
     done;
-
+ADD ./common/patch_libstdc.sh patch_libstdc.sh
+RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
 
 # cmake-3.18.4 from pip; force in case cmake3 already exists
 RUN yum install -y python3-pip && \
@@ -148,7 +149,7 @@ FROM cpu_final as rocm_final
 ARG ROCM_VERSION=6.0
 ARG PYTORCH_ROCM_ARCH
 ENV PYTORCH_ROCM_ARCH ${PYTORCH_ROCM_ARCH}
-ARG DEVTOOLSET_VERSION=11
+ARG DEVTOOLSET_VERSION=13
 ENV LDFLAGS="-Wl,-rpath=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib64 -Wl,-rpath=/opt/rh/gcc-toolset-${DEVTOOLSET_VERSION}/root/usr/lib"
 # Somewhere in ROCm stack, we still use non-existing /opt/rocm/hip path,
 # below workaround helps avoid error
@@ -157,8 +158,11 @@ ENV ROCM_PATH /opt/rocm
 # and avoid 3.21.0 cmake+ninja issues with ninja inserting "-Wl,--no-as-needed" in LINK_FLAGS for static linker
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
+# replace the libdrm in /opt/amdgpu with custom amdgpu.ids lookup path
 ADD ./common/install_rocm_drm.sh install_rocm_drm.sh
 RUN bash ./install_rocm_drm.sh && rm install_rocm_drm.sh
+# ROCm 6.4 rocm-smi depends on system drm.h header
+RUN yum install -y libdrm-devel
 ENV MKLROOT /opt/intel
 ADD ./common/install_rocm_magma.sh install_rocm_magma.sh
 RUN bash ./install_rocm_magma.sh ${ROCM_VERSION} && rm install_rocm_magma.sh
@@ -172,6 +176,6 @@ ENV XPU_DRIVER_TYPE ROLLING
 RUN python3 -m pip install --upgrade pip && \
     python3 -mpip install cmake==3.28.4
 ADD ./common/install_xpu.sh install_xpu.sh
-ENV XPU_VERSION 2025.0
+ENV XPU_VERSION 2025.3
 RUN bash ./install_xpu.sh && rm install_xpu.sh
 RUN pushd /opt/_internal && tar -xJf static-libs-for-embedding-only.tar.xz && popd

@@ -130,7 +130,7 @@ This part is a little tedious but it seems to work. May want to explore using pa
 5. Install the google doc extension [docs to markdown](https://github.com/evbacher/gd2md-html)
 6. Start to compile back down these markdown files into a single markdown file.
 
-`TODO`: This is by far the most manual process and is ripe for automation. If the next person up would like to investigate Google Doc APIS there is some room hor improvement here.
+`TODO`: This is by far the most manual process and is ripe for automation. If the next person up would like to investigate Google Doc APIS there is some room for improvement here.
 
 ### Part 4: Cherry Picks
 
@@ -187,7 +187,7 @@ You will then create a release at [Pytorch Release](https://github.com/pytorch/p
 
 #### Tidbits
 You will probably have a release note that doesn't fit into the character limit of github. I used the following regex:
-`\[#(\d+)\]\(https://github.com/pytorch/pytorch/pull/\d+\)` to replace the full lunks to (#<pull-request-number>).
+`\[#(\d+)\]\(https://github.com/pytorch/pytorch/pull/\d+\)` to replace the full links to (#<pull-request-number>).
 This will get formatted correctly in the github UI and can be checked when creating a draft release.
 
 

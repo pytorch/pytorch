@@ -73,7 +73,6 @@
 #include <ATen/ops/where_native.h>
 #include <ATen/ops/zeros_like.h>
 
-#include <iostream>
 #include <utility>
 #endif
 
@@ -89,6 +88,16 @@ static inline void check_for_unsupported_isin_dtype(const ScalarType type) {
       type);
 }
 
+static inline void check_for_unsupported_clamp_dtypes(ScalarType dtype) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !isComplexType(dtype), "clamp is not supported for complex types");
+}
+
+static inline void check_for_unsupported_clamp_dtypes(const Scalar& s) {
+  TORCH_CHECK_NOT_IMPLEMENTED(
+      !s.isComplex(), "clamp is not supported for complex types");
+}
+
 TORCH_META_FUNC(clamp)
 (const Tensor& self, const OptionalScalarRef min, const OptionalScalarRef max) {
   if (!min && !max) {
@@ -96,9 +105,8 @@ TORCH_META_FUNC(clamp)
         false, "torch.clamp: At least one of 'min' or 'max' must not be None");
   }
   // Manual type promotion, since scalars have to participate in it
-  ScalarType result_type = self.scalar_type();
-  TORCH_CHECK(
-      !isComplexType(result_type), "clamp is not supported for complex types");
+  auto result_type = self.scalar_type();
+  check_for_unsupported_clamp_dtypes(result_type);
   // Floating is the highest supported
   if (!isFloatingType(result_type)) {
     at::native::ResultTypeState state = {};
@@ -122,8 +130,7 @@ TORCH_META_FUNC(clamp)
         self.dtype());
   }
   // make sure scalars weren't complex
-  TORCH_CHECK(
-      !isComplexType(result_type), "clamp is not supported for complex types");
+  check_for_unsupported_clamp_dtypes(result_type);
   build_unary_op(maybe_get_output(), self.to(result_type));
 }
 
@@ -132,9 +139,7 @@ TORCH_META_FUNC2(clamp, Tensor)
   TORCH_CHECK(
       min || max,
       "torch.clamp: At least one of 'min' or 'max' must not be None");
-  TORCH_CHECK(
-      !isComplexType(self.scalar_type()),
-      "clamp is not supported for complex types");
+  check_for_unsupported_clamp_dtypes(self.scalar_type());
 #define CLAMP_CONFIG()                      \
   TensorIteratorConfig()                    \
       .set_check_mem_overlap(true)          \
@@ -157,10 +162,9 @@ TORCH_META_FUNC(clamp_max)(const Tensor& self, const Scalar& max) {
   // we could wrap max into tensor and send to tensor overload,
   // but relu is implemented via clamp_min, so for perf an uniformity reasons
   // do a faster but correct thing
-  ScalarType result_type = self.scalar_type();
-  TORCH_CHECK(
-      !isComplexType(result_type), "clamp is not supported for complex types");
-  TORCH_CHECK(!max.isComplex(), "clamp is not supported for complex types");
+  auto result_type = self.scalar_type();
+  check_for_unsupported_clamp_dtypes(result_type);
+  check_for_unsupported_clamp_dtypes(max);
   // Floating is the highest supported
   if (!isFloatingType(result_type)) {
     auto result_type = at::native::result_type(self, max);
@@ -183,10 +187,9 @@ TORCH_META_FUNC2(clamp_max, Tensor)(const Tensor& self, const Tensor& max) {
 }
 
 TORCH_META_FUNC(clamp_min)(const Tensor& self, const Scalar& min) {
-  ScalarType result_type = self.scalar_type();
-  TORCH_CHECK(
-      !isComplexType(result_type), "clamp is not supported for complex types");
-  TORCH_CHECK(!min.isComplex(), "clamp is not supported for complex types");
+  auto result_type = self.scalar_type();
+  check_for_unsupported_clamp_dtypes(result_type);
+  check_for_unsupported_clamp_dtypes(min);
   // Floating is the highest supported
   if (!isFloatingType(result_type)) {
     auto result_type = at::native::result_type(self, min);
@@ -485,13 +488,13 @@ void _assert_async_cpu(const Tensor& self) {
 void _assert_async_msg_cpu(const Tensor& self, std::string_view assert_msg) {
   TORCH_CHECK(
       native::is_nonzero(self),
-      assert_msg != "" ? assert_msg : "Assertion is failed");
+      !assert_msg.empty() ? assert_msg : "Assertion is failed");
 }
 
 void _assert_scalar(const Scalar& scalar, std::string_view assert_msg) {
   TORCH_SYM_CHECK(
       scalar.toSymBool(),
-      assert_msg != "" ? assert_msg : "Assertion is failed");
+      !assert_msg.empty() ? assert_msg : "Assertion is failed");
 }
 
 Tensor _functional_assert_scalar(
@@ -511,7 +514,7 @@ Tensor _functional_assert_async_msg_cpu(
 }
 
 void _print(std::string_view s) {
-  std::cout << s << "\n";
+  std::cout << s << '\n';
 }
 
 // Sorting-based algorithm for isin(); used when the number of test elements is
@@ -843,7 +846,7 @@ TORCH_IMPL_FUNC(clamp_Tensor_out)
 (const Tensor& self,
  const OptionalTensorRef min,
  const OptionalTensorRef max,
- const Tensor&) {
+ const Tensor& /*unused*/) {
   if (min && max) {
     clamp_stub(device_type(), *this);
   } else if (min) {

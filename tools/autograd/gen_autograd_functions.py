@@ -272,7 +272,7 @@ PY_RAW_GETSETDEF_STRUCT = CodeTemplate(
 # Getter templates
 GETTER_DEFINITION = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   auto prop = static_cast<${op}*>(self->cdata.get())->${name};
   ${body}
@@ -283,7 +283,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
   ${body}
@@ -294,7 +294,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_RAW_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto& prop = static_cast<${op}*>(self->cdata.get())->${name}_;
   ${body}
@@ -305,7 +305,7 @@ PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_VEC_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto *node = static_cast<${op}*>(self->cdata.get());
   const auto& prop = node->${name}_;
@@ -321,7 +321,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_RAW_VEC_SAVEDVAR = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto *node = static_cast<${op}*>(self->cdata.get());
   const auto& prop = node->${name}_;
@@ -337,7 +337,7 @@ PyObject* THP${op}_${name}_raw_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_OPT = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
   if (!opt_prop.has_value()) {
@@ -352,7 +352,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
 
 GETTER_DEFINITION_OPT_ARRAYREF = CodeTemplate(
     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   auto opt_prop = static_cast<${op}*>(self->cdata.get())->${name};
   if (!opt_prop.list.has_value()) {
@@ -555,8 +555,7 @@ def gen_autograd_functions_lib(
             fname,
             lambda: {
                 "generated_comment": "@"
-                + f"generated from {fm.template_dir_for_comments()}/"
-                + fname,
+                + f"generated from {fm.template_dir_for_comments()}/{fname}",
                 "autograd_function_declarations": declarations,
                 "autograd_function_definitions": definitions,
             },
@@ -832,7 +831,7 @@ def process_function(info: DifferentiabilityInfo, template: CodeTemplate) -> str
             getter_definitions.append(
                 CodeTemplate(
                     """\
-PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
+static PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
   HANDLE_TH_ERRORS
   const auto *node = static_cast<${op}*>(self->cdata.get());
   const auto& prop = node->${name};
@@ -864,6 +863,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
             saved_variables.append(f"{type.cpp_type()} {name};")
 
             if type in MISC_GETTER_DEFS:
+                # pyrefly: ignore [bad-index, index-error]
                 getter_def, body = MISC_GETTER_DEFS[type]
                 getter_definitions.append(
                     getter_def.substitute(op=info.op, name=name, body=body)
@@ -1034,6 +1034,7 @@ PyObject* THP${op}_${name}_getter(THPCppFunction *self, void *_unused) {
     unpack_ivalues = []
     for typ, name in zip(apply_functional_args_ref_types, apply_functional_args):
         typ = typ.removesuffix("&")
+        # pyrefly: ignore [bad-argument-type]
         unpack_ivalues.append(f"auto {name} = packed_args.unpack<{typ}>();")
 
     schema_args = [f"std::array<bool, {len(input_name_to_idx)}>"]

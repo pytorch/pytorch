@@ -107,6 +107,7 @@ extra_op_data = {
     "flatten": ExtraOpData(is_view=True, dim_args=[["start_dim", "end_dim"]]),
     "flip": ExtraOpData(dim_args=[["dims..."]]),
     "gather": ExtraOpData(dim_args=[["dim"]]),
+    "hash_tensor": ExtraOpData(dim_args=[["dim..."]]),
     "imag": ExtraOpData(is_view=True),
     "index_add": ExtraOpData(dim_args=[["dim"]]),
     "index_copy": ExtraOpData(dim_args=[["dim"]]),

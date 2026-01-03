@@ -1,8 +1,6 @@
 #include <torch/csrc/jit/passes/onnx/pattern_conversion/autograd_function_process.h>
 
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/onnx/helper.h>
-#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 
 namespace torch::jit {
 

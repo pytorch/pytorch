@@ -244,7 +244,7 @@ Tensor& addmv_out_sparse_compressed_cuda(
       return result.zero_();
     } else {
       return at::mul_out(
-          const_cast<Tensor&>(result),
+          result,
           self,
           at::native::scalar_tensor(
               beta,

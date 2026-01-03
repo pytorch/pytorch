@@ -62,15 +62,12 @@ static Tensor& fill_scalar_mps_impl(Tensor& self, const Scalar& value) {
   return self;
 }
 
-// returns false if tensor cannot be filled with fillBuffer()
-static bool fill_mps_tensor_(Tensor& self, uint8_t value) {
-  if (self.is_contiguous()) {
-    MPSStream* stream = getCurrentMPSStream();
-    auto storage_byte_offset = self.storage_offset() * self.itemsize();
-    stream->fill(mps::getMTLBufferStorage(self), value, self.nbytes(), storage_byte_offset);
-    return true;
-  }
-  return false;
+static Tensor& fill_mps_tensor_(Tensor& self, uint8_t value) {
+  TORCH_INTERNAL_ASSERT(self.is_contiguous());
+  const auto stream = getCurrentMPSStream();
+  auto storage_byte_offset = self.storage_offset() * self.itemsize();
+  stream->fill(mps::getMTLBufferStorage(self), value, self.nbytes(), storage_byte_offset);
+  return self;
 }
 
 Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
@@ -89,8 +86,20 @@ Tensor& fill_scalar_mps(Tensor& self, const Scalar& value) {
     return self;
   }
   // check if it's possible to use fillBuffer() to fill the Tensor's storage
-  if (value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
-    return self;
+  if (self.is_contiguous()) {
+    if (value.toDouble() == 0.0) {
+      return fill_mps_tensor_(self, 0);
+    }
+    if (self.scalar_type() == kBool) {
+      return fill_mps_tensor_(self, value.toBool());
+    }
+    if (self.scalar_type() == kByte) {
+      return fill_mps_tensor_(self, value.toByte());
+    }
+    if (self.scalar_type() == kChar) {
+      return fill_mps_tensor_(self, value.toChar());
+    }
+  }
 
   return fill_scalar_mps_impl(self, value);
 }
@@ -101,8 +110,6 @@ Tensor& fill_tensor_mps_(Tensor& self, const Tensor& value) {
               value.dim(),
               " dimensions.");
   Scalar scalar_value = value.item();
-  if (scalar_value.toDouble() == 0.0 && fill_mps_tensor_(self, 0) == true)
-    return self;
   return fill_scalar_mps(self, scalar_value);
 }
 

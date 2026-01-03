@@ -21,6 +21,7 @@
 #include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/Types.hpp>
 #include <torch/csrc/distributed/c10d/Utils.hpp>
+#include <torch/csrc/distributed/c10d/logger.hpp>
 
 #include <ATen/ThreadLocalState.h>
 
@@ -64,9 +65,11 @@ class TORCH_API ProcessGroupGloo : public Backend {
   class TORCH_API AsyncWork : public Work {
    public:
     explicit AsyncWork(
+        std::shared_ptr<gloo::Context> context,
         std::vector<std::vector<at::Tensor>> outputTensors,
         OpType opType,
         uint64_t seq,
+        std::chrono::milliseconds timeout,
         const char* profilingTitle = nullptr,
         const std::optional<std::vector<at::Tensor>>& inputTensors =
             std::nullopt);
@@ -81,13 +84,24 @@ class TORCH_API ProcessGroupGloo : public Backend {
 
     c10::intrusive_ptr<c10::ivalue::Future> getFuture() override;
     uint64_t getSequencenumber() const override;
-
+    std::chrono::milliseconds getTimeout() const;
+    virtual const std::vector<at::Tensor> getInputTensors() = 0;
+    virtual const std::vector<at::Tensor> getOutputTensors() = 0;
+    inline std::string getProfilerTitle() const {
+      return profilingTitle_;
+    }
     inline at::ThreadLocalState getTLS() const {
       return tls_;
     }
 
    protected:
     friend class ProcessGroupGloo;
+    // unique id used to tell the trace buffer that this
+    // work has completed
+    std::optional<uint64_t> trace_id_;
+    std::optional<uint64_t> trace_reset_epoch_;
+    std::shared_ptr<gloo::Context> context_;
+    const std::chrono::milliseconds timeout_;
 
    private:
     void finishWorkGloo();
@@ -100,6 +114,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
     c10::intrusive_ptr<at::ivalue::Future> future_;
     std::function<void()> recordFunctionBeforeCallback_;
     const uint64_t seq_;
+    std::string profilingTitle_;
     at::ThreadLocalState tls_;
   };
 
@@ -174,6 +189,10 @@ class TORCH_API ProcessGroupGloo : public Backend {
     }
 #endif
 
+    const c10::intrusive_ptr<::c10d::Store>& _getStore() const {
+      return store_;
+    }
+
    protected:
     c10::intrusive_ptr<::c10d::Store> store_;
   };
@@ -223,7 +242,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
    protected:
     at::Tensor tensor_;
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
-    int srcRank_;
+    int srcRank_{-1};
     const uint64_t seq_;
   };
 
@@ -237,12 +256,19 @@ class TORCH_API ProcessGroupGloo : public Backend {
       return c10::make_intrusive<Options>(timeout);
     }
 
+    static c10::intrusive_ptr<Options> create_default(
+        std::chrono::milliseconds timeout = kBackendDefaultTimeout);
+
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
-    int threads;
+    int threads{2};
   };
 
   const std::string getBackendName() const override {
     return std::string(GLOO_BACKEND_NAME);
+  }
+
+  bool supportsSplitting() const override {
+    return true;
   }
 
   // Helper functions to create a new device object.
@@ -277,6 +303,30 @@ class TORCH_API ProcessGroupGloo : public Backend {
   c10::intrusive_ptr<Options> getOptions() {
     return options_;
   }
+
+  void setTimeout(std::chrono::milliseconds timeout) override {
+    options_->timeout = timeout;
+    for (auto& context : contexts_) {
+      context->setTimeout(timeout);
+    }
+  }
+
+  c10::intrusive_ptr<Backend::Options> getBackendOptions() override {
+    return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
+  }
+
+  c10::intrusive_ptr<Backend> split(
+      const c10::intrusive_ptr<Store>& store,
+      const std::vector<int>& ranks,
+      const c10::intrusive_ptr<Backend::Options>& opts) override;
+
+  c10::intrusive_ptr<Backend> merge(
+      const c10::intrusive_ptr<Store>& store,
+      const c10::intrusive_ptr<Backend::Options>& opts,
+      const int& rank,
+      const int& size) override;
+
+  const std::vector<uint64_t>& groupRanks() const;
 
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& tensors,
@@ -404,13 +454,13 @@ class TORCH_API ProcessGroupGloo : public Backend {
   // a single device), you need multiple contexts.
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;
   std::vector<std::thread> threads_;
-  bool stop_;
+  bool stop_{false};
 
   // Incremented for every collective we kick off.
   // The value is used as tag for collective operations. Collectives are kicked
   // off in identical order across processes. Therefore the tag can be used
   // to match up operations during concurrent execution.
-  uint32_t collectiveCounter_;
+  uint32_t collectiveCounter_{0};
 
   // Returns next collective tag to use (uses collectiveCounter_).
   uint32_t nextTag();
@@ -438,6 +488,9 @@ class TORCH_API ProcessGroupGloo : public Backend {
   std::condition_variable workProduceCV_;
   std::condition_variable workConsumeCV_;
   uint64_t seq_{0};
+  size_t local_id_;
+  std::shared_ptr<ProcessGroupStatus> pgStatus_ =
+      std::make_shared<ProcessGroupStatus>();
 };
 
 } // namespace c10d

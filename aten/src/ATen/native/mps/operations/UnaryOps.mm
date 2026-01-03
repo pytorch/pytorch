@@ -2,8 +2,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UnaryOps.h>
 #include <ATen/native/mps/Copy.h>
-#include <ATen/native/mps/MPSGraphSonomaOps.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -12,10 +10,8 @@
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_copy_from_and_resize.h>
-#include <ATen/ops/abs_native.h>
 #include <ATen/ops/acos_native.h>
 #include <ATen/ops/acosh_native.h>
-#include <ATen/ops/angle_native.h>
 #include <ATen/ops/asin_native.h>
 #include <ATen/ops/asinh_native.h>
 #include <ATen/ops/atan_native.h>
@@ -27,24 +23,17 @@
 #include <ATen/ops/cumsum_native.h>
 #include <ATen/ops/erf_native.h>
 #include <ATen/ops/exp2_native.h>
-#include <ATen/ops/expm1_native.h>
 #include <ATen/ops/frac_native.h>
 #include <ATen/ops/imag.h>
-#include <ATen/ops/log10_native.h>
-#include <ATen/ops/log1p_native.h>
-#include <ATen/ops/log2_native.h>
-#include <ATen/ops/log_native.h>
 #include <ATen/ops/logical_not_native.h>
 #include <ATen/ops/logit_backward_native.h>
 #include <ATen/ops/logit_native.h>
 #include <ATen/ops/neg.h>
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/real.h>
-#include <ATen/ops/reciprocal_native.h>
 #include <ATen/ops/reshape.h>
 #include <ATen/ops/rsqrt_native.h>
 #include <ATen/ops/sgn_native.h>
-#include <ATen/ops/sigmoid_native.h>
 #include <ATen/ops/sign_mps_dispatch.h>
 #include <ATen/ops/sign_native.h>
 #include <ATen/ops/signbit_native.h>
@@ -191,7 +180,6 @@ TORCH_IMPL_FUNC(sign_out_mps)(const Tensor& self, const Tensor& output) {
 
 REGISTER_MPS_UNARY_STUB(ceil, ceil);
 REGISTER_MPS_UNARY_STUB(floor, floor);
-REGISTER_MPS_UNARY_STUB(round, round);
 REGISTER_MPS_UNARY_STUB(trunc, truncate);
 
 #define CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(func_out, func_stub)                                         \
@@ -201,67 +189,9 @@ REGISTER_MPS_UNARY_STUB(trunc, truncate);
     });                                                                                                          \
   }
 
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(exp2_out_mps, exponentBase2)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(reciprocal_out_mps, reciprocal)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(neg_out_mps, negative)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log_out_mps, logarithm)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log10_out_mps, logarithmBase10)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(log2_out_mps, logarithmBase2)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(erf_out_mps, erf)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(sin_out_mps, sin)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(cos_out_mps, cos)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(tan_out_mps, tan)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asin_out_mps, asin)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acos_out_mps, acos)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atan_out_mps, atan)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(sinh_out_mps, sinh)
-CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(cosh_out_mps, cosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(asinh_out_mps, asinh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(acosh_out_mps, acosh)
 CREATE_MPS_STRUCTURED_UNARY_TORCH_IMPL_FUNC(atanh_out_mps, atanh)
-
-TORCH_IMPL_FUNC(rsqrt_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "rsqrt_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-#ifdef __MAC_15_0
-    if (is_macos_13_or_newer(MacOSVersion::MACOS_VER_15_0_PLUS)) {
-      return [mpsGraph reciprocalSquareRootWithTensor:inputTensor name:nil];
-    }
-#endif // __MAC_15_0
-    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wdeprecated-declarations")
-    return [mpsGraph reverseSquareRootWithTensor:inputTensor name:nil];
-    C10_DIAGNOSTIC_POP()
-  });
-}
-
-Tensor& abs_out_mps(const Tensor& self, Tensor& output) {
-  using namespace mps;
-
-  if (!output.is_same_size(self)) {
-    output.resize_(self.sizes());
-  }
-
-  if (self.numel() == 0) {
-    return output;
-  }
-
-  if (supportsComplex() || !self.is_complex()) {
-    unary_op_noresize(self, output, "abs_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-      auto rc = [mpsGraph absoluteWithTensor:inputTensor name:nil];
-      if (self.is_complex()) {
-        rc = [mpsGraph realPartOfTensor:rc name:nil];
-      }
-      return rc;
-    });
-  } else {
-    Tensor realInput = at::view_as_real(self);
-    unary_op_noresize(
-        realInput, output, "abs_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-          auto rc = lengthOfComplexAsReal(mpsGraph, inputTensor);
-          return [mpsGraph reshapeTensor:rc withShape:getMPSShape(output) name:nil];
-        });
-  }
-  return output;
-}
 
 Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
   auto bool_self = self.to(ScalarType::Bool);
@@ -269,51 +199,6 @@ Tensor& logical_not_out_mps(const Tensor& self, Tensor& output) {
     return [mpsGraph notWithTensor:inputTensor name:nil];
   });
   return output;
-}
-
-Tensor& angle_out_mps(const Tensor& self, Tensor& output) {
-  if (mps::supportsComplex()) {
-    mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-      auto realPart = [mpsGraph realPartOfTensor:inputTensor name:nil];
-      auto imagPart = [mpsGraph imaginaryPartOfTensor:inputTensor name:nil];
-      return [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:realPart name:nil];
-    });
-    return output;
-  } else {
-    TORCH_CHECK(!self.is_complex(), "MPS does not support angle with complex input on macOS13")
-    mps::unary_op(self, output, "angle_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-      // On macOS 13 with non-complex input, realPartOfTensor and imaginaryPartOfTensor are
-      // not available, and NaN is not propagated correctly:
-      auto imagPart = [mpsGraph constantWithScalar:0.0 shape:inputTensor.shape dataType:inputTensor.dataType];
-      auto result = [mpsGraph atan2WithPrimaryTensor:imagPart secondaryTensor:inputTensor name:nil];
-      auto nanMask = [mpsGraph isNaNWithTensor:inputTensor name:nil];
-      return [mpsGraph selectWithPredicateTensor:nanMask
-                             truePredicateTensor:inputTensor
-                            falsePredicateTensor:result
-                                            name:nil];
-    });
-    return output;
-  }
-}
-
-Tensor angle_mps(const Tensor& self) {
-  const auto float_type = c10::isIntegralType(self.scalar_type(), /*includeBool=*/true)
-      ? c10::typeMetaToScalarType(c10::get_default_dtype())
-      : c10::toRealValueType(self.scalar_type());
-  Tensor result = at::empty({0}, self.options().dtype(float_type));
-  return angle_out_mps(self, result);
-}
-
-TORCH_IMPL_FUNC(sigmoid_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "sigmoid_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    return [mpsGraph sigmoidWithTensor:inputTensor name:nil];
-  });
-}
-
-TORCH_IMPL_FUNC(log1p_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "log1p_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    return mps::log1p(mpsGraph, inputTensor);
-  });
 }
 
 TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
@@ -326,14 +211,6 @@ TORCH_IMPL_FUNC(frac_out_mps)(const Tensor& self, const Tensor& output) {
                                       falsePredicateTensor:[mpsGraph floorWithTensor:inputTensor name:nil]
                                                       name:nil];
     return [mpsGraph subtractionWithPrimaryTensor:inputTensor secondaryTensor:truncTensor name:nil];
-  });
-}
-
-TORCH_IMPL_FUNC(expm1_out_mps)(const Tensor& self, const Tensor& output) {
-  mps::unary_op(self, output, "expm1_out_mps", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-    MPSGraphTensor* oneTensor = [mpsGraph constantWithScalar:1.0 shape:@[ @1 ] dataType:inputTensor.dataType];
-    MPSGraphTensor* ePowTensor = [mpsGraph exponentWithTensor:inputTensor name:nil];
-    return [mpsGraph subtractionWithPrimaryTensor:ePowTensor secondaryTensor:oneTensor name:nil];
   });
 }
 
@@ -446,7 +323,6 @@ static void cumulative_op_impl(const Tensor& self,
                                const Tensor& result,
                                MPSCumulativeOpType cumulativeOpType,
                                const std::string& op_name) {
-  bool macOS13_3_plus = is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_3_PLUS);
   auto nDims = self.dim();
   auto wrapped_dim = maybe_wrap_dim(dim, nDims);
   TORCH_CHECK(wrapped_dim >= 0 && wrapped_dim < std::max(1LL, self.ndimension()),
@@ -464,11 +340,6 @@ static void cumulative_op_impl(const Tensor& self,
   // int32 fixed in macOS 13.3
   bool castInputData = (isIntegralType(input.scalar_type(), true) && input.scalar_type() != ScalarType::Int &&
                         input.scalar_type() != ScalarType::Long);
-
-  TORCH_CHECK(macOS13_3_plus || input.scalar_type() != ScalarType::Long,
-              "MPS does not support ",
-              op_name,
-              " op with int64 input. Support has been added in macOS 13.3");
 
   mps::unary_op(
       input, result, op_name + std::to_string(dim), ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
@@ -524,17 +395,10 @@ TORCH_IMPL_FUNC(sgn_out_mps)(const Tensor& self, const Tensor& output) {
 
 Tensor& conj_physical_out_mps(const Tensor& self, Tensor& result) {
   TORCH_CHECK(self.is_complex());
-  if (!mps::supportsComplex()) {
-    if (!result.is_same_size(self)) {
-      result.resize_(self.sizes());
-    }
-    at::real(result).copy_(at::real(self));
-    at::imag(result).copy_(at::neg(at::imag(self)));
-  } else {
-    mps::unary_op(self, result, "conj", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
-      return [mpsGraph conjugateWithTensor:inputTensor name:nil];
-    });
-  }
+  TORCH_CHECK(self.dtype() != at::kComplexDouble);
+  mps::unary_op(self, result, "conj", ^MPSGraphTensor*(MPSGraph* mpsGraph, MPSGraphTensor* inputTensor) {
+    return [mpsGraph conjugateWithTensor:inputTensor name:nil];
+  });
   return result;
 }
 

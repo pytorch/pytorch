@@ -4,13 +4,13 @@ import functools
 import itertools
 import logging
 import sys
-from collections.abc import Iterable
-from typing import Callable, Optional, Union
+from collections.abc import Callable, Iterable
+from typing import Optional, Union
 from unittest.mock import patch
 
 import sympy
 
-from .. import codecache, config, ir
+from .. import config, ir
 from ..autotune_process import CppBenchmarkRequest, TensorMeta
 from ..utils import IndentedBuffer, Placeholder, unique
 from ..virtualized import V
@@ -85,6 +85,7 @@ class CppTemplate(KernelTemplate):
         bmreq = CppBenchmarkRequest(
             kernel_name=kernel_name,
             input_tensor_meta=TensorMeta.from_irnodes(self.input_nodes),
+            # pyrefly: ignore [bad-argument-type]
             output_tensor_meta=TensorMeta.from_irnodes(self.output_node),
             extra_args=extra_args,
             source_code=code,
@@ -112,6 +113,7 @@ class CppTemplate(KernelTemplate):
             kernel_hash_name,
             self.name,
             self.input_nodes,
+            # pyrefly: ignore [bad-index, index-error]
             self.output_node[0].get_layout()
             if isinstance(self.output_node, Iterable)
             else self.output_node.get_layout(),
@@ -122,7 +124,7 @@ class CppTemplate(KernelTemplate):
 
     def header(self) -> IndentedBuffer:
         res = IndentedBuffer()
-        res.writeline(codecache.cpp_prefix())
+        res.writeline("#include <torch/csrc/inductor/cpp_prefix.h>")
         # TODO: add c10::ForcedUnroll test to test_aoti_abi_check
         res.splice("""#include <c10/util/Unroll.h>""")
         res.splice("""#include <torch/csrc/inductor/aoti_torch/c/shim.h>""")
@@ -131,7 +133,7 @@ class CppTemplate(KernelTemplate):
             "win32",
         ]
         if enable_kernel_profile:
-            res.writelines(["#include <ATen/record_function.h>"])
+            res.writelines(["#include <torch/csrc/inductor/aoti_runtime/utils.h>"])
         return res
 
     def render(self, **kwargs) -> str:

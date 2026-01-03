@@ -1,5 +1,6 @@
 #include <ATen/ThreadLocalState.h>
 #include <distributed/c10d/ProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/cuda/StreamBlock.hpp>
 
 #include <torch/csrc/distributed/c10d/Work.hpp>
 #include <utility>
@@ -98,6 +99,15 @@ bool Work::wait(std::chrono::milliseconds timeout) {
   synchronize();
   // Always return true, because abort API is not implemented.
   return true;
+}
+
+void Work::blockCurrentStream() {
+  // block cuda stream indefinitely until work is completed.
+  std::shared_ptr<c10d::cuda::StreamBlock> handle =
+      c10d::cuda::block_stream(std::chrono::milliseconds(0));
+
+  getFuture()->addCallback(
+      [handle](c10::ivalue::Future& future) { handle->abort(); });
 }
 
 void Work::abort() {

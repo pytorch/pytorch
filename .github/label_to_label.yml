@@ -16,6 +16,11 @@
   then:
   - "module: pt2-dispatcher"
 - any:
+  - "vllm-compile"
+  then:
+  - "module: vllm"
+  - "oncall: pt2"
+- any:
   - "module: vmap"
   then:
   - "module: functorch"
@@ -28,10 +33,6 @@
   then:
   - "module: dynamo"
 - any:
-  - "module: flex attention"
-  then:
-  - "module: higher order operators"
-- any:
   - "module: aotinductor"
   then:
   - "oncall: export"
@@ -42,9 +43,18 @@
   - "module: aotinductor"
   - "module: cudagraphs"
   - "oncall: export"
-  - "module: startup-tracing-compile"
+  - "module: compile-time"
   - "module: compiled autograd"
   - "module: flex attention"
   - "module: dynamic shapes"
   then:
   - "oncall: pt2"
+- any:
+  - "release notes: distributed (c10d)"
+  - "release notes: distributed (symm_mem)"
+  - "release notes: distributed (pipeline)"
+  - "release notes: distributed (fsdp)"
+  - "release notes: distributed (dtensor)"
+  - "oncall: distributed"
+  then:
+  - "ciflow/h100-distributed"

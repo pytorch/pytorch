@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 from torch import Tensor
 
@@ -22,18 +21,18 @@ class AdamW(Adam):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
-        betas: tuple[Union[float, Tensor], Union[float, Tensor]] = (0.9, 0.999),
+        lr: float | Tensor = 1e-3,
+        betas: tuple[float | Tensor, float | Tensor] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 1e-2,
         amsgrad: bool = False,
         *,
         maximize: bool = False,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         capturable: bool = False,
         differentiable: bool = False,
-        fused: Optional[bool] = None,
-    ):
+        fused: bool | None = None,
+    ) -> None:
         super().__init__(
             params,
             lr,
@@ -102,8 +101,9 @@ AdamW.__doc__ = (
         lr (float, Tensor, optional): learning rate (default: 1e-3). A tensor LR
             is not yet supported for all our implementations. Please use a float
             LR if you are not also specifying fused=True or capturable=True.
-        betas (Tuple[float, float], optional): coefficients used for computing
-            running averages of gradient and its square (default: (0.9, 0.999))
+        betas (tuple[Union[float, Tensor], Union[float, Tensor]], optional):
+            coefficients used for computing running averages of gradient and
+            its square. If a tensor is provided, must be 1-element. (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay coefficient (default: 1e-2)
@@ -136,22 +136,22 @@ def adamw(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     capturable: bool = False,
     differentiable: bool = False,
-    fused: Optional[bool] = None,
-    grad_scale: Optional[Tensor] = None,
-    found_inf: Optional[Tensor] = None,
+    fused: bool | None = None,
+    grad_scale: Tensor | None = None,
+    found_inf: Tensor | None = None,
     has_complex: bool = False,
     *,
     amsgrad: bool,
-    beta1: float,
-    beta2: float,
-    lr: Union[float, Tensor],
+    beta1: float | Tensor,
+    beta2: float | Tensor,
+    lr: float | Tensor,
     weight_decay: float,
     eps: float,
     maximize: bool,
-):
+) -> None:
     r"""Functional API that performs AdamW algorithm computation.
 
     See :class:`~torch.optim.AdamW` for details.

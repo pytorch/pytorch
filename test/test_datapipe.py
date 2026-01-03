@@ -520,7 +520,7 @@ class TestIterableDataPipeBasic(TestCase):
         self.assertEqual(list(range(9)), list(n))
 
         # Functional Test: Uneven DataPipes
-        source_numbers = list(range(0, 10)) + [10, 12]
+        source_numbers = list(range(10)) + [10, 12]
         numbers_dp = dp.iter.IterableWrapper(source_numbers)
         n1, n2 = numbers_dp.demux(2, lambda x: x % 2)
         self.assertEqual([0, 2, 4, 6, 8, 10, 12], list(n1))
@@ -573,7 +573,7 @@ class TestCaptureDataFrame(TestCase):
 
 class TestDataFramesPipes(TestCase):
     """
-    Most of test will fail if pandas instaled, but no dill available.
+    Most of test will fail if pandas installed, but no dill available.
     Need to rework them to avoid multiple skips.
     """
 
@@ -658,7 +658,7 @@ class TestDataFramesPipes(TestCase):
         ]
 
         actual_i = []
-        for i, j in df_numbers:
+        for i, _ in df_numbers:
             actual_i.append(i)
         self.assertEqual(expected_i, actual_i)
 
@@ -1136,7 +1136,7 @@ class TestFunctionalIterDataPipe(TestCase):
                     )
                 break
         with warnings.catch_warnings(record=True) as wa:
-            for i, (n1, n2) in enumerate(zip(dp1, dp2)):
+            for n1, n2 in zip(dp1, dp2):
                 output1.append(n1)
                 output2.append(n2)
             self.assertEqual(len(wa), 1)
@@ -1257,7 +1257,7 @@ class TestFunctionalIterDataPipe(TestCase):
         )
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(5, 10)), output1)
-        self.assertEqual(list(range(0, 5)), output2)
+        self.assertEqual(list(range(5)), output2)
 
         # Functional Test: values of the same classification are lumped together, and unlimited buffer
         with warnings.catch_warnings(record=True) as wa:
@@ -1271,7 +1271,7 @@ class TestFunctionalIterDataPipe(TestCase):
             self.assertRegex(str(wa[-1].message), r"Unlimited buffer size is set")
         output1, output2 = list(dp1), list(dp2)
         self.assertEqual(list(range(5, 10)), output1)
-        self.assertEqual(list(range(0, 5)), output2)
+        self.assertEqual(list(range(5)), output2)
 
         # Functional Test: classifier returns a value outside of [0, num_instance - 1]
         dp0 = input_dp.demux(num_instances=1, classifier_fn=lambda x: x % 2)
@@ -1887,7 +1887,7 @@ class TestFunctionalIterDataPipe(TestCase):
         with self.assertRaises(ValueError):
             list(filter_dp)
 
-        # Funtional Test: Specify input_col
+        # Functional Test: Specify input_col
         tuple_input_ds = dp.iter.IterableWrapper([(d - 1, d, d + 1) for d in range(10)])
 
         # Single input_col
@@ -2478,7 +2478,7 @@ class TestTyping(TestCase):
             else:
                 self.assertFalse(issubinstance(d, S))
             for t in basic_type:
-                if type(d) == t:
+                if type(d) is t:
                     self.assertTrue(issubinstance(d, t))
                 else:
                     self.assertFalse(issubinstance(d, t))
@@ -2577,7 +2577,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP4, IterDataPipe))
         dp4 = DP4()
-        self.assertTrue(dp4.type.param == tuple)
+        self.assertTrue(dp4.type.param is tuple)
 
         class DP5(IterDataPipe):
             r"""DataPipe without type annotation"""
@@ -2601,7 +2601,7 @@ class TestTyping(TestCase):
 
         self.assertTrue(issubclass(DP6, IterDataPipe))
         dp6 = DP6()
-        self.assertTrue(dp6.type.param == int)
+        self.assertTrue(dp6.type.param is int)
 
         class DP7(IterDataPipe[Awaitable[T_co]]):
             r"""DataPipe with abstract base class"""
@@ -2632,7 +2632,7 @@ class TestTyping(TestCase):
                 self.dp = dp
 
             def __iter__(self) -> Iterator[int]:
-                for a, b in self.dp:
+                for a, _ in self.dp:
                     yield a
 
         # Non-DataPipe input with DataPipe hint
@@ -3355,63 +3355,6 @@ class TestSharding(TestCase):
         dp.apply_sharding(5, 3, sharding_group=SHARDING_PRIORITIES.MULTIPROCESSING)
         with self.assertRaises(Exception):
             dp.apply_sharding(2, 1, sharding_group=SHARDING_PRIORITIES.DEFAULT)
-
-    # Test tud.datapipes.iter.grouping.SHARDING_PRIORITIES for backward compatbility
-    # TODO: Remove this test once tud.datapipes.iter.grouping.SHARDING_PRIORITIES is deprecated
-    def test_sharding_groups_in_legacy_grouping_package(self):
-        with self.assertWarnsRegex(
-            FutureWarning,
-            r"Please use `SHARDING_PRIORITIES` "
-            "from the `torch.utils.data.datapipes.iter.sharding`",
-        ):
-            from torch.utils.data.datapipes.iter.grouping import (
-                SHARDING_PRIORITIES as LEGACY_SHARDING_PRIORITIES,
-            )
-
-        def construct_sharded_pipe():
-            sharding_pipes = []
-            dp = NumbersDataset(size=90)
-            dp = dp.sharding_filter(
-                sharding_group_filter=LEGACY_SHARDING_PRIORITIES.DISTRIBUTED
-            )
-            sharding_pipes.append(dp)
-            dp = dp.sharding_filter(
-                sharding_group_filter=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING
-            )
-            sharding_pipes.append(dp)
-            dp = dp.sharding_filter(sharding_group_filter=300)
-            sharding_pipes.append(dp)
-            return dp, sharding_pipes
-
-        dp, sharding_pipes = construct_sharded_pipe()
-
-        for pipe in sharding_pipes:
-            pipe.apply_sharding(
-                2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DISTRIBUTED
-            )
-            pipe.apply_sharding(
-                5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING
-            )
-            pipe.apply_sharding(3, 1, sharding_group=300)
-
-        actual = list(dp)
-        expected = [17, 47, 77]
-        self.assertEqual(expected, actual)
-        self.assertEqual(3, len(dp))
-
-        dp, _ = construct_sharded_pipe()
-        dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
-        with self.assertRaises(Exception):
-            dp.apply_sharding(
-                5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING
-            )
-
-        dp, _ = construct_sharded_pipe()
-        dp.apply_sharding(
-            5, 3, sharding_group=LEGACY_SHARDING_PRIORITIES.MULTIPROCESSING
-        )
-        with self.assertRaises(Exception):
-            dp.apply_sharding(2, 1, sharding_group=LEGACY_SHARDING_PRIORITIES.DEFAULT)
 
     def test_legacy_custom_sharding(self):
         dp = self._get_pipeline()

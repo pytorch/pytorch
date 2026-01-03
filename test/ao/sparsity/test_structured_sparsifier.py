@@ -1,6 +1,5 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
 import copy
-import logging
 import random
 
 import torch
@@ -29,12 +28,12 @@ from torch.testing._internal.common_pruning import (
     SimpleConv2d,
     SimpleLinear,
 )
-from torch.testing._internal.common_utils import skipIfTorchDynamo, TestCase
-
-
-logging.basicConfig(
-    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+from torch.testing._internal.common_utils import (
+    raise_on_run_directly,
+    skipIfTorchDynamo,
+    TestCase,
 )
+
 
 DEVICES = {
     torch.device("cpu"),
@@ -159,7 +158,7 @@ class TestBaseStructuredSparsifier(TestCase):
             assert parametrize.is_parametrized(module)
             assert hasattr(module, "parametrizations")
             # Assume that this is the 1st/only parametrization
-            assert type(module.parametrizations.weight[0]) == FakeStructuredSparsity
+            assert type(module.parametrizations.weight[0]) is FakeStructuredSparsity
 
     def _check_pruner_valid_before_step(self, model, pruner, device):
         for config in pruner.groups:
@@ -1056,9 +1055,9 @@ class TestFPGMPruner(TestCase):
         mask1 = pruner.groups[0]["module"].parametrizations.weight[0].mask[-1]
         mask2 = pruner.groups[0]["module"].parametrizations.weight[0].mask[-2]
         # Check if either of the least-norm filters is not pruned
-        assert (
-            mask1.item() is not False or mask2.item() is not False
-        ), "Do not prune all least-norm filters"
+        assert mask1.item() is not False or mask2.item() is not False, (
+            "Do not prune all least-norm filters"
+        )
 
         # fusion step
         pruned_model = pruner.prune()
@@ -1089,3 +1088,7 @@ class TestFPGMPruner(TestCase):
             self._test_update_mask_on_multiple_layer(
                 expected_conv1, expected_conv2, device
             )
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_ao_sparsity.py")

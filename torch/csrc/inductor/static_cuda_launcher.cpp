@@ -2,16 +2,12 @@
 // We disable this file from being hipified because there are CUDA drivers hip
 // has not implemented yet. Also, we're passing in a cubin file directly, so it
 // would take more work to support ROCM anyway.
-#include <torch/csrc/utils/pythoncapi_compat.h>
 
 #include <ATen/Context.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <c10/cuda/CUDAGuard.h>
-#include <c10/cuda/CUDAStream.h>
 #include <torch/csrc/inductor/static_cuda_launcher.h>
 #include <cstdint>
-#include <stdexcept>
 
 #include <torch/csrc/utils/python_numbers.h>
 #include <filesystem>
@@ -369,7 +365,7 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   // Parse the fixed arguments and the format string
   if (!PyArg_ParseTuple(
           args,
-          "KiiiiisOl",
+          "KiiiiisOK",
           &func_ptr,
           &gridX,
           &gridY,
@@ -384,6 +380,15 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
   if (gridX * gridY * gridZ <= 0) {
     // No need to do any work if we're outside of grid bounds
     Py_RETURN_NONE;
+  }
+  CUcontext pctx = nullptr;
+  AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
+  if (!pctx) {
+    // Ensure device context exists
+    CUdevice device = 0;
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuDeviceGet(&device, 0));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxRetain(&pctx, device));
+    AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxSetCurrent(pctx));
   }
   CUfunction func = reinterpret_cast<CUfunction>(func_ptr); // NOLINT
   cudaStream_t cudaStream = reinterpret_cast<cudaStream_t>(stream); // NOLINT
@@ -429,12 +434,12 @@ PyObject* launch_kernel(PyObject* self, PyObject* args) {
 std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
     PyMethodDef{
         "_launch_kernel",
-        (PyCFunction)launch_kernel,
+        launch_kernel,
         METH_VARARGS,
         "Statically launch triton compiled CUDA kernels"},
     PyMethodDef{
         "_load_kernel",
-        (PyCFunction)load_kernel,
+        load_kernel,
         METH_VARARGS,
         "Load CUDA kernel from cubin file"}};
 
@@ -442,7 +447,7 @@ std::array<PyMethodDef, 2> StaticCudaLauncherMethods = {
 // We don't implement __new__ or __init__ because we're using it only as a
 // container for static methods.
 PyTypeObject StaticCudaLauncherType = {
-      PyVarObject_HEAD_INIT(nullptr, 0)
+    PyVarObject_HEAD_INIT(nullptr, 0)
     "torch._C._StaticCudaLauncher", // tp_name
     sizeof(PyObject), // tp_basicsize
     0, // tp_itemsize

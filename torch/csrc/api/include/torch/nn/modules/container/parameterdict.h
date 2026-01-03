@@ -28,13 +28,13 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
   void pretty_print(std::ostream& stream) const override {
     stream << "torch::nn::ParameterDict(" << '\n';
     for (const auto& pair : parameters_) {
-      stream << "(" << pair.key() << ")"
-             << ": Parameter containing: [" << pair.value().scalar_type()
-             << " of size " << pair.value().sizes() << "]";
+      stream << '(' << pair.key() << ')' << ": Parameter containing: ["
+             << pair.value().scalar_type() << " of size "
+             << pair.value().sizes() << ']';
       ;
       stream << '\n';
     }
-    stream << ")";
+    stream << ')';
   }
 
   /// Insert the parameter along with the key into ParameterDict
@@ -107,7 +107,7 @@ class ParameterDictImpl : public Cloneable<ParameterDictImpl> {
     parameters_.clear();
   }
 
-  /// Check if the centain parameter with the key in the ParameterDict
+  /// Check if the certain parameter with the key in the ParameterDict
   bool contains(const std::string& key) const noexcept {
     return parameters_.contains(key);
   }

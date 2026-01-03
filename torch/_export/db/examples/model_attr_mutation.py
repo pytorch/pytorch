@@ -1,11 +1,10 @@
 # mypy: allow-untyped-defs
 import torch
-from torch._export.db.case import SupportLevel
 
 
 class ModelAttrMutation(torch.nn.Module):
     """
-    Attribute mutation is not supported.
+    Attribute mutation raises a warning. Covered in the test_export.py test_detect_leak_strict test.
     """
 
     def __init__(self) -> None:
@@ -22,5 +21,4 @@ class ModelAttrMutation(torch.nn.Module):
 
 example_args = (torch.randn(3, 2),)
 tags = {"python.object-model"}
-support_level = SupportLevel.NOT_SUPPORTED_YET
 model = ModelAttrMutation()

@@ -57,6 +57,10 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
     return impl_->deviceCount();
   }
 
+  DeviceCapability getDeviceCapability(Device d) const override {
+    return impl_->getDeviceCapability(d);
+  }
+
   // Event functions
   void record(
       void** event,
@@ -94,11 +98,11 @@ class VirtualGuardImpl final : public DeviceGuardImplInterface {
   }
 
   void synchronizeEvent(void* event) const override {
-    return impl_->synchronizeEvent(event);
+    impl_->synchronizeEvent(event);
   }
 
   void synchronizeDevice(const DeviceIndex device_index) const override {
-    return impl_->synchronizeDevice(device_index);
+    impl_->synchronizeDevice(device_index);
   }
 
  private:

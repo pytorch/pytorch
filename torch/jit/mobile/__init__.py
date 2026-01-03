@@ -47,14 +47,16 @@ def _load_for_lite_interpreter(f, map_location=None):
         cpp_module = torch._C._load_for_lite_interpreter(os.fspath(f), map_location)
     else:
         cpp_module = torch._C._load_for_lite_interpreter_from_buffer(
-            f.read(), map_location
+            # pyrefly: ignore [missing-attribute]
+            f.read(),
+            map_location,
         )
 
     return LiteScriptModule(cpp_module)
 
 
 class LiteScriptModule:
-    def __init__(self, cpp_module):
+    def __init__(self, cpp_module) -> None:
         self._c = cpp_module
         super().__init__()
 
@@ -105,6 +107,7 @@ def _get_model_bytecode_version(f_input) -> int:
     if isinstance(f_input, (str, os.PathLike)):
         return torch._C._get_model_bytecode_version(os.fspath(f_input))
     else:
+        # pyrefly: ignore [missing-attribute]
         return torch._C._get_model_bytecode_version_from_buffer(f_input.read())
 
 
@@ -137,6 +140,7 @@ def _get_mobile_model_contained_types(f_input) -> int:
     if isinstance(f_input, (str, os.PathLike)):
         return torch._C._get_mobile_model_contained_types(os.fspath(f_input))
     else:
+        # pyrefly: ignore [missing-attribute]
         return torch._C._get_mobile_model_contained_types_from_buffer(f_input.read())
 
 
@@ -161,11 +165,16 @@ def _backport_for_mobile(f_input, f_output, to_version):
         isinstance(f_output, (str, os.PathLike))
     ):
         return torch._C._backport_for_mobile(
-            os.fspath(f_input), os.fspath(f_output), to_version
+            os.fspath(f_input),
+            os.fspath(f_output),
+            to_version,
         )
     else:
         return torch._C._backport_for_mobile_from_buffer(
-            f_input.read(), str(f_output), to_version
+            # pyrefly: ignore [missing-attribute]
+            f_input.read(),
+            str(f_output),
+            to_version,
         )
 
 
@@ -187,7 +196,9 @@ def _backport_for_mobile_to_buffer(f_input, to_version):
         return torch._C._backport_for_mobile_to_buffer(os.fspath(f_input), to_version)
     else:
         return torch._C._backport_for_mobile_from_buffer_to_buffer(
-            f_input.read(), to_version
+            # pyrefly: ignore [missing-attribute]
+            f_input.read(),
+            to_version,
         )
 
 
@@ -229,4 +240,5 @@ def _get_model_ops_and_info(f_input):
     if isinstance(f_input, (str, os.PathLike)):
         return torch._C._get_model_ops_and_info(os.fspath(f_input))
     else:
+        # pyrefly: ignore [missing-attribute]
         return torch._C._get_model_ops_and_info(f_input.read())

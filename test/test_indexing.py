@@ -5,6 +5,7 @@ import random
 import unittest
 import warnings
 from functools import reduce
+from itertools import product
 
 import numpy as np
 
@@ -15,17 +16,31 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCPU,
     dtypesIfCUDA,
+    dtypesIfMPS,
+    dtypesIfXPU,
+    expectedFailureMPS,
     instantiate_device_type_tests,
-    onlyCUDA,
+    onlyCPU,
     onlyNativeDeviceTypes,
+    onlyOn,
     skipXLA,
+    skipXPUIf,
+)
+from torch.testing._internal.common_dtype import (
+    all_mps_types_and,
+    all_types_and,
+    all_types_and_complex_and,
+    all_types_complex_float8_and,
 )
 from torch.testing._internal.common_utils import (
     DeterministicGuard,
+    parametrize,
     run_tests,
     serialTest,
     skipIfTorchDynamo,
     TEST_CUDA,
+    TEST_MPS,
+    TEST_XPU,
     TestCase,
     xfailIfTorchDynamo,
 )
@@ -140,8 +155,11 @@ class TestIndexing(TestCase):
         )
 
         lst = [list(range(i, i + 10)) for i in range(0, 100, 10)]
-        tensor = torch.DoubleTensor(lst).to(device)
-        for _i in range(100):
+        _make_tensor = (
+            torch.DoubleTensor if not device.startswith("mps") else torch.FloatTensor
+        )
+        tensor = _make_tensor(lst).to(device)
+        for _ in range(100):
             idx1_start = random.randrange(10)
             idx1_end = idx1_start + random.randrange(1, 10 - idx1_start + 1)
             idx1_step = random.randrange(1, 8)
@@ -156,7 +174,7 @@ class TestIndexing(TestCase):
             else:
                 lst_indexed = lst[idx1]
                 tensor_indexed = tensor[idx1]
-            self.assertEqual(torch.DoubleTensor(lst_indexed), tensor_indexed)
+            self.assertEqual(_make_tensor(lst_indexed), tensor_indexed)
 
         self.assertRaises(ValueError, lambda: reference[1:9:0])
         self.assertRaises(ValueError, lambda: reference[1:9:-1])
@@ -179,6 +197,7 @@ class TestIndexing(TestCase):
 
     @onlyNativeDeviceTypes
     @dtypes(torch.half, torch.double)
+    @dtypesIfMPS(torch.half)  # TODO: add bf16 there?
     def test_advancedindex(self, device, dtype):
         # Tests for Integer Array Indexing, Part I - Purely integer array
         # indexing
@@ -231,7 +250,7 @@ class TestIndexing(TestCase):
                 x[ri([0, 2, 4]),], torch.tensor([5, 4, 3], dtype=dtype, device=device)
             )
 
-        # Only validates indexing and setting for halfs
+        # Only validates indexing and setting for Halves
         if dtype == torch.half:
             reference = consec((10,))
             validate_indexing(reference)
@@ -250,7 +269,10 @@ class TestIndexing(TestCase):
         reference = consec((10,))
         strided = torch.tensor((), dtype=dtype, device=device)
         strided.set_(
-            reference.storage(), storage_offset=0, size=torch.Size([4]), stride=[2]
+            reference.untyped_storage(),
+            storage_offset=0,
+            size=torch.Size([4]),
+            stride=[2],
         )
 
         self.assertEqual(strided[[0]], torch.tensor([1], dtype=dtype, device=device))
@@ -274,7 +296,10 @@ class TestIndexing(TestCase):
         # stride is [4, 8]
         strided = torch.tensor((), dtype=dtype, device=device)
         strided.set_(
-            reference.storage(), storage_offset=4, size=torch.Size([2]), stride=[4]
+            reference.untyped_storage(),
+            storage_offset=4,
+            size=torch.Size([2]),
+            stride=[4],
         )
         self.assertEqual(strided[[0]], torch.tensor([5], dtype=dtype, device=device))
         self.assertEqual(
@@ -309,15 +334,15 @@ class TestIndexing(TestCase):
         self.assertEqual(reference[ri([0]), ri([0])], consec((1,)))
         self.assertEqual(reference[ri([2]), ri([1])], consec((1,), 6))
         self.assertEqual(
-            reference[[ri([0, 0]), ri([0, 1])]],
+            reference[(ri([0, 0]), ri([0, 1]))],
             torch.tensor([1, 2], dtype=dtype, device=device),
         )
         self.assertEqual(
-            reference[[ri([0, 1, 1, 0, 2]), ri([1])]],
+            reference[(ri([0, 1, 1, 0, 2]), ri([1]))],
             torch.tensor([2, 4, 4, 2, 6], dtype=dtype, device=device),
         )
         self.assertEqual(
-            reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]],
+            reference[(ri([0, 0, 1, 1]), ri([0, 1, 0, 0]))],
             torch.tensor([1, 2, 3, 3], dtype=dtype, device=device),
         )
 
@@ -387,15 +412,15 @@ class TestIndexing(TestCase):
             reference[ri([2]), ri([1])], torch.tensor([6], dtype=dtype, device=device)
         )
         self.assertEqual(
-            reference[[ri([0, 0]), ri([0, 1])]],
+            reference[(ri([0, 0]), ri([0, 1]))],
             torch.tensor([0, 4], dtype=dtype, device=device),
         )
         self.assertEqual(
-            reference[[ri([0, 1, 1, 0, 3]), ri([1])]],
+            reference[(ri([0, 1, 1, 0, 3]), ri([1]))],
             torch.tensor([4, 5, 5, 4, 7], dtype=dtype, device=device),
         )
         self.assertEqual(
-            reference[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]],
+            reference[(ri([0, 0, 1, 1]), ri([0, 1, 0, 0]))],
             torch.tensor([0, 4, 1, 1], dtype=dtype, device=device),
         )
 
@@ -446,7 +471,9 @@ class TestIndexing(TestCase):
 
         reference = torch.arange(0.0, 24, dtype=dtype, device=device).view(3, 8)
         strided = torch.tensor((), dtype=dtype, device=device)
-        strided.set_(reference.storage(), 1, size=torch.Size([2, 4]), stride=[8, 2])
+        strided.set_(
+            reference.untyped_storage(), 1, size=torch.Size([2, 4]), stride=[8, 2]
+        )
 
         self.assertEqual(
             strided[ri([0, 1]), ri([0])],
@@ -463,15 +490,15 @@ class TestIndexing(TestCase):
             strided[ri([1]), ri([3])], torch.tensor([15], dtype=dtype, device=device)
         )
         self.assertEqual(
-            strided[[ri([0, 0]), ri([0, 3])]],
+            strided[(ri([0, 0]), ri([0, 3]))],
             torch.tensor([1, 7], dtype=dtype, device=device),
         )
         self.assertEqual(
-            strided[[ri([1]), ri([0, 1, 1, 0, 3])]],
+            strided[(ri([1]), ri([0, 1, 1, 0, 3]))],
             torch.tensor([9, 11, 11, 9, 15], dtype=dtype, device=device),
         )
         self.assertEqual(
-            strided[[ri([0, 0, 1, 1]), ri([0, 1, 0, 0])]],
+            strided[(ri([0, 0, 1, 1]), ri([0, 1, 0, 0]))],
             torch.tensor([1, 3, 9, 9], dtype=dtype, device=device),
         )
 
@@ -502,7 +529,9 @@ class TestIndexing(TestCase):
 
         reference = torch.arange(0.0, 24, dtype=dtype, device=device).view(3, 8)
         strided = torch.tensor((), dtype=dtype, device=device)
-        strided.set_(reference.storage(), 10, size=torch.Size([2, 2]), stride=[7, 1])
+        strided.set_(
+            reference.untyped_storage(), 10, size=torch.Size([2, 2]), stride=[7, 1]
+        )
         self.assertEqual(
             strided[ri([0]), ri([1])], torch.tensor([11], dtype=dtype, device=device)
         )
@@ -513,7 +542,9 @@ class TestIndexing(TestCase):
 
         reference = torch.arange(0.0, 24, dtype=dtype, device=device).view(3, 8)
         strided = torch.tensor((), dtype=dtype, device=device)
-        strided.set_(reference.storage(), 10, size=torch.Size([2, 2]), stride=[7, 1])
+        strided.set_(
+            reference.untyped_storage(), 10, size=torch.Size([2, 2]), stride=[7, 1]
+        )
         self.assertEqual(
             strided[ri([0, 1]), ri([1, 0])],
             torch.tensor([11, 17], dtype=dtype, device=device),
@@ -528,7 +559,9 @@ class TestIndexing(TestCase):
 
         reference = torch.arange(0.0, 24, dtype=dtype, device=device).view(3, 8)
         strided = torch.tensor((), dtype=dtype, device=device)
-        strided.set_(reference.storage(), 10, size=torch.Size([2, 2]), stride=[7, 1])
+        strided.set_(
+            reference.untyped_storage(), 10, size=torch.Size([2, 2]), stride=[7, 1]
+        )
 
         rows = ri([[0], [1]])
         columns = ri([[0, 1], [0, 1]])
@@ -568,8 +601,8 @@ class TestIndexing(TestCase):
 
         # test invalid index fails
         reference = torch.empty(10, dtype=dtype, device=device)
-        # can't test cuda because it is a device assert
-        if not reference.is_cuda:
+        # can't test cuda/xpu because it is a device assert
+        if reference.device.type == "cpu":
             for err_idx in (10, -11):
                 with self.assertRaisesRegex(IndexError, r"out of"):
                     reference[err_idx]
@@ -642,19 +675,19 @@ class TestIndexing(TestCase):
 
         indices_to_test = [
             # grab the second, fourth columns
-            [slice(None), [1, 3]],
+            (slice(None), [1, 3]),
             # first, third rows,
-            [[0, 2], slice(None)],
+            ([0, 2], slice(None)),
             # weird shape
-            [slice(None), [[0, 1], [2, 3]]],
+            (slice(None), [[0, 1], [2, 3]]),
             # negatives
-            [[-1], [0]],
-            [[0, 2], [-1]],
-            [slice(None), [-1]],
+            ([-1], [0]),
+            ([0, 2], [-1]),
+            (slice(None), [-1]),
         ]
 
         # only test dupes on gets
-        get_indices_to_test = indices_to_test + [[slice(None), [0, 1, 1, 2, 2]]]
+        get_indices_to_test = indices_to_test + [(slice(None), [0, 1, 1, 2, 2])]
 
         for indexer in get_indices_to_test:
             assert_get_eq(reference, indexer)
@@ -668,117 +701,117 @@ class TestIndexing(TestCase):
         reference = torch.arange(0.0, 160, dtype=dtype, device=device).view(4, 8, 5)
 
         indices_to_test = [
-            [slice(None), slice(None), [0, 3, 4]],
-            [slice(None), [2, 4, 5, 7], slice(None)],
-            [[2, 3], slice(None), slice(None)],
-            [slice(None), [0, 2, 3], [1, 3, 4]],
-            [slice(None), [0], [1, 2, 4]],
-            [slice(None), [0, 1, 3], [4]],
-            [slice(None), [[0, 1], [1, 0]], [[2, 3]]],
-            [slice(None), [[0, 1], [2, 3]], [[0]]],
-            [slice(None), [[5, 6]], [[0, 3], [4, 4]]],
-            [[0, 2, 3], [1, 3, 4], slice(None)],
-            [[0], [1, 2, 4], slice(None)],
-            [[0, 1, 3], [4], slice(None)],
-            [[[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None)],
-            [[[0, 1], [1, 0]], [[2, 3]], slice(None)],
-            [[[0, 1], [2, 3]], [[0]], slice(None)],
-            [[[2, 1]], [[0, 3], [4, 4]], slice(None)],
-            [[[2]], [[0, 3], [4, 1]], slice(None)],
+            (slice(None), slice(None), (0, 3, 4)),
+            (slice(None), (2, 4, 5, 7), slice(None)),
+            ((2, 3), slice(None), slice(None)),
+            (slice(None), (0, 2, 3), (1, 3, 4)),
+            (slice(None), (0,), (1, 2, 4)),
+            (slice(None), (0, 1, 3), (4,)),
+            (slice(None), ((0, 1), (1, 0)), ((2, 3),)),
+            (slice(None), ((0, 1), (2, 3)), ((0,),)),
+            (slice(None), ((5, 6),), ((0, 3), (4, 4))),
+            ((0, 2, 3), (1, 3, 4), slice(None)),
+            ((0,), (1, 2, 4), slice(None)),
+            ((0, 1, 3), (4,), slice(None)),
+            (((0, 1), (1, 0)), ((2, 1), (3, 5)), slice(None)),
+            (((0, 1), (1, 0)), ((2, 3),), slice(None)),
+            (((0, 1), (2, 3)), ((0,),), slice(None)),
+            (((2, 1),), ((0, 3), (4, 4)), slice(None)),
+            (((2,),), ((0, 3), (4, 1)), slice(None)),
             # non-contiguous indexing subspace
-            [[0, 2, 3], slice(None), [1, 3, 4]],
+            ((0, 2, 3), slice(None), (1, 3, 4)),
             # [...]
             # less dim, ellipsis
-            [[0, 2]],
-            [[0, 2], slice(None)],
-            [[0, 2], Ellipsis],
-            [[0, 2], slice(None), Ellipsis],
-            [[0, 2], Ellipsis, slice(None)],
-            [[0, 2], [1, 3]],
-            [[0, 2], [1, 3], Ellipsis],
-            [Ellipsis, [1, 3], [2, 3]],
-            [Ellipsis, [2, 3, 4]],
-            [Ellipsis, slice(None), [2, 3, 4]],
-            [slice(None), Ellipsis, [2, 3, 4]],
+            ((0, 2),),
+            ((0, 2), slice(None)),
+            ((0, 2), Ellipsis),
+            ((0, 2), slice(None), Ellipsis),
+            ((0, 2), Ellipsis, slice(None)),
+            ((0, 2), (1, 3)),
+            ((0, 2), (1, 3), Ellipsis),
+            (Ellipsis, (1, 3), (2, 3)),
+            (Ellipsis, (2, 3, 4)),
+            (Ellipsis, slice(None), (2, 3, 4)),
+            (slice(None), Ellipsis, (2, 3, 4)),
             # ellipsis counts for nothing
-            [Ellipsis, slice(None), slice(None), [0, 3, 4]],
-            [slice(None), Ellipsis, slice(None), [0, 3, 4]],
-            [slice(None), slice(None), Ellipsis, [0, 3, 4]],
-            [slice(None), slice(None), [0, 3, 4], Ellipsis],
-            [Ellipsis, [[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None)],
-            [[[0, 1], [1, 0]], [[2, 1], [3, 5]], Ellipsis, slice(None)],
-            [[[0, 1], [1, 0]], [[2, 1], [3, 5]], slice(None), Ellipsis],
+            (Ellipsis, slice(None), slice(None), (0, 3, 4)),
+            (slice(None), Ellipsis, slice(None), (0, 3, 4)),
+            (slice(None), slice(None), Ellipsis, (0, 3, 4)),
+            (slice(None), slice(None), (0, 3, 4), Ellipsis),
+            (Ellipsis, ((0, 1), (1, 0)), ((2, 1), (3, 5)), slice(None)),
+            (((0, 1), (1, 0)), ((2, 1), (3, 5)), Ellipsis, slice(None)),
+            (((0, 1), (1, 0)), ((2, 1), (3, 5)), slice(None), Ellipsis),
         ]
 
         for indexer in indices_to_test:
             assert_get_eq(reference, indexer)
             assert_set_eq(reference, indexer, 212)
             assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
-            if torch.cuda.is_available():
+            if torch.accelerator.is_available():
                 assert_backward_eq(reference, indexer)
 
         reference = torch.arange(0.0, 1296, dtype=dtype, device=device).view(3, 9, 8, 6)
 
         indices_to_test = [
-            [slice(None), slice(None), slice(None), [0, 3, 4]],
-            [slice(None), slice(None), [2, 4, 5, 7], slice(None)],
-            [slice(None), [2, 3], slice(None), slice(None)],
-            [[1, 2], slice(None), slice(None), slice(None)],
-            [slice(None), slice(None), [0, 2, 3], [1, 3, 4]],
-            [slice(None), slice(None), [0], [1, 2, 4]],
-            [slice(None), slice(None), [0, 1, 3], [4]],
-            [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3]]],
-            [slice(None), slice(None), [[0, 1], [2, 3]], [[0]]],
-            [slice(None), slice(None), [[5, 6]], [[0, 3], [4, 4]]],
-            [slice(None), [0, 2, 3], [1, 3, 4], slice(None)],
-            [slice(None), [0], [1, 2, 4], slice(None)],
-            [slice(None), [0, 1, 3], [4], slice(None)],
-            [slice(None), [[0, 1], [3, 4]], [[2, 3], [0, 1]], slice(None)],
-            [slice(None), [[0, 1], [3, 4]], [[2, 3]], slice(None)],
-            [slice(None), [[0, 1], [3, 2]], [[0]], slice(None)],
-            [slice(None), [[2, 1]], [[0, 3], [6, 4]], slice(None)],
-            [slice(None), [[2]], [[0, 3], [4, 2]], slice(None)],
-            [[0, 1, 2], [1, 3, 4], slice(None), slice(None)],
-            [[0], [1, 2, 4], slice(None), slice(None)],
-            [[0, 1, 2], [4], slice(None), slice(None)],
-            [[[0, 1], [0, 2]], [[2, 4], [1, 5]], slice(None), slice(None)],
-            [[[0, 1], [1, 2]], [[2, 0]], slice(None), slice(None)],
-            [[[2, 2]], [[0, 3], [4, 5]], slice(None), slice(None)],
-            [[[2]], [[0, 3], [4, 5]], slice(None), slice(None)],
-            [slice(None), [3, 4, 6], [0, 2, 3], [1, 3, 4]],
-            [slice(None), [2, 3, 4], [1, 3, 4], [4]],
-            [slice(None), [0, 1, 3], [4], [1, 3, 4]],
-            [slice(None), [6], [0, 2, 3], [1, 3, 4]],
-            [slice(None), [2, 3, 5], [3], [4]],
-            [slice(None), [0], [4], [1, 3, 4]],
-            [slice(None), [6], [0, 2, 3], [1]],
-            [slice(None), [[0, 3], [3, 6]], [[0, 1], [1, 3]], [[5, 3], [1, 2]]],
-            [[2, 2, 1], [0, 2, 3], [1, 3, 4], slice(None)],
-            [[2, 0, 1], [1, 2, 3], [4], slice(None)],
-            [[0, 1, 2], [4], [1, 3, 4], slice(None)],
-            [[0], [0, 2, 3], [1, 3, 4], slice(None)],
-            [[0, 2, 1], [3], [4], slice(None)],
-            [[0], [4], [1, 3, 4], slice(None)],
-            [[1], [0, 2, 3], [1], slice(None)],
-            [[[1, 2], [1, 2]], [[0, 1], [2, 3]], [[2, 3], [3, 5]], slice(None)],
+            (slice(None), slice(None), slice(None), (0, 3, 4)),
+            (slice(None), slice(None), (2, 4, 5, 7), slice(None)),
+            (slice(None), (2, 3), slice(None), slice(None)),
+            ((1, 2), slice(None), slice(None), slice(None)),
+            (slice(None), slice(None), (0, 2, 3), (1, 3, 4)),
+            (slice(None), slice(None), (0,), (1, 2, 4)),
+            (slice(None), slice(None), (0, 1, 3), (4,)),
+            (slice(None), slice(None), ((0, 1), (1, 0)), ((2, 3),)),
+            (slice(None), slice(None), ((0, 1), (2, 3)), ((0,),)),
+            (slice(None), slice(None), ((5, 6),), ((0, 3), (4, 4))),
+            (slice(None), (0, 2, 3), (1, 3, 4), slice(None)),
+            (slice(None), (0,), (1, 2, 4), slice(None)),
+            (slice(None), (0, 1, 3), (4,), slice(None)),
+            (slice(None), ((0, 1), (3, 4)), ((2, 3), (0, 1)), slice(None)),
+            (slice(None), ((0, 1), (3, 4)), ((2, 3),), slice(None)),
+            (slice(None), ((0, 1), (3, 2)), ((0,),), slice(None)),
+            (slice(None), ((2, 1),), ((0, 3), (6, 4)), slice(None)),
+            (slice(None), ((2,),), ((0, 3), (4, 2)), slice(None)),
+            ((0, 1, 2), (1, 3, 4), slice(None), slice(None)),
+            ((0,), (1, 2, 4), slice(None), slice(None)),
+            ((0, 1, 2), (4,), slice(None), slice(None)),
+            (((0, 1), (0, 2)), ((2, 4), (1, 5)), slice(None), slice(None)),
+            (((0, 1), (1, 2)), ((2, 0),), slice(None), slice(None)),
+            (((2, 2),), ((0, 3), (4, 5)), slice(None), slice(None)),
+            (((2,),), ((0, 3), (4, 5)), slice(None), slice(None)),
+            (slice(None), (3, 4, 6), (0, 2, 3), (1, 3, 4)),
+            (slice(None), (2, 3, 4), (1, 3, 4), (4,)),
+            (slice(None), (0, 1, 3), (4,), (1, 3, 4)),
+            (slice(None), (6,), (0, 2, 3), (1, 3, 4)),
+            (slice(None), (2, 3, 5), (3,), (4,)),
+            (slice(None), (0,), (4,), (1, 3, 4)),
+            (slice(None), (6,), (0, 2, 3), (1,)),
+            (slice(None), ((0, 3), (3, 6)), ((0, 1), (1, 3)), ((5, 3), (1, 2))),
+            ((2, 2, 1), (0, 2, 3), (1, 3, 4), slice(None)),
+            ((2, 0, 1), (1, 2, 3), (4,), slice(None)),
+            ((0, 1, 2), (4,), (1, 3, 4), slice(None)),
+            ((0,), (0, 2, 3), (1, 3, 4), slice(None)),
+            ((0, 2, 1), (3,), (4,), slice(None)),
+            ((0,), (4,), (1, 3, 4), slice(None)),
+            ((1,), (0, 2, 3), (1,), slice(None)),
+            (((1, 2), (1, 2)), ((0, 1), (2, 3)), ((2, 3), (3, 5)), slice(None)),
             # less dim, ellipsis
-            [Ellipsis, [0, 3, 4]],
-            [Ellipsis, slice(None), [0, 3, 4]],
-            [Ellipsis, slice(None), slice(None), [0, 3, 4]],
-            [slice(None), Ellipsis, [0, 3, 4]],
-            [slice(None), slice(None), Ellipsis, [0, 3, 4]],
-            [slice(None), [0, 2, 3], [1, 3, 4]],
-            [slice(None), [0, 2, 3], [1, 3, 4], Ellipsis],
-            [Ellipsis, [0, 2, 3], [1, 3, 4], slice(None)],
-            [[0], [1, 2, 4]],
-            [[0], [1, 2, 4], slice(None)],
-            [[0], [1, 2, 4], Ellipsis],
-            [[0], [1, 2, 4], Ellipsis, slice(None)],
-            [[1]],
-            [[0, 2, 1], [3], [4]],
-            [[0, 2, 1], [3], [4], slice(None)],
-            [[0, 2, 1], [3], [4], Ellipsis],
-            [Ellipsis, [0, 2, 1], [3], [4]],
+            (Ellipsis, (0, 3, 4)),
+            (Ellipsis, slice(None), (0, 3, 4)),
+            (Ellipsis, slice(None), slice(None), (0, 3, 4)),
+            (slice(None), Ellipsis, (0, 3, 4)),
+            (slice(None), slice(None), Ellipsis, (0, 3, 4)),
+            (slice(None), (0, 2, 3), (1, 3, 4)),
+            (slice(None), (0, 2, 3), (1, 3, 4), Ellipsis),
+            (Ellipsis, (0, 2, 3), (1, 3, 4), slice(None)),
+            ((0,), (1, 2, 4)),
+            ((0,), (1, 2, 4), slice(None)),
+            ((0,), (1, 2, 4), Ellipsis),
+            ((0,), (1, 2, 4), Ellipsis, slice(None)),
+            ((1,),),
+            ((0, 2, 1), (3,), (4,)),
+            ((0, 2, 1), (3,), (4,), slice(None)),
+            ((0, 2, 1), (3,), (4,), Ellipsis),
+            (Ellipsis, (0, 2, 1), (3,), (4,)),
         ]
 
         for indexer in indices_to_test:
@@ -786,8 +819,8 @@ class TestIndexing(TestCase):
             assert_set_eq(reference, indexer, 1333)
             assert_set_eq(reference, indexer, get_set_tensor(reference, indexer))
         indices_to_test += [
-            [slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]],
-            [slice(None), slice(None), [[2]], [[0, 3], [4, 4]]],
+            (slice(None), slice(None), [[0, 1], [1, 0]], [[2, 3], [3, 0]]),
+            (slice(None), slice(None), [[2]], [[0, 3], [4, 4]]),
         ]
         for indexer in indices_to_test:
             assert_get_eq(reference, indexer)
@@ -866,6 +899,21 @@ class TestIndexing(TestCase):
             )
             self.assertEqual(len(w), 1)
 
+    def test_list_indices(self, device):
+        N = 1000
+        t = torch.randn(N, device=device)
+        # Set window size
+        W = 10
+        # Generate a list of lists, containing overlapping window indices
+        indices = [range(i, i + W) for i in range(N - W)]
+
+        for i in [len(indices), 100, 32]:
+            windowed_data = t[indices[:i]]
+            self.assertEqual(windowed_data.shape, (i, W))
+
+        with self.assertRaisesRegex(IndexError, "too many indices"):
+            windowed_data = t[indices[:31]]
+
     def test_bool_indices_accumulate(self, device):
         mask = torch.zeros(size=(10,), dtype=torch.bool, device=device)
         y = torch.ones(size=(10, 10), device=device)
@@ -878,6 +926,66 @@ class TestIndexing(TestCase):
         mask1 = torch.tensor([1, 0, 1, 1, 0], dtype=torch.bool, device=device)
         mask2 = torch.tensor([1, 1, 1], dtype=torch.bool, device=device)
         self.assertEqual(v[mask1, :, mask2].shape, (3, 7))
+
+    def test_multi_dimensional_bool_mask(self, device):
+        x = torch.randn(2, 2, 3, device=device)
+        b = ((True, False), (False, False))
+        m = torch.tensor(b, dtype=torch.bool, device=device)
+        z = torch.tensor(0)
+        t = torch.tensor(True)
+        f = torch.tensor(False)
+
+        # Using boolean sequence
+        self.assertEqual(x[b,].shape, (1, 3))
+        self.assertEqual(x[b, ::2].shape, (1, 2))
+        self.assertEqual(x[b, None].shape, (1, 1, 3))
+        self.assertEqual(x[b, 0].shape, (1,))
+        self.assertEqual(x[b, z].shape, (1,))
+        self.assertEqual(x[b, True].shape, (1, 3))
+        self.assertEqual(x[b, True, True, True, True].shape, (1, 3))
+        self.assertEqual(x[b, False].shape, (0, 3))
+        self.assertEqual(x[b, True, True, False, True].shape, (0, 3))
+        self.assertEqual(x[b, t].shape, (1, 3))
+        self.assertEqual(x[b, f].shape, (0, 3))
+
+        # Using boolean tensor
+        self.assertEqual(x[m].shape, (1, 3))
+        self.assertEqual(x[m, ::2].shape, (1, 2))
+        self.assertEqual(x[m, None].shape, (1, 1, 3))
+        self.assertEqual(x[m, 0].shape, (1,))
+        self.assertEqual(x[m, z].shape, (1,))
+        self.assertEqual(x[m, True].shape, (1, 3))
+        self.assertEqual(x[m, True, True, True, True].shape, (1, 3))
+        self.assertEqual(x[m, False].shape, (0, 3))
+        self.assertEqual(x[m, True, True, False, True].shape, (0, 3))
+        self.assertEqual(x[m, t].shape, (1, 3))
+        self.assertEqual(x[m, f].shape, (0, 3))
+
+        # Boolean mask in the middle of indices array
+        x = torch.randn(3, 2, 2, 5, device=device)
+        self.assertEqual(x[:, m, :].shape, (3, 1, 5))
+        self.assertEqual(x[0, m, ::2].shape, (1, 3))
+        self.assertEqual(x[..., m, ::2].shape, (3, 1, 3))
+        self.assertEqual(x[None, ..., m, ::2].shape, (1, 3, 1, 3))
+
+    def test_bool_mask_assignment(self, device):
+        v = torch.tensor([[1, 2], [3, 4]], device=device)
+        mask = torch.tensor([1, 0], dtype=torch.bool, device=device)
+        v[mask, :] = 0
+        self.assertEqual(v, torch.tensor([[0, 0], [3, 4]], device=device))
+
+        v = torch.tensor([[1, 2], [3, 4]], device=device)
+        v[:, mask] = 0
+        self.assertEqual(v, torch.tensor([[0, 2], [0, 4]], device=device))
+
+    def test_multi_dimensional_bool_mask_assignment(self, device):
+        v = torch.tensor([[[[1], [2]], [[3], [4]]]], device=device)
+        mask = torch.tensor([[1, 0], [0, 1]], dtype=torch.bool, device=device)
+        v[:, mask, :] = 0
+        self.assertEqual(v, torch.tensor([[[[0], [2]], [[3], [0]]]], device=device))
+        v = torch.tensor([[[[1], [2]], [[3], [4]]]], device=device)
+        torch.ops.aten.index_put_(v, [None, mask, None], torch.tensor(0))
+        self.assertEqual(v, torch.tensor([[[[0], [2]], [[3], [0]]]], device=device))
 
     def test_byte_mask(self, device):
         v = torch.randn(5, 7, 3, device=device)
@@ -900,10 +1008,11 @@ class TestIndexing(TestCase):
             self.assertEqual(y, torch.ones(size=(10, 10), device=device))
             self.assertEqual(len(w), 2)
 
+    # MPS: Fails locally, but passes in CI...
     @skipIfTorchDynamo(
         "This test causes SIGKILL when running with dynamo, https://github.com/pytorch/pytorch/issues/88472"
     )
-    @serialTest(TEST_CUDA)
+    @serialTest(TEST_CUDA or TEST_XPU or TEST_MPS)
     def test_index_put_accumulate_large_tensor(self, device):
         # This test is for tensors with number of elements >= INT_MAX (2^31 - 1).
         N = (1 << 31) + 5
@@ -980,7 +1089,7 @@ class TestIndexing(TestCase):
         out_cpu = t.index_put_(indices, values2d, accumulate=True)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_index_put_large_indices(self, device):
         def generate_indices(num_indices: int, index_range: int):
             indices = []
@@ -1032,7 +1141,7 @@ class TestIndexing(TestCase):
             a_dev.index_put_(indices=[b_dev], values=c_dev, accumulate=True)
             self.assertEqual(a_dev.cpu(), a)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_index_put_accumulate_non_contiguous(self, device):
         t = torch.zeros((5, 2, 2))
         t_dev = t.to(device)
@@ -1051,17 +1160,16 @@ class TestIndexing(TestCase):
 
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
-    @onlyCUDA
-    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
-    def test_index_put_accumulate_with_optional_tensors(self, device):
-        # TODO: replace with a better solution.
-        # Currently, here using torchscript to put None into indices.
-        # on C++ it gives indices as a list of 2 optional tensors: first is null and
-        # the second is a valid tensor.
-        @torch.jit.script
+    @onlyOn(["cuda", "xpu"])
+    def test_index_put_deterministic_with_optional_tensors(self, device):
         def func(x, i, v):
-            idx = [None, i]
-            x.index_put_(idx, v, accumulate=True)
+            with DeterministicGuard(True):
+                x[..., i] = v
+            return x
+
+        def func1(x, i, v):
+            with DeterministicGuard(True):
+                x[i] = v
             return x
 
         n = 4
@@ -1071,21 +1179,43 @@ class TestIndexing(TestCase):
         indices_dev = indices.to(device)
         value0d = torch.tensor(10.0)
         value1d = torch.tensor([1.0, 2.0])
+        values2d = torch.randn(n, 1)
 
-        out_cuda = func(t_dev, indices_dev, value0d.cuda())
-        out_cpu = func(t, indices, value0d)
+        for val in (value0d, value1d, values2d):
+            out_cuda = func(t_dev, indices_dev, val.to(device))
+            out_cpu = func(t, indices, val)
+            self.assertEqual(out_cuda.cpu(), out_cpu)
+
+        t = torch.zeros((5, 4))
+        t_dev = t.to(device)
+        indices = torch.tensor([1, 4, 3])
+        indices_dev = indices.to(device)
+        val = torch.randn(4)
+        out_cuda = func1(t_dev, indices_dev, val.to(device))
+        out_cpu = func1(t, indices, val)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
-        out_cuda = func(t_dev, indices_dev, value1d.cuda())
-        out_cpu = func(t, indices, value1d)
+        t = torch.zeros(2, 3, 4)
+        ind = torch.tensor([0, 1])
+        val = torch.randn(6, 2)
+        with self.assertRaisesRegex(RuntimeError, "shape mismatch"):
+            func(t, ind, val)
+
+        with self.assertRaisesRegex(RuntimeError, "must match"):
+            func(t.to(device), ind.to(device), val.to(device))
+
+        val = torch.randn(2, 3, 1)
+        out_cuda = func1(t.to(device), ind.to(device), val.to(device))
+        out_cpu = func1(t, ind, val)
         self.assertEqual(out_cuda.cpu(), out_cpu)
 
     @onlyNativeDeviceTypes
     def test_index_put_accumulate_duplicate_indices(self, device):
+        dtype = torch.float if device.startswith("mps") else torch.double
         for i in range(1, 512):
             # generate indices by random walk, this will create indices with
             # lots of duplicates interleaved with each other
-            delta = torch.empty(i, dtype=torch.double, device=device).uniform_(-1, 1)
+            delta = torch.empty(i, dtype=dtype, device=device).uniform_(-1, 1)
             indices = delta.cumsum(0).long()
 
             input = torch.randn(indices.abs().max() + 1, device=device)
@@ -1194,6 +1324,15 @@ class TestIndexing(TestCase):
         torch.float8_e5m2,
         torch.float8_e4m3fn,
     )
+    @dtypesIfXPU(
+        torch.cfloat,
+        torch.cdouble,
+        torch.half,
+        torch.long,
+        torch.bool,
+        torch.bfloat16,
+    )
+    @dtypesIfMPS(torch.float, torch.float16, torch.long, torch.bool)
     def test_index_put_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
         vals = torch.ones(3, 2, 4, device=device, dtype=dtype)
@@ -1204,6 +1343,7 @@ class TestIndexing(TestCase):
     @dtypes(torch.float, torch.bfloat16, torch.long, torch.bool)
     @dtypesIfCPU(torch.float, torch.long, torch.bfloat16, torch.bool)
     @dtypesIfCUDA(torch.half, torch.long, torch.bfloat16, torch.bool)
+    @dtypesIfXPU(torch.half, torch.long, torch.bfloat16, torch.bool)
     def test_index_src_datatype(self, device, dtype):
         src = torch.ones(3, 2, 4, device=device, dtype=dtype)
         # test index
@@ -1502,7 +1642,7 @@ class TestIndexing(TestCase):
 
         self.assertRaisesRegex(IndexError, "invalid index", runner)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_invalid_device(self, device):
         idx = torch.tensor([0, 1])
         b = torch.zeros(5, device=device)
@@ -1514,7 +1654,7 @@ class TestIndexing(TestCase):
                 lambda: torch.index_put_(b, (idx,), c, accumulate=accumulate),
             )
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_cpu_indices(self, device):
         idx = torch.tensor([0, 1])
         b = torch.zeros(2, device=device)
@@ -1590,7 +1730,7 @@ class TestIndexing(TestCase):
         with self.assertRaisesRegex(IndexError, "Dimension out of range"):
             torch.take_along_dim(t, indices, dim=7)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     @dtypes(torch.float)
     def test_gather_take_along_dim_cross_device(self, device, dtype):
         shape = (2, 3, 1, 4)
@@ -1620,7 +1760,7 @@ class TestIndexing(TestCase):
         ):
             torch.take_along_dim(t.cpu(), indices, dim=0)
 
-    @onlyCUDA
+    @onlyOn(["cuda", "xpu"])
     def test_cuda_broadcast_index_use_deterministic_algorithms(self, device):
         with DeterministicGuard(True):
             idx1 = torch.tensor([0])
@@ -1668,6 +1808,337 @@ class TestIndexing(TestCase):
         idx_max = torch.iinfo(torch.int64).max
         self.assertRaises(IndexError, lambda: t[idx_min])
         self.assertRaises(IndexError, lambda: t[idx_max])
+
+    @parametrize("reduce", ["prod", "amin", "amax", "mean"])
+    @dtypes(*all_types_and(torch.half, torch.bfloat16))
+    @expectedFailureMPS  # Unimplemented for MPS device
+    def test_index_reduce(self, device, dtype, reduce):
+        size = (3, 4, 5)
+        index_dtypes = [torch.int, torch.long]
+        include_selfs = [True, False]
+        amin_init = float("inf") if dtype.is_floating_point else torch.iinfo(dtype).max
+        amax_init = -float("inf") if dtype.is_floating_point else torch.iinfo(dtype).min
+        reduction_init = {"prod": 1, "mean": 0, "amin": amin_init, "amax": amax_init}
+
+        for dest_noncontig, src_noncontig, index_noncontig in product(
+            [True, False], repeat=3
+        ):
+            for idx_dtype, include_self in product(index_dtypes, include_selfs):
+                for dim in range(len(size)):
+                    num_src = np.random.randint(10)
+                    num_dest = size[dim]
+                    dest = make_tensor(
+                        size, device=device, dtype=dtype, noncontiguous=dest_noncontig
+                    )
+                    src_size = size[:dim] + (num_src,) + size[dim + 1 :]
+                    src = make_tensor(
+                        src_size,
+                        device=device,
+                        dtype=dtype,
+                        noncontiguous=src_noncontig,
+                    )
+                    idx = torch.testing.make_tensor(
+                        num_src,
+                        low=0,
+                        high=num_dest,
+                        dtype=idx_dtype,
+                        device=device,
+                        noncontiguous=index_noncontig,
+                    )
+                    expected = dest.clone()
+                    dest.index_reduce_(dim, idx, src, reduce, include_self=include_self)
+                    # fill rows in idx with reduction inits if include_self=False
+                    if not include_self:
+                        expected.index_fill_(dim, idx.long(), reduction_init[reduce])
+                    expected = expected.transpose(0, dim)
+                    src = src.transpose(0, dim)
+                    for i in range(num_src):
+                        if reduce == "prod":
+                            expected[idx[i]] *= src[i]
+                        elif reduce == "amin":
+                            torch.minimum(
+                                expected[idx[i]], src[i], out=expected[idx[i]]
+                            )
+                        elif reduce == "amax":
+                            torch.maximum(
+                                expected[idx[i]], src[i], out=expected[idx[i]]
+                            )
+                        else:
+                            expected[idx[i]] += src[i]
+                    if reduce == "mean":
+                        counts = (
+                            torch.ones_like(expected)
+                            if include_self
+                            else torch.zeros_like(expected)
+                        )
+                        counts.index_add_(0, idx, torch.ones_like(src))
+                        counts.masked_fill_(counts == 0, 1)
+                        if dtype.is_floating_point:
+                            expected.div_(counts)
+                        else:
+                            expected.div_(counts, rounding_mode="floor")
+                    expected = expected.transpose(0, dim)
+
+                    self.assertEqual(dest, expected)
+
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
+    def test_index_copy(self, device, dtype):
+        # We just test for num_copy <= num_dest, as otherwise there are repeated indices
+        # and the behavior is undefined
+        num_copy, num_dest = 3, 5
+
+        def make_arg(batch_sizes, n, dim, contig):
+            size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
+            return make_tensor(
+                size_arg,
+                dtype=dtype,
+                device=device,
+                low=None,
+                high=None,
+                noncontiguous=not contig,
+            )
+
+        def ref_index_copy(tgt, dim, idx, src):
+            for i in range(idx.size(0)):
+                idx_dest = dim * (slice(None),) + (idx[i],)
+                idx_src = dim * (slice(None),) + (i,)
+                tgt[idx_dest] = src[idx_src]
+
+        # More thorough testing as in index_add
+        for dest_contig, src_contig, index_contig in product([True, False], repeat=3):
+            for other_sizes in ((), (4, 5)):
+                for dim in range(len(other_sizes)):
+                    dest = make_arg(other_sizes, num_dest, dim, dest_contig)
+                    src = make_arg(other_sizes, num_copy, dim, src_contig)
+                    idx = torch.randperm(num_dest, dtype=torch.int64, device=device)[
+                        :num_copy
+                    ]
+                    if not index_contig:
+                        idx = torch.repeat_interleave(idx, 2, dim=-1)
+                        idx = idx[..., ::2]
+                    dest2 = dest.clone()
+                    dest.index_copy_(dim, idx, src)
+                    ref_index_copy(dest2, dim, idx, src)
+                    self.assertEqual(dest, dest2)
+
+    # onlyNativeDeviceTypes due to an XLA error:
+    # https://github.com/pytorch/pytorch/issues/53256
+    @onlyNativeDeviceTypes
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
+    def test_index_copy_scalars(self, device, dtype):
+        # Create the 8 possible combinations of scalar sizes for target / index / source
+        scalars = (
+            (
+                make_tensor(size_t, dtype=dtype, device=device, low=None, high=None),
+                make_tensor(size_i, dtype=torch.int64, device=device, low=0, high=1),
+                make_tensor(size_s, dtype=dtype, device=device, low=None, high=None),
+            )
+            for size_t, size_i, size_s in product([(), (1,)], repeat=3)
+        )
+        for target, idx, source in scalars:
+            target.index_copy_(0, idx, source)
+            self.assertEqual(target.item(), source.item())
+
+    @onlyCPU
+    def test_errors_index_copy(self, device):
+        # We do not test the GPU as the CUDA_ASSERT would break the CUDA context
+        idx_dim = 8
+        tgt_dim = 5
+        batch_dim = 3
+
+        # Too large of an index
+        a = torch.randn(batch_dim, tgt_dim, device=device)
+        idx = torch.full((idx_dim,), tgt_dim, device=device)
+        c = torch.zeros(batch_dim, idx_dim, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+        # Too small (negative indices)
+        idx = torch.full((idx_dim,), -1, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+        # Too small (very negative indices) - they should be unsupported even
+        # when support for negative indices is implemented for index_copy_
+        idx = torch.full((idx_dim,), -tgt_dim - 1, device=device)
+        with self.assertRaises(IndexError):
+            a.index_copy_(1, idx, c)
+
+    def _prepare_data_for_index_copy_and_add_deterministic(
+        self, dim: int, device: torch.device
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        assert dim >= 0 and dim < 3
+        a = [5, 4, 3]
+        a[dim] = 2000
+        x = torch.zeros(a, device=device)
+        b = a.copy()
+        elems = a[dim] * 20
+        b[dim] = elems
+        src = torch.rand(b, device=device)
+        index = torch.randint(a[dim], (elems,), device=device)
+        return (x, index, src)
+
+    @onlyNativeDeviceTypes
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")
+    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
+    def test_index_copy_deterministic(self, device: torch.device) -> None:
+        for dim in range(3):
+            x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(
+                dim, device
+            )
+            with DeterministicGuard(True):
+                y0 = torch.index_copy(x, dim, index, src)
+
+            x0 = x.detach().clone()
+            index_list = index.tolist()
+            for i in range(len(index_list)):
+                if dim == 0:
+                    x0[index_list[i], :, :] = src[i, :, :]
+                elif dim == 1:
+                    x0[:, index_list[i], :] = src[:, i, :]
+                elif dim == 2:
+                    x0[:, :, index_list[i]] = src[:, :, i]
+
+            self.assertEqual(x0, y0, atol=0, rtol=0)
+
+    @onlyNativeDeviceTypes
+    @expectedFailureMPS  # See https://github.com/pytorch/pytorch/issues/161029
+    def test_index_add_deterministic(self, device: torch.device) -> None:
+        for dim in range(3):
+            x, index, src = self._prepare_data_for_index_copy_and_add_deterministic(
+                dim, device
+            )
+            alpha = random.random() + 1
+            # on CPU it should be deterministic regardless of the deterministic mode
+            with DeterministicGuard(True):
+                y0 = torch.index_add(x, dim, index, src, alpha=alpha)
+                for _ in range(3):
+                    y = torch.index_add(x, dim, index, src, alpha=alpha)
+                    self.assertEqual(y, y0, atol=0, rtol=0)
+
+            with DeterministicGuard(False):
+                for _ in range(3):
+                    y_nd = torch.index_add(x, dim, index, src, alpha=alpha)
+                    self.assertEqual(y_nd, y0, atol=1e-3, rtol=1e-5)
+
+    @onlyNativeDeviceTypes
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1973")
+    def test_index_put_non_accumulate_deterministic(self, device) -> None:
+        with DeterministicGuard(True):
+            for i in range(3):
+                m = random.randint(10, 20)
+                elems = random.randint(20000, 30000)
+                values = torch.rand(elems, device=device)
+                indices = torch.randint(m, (elems,), device=device)
+                input = torch.rand(m, device=device)
+                output = input.index_put((indices,), values, accumulate=False)
+
+                input_list = input.tolist()
+                indices_list = indices.tolist()
+                values_list = values.tolist()
+                for i, v in zip(indices_list, values_list):
+                    input_list[i] = v
+
+                self.assertEqual(output, input_list)
+
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool))  # TODO: Add torch.cfloat here
+    def test_index_fill(self, device, dtype):
+        x = torch.tensor([[1, 2], [4, 5]], dtype=dtype, device=device)
+        index = torch.tensor([0], device=device)
+        x.index_fill_(1, index, 0)
+        self.assertEqual(x, torch.tensor([[0, 2], [0, 5]], dtype=dtype, device=device))
+        if not x.is_complex() and device != "meta":
+            with self.assertRaisesRegex(RuntimeError, r"Scalar"):
+                x.index_fill_(1, index, 1 + 1j)
+        # Make sure that the result stays 0-dim while applied to
+        # a 0-dim input
+        x = torch.tensor(1, dtype=dtype, device=device)
+        self.assertEqual(0, x.index_fill(0, index, -1).dim())
+        self.assertEqual(0, x.index_fill_(0, index, -1).dim())
+
+    # The test fails for zero-dimensional tensors on XLA
+    @onlyNativeDeviceTypes
+    @dtypes(*all_types_complex_float8_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfXPU(*all_types_and_complex_and(torch.half, torch.bool, torch.bfloat16))
+    @dtypesIfMPS(*all_mps_types_and(torch.bool, torch.cfloat))
+    def test_index_select(self, device, dtype):
+        num_src, num_out = 3, 5
+
+        def make_arg(batch_sizes, n, dim, contig):
+            size_arg = batch_sizes[:dim] + (n,) + batch_sizes[dim:]
+            return make_tensor(
+                size_arg,
+                dtype=dtype,
+                device=device,
+                low=None,
+                high=None,
+                noncontiguous=not contig,
+            )
+
+        def ref_index_select(src, dim, idx):
+            # some types not supported on numpy
+            not_np_dtypes = (
+                torch.bfloat16,
+                torch.float8_e5m2,
+                torch.float8_e5m2fnuz,
+                torch.float8_e4m3fn,
+                torch.float8_e4m3fnuz,
+            )
+            if dtype in not_np_dtypes:
+                src = src.float()
+            out = torch.from_numpy(
+                np.take(src.cpu().numpy(), idx.cpu().numpy(), axis=dim)
+            )
+            if dtype in not_np_dtypes:
+                out = out.to(device=device, dtype=dtype)
+            return out
+
+        for src_contig, idx_contig in product([True, False], repeat=2):
+            for other_sizes in ((), (4, 5)):
+                for dim in range(len(other_sizes)):
+                    src = make_arg(other_sizes, num_src, dim, src_contig)
+                    idx = make_tensor(
+                        (num_out,),
+                        dtype=torch.int64,
+                        device=device,
+                        low=0,
+                        high=num_src,
+                        noncontiguous=not idx_contig,
+                    )
+                    out = torch.index_select(src, dim, idx)
+                    out2 = ref_index_select(src, dim, idx)
+                    self.assertEqual(out, out2)
+
+        for idx_type in (torch.int32, torch.int64):
+            other_sizes = (3, 2)
+            dim = 1
+            src = make_arg(other_sizes, num_src, dim, True)
+            idx = make_tensor(
+                (num_out,),
+                dtype=idx_type,
+                device=device,
+                low=0,
+                high=num_src,
+                noncontiguous=False,
+            )
+            out = torch.index_select(src, dim, idx)
+            out2 = ref_index_select(src, dim, idx)
+            self.assertEqual(out, out2)
+
+        # Create the 4 possible combinations of scalar sizes for index / source
+        scalars = (
+            (
+                make_tensor(size_s, dtype=dtype, device=device),
+                torch.zeros(size_i, dtype=torch.int64, device=device),
+            )
+            for size_s, size_i in product([(), (1,)], repeat=2)
+        )
+        for source, idx in scalars:
+            out = source.index_select(0, idx)
+            self.assertEqual(out.item(), source.item())
 
 
 # The tests below are from NumPy test_indexing.py with some modifications to
@@ -1905,8 +2376,8 @@ class NumpyTests(TestCase):
     def test_trivial_fancy_out_of_bounds(self, device):
         a = torch.zeros(5, device=device)
         ind = torch.ones(20, dtype=torch.int64, device=device)
-        if a.is_cuda:
-            raise unittest.SkipTest("CUDA asserts instead of raising an exception")
+        if a.device.type in ["cuda", "xpu"]:
+            raise unittest.SkipTest("CUDA/XPU asserts instead of raising an exception")
         ind[-1] = 10
         self.assertRaises(IndexError, a.__getitem__, ind)
         self.assertRaises(IndexError, a.__setitem__, ind, 0)
@@ -1940,8 +2411,10 @@ class NumpyTests(TestCase):
         self.assertEqual(kernel, kernel2)
 
 
-instantiate_device_type_tests(TestIndexing, globals(), except_for="meta")
-instantiate_device_type_tests(NumpyTests, globals(), except_for="meta")
+instantiate_device_type_tests(
+    TestIndexing, globals(), except_for="meta", allow_mps=True, allow_xpu=True
+)
+instantiate_device_type_tests(NumpyTests, globals(), except_for="meta", allow_xpu=True)
 
 if __name__ == "__main__":
     run_tests()

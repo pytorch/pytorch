@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from enum import auto, Enum
-from typing import Optional
 
 import torch
 import torch.nn.functional as F
@@ -98,6 +97,7 @@ class _Orthogonal(Module):
                 )
             # Q is now orthogonal (or unitary) of size (..., n, n)
             if n != k:
+                # pyrefly: ignore [unbound-name]
                 Q = Q[..., :k]
             # Q is now the size of the X (albeit perhaps transposed)
         else:
@@ -110,8 +110,10 @@ class _Orthogonal(Module):
             Q = Q * X.diagonal(dim1=-2, dim2=-1).int().unsqueeze(-2)
 
         if hasattr(self, "base"):
+            # pyrefly: ignore [unbound-name]
             Q = self.base @ Q
         if transposed:
+            # pyrefly: ignore [unbound-name]
             Q = Q.mT
         return Q  # type: ignore[possibly-undefined]
 
@@ -191,7 +193,7 @@ class _Orthogonal(Module):
 def orthogonal(
     module: Module,
     name: str = "weight",
-    orthogonal_map: Optional[str] = None,
+    orthogonal_map: str | None = None,
     *,
     use_trivialization: bool = True,
 ) -> Module:
@@ -314,7 +316,7 @@ def orthogonal(
 class _WeightNorm(Module):
     def __init__(
         self,
-        dim: Optional[int] = 0,
+        dim: int | None = 0,
     ) -> None:
         super().__init__()
         if dim is None:
@@ -385,7 +387,7 @@ def weight_norm(module: Module, name: str = "weight", dim: int = 0):
         missing_keys,
         unexpected_keys,
         error_msgs,
-    ):
+    ) -> None:
         g_key = f"{prefix}{name}_g"
         v_key = f"{prefix}{name}_v"
         if g_key in state_dict and v_key in state_dict:
@@ -438,7 +440,10 @@ class _SpectralNorm(Module):
 
     def _reshape_weight_to_matrix(self, weight: torch.Tensor) -> torch.Tensor:
         # Precondition
-        assert weight.ndim > 1
+        if weight.ndim <= 1:
+            raise AssertionError(
+                f"Expected weight to have more than 1 dimension, got {weight.ndim}"
+            )
 
         if self.dim != 0:
             # permute dim to front
@@ -482,7 +487,10 @@ class _SpectralNorm(Module):
         #    (i.e., the `u` and `v` vectors) are changed in the second forward.
 
         # Precondition
-        assert weight_mat.ndim > 1
+        if weight_mat.ndim <= 1:
+            raise AssertionError(
+                f"Expected weight_mat to have more than 1 dimension, got {weight_mat.ndim}"
+            )
 
         for _ in range(n_power_iterations):
             # Spectral norm of weight equals to `u^T W v`, where `u` and `v`
@@ -529,7 +537,7 @@ def spectral_norm(
     name: str = "weight",
     n_power_iterations: int = 1,
     eps: float = 1e-12,
-    dim: Optional[int] = None,
+    dim: int | None = None,
 ) -> Module:
     r"""Apply spectral normalization to a parameter in the given module.
 

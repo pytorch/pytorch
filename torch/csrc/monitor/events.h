@@ -35,7 +35,7 @@ struct TORCH_API Event {
   std::unordered_map<std::string, data_value_t> data;
 };
 
-TORCH_API inline bool operator==(const Event& lhs, const Event& rhs) {
+inline bool operator==(const Event& lhs, const Event& rhs) {
   return lhs.name == rhs.name && lhs.timestamp == rhs.timestamp &&
       lhs.data == rhs.data;
 }

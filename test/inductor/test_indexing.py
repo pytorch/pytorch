@@ -55,7 +55,7 @@ class TestIndexingSimplification(InductorTestCase):
             sizevars.simplify_with_ranges(expr, var_ranges),
             i1 + 128 * i2 + 64 * ModularIndexing(r3, 1, 2),
         )
-        # all the modular indexing should be removed when the body cant be larger than the modulus
+        # all the modular indexing should be removed when the body can't be larger than the modulus
         var_ranges[r3] = 2
         self.assertEqual(
             sizevars.simplify_with_ranges(expr, var_ranges), i1 + 128 * i2 + 64 * r3
@@ -205,6 +205,13 @@ class TestIndexingSimplification(InductorTestCase):
         self.assertEqual(expr2, actual)
         self.assertNotEqual(ModularIndexing(x, 1, b), actual)
 
+    def test_modular_indexing_positive(self):
+        x = sympy.Symbol("x", integer=True, positive=True)
+        expr = ModularIndexing(x, 1, 1024) - 1
+        expr2 = abs(expr)
+
+        self.assertNotEqual(expr2, expr)
+
     def test_expand_floor_div_skipped(self):
         sizevars = SizeVarAllocator()
         x = sympy.Symbol("x", integer=True, positive=True)
@@ -240,12 +247,52 @@ class TestIndexingSimplification(InductorTestCase):
         x = torch.randint(0, 255, (2, 4096, 5504), dtype=torch.uint8, device=GPU_TYPE)
 
         triton_code = run_and_get_triton_code(f, x)
-        # Make sure the 2 load uses simpified indexing rather than something like
+        # Make sure the 2 load uses simplified indexing rather than something like
         # tl.load(in_ptr0 + ((5504*x1) + (x0 // 2)),
         self.assertEqual(2, triton_code.count("tl.load(in_ptr0 + (x2 // 2),"))
         if DO_PERF_TEST:
             ms = benchmarker.benchmark_gpu(lambda: f(x))
             print(f"{ms=:.03f}")
+
+    @unittest.skipUnless(HAS_GPU, "Need GPU for this test")
+    def test_floordiv_div_sympy_is_integer_bug(self):
+        def foo(arg0, arg1, arg2, arg3, arg4, sentinel):
+            t0 = arg0
+            t1 = t0.reshape((28, 24, 3, 127))
+            t2 = t1.var(dim=2)
+            t3 = arg1
+            t4 = arg2
+            t5 = torch.nn.functional.embedding(
+                torch.clamp(t3, 0, t4.size(0) - 1).to(torch.long), t4
+            )
+            t6 = arg3
+            t7 = torch.nn.functional.pad(t6, [0, 1], mode="constant", value=0.0)
+            t8 = arg4
+            t9 = t8.sum(dim=1)
+            t10 = torch.baddbmm(t5, t7, t9)
+            t11 = torch.cat([t2, t10], dim=0)
+            output = t11 + sentinel
+            return output
+
+        arg0 = torch.rand(
+            [36, 7112, 1, 1], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        arg1 = torch.randint(0, 512, [30, 24], dtype=torch.int64, device=GPU_TYPE)
+        arg2 = torch.rand(
+            [512, 127], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        arg3 = torch.rand(
+            [30, 24, 15], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        arg4 = torch.rand(
+            [30, 4, 16, 127], dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        sentinel = torch.tensor(
+            0.0, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        )
+        compiled_foo = torch.compile(foo, fullgraph=True, dynamic=True)
+        out_compiled = compiled_foo(arg0, arg1, arg2, arg3, arg4, sentinel)
+        out_compiled.sum().backward()
 
 
 class ExprPrinterTests(InductorTestCase):
@@ -396,10 +443,16 @@ class ExprPrinterTests(InductorTestCase):
         s2 = sympy.S(-1)
         expr = FloorDiv(s1, s2)
         self.assertEqual(pexpr(expr), "(-1)*s1")
-        self.assertEqual(cexpr(expr), "(-1LL)*s1") if sys.platform in [
-            "darwin",
-            "win32",
-        ] else "(-1L)*s1"
+        self.assertEqual(
+            cexpr(expr),
+            "(-1LL)*s1"
+            if sys.platform
+            in [
+                "darwin",
+                "win32",
+            ]
+            else "(-1L)*s1",
+        )
 
         s0 = sympy.Symbol("s0", integer=True)
         s2 = sympy.S(2)

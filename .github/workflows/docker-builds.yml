@@ -49,45 +49,51 @@ jobs:
       matrix:
         runner: [linux.12xlarge]
         docker-image-name: [
-          pytorch-linux-focal-cuda12.4-cudnn9-py3-gcc9-inductor-benchmarks,
-          pytorch-linux-focal-cuda12.4-cudnn9-py3.12-gcc9-inductor-benchmarks,
-          pytorch-linux-focal-cuda12.4-cudnn9-py3.13-gcc9-inductor-benchmarks,
-          pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11,
-          pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc9-inductor-benchmarks,
-          pytorch-linux-focal-cuda12.6-cudnn9-py3.12-gcc9-inductor-benchmarks,
-          pytorch-linux-focal-cuda12.6-cudnn9-py3.13-gcc9-inductor-benchmarks,
-          pytorch-linux-focal-cuda11.8-cudnn9-py3-gcc9,
-          pytorch-linux-focal-py3.9-clang10,
-          pytorch-linux-focal-py3.11-clang10,
-          pytorch-linux-focal-py3.12-clang10,
-          pytorch-linux-focal-py3.13-clang10,
-          pytorch-linux-focal-rocm-n-1-py3,
-          pytorch-linux-focal-rocm-n-py3,
-          pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-clang12,
-          pytorch-linux-jammy-py3.9-gcc11,
-          pytorch-linux-jammy-py3.9-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks,
+          pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11,
+          pytorch-linux-jammy-py3.10-clang12,
+          pytorch-linux-jammy-py3.11-clang12,
+          pytorch-linux-jammy-py3.12-clang12,
+          pytorch-linux-jammy-py3.13-clang12,
+          pytorch-linux-jammy-py3.14-clang12,
+          pytorch-linux-jammy-rocm-n-py3,
+          pytorch-linux-noble-rocm-n-py3,
+          pytorch-linux-noble-rocm-nightly-py3,
+          pytorch-linux-jammy-rocm-n-py3-benchmarks,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang12,
+          pytorch-linux-jammy-py3.10-gcc11,
+          pytorch-linux-jammy-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-py3.12-halide,
-          pytorch-linux-jammy-xpu-2024.0-py3,
-          pytorch-linux-jammy-xpu-2025.0-py3,
-          pytorch-linux-jammy-py3-clang15-asan,
+          pytorch-linux-jammy-py3.12-pallas,
+          pytorch-linux-jammy-cuda12.8-py3.12-pallas,
+          pytorch-linux-jammy-tpu-py3.12-pallas,
+          pytorch-linux-jammy-xpu-n-1-py3,
+          pytorch-linux-noble-xpu-n-py3,
+          pytorch-linux-noble-xpu-n-py3-inductor-benchmarks,
           pytorch-linux-jammy-py3-clang18-asan,
-          pytorch-linux-focal-py3-clang10-onnx,
-          pytorch-linux-focal-linter,
-          pytorch-linux-jammy-cuda11.8-cudnn9-py3.9-linter,
-          pytorch-linux-jammy-py3-clang12-executorch,
-          pytorch-linux-jammy-py3.12-triton-cpu
+          pytorch-linux-jammy-py3-clang12-onnx,
+          pytorch-linux-jammy-linter,
+          pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-linter,
+          # TODO: Re-enable me when docker pin update happens
+          # pytorch-linux-jammy-py3-clang12-executorch,
+          pytorch-linux-jammy-py3.12-triton-cpu,
+          pytorch-linux-noble-riscv64-py3.12-gcc14
         ]
         include:
-          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13
             runner: linux.arm64.m7g.4xlarge
-          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc11-inductor-benchmarks
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-clang21
+            runner: linux.arm64.m7g.4xlarge
+          - docker-image-name: pytorch-linux-jammy-aarch64-py3.10-gcc13-inductor-benchmarks
             runner: linux.arm64.m7g.4xlarge
             timeout-minutes: 600
     # Docker uploads fail from LF runners, see https://github.com/pytorch/pytorch/pull/137358
     # runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
     runs-on: "${{ matrix.runner }}"
-    env:
-      DOCKER_IMAGE_BASE: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/${{ matrix.docker-image-name }}
     steps:
       - name: Clean workspace
         shell: bash
@@ -104,11 +110,14 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
       - name: Build docker image
         id: build-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
         with:
-          docker-image-name: ${{ matrix.docker-image-name }}
+          docker-image-name: ci-image:${{ matrix.docker-image-name }}
           always-rebuild: true
           push: true
 
@@ -117,17 +126,32 @@ jobs:
         with:
           docker-image: ${{ steps.build-docker-image.outputs.docker-image }}
 
+      - name: Generate output
+        if: contains(matrix.docker-image-name, 'rocm')
+        id: generate_output
+        run: |
+          docker_image_name="${{ matrix.docker-image-name }}"
+          docker_image_tag="${{ steps.build-docker-image.outputs.docker-image }}"
+          echo "${docker_image_name}=${docker_image_tag}" >> docker-builds-output-${docker_image_name}.txt
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4.4.0
+        if: contains(matrix.docker-image-name, 'rocm')
+        with:
+          name: docker-builds-artifacts-${{ matrix.docker-image-name }}
+          retention-days: 14
+          path: ./docker-builds-output-${{ matrix.docker-image-name }}.txt
+
       - uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
-        name: Push to https://https://ghcr.io/
+        name: Push to https://ghcr.io/
         id: push-to-ghcr-io
         if: ${{ github.event_name == 'push' }}
         env:
           ECR_DOCKER_IMAGE: ${{ steps.build-docker-image.outputs.docker-image }}
           GHCR_PAT: ${{ secrets.GHCR_PAT }}
-          IMAGE_NAME: ${{ matrix.docker-image-name }}
         with:
           shell: bash
-          timeout_minutes: 30
+          timeout_minutes: 60
           max_attempts: 5
           retry_wait_seconds: 90
           command: |
@@ -135,8 +159,8 @@ jobs:
             tag=${ECR_DOCKER_IMAGE##*:}
             # Push docker image to the ghcr.io
             echo $GHCR_PAT | docker login ghcr.io -u pytorch --password-stdin
-            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${IMAGE_NAME}-${tag}"
-            docker push "${ghcr_image}:${IMAGE_NAME}-${tag}"
+            docker tag "${ECR_DOCKER_IMAGE}" "${ghcr_image}:${tag}"
+            docker push "${ghcr_image}:${tag}"
 
       - name: Chown workspace
         uses: ./.github/actions/chown-workspace

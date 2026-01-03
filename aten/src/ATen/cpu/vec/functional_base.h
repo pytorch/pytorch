@@ -6,8 +6,24 @@
 #include <ATen/cpu/vec/vec.h>
 #include <c10/util/irange.h>
 
-namespace at::vec {
+namespace at {
+namespace detail {
+// We prefer to convert through float for reduced-precision floating
+// point types if we have a Vectorized specialization for float and we
+// don't have one for the actual type in question.
+template <typename T>
+struct should_prefer_converting_through_float
+    : std::bool_constant<
+          is_reduced_floating_point_v<T> &&
+          vec::is_vec_specialized_for_v<float> &&
+          !vec::is_vec_specialized_for_v<T>> {};
 
+template <typename T>
+constexpr auto should_prefer_converting_through_float_v =
+    should_prefer_converting_through_float<T>::value;
+} // namespace detail
+
+namespace vec {
 // slow path
 template <typename scalar_t, typename Op>
 inline scalar_t vec_reduce_all(
@@ -115,7 +131,17 @@ struct VecReduceAllSIMD<float, Op> {
     return v[0];
   }
 };
-#endif // defined(__aarch64__)
+
+template <>
+struct VecReduceAllSIMD<float, std::plus<Vectorized<float>>> {
+  static inline float apply(
+      const std::plus<Vectorized<float>>& vec_fun,
+      const Vectorized<float>& acc_vec) {
+    return vaddvq_f32(acc_vec);
+  }
+};
+#endif // defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+       // && !defined(CPU_CAPABILITY_SVE)
 
 #if defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__) && \
     defined(CPU_CAPABILITY_SVE256)
@@ -141,7 +167,8 @@ struct VecReduceAllSIMD<float, Op> {
     return svlasta(svpfalse(), v);
   }
 };
-#endif // defined(__aarch64__)
+#endif // defined(__aarch64__) && !defined(C10_MOBILE) && !defined(__CUDACC__)
+       // && defined(CPU_CAPABILITY_SVE256)
 
 template <typename scalar_t, typename Op>
 inline scalar_t vec_reduce_all(
@@ -315,7 +342,10 @@ inline scalar_t map3_reduce_all(
 template <
     typename scalar_t,
     typename Op,
-    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+    typename std::enable_if_t<
+        !detail::should_prefer_converting_through_float_v<scalar_t> &&
+            std::is_invocable_v<Op, vec::Vectorized<scalar_t>>,
+        int> = 0>
 inline void map(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -336,7 +366,13 @@ inline void map(
 template <
     typename scalar_t,
     typename Op,
-    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+    typename std::enable_if_t<
+        !detail::should_prefer_converting_through_float_v<scalar_t> &&
+            std::is_invocable_v<
+                Op,
+                vec::Vectorized<scalar_t>,
+                vec::Vectorized<scalar_t>>,
+        int> = 0>
 inline void map2(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -362,7 +398,14 @@ inline void map2(
 template <
     typename scalar_t,
     typename Op,
-    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+    typename std::enable_if_t<
+        !detail::should_prefer_converting_through_float_v<scalar_t> &&
+            std::is_invocable_v<
+                Op,
+                vec::Vectorized<scalar_t>,
+                vec::Vectorized<scalar_t>,
+                vec::Vectorized<scalar_t>>,
+        int> = 0>
 inline void map3(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -391,7 +434,15 @@ inline void map3(
 template <
     typename scalar_t,
     typename Op,
-    typename std::enable_if_t<!is_reduced_floating_point_v<scalar_t>, int> = 0>
+    typename std::enable_if_t<
+        !detail::should_prefer_converting_through_float_v<scalar_t> &&
+            std::is_invocable_v<
+                Op,
+                vec::Vectorized<scalar_t>,
+                vec::Vectorized<scalar_t>,
+                vec::Vectorized<scalar_t>,
+                vec::Vectorized<scalar_t>>,
+        int> = 0>
 inline void map4(
     const Op& vec_fun,
     scalar_t* output_data,
@@ -420,4 +471,5 @@ inline void map4(
   }
 }
 
-} // namespace at::vec
+} // namespace vec
+} // namespace at

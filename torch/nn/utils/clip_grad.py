@@ -1,9 +1,12 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import functools
+import types
 import typing
-from typing import cast, Optional, Union
-from typing_extensions import deprecated
+import warnings
+from collections.abc import Callable
+from typing import cast, TypeAlias, TypeVar
+from typing_extensions import deprecated, ParamSpec
 
 import torch
 from torch import Tensor
@@ -14,20 +17,20 @@ from torch.utils._foreach_utils import (
 )
 
 
-__all__ = [
-    "clip_grad_norm_",
+__all__: list[str] = [
     "clip_grad_norm",
+    "clip_grad_norm_",
     "clip_grad_value_",
 ]
 
 
-_tensor_or_tensors = Union[
-    torch.Tensor,
-    typing.Iterable[torch.Tensor],  # noqa: UP006 - needed until XLA's patch is updated
-]
+_tensor_or_tensors: TypeAlias = torch.Tensor | typing.Iterable[torch.Tensor]  # noqa: PYI042
+
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
 
 
-def _no_grad(func):
+def _no_grad(func: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     This wrapper is needed to avoid a circular import when using @torch.no_grad on the exposed functions
     clip_grad_norm_ and clip_grad_value_ themselves.
@@ -35,9 +38,11 @@ def _no_grad(func):
 
     def _no_grad_wrapper(*args, **kwargs):
         with torch.no_grad():
+            # pyrefly: ignore [invalid-param-spec]
             return func(*args, **kwargs)
 
     functools.update_wrapper(_no_grad_wrapper, func)
+    # pyrefly: ignore [bad-return]
     return _no_grad_wrapper
 
 
@@ -46,7 +51,7 @@ def _get_total_norm(
     tensors: _tensor_or_tensors,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> torch.Tensor:
     r"""Compute the norm of an iterable of tensors.
 
@@ -79,7 +84,7 @@ def _get_total_norm(
     first_device = tensors[0].device
     grouped_tensors: dict[
         tuple[torch.device, torch.dtype], tuple[list[list[Tensor]], list[int]]
-    ] = _group_tensors_by_device_and_dtype(
+    ] = _group_tensors_by_device_and_dtype(  # pyrefly: ignore [bad-assignment]
         [tensors]  # type: ignore[list-item]
     )  # type: ignore[assignment]
 
@@ -117,16 +122,19 @@ def _clip_grads_with_norm_(
     parameters: _tensor_or_tensors,
     max_norm: float,
     total_norm: torch.Tensor,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> None:
     r"""Scale the gradients of an iterable of parameters given a pre-calculated total norm and desired max norm.
 
     The gradients will be scaled by the following calculation
 
     .. math::
-        grad = grad * \frac{max\_norm}{total\_norm + 1e-6}
+        grad = grad * \min(\frac{max\_norm}{total\_norm + 1e-6}, 1)
 
     Gradients are modified in-place.
+
+    Note: The scale coefficient is clamped to a maximum of 1.0 to prevent gradient amplification.
+    This ensures that gradients are only scaled down when the total norm exceeds max_norm.
 
     This function is equivalent to :func:`torch.nn.utils.clip_grad_norm_` with a pre-calculated
     total norm.
@@ -152,9 +160,7 @@ def _clip_grads_with_norm_(
         return
     grouped_grads: dict[
         tuple[torch.device, torch.dtype], tuple[list[list[Tensor]], list[int]]
-    ] = _group_tensors_by_device_and_dtype(
-        [grads]
-    )  # type: ignore[assignment]
+    ] = _group_tensors_by_device_and_dtype([grads])  # type: ignore[assignment]
 
     clip_coef = max_norm / (total_norm + 1e-6)
     # Note: multiplying by the clamped coef is redundant when the coef is clamped to 1, but doing so
@@ -182,7 +188,7 @@ def clip_grad_norm_(
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> torch.Tensor:
     r"""Clip the gradient norm of an iterable of parameters.
 
@@ -213,8 +219,14 @@ def clip_grad_norm_(
     if isinstance(parameters, torch.Tensor):
         parameters = [parameters]
     else:
+        is_generator = isinstance(parameters, types.GeneratorType)
         # prevent generators from being exhausted
         parameters = list(parameters)
+        if is_generator and len(parameters) == 0:
+            warnings.warn(
+                "`parameters` is an empty generator, no gradient clipping will occur.",
+                stacklevel=3,
+            )
     grads = [p.grad for p in parameters if p.grad is not None]
     total_norm = _get_total_norm(grads, norm_type, error_if_nonfinite, foreach)
     _clip_grads_with_norm_(parameters, max_norm, total_norm, foreach)
@@ -231,7 +243,7 @@ def clip_grad_norm(
     max_norm: float,
     norm_type: float = 2.0,
     error_if_nonfinite: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> torch.Tensor:
     r"""Clip the gradient norm of an iterable of parameters.
 
@@ -246,7 +258,7 @@ def clip_grad_norm(
 def clip_grad_value_(
     parameters: _tensor_or_tensors,
     clip_value: float,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
 ) -> None:
     r"""Clip the gradients of an iterable of parameters at specified value.
 
@@ -268,6 +280,7 @@ def clip_grad_value_(
     clip_value = float(clip_value)
 
     grads = [p.grad for p in parameters if p.grad is not None]
+    # pyrefly: ignore [bad-argument-type]
     grouped_grads = _group_tensors_by_device_and_dtype([grads])
 
     for (device, _), ([grads], _) in grouped_grads.items():

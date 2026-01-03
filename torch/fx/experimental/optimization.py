@@ -193,6 +193,7 @@ def modules_to_mkldnn(nodes: list[fx.Node], modules: dict[str, nn.Module]):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in mkldnn_map:
+                # pyrefly: ignore [bad-index, index-error]
                 new_module = mkldnn_map[type(cur_module)](cur_module, torch.float)
                 assert isinstance(new_module, nn.Module)
                 old_modules[new_module] = copy.deepcopy(cur_module)
@@ -263,7 +264,10 @@ def gen_mkl_autotuner(example_inputs, iters=10, warmup=1):
         )
 
         reset_modules(
-            submodule.graph.nodes, dict(submodule.named_modules()), old_modules
+            submodule.graph.nodes,
+            dict(submodule.named_modules()),
+            # pyrefly: ignore [bad-argument-type]
+            old_modules,
         )
         no_mkl_time = benchmark(lambda: submodule(*sample_inputs))
         return mkl_time < no_mkl_time
@@ -368,12 +372,12 @@ def optimize_for_inference(
                 supports_mkldnn = MklSupport.YES
                 sample_parameter = next(cur_module.parameters(), None)
                 if sample_parameter is not None:
-                    assert (
-                        sample_parameter.dtype == torch.float
-                    ), "this pass is only for torch.float modules"
-                    assert sample_parameter.device == torch.device(
-                        "cpu"
-                    ), "this pass is only for CPU modules"
+                    assert sample_parameter.dtype == torch.float, (
+                        "this pass is only for torch.float modules"
+                    )
+                    assert sample_parameter.device == torch.device("cpu"), (
+                        "this pass is only for CPU modules"
+                    )
         elif node.op == "call_function":
             if node.target in mkldnn_supported:
                 supports_mkldnn = MklSupport.YES
@@ -471,7 +475,7 @@ def optimize_for_inference(
         if not use_mkl_heuristic(graph):
             for node in graph.start_nodes + graph.end_nodes:
                 prv = node.args[0]
-                node.replace_all_uses_with(prv)
+                node.replace_all_uses_with(prv)  # type: ignore[arg-type]
                 fx_graph.erase_node(node)
             reset_modules(graph.nodes, modules, old_modules)
 

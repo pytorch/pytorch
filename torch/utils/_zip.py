@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from zipfile import ZipFile
 
+
 # Exclude some standard library modules to:
 # 1. Slim down the final zipped file size
 # 2. Remove functionality we don't want to support.
@@ -35,7 +36,7 @@ def remove_prefix(text, prefix):
     return text
 
 
-def write_to_zip(file_path, strip_file_path, zf, prepend_str=""):
+def write_to_zip(file_path, strip_file_path, zf, prepend_str="") -> None:
     stripped_file_path = prepend_str + remove_prefix(file_path, strip_file_dir + "/")
     path = Path(stripped_file_path)
     if path.name in DENY_LIST:
@@ -68,18 +69,17 @@ def main() -> None:
     zip_file_name = args.install_dir + "/" + args.zip_name
     strip_file_dir = args.strip_dir
     prepend_str = args.prepend_str
-    zf = ZipFile(zip_file_name, mode="w")
-
-    for p in sorted(args.paths):
-        if os.path.isdir(p):
-            files = glob.glob(p + "/**/*.py", recursive=True)
-            for file_path in sorted(files):
-                # strip the absolute path
-                write_to_zip(
-                    file_path, strip_file_dir + "/", zf, prepend_str=prepend_str
-                )
-        else:
-            write_to_zip(p, strip_file_dir + "/", zf, prepend_str=prepend_str)
+    with ZipFile(zip_file_name, mode="w") as zf:
+        for p in sorted(args.paths):
+            if os.path.isdir(p):
+                files = glob.glob(p + "/**/*.py", recursive=True)
+                for file_path in sorted(files):
+                    # strip the absolute path
+                    write_to_zip(
+                        file_path, strip_file_dir + "/", zf, prepend_str=prepend_str
+                    )
+            else:
+                write_to_zip(p, strip_file_dir + "/", zf, prepend_str=prepend_str)
 
 
 if __name__ == "__main__":

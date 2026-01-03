@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: quantization"]
 
+from torch.testing._internal.common_utils import raise_on_run_directly
+
 from .common import AOMigrationTestCase
 
 
@@ -150,3 +152,7 @@ class TestAOMigrationQuantizationFx(AOMigrationTestCase):
             "maybe_get_next_module",
         ]
         self._test_function_import("fx.utils", function_list)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

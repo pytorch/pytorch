@@ -14,6 +14,9 @@ class CpuDeviceOpOverrides(DeviceOpOverrides):
             """
         )
 
+    def cpp_kernel_type(self) -> str:
+        return "void*"
+
     def set_device(self, device_idx: int) -> str:
         return "pass"
 

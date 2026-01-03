@@ -76,6 +76,7 @@
   - .github/ci_commit_pins/audio.txt
   - .github/ci_commit_pins/vision.txt
   - .github/ci_commit_pins/torchdynamo.txt
+  - .github/ci_commit_pins/vllm.txt
   - .ci/docker/ci_commit_pins/triton.txt
   approved_by:
   - pytorchbot
@@ -123,21 +124,8 @@
   - torch/*docs.py
   approved_by:
   - svekars
-  mandatory_checks_name:
-  - EasyCLA
-  - Lint
-  - pull
-
-- name: Mobile
-  patterns:
-  - ios/**
-  - android/**
-  - test/mobile/**
-  approved_by:
-  - linbinyu
-  - IvanKobzarev
-  - dreiss
-  - raziel
+  - sekyondaMeta
+  - AlannaBurke
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -382,6 +370,7 @@
   - leslie-fang-intel
   - jgong5
   - EikanWang
+  - CaoE
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -393,19 +382,23 @@
   - torch/_inductor/mkldnn_lowerings.py
   - torch/_inductor/fx_passes/mkldnn_fusion.py
   - torch/_inductor/fx_passes/quantization.py
-  - torch/_inductor/codegen/cpp_prefix.h
   - torch/_inductor/codegen/cpp.py
   - torch/_inductor/codegen/cpp_utils.py
   - torch/_inductor/codegen/cpp_micro_gemm.py
   - torch/_inductor/codegen/cpp_template_kernel.py
   - torch/_inductor/codegen/cpp_template.py
+  - torch/_inductor/codegen/cpp_bmm_template.py
   - torch/_inductor/codegen/cpp_gemm_template.py
+  - torch/_inductor/codegen/cpp_grouped_gemm_template.py
+  - torch/_inductor/codegen/cpp_flex_attention_template.py
+  - torch/csrc/inductor/cpp_prefix.h
   - test/inductor/test_mkldnn_pattern_matcher.py
   - test/inductor/test_cpu_repro.py
   - test/inductor/test_cpu_cpp_wrapper.py
   - test/inductor/test_cpu_select_algorithm.py
   - aten/src/ATen/cpu/**
   - aten/src/ATen/native/quantized/cpu/**
+  - aten/src/ATen/test/vec_test_all_types.*
   - test/quantization/core/test_quantized_op.py
   - torch/ao/quantization/quantizer/x86_inductor_quantizer.py
   - test/quantization/pt2e/test_x86inductor_quantizer.py
@@ -413,6 +406,7 @@
   - leslie-fang-intel
   - jgong5
   - EikanWang
+  - CaoE
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -428,6 +422,7 @@
   approved_by:
   - leslie-fang-intel
   - jgong5
+  - CaoE
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -482,6 +477,23 @@
   - srossross
   - chillee
   - zou3519
+  - guilhermeleobas
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: Dynamo
+  patterns:
+  - torch/_dynamo/**
+  - torch/csrc/dynamo/**
+  - test/dynamo/**
+  - test/dynamo_expected_failures/**
+  - test/dynamo_skips/**
+  - test/inductor_expected_failures/**
+  - test/inductor_skips/**
+  approved_by:
+  - guilhermeleobas
   mandatory_checks_name:
   - EasyCLA
   - Lint
@@ -508,6 +520,41 @@
   - EikanWang
   - jgong5
   - gujinghui
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: typechecking
+  patterns:
+  - 'pyrefly.toml'
+  - 'mypy.ini'
+  - 'mypy-strict.ini'
+  approved_by:
+  - lolpack
+  - maggiemoss
+  - ndmitchell
+  - kinto0
+  mandatory_checks_name:
+  - EasyCLA
+  - Lint
+  - pull
+
+- name: PrivateUse1
+  patterns:
+  - torch/accelerator/**
+  - torch/utils/backend_registration.py
+  - torch/csrc/acc/**
+  - torch/csrc/DeviceAccelerator.*
+  - torch/csrc/profiler/standalone/privateuse1_observer.*
+  - aten/src/ATen/DeviceAccelerator.*
+  - aten/src/ATen/core/GeneratorForPrivateuseone.*
+  - aten/src/ATen/detail/PrivateUse1HooksInterface.*
+  - docs/source/accelerator/**
+  - test/cpp_extensions/open_registration_extension/torch_openreg/**
+  approved_by:
+  - albanD
+  - fffrog
   mandatory_checks_name:
   - EasyCLA
   - Lint

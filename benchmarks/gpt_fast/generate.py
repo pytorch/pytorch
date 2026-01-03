@@ -44,7 +44,7 @@ def device_sync(device):
     elif "cpu" in device:
         pass
     else:
-        print(f"device={device} is not yet suppported")
+        print(f"device={device} is not yet supported")
 
 
 def get_arch_name() -> str:

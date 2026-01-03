@@ -324,7 +324,7 @@ class basic_string_view final {
 
   constexpr size_type find(basic_string_view v, size_type pos = 0)
       const noexcept {
-    if (v.size() == 0) {
+    if (v.empty()) {
       return pos <= size() ? pos : npos;
     }
 
@@ -355,7 +355,7 @@ class basic_string_view final {
   constexpr size_type rfind(basic_string_view v, size_type pos = npos)
       const noexcept {
     // Write it iteratively. This is faster.
-    if (v.size() == 0) {
+    if (v.empty()) {
       return pos <= size() ? pos : size();
     }
 
@@ -509,7 +509,7 @@ class basic_string_view final {
   constexpr size_type find_last_if_(size_type pos, Condition&& condition)
       const noexcept {
     // Write it iteratively. This is faster.
-    if (size() > 0) {
+    if (!empty()) {
       pos = std::min(size() - 1, pos);
       do {
         if (condition(at_(pos))) {
@@ -632,7 +632,7 @@ struct hash<::c10::basic_string_view<CharT>> {
   size_t operator()(::c10::basic_string_view<CharT> x) const {
     // The standard says that std::string_view hashing must do the same as
     // std::string hashing but leaves the details of std::string hashing
-    // up to the implementer. So, to be conformant, we need to re-use and
+    // up to the implementer. So, to be conformant, we need to reuse and
     // existing STL type's hash function. The std::string fallback is probably
     // slow but the only way to be conformant.
 

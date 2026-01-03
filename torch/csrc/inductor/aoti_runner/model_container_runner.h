@@ -55,6 +55,7 @@ class TORCH_API AOTIModelContainerRunner {
       AOTInductorStreamHandle cuda_stream_handle = nullptr);
   void swap_constant_buffer();
   void free_inactive_constant_buffer();
+  void update_constant_buffer_from_blob(const std::string& weights_path);
 
   std::vector<std::string> get_call_spec();
 
@@ -99,6 +100,10 @@ class TORCH_API AOTIModelContainerRunner {
   decltype(&AOTInductorModelContainerFreeInactiveConstantBuffer)
       free_inactive_constant_buffer_func_{nullptr};
   decltype(&AOTInductorModelContainerGetCallSpec) get_call_spec_func_{nullptr};
+  decltype(&AOTInductorModelContainerGetConstantsBlobSize)
+      get_constants_blob_size_func_{nullptr};
+  decltype(&AOTInductorModelUpdateConstantsFromBlob)
+      update_constants_from_blob_func_{nullptr};
 
   AOTInductorModelContainerHandle container_handle_ = nullptr;
 
@@ -121,15 +126,15 @@ TORCH_API std::unordered_map<std::string, CreateAOTIModelRunnerFunc>&
 getAOTIModelRunnerRegistry();
 
 // To register a new external backend in AOTI one needs to create an instance of
-// this struct. It is not thread-safe. Becase it is expected to be called during
-// the initialization of the program.
-struct TORCH_API RegisterAOTIModelRunner {
-  RegisterAOTIModelRunner(
-      const std::string& name,
-      CreateAOTIModelRunnerFunc create_aoti_model_runner_fn) {
+// this struct. It is not thread-safe. Because it is expected to be called
+// during the initialization of the program.
+struct TORCH_API RegisterAOTIModelRunner{RegisterAOTIModelRunner(
+    const std::string& name,
+    CreateAOTIModelRunnerFunc create_aoti_model_runner_fn){
     getAOTIModelRunnerRegistry()[name] = create_aoti_model_runner_fn;
-  }
-};
+} // namespace torch::inductor
+}
+;
 
 } // namespace torch::inductor
 #endif

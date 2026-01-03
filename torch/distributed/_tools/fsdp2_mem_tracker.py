@@ -1,7 +1,8 @@
+from collections.abc import Callable
 from copy import deepcopy
 from enum import auto, Enum
 from functools import partial, wraps
-from typing import Any, Callable, NamedTuple, Optional, TypeVar, Union
+from typing import Any, NamedTuple, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec, TypeVarTuple, Unpack
 
 import torch
@@ -11,10 +12,14 @@ from torch._guards import active_fake_mode
 from torch.distributed._tools.mem_tracker import _RefType, _State, MemTracker
 from torch.distributed.fsdp import FSDPModule
 from torch.distributed.fsdp._fully_shard._fsdp_param_group import FSDPParamGroup
+from torch.distributed.tensor import DTensor
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map_only
 from torch.utils.weak import WeakIdKeyDictionary, weakref
 
+
+if TYPE_CHECKING:
+    from torch.utils.hooks import RemovableHandle
 
 _TOTAL_KEY = "Total"
 
@@ -157,7 +162,7 @@ class FSDPMemTracker(MemTracker):
     def __init__(
         self,
         mod: torch.nn.Module,
-        optm: Optional[torch.optim.Optimizer] = None,
+        optm: torch.optim.Optimizer | None = None,
     ) -> None:
         super().__init__()
         assert isinstance(mod, FSDPModule), "FSDPMemTracker only supports FSDP modules"
@@ -170,7 +175,7 @@ class FSDPMemTracker(MemTracker):
     def _instrument_fsdp_sharded_params_grads(
         self, fsdp_param_group: FSDPParamGroup
     ) -> None:
-        # Track sharded params and grads after initilization
+        # Track sharded params and grads after initialization
         for fsdp_param in fsdp_param_group.fsdp_params:
             self._update_and_maybe_create_winfos(
                 fsdp_param.sharded_param,
@@ -199,7 +204,7 @@ class FSDPMemTracker(MemTracker):
         #         this module is called for the second time. If it is a root module, that means we are in the next
         #         iteration and we error out. If it is not a root module, that means it's a submodule that is being
         #         used multiple times in the same iteration, which we allow and track.
-        # For Case 1 and 3, we also initialiaze the ``local_peak`` and ``PEAK_FW`` snapshot for the module.
+        # For Case 1 and 3, we also initialize the ``local_peak`` and ``PEAK_FW`` snapshot for the module.
         # For Case 2 we only capture 1 snapshot after ``FSDPState._pre_forward`` runs because it is a no-op.
         @wraps(orig_fsdp_state_pre_fw)
         def inner(
@@ -230,6 +235,7 @@ class FSDPMemTracker(MemTracker):
                         " or file a github issue if you need this feature."
                     )
 
+            # pyrefly: ignore [bad-assignment]
             args, kwargs = orig_fsdp_state_pre_fw(*args, **kwargs)
 
             fsdp_state = fsdp_mod._get_fsdp_state()
@@ -363,14 +369,30 @@ class FSDPMemTracker(MemTracker):
         # `FSDPParamGroup.post_forward` because during AC these won't be called.
         # TODO(@sanketpurandare): This will need to be modified after this PR (https://github.com/pytorch/pytorch/pull/127786)
         # lands. For backward we monkey-patch the `FSDPParamGroup.pre_backward` and `FSDPParamGroup.post_backward`.
+
+        # get the unique _MultiHandlers/RemoveHandlers and store in dictionary
+        # the _MultiHandlers object will only need to be grabbed once.
+        unique_handlers: dict[RemovableHandle, bool] = {}
+        # pyrefly: ignore  # missing-attribute
+        for module in self._root_mod.modules():
+            if isinstance(module, FSDPModule):
+                fsdp_state = module._get_fsdp_state()
+                if fsdp_param_group := fsdp_state._fsdp_param_group:
+                    if not unique_handlers.get(fsdp_state._pre_forward_hook_handle):
+                        unique_handlers[fsdp_state._pre_forward_hook_handle] = True
+                    if not unique_handlers.get(fsdp_state._post_forward_hook_handle):
+                        unique_handlers[fsdp_state._post_forward_hook_handle] = True
+        # call remove on the handles once
+        for f_hook_handle in unique_handlers:
+            f_hook_handle.remove()
+        # pyrefly: ignore  # missing-attribute
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
                 if fsdp_param_group := fsdp_state._fsdp_param_group:
                     self._instrument_fsdp_sharded_params_grads(fsdp_param_group)
-                    fsdp_state._pre_forward_hook_handle.remove()
-                    fsdp_state._post_forward_hook_handle.remove()
                     fsdp_state._pre_forward_hook_handle = (
+                        # pyrefly: ignore [missing-attribute]
                         module.register_forward_pre_hook(
                             self._fsdp_state_pre_forward(
                                 module, fsdp_state._pre_forward
@@ -379,6 +401,7 @@ class FSDPMemTracker(MemTracker):
                             with_kwargs=True,
                         )
                     )
+                    # pyrefly: ignore [missing-attribute]
                     fsdp_state._post_forward_hook_handle = module.register_forward_hook(
                         self._fsdp_state_post_forward(module, fsdp_state._post_forward),
                         prepend=False,
@@ -397,6 +420,7 @@ class FSDPMemTracker(MemTracker):
                         )
                     )
 
+        # pyrefly: ignore [missing-attribute]
         for buffer in self._root_mod.buffers():
             self._update_and_maybe_create_winfos(
                 buffer,
@@ -471,7 +495,7 @@ class FSDPMemTracker(MemTracker):
         tree_map_only(torch.Tensor, _track_inputs, inputs)
 
     def track_external(
-        self, *external: Union[nn.Module, optim.Optimizer, torch.Tensor]
+        self, *external: nn.Module | optim.Optimizer | torch.Tensor
     ) -> None:
         """This is no-op for ``FSDPMemTracker``"""
 
@@ -479,7 +503,6 @@ class FSDPMemTracker(MemTracker):
         if self._depth == 0:
             self._register_module_and_optimizer_hooks()
             self._track_resize()
-            self._track_dtensor_dispatch()
             self._peak_mem_snap = self.get_tracker_snapshot()
             self._peak_mem = {
                 dev: dev_snap[_TOTAL_KEY]
@@ -495,17 +518,23 @@ class FSDPMemTracker(MemTracker):
         if self._depth == 0:
             self._deregister_module_and_optimizer_hooks()
             self._restore_resize()
-            self._restore_dtensor_dispatch()
             self._mod_tracker.__exit__(*args)
         TorchDispatchMode.__exit__(self, *args)
 
     def __torch_dispatch__(self, func, types, args=..., kwargs=None):  # type: ignore[no-untyped-def]
+        # When running this mode with DTensor, ordinarily all modes will
+        # run **before** subclasses get a chance to run.
+        # Returning NotImplemented here gives us a chance to let DTensor
+        # run and desugar into local tensor ops, before `MemTracker` sees them.
+        if any(t == DTensor for t in types):
+            return NotImplemented
         if (
-            func == torch.ops._c10d_functional.wait_tensor.default
+            func is torch.ops._c10d_functional.wait_tensor.default
             and active_fake_mode()
         ):
             # N.B: This is a hacky way to override the Meta IMPL of wait_tensor. The original impl returns
             # a new tensor which does not happen in eager mode, when a wait_tensor is called.
+            # pyrefly: ignore [unsupported-operation]
             res = args[0]
         else:
             res = func(*args, **kwargs or {})
@@ -518,10 +547,11 @@ class FSDPMemTracker(MemTracker):
             reftype = _FSDPRefType.TEMP
         else:
             reftype = _FSDPRefType.ACT
-        if func == c10d._allgather_base_.default and self._fsdp_state in [
+        if func is c10d._allgather_base_.default and self._fsdp_state in [
             _FSDPState.PRE_FW,
             _FSDPState.PRE_BW,
         ]:
+            # pyrefly: ignore [unsupported-operation]
             output_tensor = args[0]
             self._update_and_maybe_create_winfos(
                 output_tensor,
@@ -529,9 +559,10 @@ class FSDPMemTracker(MemTracker):
                 update_existing=True,
             )
         if (
-            func == c10d._reduce_scatter_base_.default
+            func is c10d._reduce_scatter_base_.default
             and self._fsdp_state == _FSDPState.POST_BW
         ):
+            # pyrefly: ignore [unsupported-operation]
             input_tensor = args[1]
             self._update_and_maybe_create_winfos(
                 input_tensor,

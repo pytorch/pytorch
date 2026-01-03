@@ -39,8 +39,11 @@ SavedVariable::SavedVariable(
     // follow.
     TORCH_CHECK(
         !variable.is_inference(),
-        "Inference tensors cannot be saved for backward. To work around "
-        "you can make a clone to get a normal tensor and use it in autograd.")
+        "Inference tensors cannot be saved for backward. Please do not use "
+        "Tensors created in inference mode in computation tracked by autograd. "
+        "To work around this, you can make a clone to get a normal tensor and "
+        "use it in autograd, or use `torch.no_grad()` instead of "
+        "`torch.inference_mode()`.");
 
     was_default_constructed_ = false;
     saved_version_ = variable._version();
@@ -52,8 +55,9 @@ SavedVariable::SavedVariable(
       TORCH_INTERNAL_ASSERT(!is_leaf_ && is_output);
       weak_grad_fn_ = variable.grad_fn();
     }
-
-    auto maybe_hooks = get_default_hooks();
+    std::unique_ptr<SavedVariableHooks> maybe_hooks =
+        at::SavedTensorDefaultHooks::is_enabled() ? get_default_hooks()
+                                                  : nullptr;
 
     // Avoid wrapped numbers from being leaked to the user
     if (maybe_hooks && !variable.unsafeGetTensorImpl()->is_wrapped_number()) {
@@ -168,22 +172,22 @@ Variable SavedVariable::unpack(std::shared_ptr<Node> saved_for) const {
       message
           << "one of the variables needed for gradient computation has been "
              "modified by an inplace operation: ["
-          << data_.toString() << " ";
+          << data_.toString() << ' ';
       if (data_.is_nested()) {
-        message << data_._nested_tensor_size() << "]";
+        message << data_._nested_tensor_size() << ']';
       } else {
-        message << data_.sizes() << "]";
+        message << data_.sizes() << ']';
       }
       if (grad_fn) {
         message << ", which is output " << output_nr_ << " of "
-                << grad_fn->name() << ",";
+                << grad_fn->name() << ',';
       }
       message << " is at version " << current_version << "; expected version "
               << saved_version_ << " instead.";
       if (!AnomalyMode::is_enabled()) {
         message << " Hint: enable anomaly detection to find the operation "
                    "that failed to compute its gradient, with torch.autograd."
-                   "set_detect_anomaly(True).";
+                   "set_detect_anomaly(True, check_nan=False).";
       } else {
         message
             << " Hint: the backtrace further above shows the operation "

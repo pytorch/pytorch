@@ -23,8 +23,8 @@
 
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/function_schema.h>
-#include <ATen/core/stack.h>
 #include <ATen/record_function.h>
+#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/profiler/standalone/execution_trace_observer.h>
 #include <torch/csrc/profiler/util.h>
@@ -108,29 +108,30 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   using ID = size_t;
 
   // Mapping of each thread to its own operator stack
-  std::map<size_t, std::stack<ID>> opStack{};
+  std::map<size_t, std::stack<ID>> opStack;
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
-  std::map<const void*, ID> objectId{};
+
+  std::map<const void*, ID> objectId;
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
   // Mutex for multithreaded access to the shared containers.
-  std::recursive_mutex gMutex{};
+  std::recursive_mutex gMutex;
   // Stream to write output JSON.
-  std::ofstream out{};
+  std::ofstream out;
 
   // Full path to the output file.
-  std::string fileName{};
+  std::string fileName;
 
-  std::string resourceDir{};
+  std::string resourceDir;
 
   // RecordFunction callback handle for this observer.
   CallbackHandle cbHandle{INVALID_CALLBACK_HANDLE};
 
   // Process ID.
   int32_t pid{-1};
-  std::string recordTime{};
+  std::string recordTime;
 
   ExecutionTraceObserver() = default;
 
@@ -157,7 +158,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   bool record_integral_tensor_range{false};
 
-  std::unordered_set<std::string> nodeListForSavingIntegerTensor{};
+  std::unordered_set<std::string> nodeListForSavingIntegerTensor;
 
  private:
   static bool callbackShouldBeEnabled(RunState run_state) {
@@ -170,7 +171,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
 
   // All tensors and operators have an unique id assigned. Increment id for each
   // new tensor or operator node.
-  // 0 -> unintialized
+  // 0 -> uninitialized
   // 1 -> root ID
   // 2 ... -> regular node ID
   std::atomic<ID> id_{2};
@@ -224,7 +225,7 @@ static std::ofstream openOutputFile(const std::string& name) {
   std::ofstream stream;
   stream.open(name, std::ofstream::out | std::ofstream::trunc);
   if (!stream) {
-    LOG(ERROR) << "Failed to open '" << name << "'";
+    LOG(ERROR) << "Failed to open '" << name << '\'';
   } else {
     VLOG(1) << "PyTorch Execution Trace: writing to " << name;
   }
@@ -699,7 +700,7 @@ static void recordOperatorStart(
                 RecordScope::USER_SCOPE),
             tid,
             0); // fw_tid
-        ob.out << ",";
+        ob.out << ',';
       }
     }
 
@@ -873,7 +874,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
             fc.kernelFile,
             fc.get_string_for_tensor_range(),
             additiona_attrs);
-        ob->out << ",";
+        ob->out << ',';
       }
     } catch (const std::exception& e) {
       LOG(WARNING) << "Exception in execution trace observer: [" << fc.name
@@ -898,18 +899,18 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
 
     // check if the environment variable is set to force recording integer
     // tensors
-    auto env_variable =
-        getenv("ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE");
-    if (env_variable != nullptr) {
+    auto env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_RANGE");
+    if (env_variable.has_value()) {
       ob.record_integral_tensor_range = true;
     }
 
     // check if the environment variable is set to force recording integer
     // tensors
-    env_variable =
-        getenv("ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA");
-    if (env_variable != nullptr) {
-      std::istringstream stream(env_variable);
+    env_variable = c10::utils::get_env(
+        "ENABLE_PYTORCH_EXECUTION_TRACE_SAVE_INTEGRAL_TENSOR_DATA");
+    if (env_variable.has_value()) {
+      std::istringstream stream(env_variable.value());
       std::string token;
       while (std::getline(stream, token, ',')) {
         ob.nodeListForSavingIntegerTensor.insert(token);
@@ -922,7 +923,7 @@ bool addExecutionTraceObserver(const std::string& output_file_path) {
       // 5 is the length of ".json"
       ob.resourceDir.replace(ext_pos, 5, "_resources/");
       VLOG(1) << "Execution trace resource directory: " << ob.resourceDir
-              << "\n";
+              << '\n';
     } else {
       LOG(WARNING)
           << "Execution trace output file does not end with \".json\".";

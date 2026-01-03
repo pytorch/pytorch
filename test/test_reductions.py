@@ -65,7 +65,7 @@ def _rand_shape(dim, min_size, max_size):
         shape.append(random.randint(min_size, max_size))
     return tuple(shape)
 
-def _reduced_shape(shape, dim=None, keepdim=False):
+def _reduced_shape(shape, empty_dim_as_none=False, dim=None, keepdim=False):
     """Computes the expected reduced shape given dim and keepdim
 
     Args:
@@ -77,7 +77,7 @@ def _reduced_shape(shape, dim=None, keepdim=False):
     Returns:
         The reduced shape
     """
-    if dim is None:
+    if dim is None or (empty_dim_as_none and dim == []):
         return [1] * len(shape) if keepdim else []
 
     # Wrap negative dims
@@ -105,7 +105,8 @@ class TestReductions(TestCase):
         t = make_tensor(shape, dtype=torch.float, device=device)
         args, kwargs = next(op.generate_args_kwargs(t, **dim_keepdim))
         result = op(t, *args, **dim_keepdim, **kwargs)
-        expected_shape = _reduced_shape(shape, **dim_keepdim)
+        empty_dim_as_none = (op.name == "linalg.vector_norm" or op.name == "_refs.linalg.vector_norm")
+        expected_shape = _reduced_shape(shape, empty_dim_as_none, **dim_keepdim)
         self.assertEqual(result.shape, expected_shape, f"""
         expected output shape to be {expected_shape} but got {list(result.shape)}
         for input shape {shape} and {dim_keepdim}
@@ -314,7 +315,7 @@ class TestReductions(TestCase):
         for dim in [1] + [[1, 2]] if op.supports_multiple_dims else []:
             args, kwargs = next(op.generate_args_kwargs(t, dim=dim))
             result = op(t, *args, dim=dim, **kwargs)
-            self.assertEqual(result.shape, _reduced_shape(t.shape, dim))
+            self.assertEqual(result.shape, _reduced_shape(t.shape, dim=dim))
 
     def _test_noncontiguous(self, op: ReductionOpInfo, t: torch.Tensor, **reduction_kwargs):
         """Helper method to test noncontiguous input tensors."""
@@ -734,7 +735,7 @@ class TestReductions(TestCase):
         res2 = x1.sum(axis=(0, 2), keepdims=True)
         self.assertEqual(res1, res2)
 
-    # TODO: kill this ane replace with common creation ops
+    # TODO: kill this and replace with common creation ops
     def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True,
                       use_complex=False) -> dict[str, list[torch.Tensor]]:
         float_types = [torch.double,
@@ -1628,7 +1629,7 @@ class TestReductions(TestCase):
                 RuntimeError, "only when boundaries tensor dimension is 1"):
             torch.searchsorted(boundaries, 1)
 
-        # incompatiable output tensor's dtype
+        # incompatible output tensor's dtype
         def test_output_dtype(dtype, is_int32):
             output = values_1d.to(dtype)
             with self.assertRaisesRegex(
@@ -1709,7 +1710,7 @@ class TestReductions(TestCase):
                                             with_extremal=False, atol=None, rtol=None,
                                             exact_dtype=True, with_keepdim=False):
         # Test 0-d to 3-d tensors.
-        for ndims in range(0, 4):
+        for ndims in range(4):
             shape = _rand_shape(ndims, min_size=5, max_size=10)
             for n in range(ndims + 1):
                 for c in combinations(list(range(ndims)), n):
@@ -1791,7 +1792,7 @@ class TestReductions(TestCase):
     @dtypes(*complex_types())
     def test_nansum_complex(self, device, dtype):
         x = torch.randn((3, 3, 3), device=device, dtype=dtype)
-        with self.assertRaisesRegex(RuntimeError, "nansum does not support complex inputs"):
+        with self.assertRaisesRegex(RuntimeError, "nansum on CPU does not support complex inputs"):
             torch.nansum(x)
 
     @dtypes(*all_types_and(torch.half))
@@ -1898,7 +1899,7 @@ class TestReductions(TestCase):
         # Note [all, any uint8 compatibility]: However for compatibility reason,
         # for `uint8`, they return Tensor of same dtype `uint8`.
         # Reference: https://github.com/pytorch/pytorch/pull/47878#issuecomment-747108561
-        exact_dtype = True if dtype != torch.uint8 else False
+        exact_dtype = dtype != torch.uint8
 
         def _test_all_any(x):
             self.compare_with_numpy(torch.all, np.all, x)
@@ -2017,7 +2018,7 @@ class TestReductions(TestCase):
                 with self.assertRaisesRegex(RuntimeError, error_msg):
                     op(x, dim=dim)
 
-    # TODO: update this test to comapre against NumPy
+    # TODO: update this test to compare against NumPy
     @onlyCUDA
     def test_var(self, device):
         cpu_tensor = torch.randn(2, 3, 3)
@@ -2512,7 +2513,7 @@ class TestReductions(TestCase):
             k = int((t.numel() - 1) / 2)
             self.assertEqual(res, t.view(-1).sort()[0][k])
             if t.numel() % 2 == 1:
-                # We can only test agains numpy for odd reductions because numpy
+                # We can only test against numpy for odd reductions because numpy
                 # returns the mean of the two medians and torch returns the lower
                 self.assertEqual(res.cpu().numpy(), np.median(t_numpy))
             for dim in range(t.ndim):
@@ -2523,7 +2524,7 @@ class TestReductions(TestCase):
                 self.assertEqual(res[0], (t.sort(dim)[0]).select(dim, k).unsqueeze_(dim))
                 self.assertEqual(res[0], t.gather(dim, res[1]))
                 if size % 2 == 1:
-                    # We can only test agains numpy for odd reductions because numpy
+                    # We can only test against numpy for odd reductions because numpy
                     # returns the mean of the two medians and torch returns the lower
                     self.assertEqual(res[0].cpu().numpy(), np.median(t_numpy, dim, keepdims=True), exact_dtype=False)
 
@@ -2547,7 +2548,7 @@ class TestReductions(TestCase):
                     k = int((t.numel() - num_nan - 1) / 2)
                 self.assertEqual(res, t.view(-1).sort()[0][k])
                 if (t.numel() - num_nan) % 2 == 1:
-                    # We can only test agains numpy for odd reductions because numpy
+                    # We can only test against numpy for odd reductions because numpy
                     # returns the mean of the two medians and torch returns the lower
                     self.assertEqual(res.item(), numpy_op(t.cpu().numpy()))
                 for dim in range(t.ndim):
@@ -2560,7 +2561,7 @@ class TestReductions(TestCase):
                         k = ((size - num_nan - 1) / 2).type(torch.long)
                     self.assertEqual(res[0], (t.sort(dim)[0]).gather(dim, k))
                     self.assertEqual(res[0], t.gather(dim, res[1]))
-                    # We can only test agains numpy for odd reductions because numpy
+                    # We can only test against numpy for odd reductions because numpy
                     # returns the mean of the two medians and torch returns the lower
                     mask = (size - num_nan) % 2 == 1
                     res = res[0].masked_select(mask).cpu()
@@ -2622,7 +2623,7 @@ class TestReductions(TestCase):
         # Generate some random test cases
         ops = ['quantile', 'nanquantile']
         inputs = [tuple(np.random.randint(2, 10, size=i)) for i in range(1, 4)]
-        quantiles = [tuple(np.random.rand(i)) for i in range(0, 5)]
+        quantiles = [tuple(np.random.rand(i)) for i in range(5)]
         keepdims = [True, False]
 
         # Add corner cases
@@ -2651,7 +2652,7 @@ class TestReductions(TestCase):
                                               [None] + list(range(a.ndim))):
                 result = torch_op(a, q, dim=dim, keepdim=keepdim, interpolation=interpolation)
                 expected = numpy_op(a.cpu().numpy(), q.cpu().numpy(), dim,
-                                    interpolation=interpolation, keepdims=keepdim)
+                                    method=interpolation, keepdims=keepdim)
                 self.assertEqual(result.cpu(), torch.from_numpy(np.array(expected)).type(result.type()))
 
                 # Test out variation
@@ -3046,9 +3047,13 @@ class TestReductions(TestCase):
             torch.tensor([1], dtype=torch.float, device=device),
             actual)
         # tensors with inf; min, max not provided -- should throw a RuntimeError
-        with self.assertRaisesRegex(RuntimeError, r'range of \[inf, inf\] is not finite'):
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
             torch.histc(torch.tensor([float("inf")], dtype=torch.float, device=device))
-        with self.assertRaisesRegex(RuntimeError, r'range of \[1, inf\] is not finite'):
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
+            torch.histc(torch.tensor([float("-inf")], dtype=torch.float, device=device))
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
+            torch.histc(torch.tensor([float("-inf"), float("inf")], dtype=torch.float, device=device))
+        with self.assertRaisesRegex(RuntimeError, r'range of \[[\w,+\-\.\ ]+\] is not finite'):
             torch.histc(torch.tensor([1., 2., float("inf")], dtype=torch.float, device=device))
         # tensors with inf; min, max provided
         self.assertEqual(
@@ -3128,6 +3133,20 @@ class TestReductions(TestCase):
         self.assertEqual(
             torch.tensor([2, 0, 0, 1], dtype=dtype, device=device),
             actual)
+
+    @onlyCPU
+    @dtypes(torch.float, torch.double)
+    def test_histc_value_corner_cases(self, device, dtype):
+        min_val = torch.finfo(dtype).min
+        actual = torch.histc(
+            torch.tensor([min_val, min_val, min_val], dtype=dtype, device=device),
+            bins=4)
+        self.assertEqual(3.0, actual.sum())
+        max_val = torch.finfo(dtype).max
+        actual = torch.histc(
+            torch.tensor([max_val, max_val, max_val], dtype=dtype, device=device),
+            bins=4)
+        self.assertEqual(3.0, actual.sum())
 
     @onlyCUDA
     @dtypes(torch.uint8, torch.int8, torch.int, torch.long)
@@ -3308,7 +3327,7 @@ class TestReductions(TestCase):
     """
     def _test_histogramdd_numpy(self, t, bins, bin_range, weights, density):
         def to_np(t):
-            if type(t) == list:
+            if type(t) is list:
                 return list(map(to_np, t))
             if not torch.is_tensor(t):
                 return t
@@ -3525,7 +3544,7 @@ as the input tensor excluding its innermost dimension'):
     # raises an error if no `dim` parameter is specified. This exists separately from tests in
     # test_tensot_compare_ops_empty because not specifying a `dim` parameter in the former tests does
     # not throw errors. Also, checking the return type of argmax requires supplying a different dtype
-    # argument than that for the input tensor. There is also variantion in numpy testing.
+    # argument than that for the input tensor. There is also variation in numpy testing.
     def test_tensor_compare_ops_argmax_argmix_kthvalue_dim_empty(self, device):
         shape = (2, 0, 4)
         master_input = torch.randn(shape, device=device)
@@ -3735,6 +3754,44 @@ as the input tensor excluding its innermost dimension'):
             RuntimeError, err_msg) if dtype is torch.chalf else contextlib.nullcontext()
         with ctx:
             self.assertEqual(torch.mean(t), expected)
+
+    def test_scalar_tensor_as_dim_argument(self):
+        """Tests that scalar tensors work correctly as dimension arguments.
+
+        This tests the fix for the PythonArgParser bug where scalar Tensors
+        passed to IntList/SymIntList parameters would be incorrectly handled.
+        """
+        x = torch.ones(1, 2, 3, 4, 5)
+
+        # Scalar tensors should work correctly (same as passing an int)
+        result_tensor = x.sum(dim=torch.tensor(3))
+        result_int = x.sum(dim=3)
+        self.assertEqual(result_tensor.shape, result_int.shape)
+        self.assertEqual(result_tensor.shape, torch.Size([1, 2, 3, 5]))
+
+        # Test with different integer dtypes
+        for dtype in [torch.int32, torch.int64, torch.int16, torch.int8]:
+            dim_tensor = torch.tensor(1, dtype=dtype)
+            result = x.sum(dim=dim_tensor)
+            expected = x.sum(dim=1)
+            self.assertEqual(result.shape, expected.shape)
+
+    @skipIfTorchDynamo("Test uses random.randint which creates FakeTensors")
+    def test_scalar_tensor_dim_compiled_mode(self):
+        """Tests that scalar FakeTensors from random.randint work correctly in compiled mode."""
+        def foo():
+            x = torch.ones(2, 2, 2)
+            return x.sum(dim=random.randint(0, 0))
+
+        @torch.compile
+        def foo_compile():
+            x = torch.ones(2, 2, 2)
+            return x.sum(dim=random.randint(0, 0))
+
+        result_eager = foo()
+        result_compiled = foo_compile()
+        self.assertEqual(result_eager.shape, result_compiled.shape)
+        self.assertEqual(result_eager.shape, torch.Size([2, 2]))
 
 instantiate_device_type_tests(TestReductions, globals())
 

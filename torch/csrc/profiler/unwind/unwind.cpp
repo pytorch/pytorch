@@ -1,7 +1,7 @@
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
+#include <c10/util/env.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
-#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
     !__has_include("ext/stdio_filebuf.h")
@@ -46,9 +46,7 @@ Stats stats() {
 #include <vector>
 
 #include <c10/util/irange.h>
-#include <cxxabi.h>
 #include <torch/csrc/profiler/unwind/communicate.h>
-#include <torch/csrc/profiler/unwind/dwarf_enums.h>
 #include <torch/csrc/profiler/unwind/eh_frame_hdr.h>
 #include <torch/csrc/profiler/unwind/fast_symbolizer.h>
 #include <torch/csrc/profiler/unwind/fde.h>
@@ -321,10 +319,10 @@ static std::string dladdr_lookup(void* addr) {
 
 struct Symbolizer {
   Symbolizer() {
-    auto envar = std::getenv("TORCH_ADDR2LINE_BINARY");
-    if (envar != nullptr) {
+    auto envar = c10::utils::get_env("TORCH_ADDR2LINE_BINARY");
+    if (envar.has_value()) {
       // currently we take user's input as is without checking
-      addr2line_binary_ = envar;
+      addr2line_binary_ = std::move(envar.value());
       TORCH_WARN("Use custom addr2line binary: ", addr2line_binary_);
     } else {
       addr2line_binary_ = "addr2line"; // default
@@ -353,7 +351,7 @@ struct Symbolizer {
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    entry.comm->out() << (void*)libaddress << "\n";
+    entry.comm->out() << (void*)libaddress << '\n';
     // we need to make sure we don't write more than 64k bytes to
     // a pipe before reading the results. Otherwise the buffer may
     // get filled and block before we read the results.
@@ -379,7 +377,7 @@ struct Symbolizer {
 
  private:
   static constexpr int BLOCK = 1024;
-  const char* addr2line_binary_;
+  std::string addr2line_binary_;
   struct Entry {
     std::unique_ptr<Communicate> comm;
     std::vector<void*> queried;
@@ -394,12 +392,13 @@ struct Symbolizer {
     if (it == entries_.end()) {
       // NOLINTNEXTLINE(*-c-arrays*)
       const char* args[] = {
-          addr2line_binary_, "-C", "-f", "-e", name.c_str(), nullptr};
+          addr2line_binary_.c_str(), "-C", "-f", "-e", name.c_str(), nullptr};
       it = entries_
                .insert_or_assign(
                    name,
                    Entry{
-                       std::make_unique<Communicate>(addr2line_binary_, args),
+                       std::make_unique<Communicate>(
+                           addr2line_binary_.c_str(), args),
                        {}})
                .first;
     }
@@ -509,7 +508,7 @@ extern "C" C10_USED void unwind_c(
   std::shared_lock lock(torch::unwind::cache_mutex_);
   torch::unwind::UnwindState state{};
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  state.rip = *(int64_t*)(rsp);
+  state.rip = *(int64_t*)rsp;
   // +8 because we saved rsp after the return address was already pushed
   // to the stack
   state.rsp = rsp + 8;

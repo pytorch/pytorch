@@ -30,7 +30,6 @@
 #include <torch/csrc/jit/passes/shape_analysis.h>
 #include <torch/csrc/jit/passes/specialize_autogradzero.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/jit/resource_guard.h>
 #include <torch/csrc/jit/runtime/argument_spec.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
 #include <torch/csrc/jit/runtime/custom_operator.h>
@@ -863,7 +862,7 @@ bool GraphExecutor::isOptimized() const {
 
 TORCH_API bool IsNewExecutorEnabled() {
   static const auto disable_new_executor =
-      std::getenv("TORCH_JIT_DISABLE_NEW_EXECUTOR");
+      c10::utils::has_env("TORCH_JIT_DISABLE_NEW_EXECUTOR");
   return getExecutorMode() && FLAGS_torch_jit_enable_new_executor &&
       !disable_new_executor;
 }

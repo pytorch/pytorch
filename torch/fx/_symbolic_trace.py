@@ -5,17 +5,20 @@ import contextlib
 import copy
 import functools
 import inspect
+import logging
 import math
 import os
 import warnings
+from collections.abc import Callable
 from itertools import chain
 from types import CodeType, FunctionType, ModuleType
-from typing import Any, Callable, NamedTuple, Optional, Union
+from typing import Any, get_args, NamedTuple, Optional, TypeAlias, Union
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_reference_type, is_opaque_type
 
 from ._compatibility import compatibility
 from ._lazy_graph_module import _make_graph_module
@@ -24,6 +27,8 @@ from .graph_module import GraphModule
 from .node import Argument, base_types, map_aggregate
 from .proxy import ParameterProxy, Proxy, Scope, ScopeContextManager, TracerBase
 
+
+log = logging.getLogger(__name__)
 
 HAS_VARSTUFF = inspect.CO_VARARGS | inspect.CO_VARKEYWORDS
 
@@ -35,9 +40,31 @@ _proxyable_classes: dict[type, None] = {}
 
 _is_fx_tracing_flag = False
 
+_ConstantAttributeType: TypeAlias = Union[
+    torch.Tensor, torch.ScriptObject, FakeScriptObject, pytree.TreeSpec
+]
+
+_constant_attribute_types = get_args(_ConstantAttributeType)
+
+
+# We only want to print this once to avoid flooding logs
+@functools.lru_cache
+def is_fx_tracing_warning():
+    log.warning(
+        "is_fx_tracing will return true for both fx.symbolic_trace and "
+        "torch.export. Please use "
+        "is_fx_tracing_symbolic_tracing() for specifically fx.symbolic_trace "
+        "or torch.compiler.is_compiling() for specifically torch.export/compile."
+    )
+
 
 def is_fx_tracing():
+    is_fx_tracing_warning()
     return _is_fx_tracing_flag
+
+
+def is_fx_symbolic_tracing():
+    return _is_fx_tracing_flag and not torch.compiler.is_compiling()
 
 
 @compatibility(is_backward_compatible=True)
@@ -138,7 +165,7 @@ def _patch_function(fn: FunctionType, nargs: int) -> FunctionType:
             co.co_name,
             co.co_qualname,  # type: ignore[attr-defined]
             co.co_firstlineno,
-            co.co_lnotab,
+            co.co_linetable,
             co.co_exceptiontable,  # type: ignore[attr-defined]
             co.co_freevars,
             co.co_cellvars,
@@ -395,20 +422,33 @@ class Tracer(TracerBase):
         # a get_attr to retrieve that tensor. Otherwise, we'll store away the
         # tensor value into a special attribute on the Module s.t. we can
         # retrieve it with a get_attr.
-        if isinstance(a, (torch.Tensor, ScriptObject, FakeScriptObject)):
-            qualname: Optional[str] = self.tensor_attrs.get(a)
+        if isinstance(a, _constant_attribute_types) or (
+            is_opaque_reference_type(type(a))
+        ):
+            qualname: Optional[str] = self.tensor_attrs.get(
+                a
+            )  # pyrefly: ignore[no-matching-overload]
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
             if not qualname:
-                base_name = (
-                    "_tensor_constant"
-                    if isinstance(a, torch.Tensor)
-                    else "_torchbind_obj"
-                )
+                if isinstance(a, torch.Tensor):
+                    base_name = "_tensor_constant"
+                elif isinstance(a, (FakeScriptObject, ScriptObject)):
+                    base_name = "_torchbind_obj"
+                elif isinstance(a, pytree.TreeSpec):
+                    base_name = "_tree_spec_constant"
+                elif is_opaque_type(type(a)):
+                    base_name = "_opaque_obj"
+                else:
+                    raise RuntimeError(
+                        f"cannot create constant arg for {a} of type {type(a)}."
+                    )
                 qualname = self.get_fresh_qualname(base_name)
                 assert isinstance(qualname, str)
-                self.tensor_attrs[a] = qualname
+                self.tensor_attrs[a] = (  # pyrefly: ignore[unsupported-operation]
+                    qualname
+                )
                 setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
@@ -423,7 +463,6 @@ class Tracer(TracerBase):
             setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})
-
         return super().create_arg(a)
 
     @compatibility(is_backward_compatible=True)
@@ -573,6 +612,7 @@ class Tracer(TracerBase):
                             in inspect.signature(self.create_proxy).parameters
                         ):
                             kwargs["proxy_factory_fn"] = (
+                                # pyrefly: ignore [unsupported-operation]
                                 None
                                 if not self.param_shapes_constant
                                 else lambda node: ParameterProxy(
@@ -678,11 +718,11 @@ class Tracer(TracerBase):
             root_fn = _patch_function(root_fn, len(args))
 
         flat_args, in_spec = pytree.tree_flatten(tuple(args))
-        if not all(child.is_leaf() for child in in_spec.children_specs):
+        if not all(child.is_leaf() for child in in_spec.children()):
             # In the case that we have pytree-flattened inputs in
             # `concrete_args`, generate a flattening wrapper around the
             # original root function and return that.
-            self.graph._codegen = _PyTreeCodeGen(
+            self.graph._codegen = _PyTreeCodeGen(  # type: ignore[has-type]
                 _PyTreeInfo(orig_args[:total_args], in_spec, None)
             )
 
@@ -690,7 +730,7 @@ class Tracer(TracerBase):
                 tree_args = pytree.tree_unflatten(list(args), in_spec)
                 tree_out = root_fn(*tree_args)
                 out_args, out_spec = pytree.tree_flatten(tree_out)
-                assert isinstance(self.graph._codegen, _PyTreeCodeGen)
+                assert isinstance(self.graph._codegen, _PyTreeCodeGen)  # type: ignore[has-type]
                 self.graph._codegen.pytree_info = (
                     self.graph._codegen.pytree_info._replace(out_spec=out_spec)
                 )
@@ -743,9 +783,9 @@ class Tracer(TracerBase):
 
                 self.root = root
 
-                assert hasattr(
-                    type(root), self.traced_func_name
-                ), f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
+                assert hasattr(type(root), self.traced_func_name), (
+                    f"traced_func_name={self.traced_func_name} doesn't exist in {type(root).__name__}"
+                )
 
                 fn = getattr(type(root), self.traced_func_name)
                 self.root_module_name = root._get_name()
@@ -769,12 +809,13 @@ class Tracer(TracerBase):
             # values to the qualified name here for efficiency. This is used downstream
             # in create_arg
             self.tensor_attrs: dict[
-                Union[torch.Tensor, ScriptObject, FakeScriptObject], str
+                _ConstantAttributeType,
+                str,
             ] = {}
 
             def collect_tensor_attrs(m: torch.nn.Module, prefix_atoms: list[str]):
                 for k, v in m.__dict__.items():
-                    if isinstance(v, (torch.Tensor, ScriptObject, FakeScriptObject)):
+                    if isinstance(v, _constant_attribute_types):
                         self.tensor_attrs[v] = ".".join(prefix_atoms + [k])
                 for k, v in m.named_children():
                     collect_tensor_attrs(v, prefix_atoms + [k])
@@ -831,17 +872,18 @@ class Tracer(TracerBase):
                     _autowrap_check(
                         patcher, module.__dict__, self._autowrap_function_ids
                     )
+                ann = inspect.get_annotations(inspect.unwrap(fn))
                 self.create_node(
                     "output",
                     "output",
                     (self.create_arg(fn(*args)),),
                     {},
-                    type_expr=fn.__annotations__.get("return", None),
+                    type_expr=ann.get("return", None),
                 )
 
             self.submodule_paths = None
         except RuntimeError as e:
-            if isinstance(e.args[0], str) and "data-dependent" in e.args[0]:
+            if e.args and isinstance(e.args[0], str) and "data-dependent" in e.args[0]:
                 partial_fx_graph = self.graph.python_code(
                     root_module="self",
                     verbose=True,
@@ -859,7 +901,7 @@ class Tracer(TracerBase):
         new_tracer = Tracer.__new__(Tracer)
 
         for k, v in self.__dict__.items():
-            if k in {"_autowrap_search"}:
+            if k == "_autowrap_search":
                 new_obj = copy.copy(v)
             else:
                 new_obj = copy.deepcopy(v, memo)
@@ -895,7 +937,11 @@ class Tracer(TracerBase):
 
                     return out
                 # Union[int, bool] == bool in Python <= 3.6
-                if type(x) == bool or type(x) in base_types and type(x) != torch.Tensor:
+                if (
+                    type(x) is bool
+                    or type(x) in base_types
+                    and type(x) is not torch.Tensor
+                ):
                     torch._assert(
                         out == x,
                         f"{name} has been specialized to have value {x} but got another value",
@@ -1151,9 +1197,9 @@ def _maybe_revert_all_patches():
     finally:
         if current_patcher is not None:
             patches_made = current_patcher.reapply_all_patches()
-        assert (
-            patches_made == patches_removed
-        ), "CURRENT_PATCHER was changed during a revert_all_patches"
+        assert patches_made == patches_removed, (
+            "CURRENT_PATCHER was changed during a revert_all_patches"
+        )
 
 
 def _patch_wrapped_functions(patcher: _Patcher):
@@ -1235,9 +1281,9 @@ def wrap(fn_or_name: Union[str, Callable]):
         assert not isinstance(fn_or_name, str)  # to make mypy happy
         fn_name = fn_or_name.__name__
     else:
-        assert isinstance(
-            fn_or_name, str
-        ), "fn_or_name must be a global function or string name"
+        assert isinstance(fn_or_name, str), (
+            "fn_or_name must be a global function or string name"
+        )
         fn_name = fn_or_name
 
     currentframe = inspect.currentframe()
@@ -1295,7 +1341,9 @@ def symbolic_trace(
             return out
 
 
-        f = fx.symbolic_trace(f, concrete_args={"x": {"a": fx.PH, "b": fx.PH, "c": fx.PH}})
+        f = fx.symbolic_trace(
+            f, concrete_args={"x": {"a": fx.PH, "b": fx.PH, "c": fx.PH}}
+        )
         assert f({"a": 1, "b": 2, "c": 4}) == 7
 
 

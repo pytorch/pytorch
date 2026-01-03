@@ -54,8 +54,9 @@ class RunDiffGuardTests(torch._dynamo.test_case.TestCase):
 
     def test_post_recompile(self):
         class Foo:
-            a = 4
-            b = 5
+            def __init__(self):
+                self.a = 4
+                self.b = 5
 
         foo = Foo()
 

@@ -7,7 +7,11 @@ on:
         required: false
         type: string
         description: |
-          List of experiments for this workfow. If not defined, all default experiments are included.
+          List of experiments for this workflow. If not defined, all default experiments are included.
+      opt_out_experiments:
+        required: false
+        type: string
+        description: Comma-separated list of experiments this workflow will opt-out of.
       triggering_actor:
         required: true
         type: string
@@ -51,6 +55,7 @@ jobs:
       TRIGGERING_ACTOR: ${{ inputs.triggering_actor }}
       ISSUE_OWNER: ${{ inputs.issue_owner }}
       CHECK_EXPERIMENTS: ${{ inputs.check_experiments }}
+      OPT_OUT_EXPERIMENTS: ${{ inputs.opt_out_experiments }}
       PR_NUMBER: ${{ github.event.pull_request.number }}
     steps:
       # - name: Checkout PyTorch
@@ -265,6 +270,16 @@ jobs:
                   required=False,
                   default="",
                   help="comma separated list of experiments to check, if omitted all experiments marked with default=True are checked",
+              )
+              parser.add_argument(
+                  "--opt-out-experiments",
+                  type=_str_comma_separated_to_set,
+                  required=False,
+                  default="",
+                  help=(
+                      "comma separated list of experiments to opt-out of. If unset, no opt-outs will occur. "
+                      "If the same experiment is listed both here and in '--eligible-experiments' opt-out will take priority."
+                  ),
               )
               parser.add_argument(
                   "--pr-number",
@@ -490,6 +505,7 @@ jobs:
               workflow_requestors: Iterable[str],
               branch: str,
               eligible_experiments: frozenset[str] = frozenset(),
+              opt_out_experiments: frozenset[str] = frozenset(),
               is_canary: bool = False,
           ) -> str:
               settings = parse_settings(rollout_state)
@@ -503,6 +519,14 @@ jobs:
                           f"Branch {branch} is an exception branch. Not enabling experiment {experiment_name}."
                       )
                       continue
+
+                  if opt_out_experiments:
+                      if experiment_name in opt_out_experiments:
+                          opt_out_exp_list = ", ".join(opt_out_experiments)
+                          log.info(
+                              f"Skipping experiment '{experiment_name}', as this workflow has opted-out (opted out experiments are: {opt_out_exp_list})"
+                          )
+                          continue
 
                   if eligible_experiments:
                       if experiment_name not in eligible_experiments:
@@ -668,6 +692,7 @@ jobs:
                       (args.github_issue_owner, username),
                       args.github_branch,
                       args.eligible_experiments,
+                      args.opt_out_experiments,
                       is_canary,
                   )
 
@@ -705,4 +730,5 @@ jobs:
             --github-ref-type "$curr_ref_type" \
             --github-repo "$GITHUB_REPOSITORY" \
             --eligible-experiments "$CHECK_EXPERIMENTS" \
+            --opt-out-experiments "$OPT_OUT_EXPERIMENTS" \
             --pr-number "${PR_NUMBER}"

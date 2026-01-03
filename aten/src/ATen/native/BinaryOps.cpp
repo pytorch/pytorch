@@ -429,6 +429,7 @@ DEFINE_DISPATCH(shifted_chebyshev_polynomial_t_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_u_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_v_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_w_stub);
+DEFINE_DISPATCH(ldexp_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -1009,12 +1010,25 @@ static Device correct_out_device(const Tensor& self, const Tensor& other) {
   }
 }
 
+static Tensor send_to_meta(const Tensor& self, const Device& device) {
+  Tensor out_meta;
+  if (self._is_zerotensor() && self.unsafeGetTensorImpl()->is_wrapped_number()) {
+    out_meta = at::_efficientzerotensor(self.sizes(), self.options().device(device));
+    out_meta.unsafeGetTensorImpl()->set_wrapped_number(true);
+  } else {
+    out_meta = self.to(device);
+  }
+  return out_meta;
+}
+
 Tensor mul_zerotensor(const Tensor& self, const Tensor& other) {
   auto out_device = correct_out_device(self, other);
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
+  auto self_meta = send_to_meta(self, device_);
+  auto other_meta = send_to_meta(other, device_);
+  auto meta_out = at::_ops::mul_Tensor::redispatch(meta_dks, self_meta, other_meta);
   return at::_efficientzerotensor(meta_out.sizes(), meta_out.options().device(out_device));
 }
 
@@ -1023,7 +1037,9 @@ Tensor div_zerotensor(const Tensor& self, const Tensor& other) {
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto meta_out = at::_ops::div_Tensor::redispatch(meta_dks, self.to(device_), other.to(device_));
+  auto self_meta = send_to_meta(self, device_);
+  auto other_meta = send_to_meta(other, device_);
+  auto meta_out = at::_ops::div_Tensor::redispatch(meta_dks, self_meta, other_meta);
 
   if (self._is_zerotensor()) {
     if (other._is_zerotensor()) {
@@ -1052,8 +1068,9 @@ static Tensor maybe_add_maybe_sub(const Tensor& self, const Tensor& other, const
   // hack to use the TensorIterator to get the correct broadcasting and type promotion logic
   auto device_ = Device(DeviceType::Meta);
   constexpr c10::DispatchKeySet meta_dks(at::DispatchKey::Meta);
-  auto meta_out = at::_ops::add_Tensor::redispatch(
-      meta_dks, self.to(device_), other.to(device_), alpha);
+  auto self_meta = send_to_meta(self, device_);
+  auto other_meta = send_to_meta(other, device_);
+  auto meta_out = at::_ops::add_Tensor::redispatch(meta_dks, self_meta, other_meta, alpha);
 
   auto get_out_like = [&] (const Tensor& tensor)
   {
@@ -1552,12 +1569,39 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
   return at::full({}, 2.0, self.options()).pow(other);
 }
 
+// This function is used to dispatch to kernels that use std::ldexp on CPU and the global namespaces ::ldexp on CUDA
+// Both of these require floating types for 'self' and integer types for 'other'.
+static inline Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(result)
+    .add_input(self)
+    .add_input(other)
+    .build();
+
+  ldexp_stub(iter.device_type(), iter);
+  return result;
+}
+
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/true),
+              "ldexp can't be cast to the desired output type ", result.scalar_type());
+
+  if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
+      isFloatingType(self.scalar_type())) {
+    return _ldexp_int_exponent(self, other, result);
+  }
+
   return at::mul_out(result, self, _pow2(self, other));
 }
 
-
 Tensor ldexp(const Tensor& self, const Tensor& other) {
+  if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
+      isFloatingType(self.scalar_type())) {
+    Tensor result = at::empty_like(self);
+    return _ldexp_int_exponent(self, other, result);
+  }
+
   return at::mul(self, _pow2(self, other));
 }
 

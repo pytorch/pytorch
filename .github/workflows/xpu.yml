@@ -5,6 +5,10 @@ on:
     tags:
       - ciflow/xpu/*
   workflow_dispatch:
+  schedule:
+    # Run 3 times on weekdays and less frequently on weekends.
+    - cron: 45 0,8,16 * * 1-5
+    - cron: 45 4 * * 0,6
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
@@ -22,46 +26,87 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  linux-jammy-xpu-2025_0-py3_9-build:
-    name: linux-jammy-xpu-2025.0-py3.9
+  linux-jammy-xpu-n-1-py3_10-build:
+    name: linux-jammy-xpu-n-1-py3.10
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      sync-tag: linux-xpu-2025-0-build
+      sync-tag: linux-xpu-n-1-build
       runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
-      build-environment: linux-jammy-xpu-2025.0-py3.9
-      docker-image-name: pytorch-linux-jammy-xpu-2025.0-py3
-      runner: linux.12xlarge
+      build-environment: linux-jammy-xpu-n-1-py3.10
+      docker-image-name: ci-image:pytorch-linux-jammy-xpu-n-1-py3
+      runner: linux.c7i.12xlarge
       test-matrix: |
         { include: [
-          { config: "default", shard: 1, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 2, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 3, num_shards: 4, runner: "linux.idc.xpu" },
-          { config: "default", shard: 4, num_shards: 4, runner: "linux.idc.xpu" },
+          { config: "default", shard: 1, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "default", shard: 2, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "default", shard: 3, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "default", shard: 4, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "default", shard: 5, num_shards: 6, runner: "linux.idc.xpu" },
+          { config: "default", shard: 6, num_shards: 6, runner: "linux.idc.xpu" },
         ]}
     secrets: inherit
 
-  linux-jammy-xpu-2025_0-py3_9-test:
-    name: linux-jammy-xpu-2025.0-py3.9
+  linux-noble-xpu-n-py3_10-build:
+    name: linux-noble-xpu-n-py3.10
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      sync-tag: linux-xpu-n-build
+      runner_prefix: ${{ needs.get-label-type.outputs.label-type }}
+      build-environment: linux-noble-xpu-n-py3.10
+      docker-image-name: ci-image:pytorch-linux-noble-xpu-n-py3
+      runner: linux.c7i.12xlarge
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 2, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 3, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 4, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 5, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 6, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 7, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 8, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 9, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 10, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 11, num_shards: 12, runner: "linux.idc.xpu" },
+          { config: "default", shard: 12, num_shards: 12, runner: "linux.idc.xpu" },
+        ]}
+    secrets: inherit
+
+  linux-noble-xpu-n-py3_10-test:
+    name: linux-noble-xpu-n-py3.10
     uses: ./.github/workflows/_xpu-test.yml
-    needs: linux-jammy-xpu-2025_0-py3_9-build
+    needs: linux-noble-xpu-n-py3_10-build
     permissions:
       id-token: write
       contents: read
     with:
-      build-environment: linux-jammy-xpu-2025.0-py3.9
-      docker-image: ${{ needs.linux-jammy-xpu-2025_0-py3_9-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-xpu-2025_0-py3_9-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-noble-xpu-n-py3_10-build.outputs.test-matrix }}
     secrets: inherit
 
-  windows-xpu-2025_0-build:
+  windows-xpu-n-1-build:
     if: github.repository_owner == 'pytorch'
-    name: win-vs2022-xpu-2025_0-py3
+    name: win-vs2022-xpu-n-1-py3
     uses: ./.github/workflows/_win-build.yml
     with:
-      build-environment: win-vs2022-xpu-py3
+      build-environment: win-vs2022-xpu-n-1-py3
       cuda-version: cpu
       use-xpu: true
-      xpu-version: '2025.0'
+      xpu-version: '2025.2'
+      vc-year: '2022'
+    secrets: inherit
+
+  windows-xpu-n-build:
+    if: github.repository_owner == 'pytorch'
+    name: win-vs2022-xpu-n-py3
+    uses: ./.github/workflows/_win-build.yml
+    with:
+      build-environment: win-vs2022-xpu-n-py3
+      cuda-version: cpu
+      use-xpu: true
+      xpu-version: '2025.3'
       vc-year: '2022'
     secrets: inherit

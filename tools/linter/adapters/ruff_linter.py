@@ -20,11 +20,6 @@ SYNTAX_ERROR = "E999"
 IS_WINDOWS: bool = os.name == "nt"
 
 
-def eprint(*args: Any, **kwargs: Any) -> None:
-    """Print to stderr."""
-    print(*args, file=sys.stderr, flush=True, **kwargs)
-
-
 class LintSeverity(str, enum.Enum):
     """Severity of a lint message."""
 
@@ -117,7 +112,7 @@ def run_command(
             if remaining_retries == 0:
                 raise err
             remaining_retries -= 1
-            logging.warning(
+            logging.warning(  # noqa: G200
                 "(%s/%s) Retrying because command failed with: %r",
                 retries - remaining_retries,
                 retries,

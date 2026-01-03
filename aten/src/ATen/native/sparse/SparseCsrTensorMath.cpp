@@ -127,6 +127,10 @@
 #include <ATen/ops/zeros_like.h>
 #endif
 
+#if AT_USE_EIGEN_SPARSE()
+#include <ATen/native/sparse/eigen/SparseBlasImpl.h>
+#endif
+
 #include <algorithm>
 
 namespace at {
@@ -467,9 +471,8 @@ CREATE_UNARY_UFUNC(tanh)
 CREATE_UNARY_UFUNC(trunc)
 CREATE_UNARY_UFUNC(conj_physical)
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
-static CREATE_UNARY_UFUNC(relu)
-C10_DIAGNOSTIC_POP()
+CREATE_UNARY_UFUNC_FUNCTIONAL(relu)
+CREATE_UNARY_UFUNC_INPLACE(relu)
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -527,7 +530,7 @@ static void addmm_out_sparse_csr_native_cpu(
     const Tensor& dense,
     const Tensor& r,
     Scalar alpha,
-    Scalar beta) {
+    const Scalar& beta) {
   auto dim_i = sparse.size(0);
   auto dim_k = dense.size(1);
 
@@ -536,7 +539,12 @@ static void addmm_out_sparse_csr_native_cpu(
   auto values = sparse.values();
 
   scalar_t cast_alpha = alpha.to<scalar_t>();
-  r.mul_(beta);
+  // If beta is zero NaN and Inf should not be propagated to the result
+  if (beta.toComplexDouble() == 0.) {
+    r.zero_();
+  } else {
+    r.mul_(beta);
+  }
   AT_DISPATCH_INDEX_TYPES(
       col_indices.scalar_type(), "csr_mm_crow_indices", [&]() {
         auto csr_accessor = csr.accessor<index_t, 1>();
@@ -647,6 +655,15 @@ Tensor& addmm_out_sparse_compressed_cpu(
     }
     return result;
   }
+
+#if AT_USE_EIGEN_SPARSE()
+  if ((result.layout() == kSparseCsr || result.layout() == kSparseCsc) &&
+      (mat1.layout() == kSparseCsr || mat1.layout() == kSparseCsc) &&
+      (mat2.layout() == kSparseCsr || mat2.layout() == kSparseCsc)) {
+    sparse::impl::eigen::addmm_out_sparse(mat1, mat2, result, alpha, beta);
+    return result;
+  }
+#endif
 
 #if !AT_USE_MKL_SPARSE()
   // The custom impl addmm_out_sparse_csr_native_cpu only supports CSR @
@@ -1312,18 +1329,18 @@ Tensor reduce_sparse_csr_cpu_template(const Tensor& sparse, IntArrayRef dims_to_
 
 template <typename scalar_t>
 struct ReductionAddOp {
-  inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
+  scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
     return a + b;
   }
-  inline scalar_t identity() const { return 0; }
+  scalar_t identity() const { return 0; }
 };
 
 template <typename scalar_t>
 struct ReductionMulOp {
-  inline scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
+  scalar_t operator()(const scalar_t& a, const scalar_t& b) const {
     return a * b;
   }
-  inline scalar_t identity() const { return 1; }
+  scalar_t identity() const { return 1; }
 };
 
 }  // namespace

@@ -47,7 +47,7 @@ def save_model_states(
         state_dict (Dict)
             The state_dict() as dumped by dlrm_s_pytorch.py. Only the model state will be extracted
             from this dictionary. This corresponds to the 'state_dict' key in the state_dict dictionary.
-            >>> model_state = state_dict['state_dict']
+            >>> model_state = state_dict["state_dict"]
         save_file_name (str)
             The filename (not path) when saving the model state dictionary
         sparse_block_shape (Tuple)
@@ -99,7 +99,7 @@ def sparsify_model(path_to_model, sparsified_model_dump_path):
         sparse_block_shapes (List of tuples)
             List of sparse block shapes to be sparsified on
     """
-    sparsity_levels = [sl / 10 for sl in range(0, 10)]
+    sparsity_levels = [sl / 10 for sl in range(10)]
     sparsity_levels += [0.91, 0.92, 0.93, 0.94, 0.95, 0.96, 0.97, 0.98, 0.99, 1.0]
 
     norms = ["L1", "L2"]

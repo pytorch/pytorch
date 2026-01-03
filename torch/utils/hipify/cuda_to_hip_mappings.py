@@ -48,6 +48,7 @@ MATH_TRANSPILATIONS = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CUDA_TYPE_NAME_MAP = collections.OrderedDict(
     [
         ("CUresult", ("hipError_t", CONV_TYPE, API_DRIVER)),
@@ -179,6 +180,9 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
         ),
         ("CUlimit", ("hipLimit_t", CONV_TYPE, API_DRIVER)),
         ("CUlimit_enum", ("hipLimit_t", CONV_TYPE, API_DRIVER)),
+        ("CUmemAccessDesc", ("hipMemAccessDesc", CONV_TYPE, API_DRIVER)),
+        ("CUmemAccessDesc_st", ("hipMemAccessDesc", CONV_TYPE, API_DRIVER)),
+        ("CUmemAccessDesc_v1", ("hipMemAccessDesc", CONV_TYPE, API_DRIVER)),
         (
             "CUmemAttach_flags",
             ("hipMemAttachFlags_t", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
@@ -187,6 +191,38 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
             "CUmemAttach_flags_enum",
             ("hipMemAttachFlags_t", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
+        ("CUmemAllocationGranularity_flags", ("hipMemAllocationGranularity_flags", CONV_TYPE, API_DRIVER)),
+        ("CUmemAllocationGranularity_flags_enum", ("hipMemAllocationGranularity_flags", CONV_TYPE, API_DRIVER)),
+        ("CUmemAllocationHandleType", ("hipMemAllocationHandleType", CONV_TYPE, API_DRIVER)),
+        ("CUmemAllocationHandleType_enum", ("hipMemAllocationHandleType", CONV_TYPE, API_DRIVER)),
+        ("CUmemAllocationProp", ("hipMemAllocationProp", CONV_TYPE, API_DRIVER)),
+        ("CUmemAllocationProp_st", ("hipMemAllocationProp", CONV_TYPE, API_DRIVER)),
+        ("CUmemAllocationProp_v1", ("hipMemAllocationProp", CONV_TYPE, API_DRIVER)),
+        ("CUmemAllocationType", ("hipMemAllocationType", CONV_TYPE, API_DRIVER)),
+        ("CUmemAllocationType_enum", ("hipMemAllocationType", CONV_TYPE, API_DRIVER)),
+        ("CUmemGenericAllocationHandle", ("hipMemGenericAllocationHandle_t", CONV_TYPE, API_DRIVER)),
+        ("CUmemGenericAllocationHandle_v1", ("hipMemGenericAllocationHandle_t", CONV_TYPE, API_DRIVER)),
+        ("CUmemHandleType", ("hipMemHandleType", CONV_TYPE, API_DRIVER)),
+        ("CUmemHandleType_enum", ("hipMemHandleType", CONV_TYPE, API_DRIVER)),
+        ("CUmemLocation", ("hipMemLocation", CONV_TYPE, API_DRIVER)),
+        ("CUmemLocationType", ("hipMemLocationType", CONV_TYPE, API_DRIVER)),
+        ("CUmemLocationType_enum", ("hipMemLocationType", CONV_TYPE, API_DRIVER)),
+        ("CUmemLocation_st", ("hipMemLocation", CONV_TYPE, API_DRIVER)),
+        ("CUmemLocation_v1", ("hipMemLocation", CONV_TYPE, API_DRIVER)),
+        ("CUmemOperationType", ("hipMemOperationType", CONV_TYPE, API_DRIVER)),
+        ("CUmemOperationType_enum", ("hipMemOperationType", CONV_TYPE, API_DRIVER)),
+        ("CUmemPoolHandle_st", ("ihipMemPoolHandle_t", CONV_TYPE, API_DRIVER)),
+        ("CUmemPoolProps", ("hipMemPoolProps", CONV_TYPE, API_DRIVER)),
+        ("CUmemPoolProps_st", ("hipMemPoolProps", CONV_TYPE, API_DRIVER)),
+        ("CUmemPoolProps_v1", ("hipMemPoolProps", CONV_TYPE, API_DRIVER)),
+        ("CUmemPoolPtrExportData", ("hipMemPoolPtrExportData", CONV_TYPE, API_DRIVER)),
+        ("CUmemPoolPtrExportData_st", ("hipMemPoolPtrExportData", CONV_TYPE, API_DRIVER)),
+        ("CUmemPoolPtrExportData_v1", ("hipMemPoolPtrExportData", CONV_TYPE, API_DRIVER)),
+        ("CUmemPool_attribute", ("hipMemPoolAttr", CONV_TYPE, API_DRIVER)),
+        ("CUmemPool_attribute_enum", ("hipMemPoolAttr", CONV_TYPE, API_DRIVER)),
+        ("CUmem_advise_enum", ("hipMemoryAdvise", CONV_TYPE, API_DRIVER)),
+        ("CUmem_range_attribute_enum", ("hipMemRangeAttribute", CONV_TYPE, API_DRIVER)),
+        ("CUmemoryPool", ("hipMemPool_t", CONV_TYPE, API_DRIVER)),
         ("CUmemorytype", ("hipMemType_t", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
         ("CUmemorytype_enum", ("hipMemType_t", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED)),
         ("CUresourcetype", ("hipResourceType", CONV_TEX, API_DRIVER, HIP_UNSUPPORTED)),
@@ -306,6 +342,7 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
         ("cudaPos", ("hipPos", CONV_MEM, API_RUNTIME)),
         ("cudaEvent_t", ("hipEvent_t", CONV_TYPE, API_RUNTIME)),
         ("cudaStream_t", ("hipStream_t", CONV_TYPE, API_RUNTIME)),
+        ("cudaHostFn_t", ("hipHostFn_t", CONV_TYPE, API_RUNTIME)),
         ("cudaPointerAttributes", ("hipPointerAttribute_t", CONV_TYPE, API_RUNTIME)),
         ("cudaDeviceAttr", ("hipDeviceAttribute_t", CONV_TYPE, API_RUNTIME)),
         ("cudaDeviceProp", ("hipDeviceProp_t", CONV_TYPE, API_RUNTIME)),
@@ -543,12 +580,14 @@ CUDA_TYPE_NAME_MAP = collections.OrderedDict(
         ("curandState", ("hiprandState_t", CONV_TYPE, API_RAND)),
         ("CUuuid", ("hipUUID", CONV_TYPE, API_RUNTIME)),
         ("cudaGraph_t", ("hipGraph_t", CONV_TYPE, API_RAND)),
+        ("cudaGraphNode_t", ("hipGraphNode_t", CONV_TYPE, API_RAND)),
         ("cudaGraphExec_t", ("hipGraphExec_t", CONV_TYPE, API_RAND)),
         ("__nv_bfloat16", ("__hip_bfloat16", CONV_TYPE, API_RUNTIME)),
         ("__nv_bfloat162", ("__hip_bfloat162", CONV_TYPE, API_RUNTIME)),
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CUDA_INCLUDE_MAP = collections.OrderedDict(
     [
         # since pytorch uses "\b{pattern}\b" as the actual re pattern,
@@ -571,9 +610,12 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
             "channel_descriptor.h",
             ("hip/channel_descriptor.h", CONV_INCLUDE, API_RUNTIME),
         ),
-        ("device_functions.h", ("hip/device_functions.h", CONV_INCLUDE, API_RUNTIME)),
-        ("driver_types.h", ("hip/driver_types.h", CONV_INCLUDE, API_RUNTIME)),
-        ("library_types.h", ("hip/library_types.h", CONV_INCLUDE, API_RUNTIME)),
+        ('include "device_functions.h', ('include "hip/device_functions.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include <device_functions.h', ('include <hip/device_functions.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include "driver_types.h', ('include "hip/driver_types.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include <driver_types.h', ('include <hip/driver_types.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include "library_types.h', ('include "hip/library_types.h', CONV_INCLUDE, API_RUNTIME)),
+        ('include <library_types.h', ('include <hip/library_types.h', CONV_INCLUDE, API_RUNTIME)),
         ("cuComplex.h", ("hip/hip_complex.h", CONV_INCLUDE, API_RUNTIME)),
         ("cuda_fp16.h", ("hip/hip_fp16.h", CONV_INCLUDE, API_RUNTIME)),
         ("cuda_bf16.h", ("hip/hip_bf16.h", CONV_INCLUDE, API_RUNTIME)),
@@ -607,6 +649,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
         ("curand_precalc.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("curand_uniform.h", ("hiprand/hiprand_kernel.h", CONV_INCLUDE, API_RAND)),
         ("cusparse.h", ("hipsparse/hipsparse.h", CONV_INCLUDE, API_RAND)),
+        ("cusparseLt.h", ("hipsparselt/hipsparselt.h", CONV_INCLUDE, API_RAND)),
         ("cufft.h", ("hipfft/hipfft.h", CONV_INCLUDE, API_BLAS)),
         ("cufftXt.h", ("hipfft/hipfftXt.h", CONV_INCLUDE, API_BLAS)),
         # PyTorch also has a source file named "nccl.h", so we need to "<"">" to differentiate
@@ -634,6 +677,7 @@ CUDA_INCLUDE_MAP = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CUDA_IDENTIFIER_MAP = collections.OrderedDict(
     [
         ("__CUDACC__", ("__HIPCC__", CONV_DEF, API_RUNTIME)),
@@ -791,6 +835,10 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         (
             "cudaErrorSetOnActiveProcess",
             ("hipErrorSetOnActiveProcess", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
+        ),
+        (
+            "cudaErrorContextIsDestroyed",
+            ("hipErrorContextIsDestroyed", CONV_TYPE, API_RUNTIME),
         ),
         (
             "cudaErrorInvalidSurface",
@@ -2545,6 +2593,38 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "CU_MEMORYTYPE_UNIFIED",
             ("hipMemTypeUnified", CONV_TYPE, API_DRIVER, HIP_UNSUPPORTED),
         ),
+        ("CU_MEMHOSTREGISTER_READ_ONLY", ("hipHostRegisterReadOnly", CONV_TYPE, API_DRIVER)),
+        ("CU_MEMPOOL_ATTR_RELEASE_THRESHOLD", ("hipMemPoolAttrReleaseThreshold", CONV_TYPE, API_DRIVER)),
+        ("CU_MEMPOOL_ATTR_RESERVED_MEM_CURRENT", ("hipMemPoolAttrReservedMemCurrent", CONV_TYPE, API_DRIVER)),
+        ("CU_MEMPOOL_ATTR_RESERVED_MEM_HIGH", ("hipMemPoolAttrReservedMemHigh", CONV_TYPE, API_DRIVER)),
+        (
+            "CU_MEMPOOL_ATTR_REUSE_ALLOW_INTERNAL_DEPENDENCIES",
+            ("hipMemPoolReuseAllowInternalDependencies", CONV_TYPE, API_DRIVER)
+        ),
+        ("CU_MEMPOOL_ATTR_REUSE_ALLOW_OPPORTUNISTIC", ("hipMemPoolReuseAllowOpportunistic", CONV_TYPE, API_DRIVER)),
+        (
+            "CU_MEMPOOL_ATTR_REUSE_FOLLOW_EVENT_DEPENDENCIES",
+            ("hipMemPoolReuseFollowEventDependencies", CONV_TYPE, API_DRIVER)
+        ),
+        ("CU_MEMPOOL_ATTR_USED_MEM_CURRENT", ("hipMemPoolAttrUsedMemCurrent", CONV_TYPE, API_DRIVER)),
+        ("CU_MEMPOOL_ATTR_USED_MEM_HIGH", ("hipMemPoolAttrUsedMemHigh", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_ACCESS_FLAGS_PROT_NONE", ("hipMemAccessFlagsProtNone", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_ACCESS_FLAGS_PROT_READ", ("hipMemAccessFlagsProtRead", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_ACCESS_FLAGS_PROT_READWRITE", ("hipMemAccessFlagsProtReadWrite", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_ALLOCATION_TYPE_INVALID", ("hipMemAllocationTypeInvalid", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_ALLOCATION_TYPE_MAX", ("hipMemAllocationTypeMax", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_ALLOCATION_TYPE_PINNED", ("hipMemAllocationTypePinned", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_ALLOC_GRANULARITY_MINIMUM", ("hipMemAllocationGranularityMinimum", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_ALLOC_GRANULARITY_RECOMMENDED", ("hipMemAllocationGranularityRecommended", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_HANDLE_TYPE_GENERIC", ("hipMemHandleTypeGeneric", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_HANDLE_TYPE_NONE", ("hipMemHandleTypeNone", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR", ("hipMemHandleTypePosixFileDescriptor", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_HANDLE_TYPE_WIN32", ("hipMemHandleTypeWin32", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_HANDLE_TYPE_WIN32_KMT", ("hipMemHandleTypeWin32Kmt", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_LOCATION_TYPE_DEVICE", ("hipMemLocationTypeDevice", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_LOCATION_TYPE_INVALID", ("hipMemLocationTypeInvalid", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_OPERATION_TYPE_MAP", ("hipMemOperationTypeMap", CONV_TYPE, API_DRIVER)),
+        ("CU_MEM_OPERATION_TYPE_UNMAP", ("hipMemOperationTypeUnmap", CONV_TYPE, API_DRIVER)),
         (
             "CU_RESOURCE_TYPE_ARRAY",
             ("hipResourceTypeArray", CONV_TEX, API_DRIVER, HIP_UNSUPPORTED),
@@ -2920,6 +3000,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuFuncSetBlockShape",
             ("hipFuncSetBlockShape", CONV_MODULE, API_DRIVER, HIP_UNSUPPORTED),
         ),
+        ("cudaLaunchKernel", ("hipLaunchKernel", CONV_MODULE, API_DRIVER)),
         (
             "cuFuncSetSharedSize",
             ("hipFuncSetSharedSize", CONV_MODULE, API_DRIVER, HIP_UNSUPPORTED),
@@ -3174,6 +3255,63 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             "cuMemGetAddressRange_v2",
             ("hipMemGetAddressRange", CONV_MEM, API_DRIVER),
         ),
+        ("cuArray3DCreate_v2", ("hipArray3DCreate", CONV_MEM, API_DRIVER)),
+        ("cuArray3DGetDescriptor_v2", ("hipArray3DGetDescriptor", CONV_MEM, API_DRIVER)),
+        ("cuArrayGetDescriptor_v2", ("hipArrayGetDescriptor", CONV_MEM, API_DRIVER)),
+        ("cuMemAlloc", ("hipMalloc", CONV_MEM, API_DRIVER)),
+        ("cuMemAllocHost_v2", ("hipMemAllocHost", CONV_MEM, API_DRIVER)),
+        ("cuMemAllocPitch_v2", ("hipMemAllocPitch", CONV_MEM, API_DRIVER)),
+        ("cuMemGetInfo", ("hipMemGetInfo", CONV_MEM, API_DRIVER)),
+        ("cuMemHostGetDevicePointer_v2", ("hipHostGetDevicePointer", CONV_MEM, API_DRIVER)),
+        ("cuMemHostRegister", ("hipHostRegister", CONV_MEM, API_DRIVER)),
+        ("cuMemcpy2DAsync_v2", ("hipMemcpyParam2DAsync", CONV_MEM, API_DRIVER)),
+        ("cuMemcpy2DUnaligned_v2", ("hipDrvMemcpy2DUnaligned", CONV_MEM, API_DRIVER)),
+        ("cuMemcpy2D_v2", ("hipMemcpyParam2D", CONV_MEM, API_DRIVER)),
+        ("cuMemcpy3DAsync_v2", ("hipDrvMemcpy3DAsync", CONV_MEM, API_DRIVER)),
+        ("cuMemcpy3D_v2", ("hipDrvMemcpy3D", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyAtoA_v2", ("hipMemcpyAtoA", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyAtoD_v2", ("hipMemcpyAtoD", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyAtoHAsync_v2", ("hipMemcpyAtoHAsync", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyAtoH_v2", ("hipMemcpyAtoH", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyDtoA_v2", ("hipMemcpyDtoA", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyDtoD", ("hipMemcpyDtoD", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyDtoDAsync", ("hipMemcpyDtoDAsync", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyDtoH", ("hipMemcpyDtoH", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyDtoHAsync", ("hipMemcpyDtoHAsync", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyHtoA_v2", ("hipMemcpyHtoA", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyHtoD", ("hipMemcpyHtoD", CONV_MEM, API_DRIVER)),
+        ("cuMemcpyHtoDAsync", ("hipMemcpyHtoDAsync", CONV_MEM, API_DRIVER)),
+        ("cuMemsetD16", ("hipMemsetD16", CONV_MEM, API_DRIVER)),
+        ("cuMemsetD32", ("hipMemsetD32", CONV_MEM, API_DRIVER)),
+        ("cuMemsetD8", ("hipMemsetD8", CONV_MEM, API_DRIVER)),
+        ("cuMemAddressFree", ("hipMemAddressFree", CONV_MEM, API_DRIVER)),
+        ("cuMemAddressReserve", ("hipMemAddressReserve", CONV_MEM, API_DRIVER)),
+        ("cuMemCreate", ("hipMemCreate", CONV_MEM, API_DRIVER)),
+        ("cuMemExportToShareableHandle", ("hipMemExportToShareableHandle", CONV_MEM, API_DRIVER)),
+        ("cuMemGetAccess", ("hipMemGetAccess", CONV_MEM, API_DRIVER)),
+        ("cuMemGetAllocationGranularity", ("hipMemGetAllocationGranularity", CONV_MEM, API_DRIVER)),
+        ("cuMemGetAllocationPropertiesFromHandle", ("hipMemGetAllocationPropertiesFromHandle", CONV_MEM, API_DRIVER)),
+        ("cuMemImportFromShareableHandle", ("hipMemImportFromShareableHandle", CONV_MEM, API_DRIVER)),
+        ("cuMemMap", ("hipMemMap", CONV_MEM, API_DRIVER)),
+        ("cuMemMapArrayAsync", ("hipMemMapArrayAsync", CONV_MEM, API_DRIVER)),
+        ("cuMemRelease", ("hipMemRelease", CONV_MEM, API_DRIVER)),
+        ("cuMemRetainAllocationHandle", ("hipMemRetainAllocationHandle", CONV_MEM, API_DRIVER)),
+        ("cuMemSetAccess", ("hipMemSetAccess", CONV_MEM, API_DRIVER)),
+        ("cuMemUnmap", ("hipMemUnmap", CONV_MEM, API_DRIVER)),
+        ("cuMemAllocAsync", ("hipMallocAsync", CONV_MEM, API_DRIVER)),
+        ("cuMemAllocFromPoolAsync", ("hipMallocFromPoolAsync", CONV_MEM, API_DRIVER)),
+        ("cuMemFreeAsync", ("hipFreeAsync", CONV_MEM, API_DRIVER)),
+        ("cuMemPoolCreate", ("hipMemPoolCreate", CONV_MEM, API_DRIVER)),
+        ("cuMemPoolDestroy", ("hipMemPoolDestroy", CONV_MEM, API_DRIVER)),
+        ("cuMemPoolExportPointer", ("hipMemPoolExportPointer", CONV_MEM, API_DRIVER)),
+        ("cuMemPoolExportToShareableHandle", ("hipMemPoolExportToShareableHandle", CONV_MEM, API_DRIVER)),
+        ("cuMemPoolGetAccess", ("hipMemPoolGetAccess", CONV_MEM, API_DRIVER)),
+        ("cuMemPoolGetAttribute", ("hipMemPoolGetAttribute", CONV_MEM, API_DRIVER)),
+        ("cuMemPoolImportFromShareableHandle", ("hipMemPoolImportFromShareableHandle", CONV_MEM, API_DRIVER)),
+        ("cuMemPoolImportPointer", ("hipMemPoolImportPointer", CONV_MEM, API_DRIVER)),
+        ("cuMemPoolSetAccess", ("hipMemPoolSetAccess", CONV_MEM, API_DRIVER)),
+        ("cuMemPoolSetAttribute", ("hipMemPoolSetAttribute", CONV_MEM, API_DRIVER)),
+        ("cuMemPoolTrimTo", ("hipMemPoolTrimTo", CONV_MEM, API_DRIVER)),
         (
             "cuPointerGetAttributes",
             ("hipPointerGetAttributes", CONV_MEM, API_DRIVER, HIP_UNSUPPORTED),
@@ -3865,6 +4003,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("CUDA_C_64U", ("HIP_C_64U", CONV_TYPE, API_RUNTIME)),
         ("CUDA_R_8F_E4M3", ("HIP_R_8F_E4M3", CONV_TYPE, API_RUNTIME)),
         ("CUDA_R_8F_E5M2", ("HIP_R_8F_E5M2", CONV_TYPE, API_RUNTIME)),
+        ("CUDA_R_4F_E2M1", ("HIP_R_4F_E2M1", CONV_TYPE, API_RUNTIME)),
         (
             "MAJOR_VERSION",
             ("hipLibraryMajorVersion", CONV_TYPE, API_RUNTIME, HIP_UNSUPPORTED),
@@ -4061,9 +4200,15 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaMemPoolAttrUsedMemCurrent", ("hipMemPoolAttrUsedMemCurrent", CONV_MEM, API_RUNTIME)),
         ("cudaMemPoolAttrUsedMemHigh", ("hipMemPoolAttrUsedMemHigh", CONV_MEM, API_RUNTIME)),
         ("cudaMemPoolGetAttribute", ("hipMemPoolGetAttribute", CONV_MEM, API_RUNTIME)),
-        ("cudaMemPoolReuseAllowInternalDependencies", ("hipMemPoolReuseAllowInternalDependencies", CONV_MEM, API_RUNTIME)),
+        (
+            "cudaMemPoolReuseAllowInternalDependencies",
+            ("hipMemPoolReuseAllowInternalDependencies", CONV_MEM, API_RUNTIME)
+        ),
         ("cudaMemPoolReuseAllowOpportunistic", ("hipMemPoolReuseAllowOpportunistic", CONV_MEM, API_RUNTIME)),
-        ("cudaMemPoolReuseFollowEventDependencies", ("hipMemPoolReuseFollowEventDependencies", CONV_MEM, API_RUNTIME)),
+        (
+            "cudaMemPoolReuseFollowEventDependencies",
+            ("hipMemPoolReuseFollowEventDependencies", CONV_MEM, API_RUNTIME)
+        ),
         ("cudaMemPoolSetAccess", ("hipMemPoolSetAccess", CONV_MEM, API_RUNTIME)),
         ("cudaMemPoolSetAttribute", ("hipMemPoolSetAttribute", CONV_MEM, API_RUNTIME)),
         ("cudaMemPoolTrimTo", ("hipMemPoolTrimTo", CONV_MEM, API_RUNTIME)),
@@ -4094,6 +4239,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ),
         ("cudaMallocHost", ("hipHostMalloc", CONV_MEM, API_RUNTIME)),
         ("cudaMallocArray", ("hipMallocArray", CONV_MEM, API_RUNTIME)),
+        ("cudaMallocAsync", ("hipMallocAsync", CONV_MEM, API_RUNTIME)),
         ("cudaMalloc", ("hipMalloc", CONV_MEM, API_RUNTIME)),
         ("cudaMalloc3D", ("hipMalloc3D", CONV_MEM, API_RUNTIME)),
         ("cudaMalloc3DArray", ("hipMalloc3DArray", CONV_MEM, API_RUNTIME)),
@@ -4108,18 +4254,22 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaMallocPitch", ("hipMallocPitch", CONV_MEM, API_RUNTIME)),
         ("cudaFreeHost", ("hipHostFree", CONV_MEM, API_RUNTIME)),
         ("cudaFreeArray", ("hipFreeArray", CONV_MEM, API_RUNTIME)),
+        ("cudaFreeAsync", ("hipFreeAsync", CONV_MEM, API_RUNTIME)),
         ("cudaFree", ("hipFree", CONV_MEM, API_RUNTIME)),
         ("cudaHostRegister", ("hipHostRegister", CONV_MEM, API_RUNTIME)),
         ("cudaHostUnregister", ("hipHostUnregister", CONV_MEM, API_RUNTIME)),
         ("cudaHostAlloc", ("hipHostMalloc", CONV_MEM, API_RUNTIME)),
         ("cudaMemoryTypeHost", ("hipMemoryTypeHost", CONV_MEM, API_RUNTIME)),
         ("cudaMemoryTypeDevice", ("hipMemoryTypeDevice", CONV_MEM, API_RUNTIME)),
+        ("cudaMemoryTypeUnregistered", ("hipMemoryTypeUnregistered", CONV_MEM, API_RUNTIME)),
+        ("cudaMemoryTypeManaged", ("hipMemoryTypeManaged", CONV_MEM, API_RUNTIME)),
         ("make_cudaExtent", ("make_hipExtent", CONV_MEM, API_RUNTIME)),
         ("make_cudaPitchedPtr", ("make_hipPitchedPtr", CONV_MEM, API_RUNTIME)),
         ("make_cudaPos", ("make_hipPos", CONV_MEM, API_RUNTIME)),
         ("cudaHostAllocDefault", ("hipHostMallocDefault", CONV_MEM, API_RUNTIME)),
         ("cudaHostAllocPortable", ("hipHostMallocPortable", CONV_MEM, API_RUNTIME)),
         ("cudaHostAllocMapped", ("hipHostMallocMapped", CONV_MEM, API_RUNTIME)),
+        ("cudaHostNodeParams", ("hipHostNodeParams", CONV_MEM, API_RUNTIME)),
         (
             "cudaHostAllocWriteCombined",
             ("hipHostMallocWriteCombined", CONV_MEM, API_RUNTIME),
@@ -4180,15 +4330,21 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaStreamGetCaptureInfo_v2", ("hipStreamGetCaptureInfo_v2", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureStatus", ("hipStreamCaptureStatus", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureStatusActive", ("hipStreamCaptureStatusActive", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamCaptureStatusNone", ("hipStreamCaptureStatusNone", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureMode", ("hipStreamCaptureMode", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureModeGlobal", ("hipStreamCaptureModeGlobal", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureModeRelaxed", ("hipStreamCaptureModeRelaxed", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamCaptureModeThreadLocal", ("hipStreamCaptureModeThreadLocal", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamBeginCapture", ("hipStreamBeginCapture", CONV_TYPE, API_RUNTIME)),
         ("cudaStreamEndCapture", ("hipStreamEndCapture", CONV_TYPE, API_RUNTIME)),
+        ("cudaStreamSetCaptureDependencies", ("hipStreamSetCaptureDependencies", CONV_STREAM, API_RUNTIME)),
+        ("cudaStreamUpdateCaptureDependencies", ("hipStreamUpdateCaptureDependencies", CONV_STREAM, API_RUNTIME)),
         ("cudaGraphInstantiate", ("hipGraphInstantiate", CONV_TYPE, API_RUNTIME)),
         ("cudaGraphInstantiateWithFlags", ("hipGraphInstantiateWithFlags", CONV_TYPE, API_RUNTIME)),
-        ("cudaGraphInstantiateFlagAutoFreeOnLaunch", ("hipGraphInstantiateFlagAutoFreeOnLaunch", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphInstantiateFlagAutoFreeOnLaunch",
+            ("hipGraphInstantiateFlagAutoFreeOnLaunch", CONV_TYPE, API_RUNTIME)
+        ),
         ("cudaGraphDestroy", ("hipGraphDestroy", CONV_TYPE, API_RUNTIME)),
         ("cudaGraphExecDestroy", ("hipGraphExecDestroy", CONV_TYPE, API_RUNTIME)),
         ("cudaGraphLaunch", ("hipGraphLaunch", CONV_TYPE, API_RUNTIME)),
@@ -4197,6 +4353,209 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("cudaGraphDebugDotFlagsVerbose", ("hipGraphDebugDotFlagsVerbose", CONV_NUMERIC_LITERAL, API_RUNTIME)),
         ("cudaGraphRetainUserObject", ("hipGraphRetainUserObject", CONV_TYPE, API_RUNTIME)),
         ("cudaGraphUserObjectMove", ("hipGraphUserObjectMove", CONV_TYPE, API_RUNTIME)),
+        ("cudaDeviceGetGraphMemAttribute", ("hipDeviceGetGraphMemAttribute", CONV_TYPE, API_RUNTIME)),
+        ("cudaDeviceGraphMemTrim", ("hipDeviceGraphMemTrim", CONV_TYPE, API_RUNTIME)),
+        ("cudaDeviceSetGraphMemAttribute", ("hipDeviceSetGraphMemAttribute", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddChildGraphNode", ("hipGraphAddChildGraphNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddDependencies", ("hipGraphAddDependencies", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddEmptyNode", ("hipGraphAddEmptyNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddEventRecordNode", ("hipGraphAddEventRecordNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddEventWaitNode", ("hipGraphAddEventWaitNode", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphAddExternalSemaphoresSignalNode",
+            ("hipGraphAddExternalSemaphoresSignalNode", CONV_TYPE, API_RUNTIME)
+        ),
+        ("cudaGraphAddExternalSemaphoresWaitNode", ("hipGraphAddExternalSemaphoresWaitNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddHostNode", ("hipGraphAddHostNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddKernelNode", ("hipGraphAddKernelNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddMemAllocNode", ("hipGraphAddMemAllocNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddMemFreeNode", ("hipGraphAddMemFreeNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddMemcpyNode", ("hipGraphAddMemcpyNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddMemcpyNode1D", ("hipGraphAddMemcpyNode1D", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddMemcpyNodeFromSymbol", ("hipGraphAddMemcpyNodeFromSymbol", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddMemcpyNodeToSymbol", ("hipGraphAddMemcpyNodeToSymbol", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddMemsetNode", ("hipGraphAddMemsetNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphAddNode", ("hipGraphAddNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphChildGraphNodeGetGraph", ("hipGraphChildGraphNodeGetGraph", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphClone", ("hipGraphClone", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphCreate", ("hipGraphCreate", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDestroyNode", ("hipGraphDestroyNode", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphEventRecordNodeGetEvent", ("hipGraphEventRecordNodeGetEvent", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphEventRecordNodeSetEvent", ("hipGraphEventRecordNodeSetEvent", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphEventWaitNodeGetEvent", ("hipGraphEventWaitNodeGetEvent", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphEventWaitNodeSetEvent", ("hipGraphEventWaitNodeSetEvent", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecChildGraphNodeSetParams", ("hipGraphExecChildGraphNodeSetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecEventRecordNodeSetEvent", ("hipGraphExecEventRecordNodeSetEvent", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecEventWaitNodeSetEvent", ("hipGraphExecEventWaitNodeSetEvent", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphExecExternalSemaphoresSignalNodeSetParams",
+            ("hipGraphExecExternalSemaphoresSignalNodeSetParams", CONV_TYPE, API_RUNTIME)
+        ),
+        (
+            "cudaGraphExecExternalSemaphoresWaitNodeSetParams",
+            ("hipGraphExecExternalSemaphoresWaitNodeSetParams", CONV_TYPE, API_RUNTIME)
+        ),
+        ("cudaGraphExecGetFlags", ("hipGraphExecGetFlags", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecHostNodeSetParams", ("hipGraphExecHostNodeSetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecKernelNodeSetParams", ("hipGraphExecKernelNodeSetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecMemcpyNodeSetParams", ("hipGraphExecMemcpyNodeSetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecMemcpyNodeSetParams1D", ("hipGraphExecMemcpyNodeSetParams1D", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphExecMemcpyNodeSetParamsFromSymbol",
+            ("hipGraphExecMemcpyNodeSetParamsFromSymbol", CONV_TYPE, API_RUNTIME)
+        ),
+        (
+            "cudaGraphExecMemcpyNodeSetParamsToSymbol",
+            ("hipGraphExecMemcpyNodeSetParamsToSymbol", CONV_TYPE, API_RUNTIME)
+        ),
+        ("cudaGraphExecMemsetNodeSetParams", ("hipGraphExecMemsetNodeSetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecNodeSetParams", ("hipGraphExecNodeSetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecUpdate", ("hipGraphExecUpdate", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphExternalSemaphoresSignalNodeGetParams",
+            ("hipGraphExternalSemaphoresSignalNodeGetParams", CONV_TYPE, API_RUNTIME)
+        ),
+        (
+            "cudaGraphExternalSemaphoresSignalNodeSetParams",
+            ("hipGraphExternalSemaphoresSignalNodeSetParams", CONV_TYPE, API_RUNTIME)
+        ),
+        (
+            "cudaGraphExternalSemaphoresWaitNodeGetParams",
+            ("hipGraphExternalSemaphoresWaitNodeGetParams", CONV_TYPE, API_RUNTIME)
+        ),
+        (
+            "cudaGraphExternalSemaphoresWaitNodeSetParams",
+            ("hipGraphExternalSemaphoresWaitNodeSetParams", CONV_TYPE, API_RUNTIME)
+        ),
+        ("cudaGraphGetEdges", ("hipGraphGetEdges", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphGetRootNodes", ("hipGraphGetRootNodes", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphHostNodeGetParams", ("hipGraphHostNodeGetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphHostNodeSetParams", ("hipGraphHostNodeSetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphInstantiateWithParams", ("hipGraphInstantiateWithParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphKernelNodeCopyAttributes", ("hipGraphKernelNodeCopyAttributes", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphKernelNodeGetAttribute", ("hipGraphKernelNodeGetAttribute", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphKernelNodeGetParams", ("hipGraphKernelNodeGetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphKernelNodeSetAttribute", ("hipGraphKernelNodeSetAttribute", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphKernelNodeSetParams", ("hipGraphKernelNodeSetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphLaunch", ("hipGraphLaunch", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemAllocNodeGetParams", ("hipGraphMemAllocNodeGetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemFreeNodeGetParams", ("hipGraphMemFreeNodeGetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemcpyNodeGetParams", ("hipGraphMemcpyNodeGetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemcpyNodeSetParams", ("hipGraphMemcpyNodeSetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemcpyNodeSetParams1D", ("hipGraphMemcpyNodeSetParams1D", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemcpyNodeSetParamsFromSymbol", ("hipGraphMemcpyNodeSetParamsFromSymbol", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemcpyNodeSetParamsToSymbol", ("hipGraphMemcpyNodeSetParamsToSymbol", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemsetNodeGetParams", ("hipGraphMemsetNodeGetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemsetNodeSetParams", ("hipGraphMemsetNodeSetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeFindInClone", ("hipGraphNodeFindInClone", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeGetDependencies", ("hipGraphNodeGetDependencies", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeGetDependentNodes", ("hipGraphNodeGetDependentNodes", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeGetEnabled", ("hipGraphNodeGetEnabled", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeGetType", ("hipGraphNodeGetType", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeSetEnabled", ("hipGraphNodeSetEnabled", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeSetParams", ("hipGraphNodeSetParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphReleaseUserObject", ("hipGraphReleaseUserObject", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphRemoveDependencies", ("hipGraphRemoveDependencies", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphUpload", ("hipGraphUpload", CONV_TYPE, API_RUNTIME)),
+        ("cudaUserObjectRelease", ("hipUserObjectRelease", CONV_TYPE, API_RUNTIME)),
+        ("cudaUserObjectRetain", ("hipUserObjectRetain", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDebugDotFlags", ("hipGraphDebugDotFlags", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDebugDotFlagsEventNodeParams", ("hipGraphDebugDotFlagsEventNodeParams", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphDebugDotFlagsExtSemasSignalNodeParams",
+            ("hipGraphDebugDotFlagsExtSemasSignalNodeParams", CONV_TYPE, API_RUNTIME)
+        ),
+        (
+            "cudaGraphDebugDotFlagsExtSemasWaitNodeParams",
+            ("hipGraphDebugDotFlagsExtSemasWaitNodeParams", CONV_TYPE, API_RUNTIME)
+        ),
+        ("cudaGraphDebugDotFlagsHandles", ("hipGraphDebugDotFlagsHandles", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDebugDotFlagsHostNodeParams", ("hipGraphDebugDotFlagsHostNodeParams", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphDebugDotFlagsKernelNodeAttributes",
+            ("hipGraphDebugDotFlagsKernelNodeAttributes", CONV_TYPE, API_RUNTIME)
+        ),
+        ("cudaGraphDebugDotFlagsKernelNodeParams", ("hipGraphDebugDotFlagsKernelNodeParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDebugDotFlagsMemcpyNodeParams", ("hipGraphDebugDotFlagsMemcpyNodeParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDebugDotFlagsMemsetNodeParams", ("hipGraphDebugDotFlagsMemsetNodeParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDependencyType", ("hipGraphDependencyType", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDependencyTypeDefault", ("hipGraphDependencyTypeDefault", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDependencyTypeProgrammatic", ("hipGraphDependencyTypeProgrammatic", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphDependencyType_enum", ("hipGraphDependencyType", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphEdgeData", ("hipGraphEdgeData", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphEdgeData_st", ("hipGraphEdgeData", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecUpdateError", ("hipGraphExecUpdateError", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphExecUpdateErrorFunctionChanged",
+            ("hipGraphExecUpdateErrorFunctionChanged", CONV_TYPE, API_RUNTIME)
+        ),
+        (
+            "cudaGraphExecUpdateErrorNodeTypeChanged",
+            ("hipGraphExecUpdateErrorNodeTypeChanged", CONV_TYPE, API_RUNTIME)
+        ),
+        ("cudaGraphExecUpdateErrorNotSupported", ("hipGraphExecUpdateErrorNotSupported", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphExecUpdateErrorParametersChanged",
+            ("hipGraphExecUpdateErrorParametersChanged", CONV_TYPE, API_RUNTIME)
+        ),
+        (
+            "cudaGraphExecUpdateErrorTopologyChanged",
+            ("hipGraphExecUpdateErrorTopologyChanged", CONV_TYPE, API_RUNTIME)
+        ),
+        (
+            "cudaGraphExecUpdateErrorUnsupportedFunctionChange",
+            ("hipGraphExecUpdateErrorUnsupportedFunctionChange", CONV_TYPE, API_RUNTIME)
+        ),
+        ("cudaGraphExecUpdateResult", ("hipGraphExecUpdateResult", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphExecUpdateSuccess", ("hipGraphExecUpdateSuccess", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphInstantiateError", ("hipGraphInstantiateError", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphInstantiateFlagDeviceLaunch", ("hipGraphInstantiateFlagDeviceLaunch", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphInstantiateFlagUpload", ("hipGraphInstantiateFlagUpload", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphInstantiateFlagUseNodePriority",
+            ("hipGraphInstantiateFlagUseNodePriority", CONV_TYPE, API_RUNTIME)
+        ),
+        ("cudaGraphInstantiateFlags", ("hipGraphInstantiateFlags", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphInstantiateInvalidStructure", ("hipGraphInstantiateInvalidStructure", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphInstantiateMultipleDevicesNotSupported",
+            ("hipGraphInstantiateMultipleDevicesNotSupported", CONV_TYPE, API_RUNTIME)
+        ),
+        (
+            "cudaGraphInstantiateNodeOperationNotSupported",
+            ("hipGraphInstantiateNodeOperationNotSupported", CONV_TYPE, API_RUNTIME)
+        ),
+        ("cudaGraphInstantiateParams", ("hipGraphInstantiateParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphInstantiateParams_st", ("hipGraphInstantiateParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphInstantiateResult", ("hipGraphInstantiateResult", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphInstantiateSuccess", ("hipGraphInstantiateSuccess", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphKernelNodePortDefault", ("hipGraphKernelNodePortDefault", CONV_TYPE, API_RUNTIME)),
+        (
+            "cudaGraphKernelNodePortLaunchCompletion",
+            ("hipGraphKernelNodePortLaunchCompletion", CONV_TYPE, API_RUNTIME)
+        ),
+        ("cudaGraphKernelNodePortProgrammatic", ("hipGraphKernelNodePortProgrammatic", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemAttrReservedMemCurrent", ("hipGraphMemAttrReservedMemCurrent", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemAttrReservedMemHigh", ("hipGraphMemAttrReservedMemHigh", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemAttrUsedMemCurrent", ("hipGraphMemAttrUsedMemCurrent", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemAttrUsedMemHigh", ("hipGraphMemAttrUsedMemHigh", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphMemAttributeType", ("hipGraphMemAttributeType", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeParams", ("hipGraphNodeParams", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeType", ("hipGraphNodeType", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeConditional", ("hipGraphNodeTypeConditional", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeCount", ("hipGraphNodeTypeCount", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeEmpty", ("hipGraphNodeTypeEmpty", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeEventRecord", ("hipGraphNodeTypeEventRecord", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeExtSemaphoreSignal", ("hipGraphNodeTypeExtSemaphoreSignal", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeExtSemaphoreWait", ("hipGraphNodeTypeExtSemaphoreWait", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeGraph", ("hipGraphNodeTypeGraph", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeHost", ("hipGraphNodeTypeHost", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeKernel", ("hipGraphNodeTypeKernel", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeMemAlloc", ("hipGraphNodeTypeMemAlloc", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeMemFree", ("hipGraphNodeTypeMemFree", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeMemcpy", ("hipGraphNodeTypeMemcpy", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeMemset", ("hipGraphNodeTypeMemset", CONV_TYPE, API_RUNTIME)),
+        ("cudaGraphNodeTypeWaitEvent", ("hipGraphNodeTypeWaitEvent", CONV_TYPE, API_RUNTIME)),
         ("cudaUserObject_t", ("hipUserObject_t", CONV_TYPE, API_RUNTIME)),
         ("cudaUserObjectCreate", ("hipUserObjectCreate", CONV_TYPE, API_RUNTIME)),
         ("cudaUserObjectNoDestructorSync", ("hipUserObjectNoDestructorSync", CONV_TYPE, API_RUNTIME)),
@@ -5170,10 +5529,6 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
             ),
         ),
         ("cudaDeviceGetLimit", ("hipDeviceGetLimit", CONV_DEVICE, API_RUNTIME)),
-        (
-            "cudaProfilerInitialize",
-            ("hipProfilerInitialize", CONV_OTHER, API_RUNTIME, HIP_UNSUPPORTED),
-        ),
         ("cudaProfilerStart", ("hipProfilerStart", CONV_OTHER, API_RUNTIME)),
         ("cudaProfilerStop", ("hipProfilerStop", CONV_OTHER, API_RUNTIME)),
         (
@@ -7337,8 +7692,18 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
         ("CUBLASLT_MATMUL_DESC_A_SCALE_POINTER", ("HIPBLASLT_MATMUL_DESC_A_SCALE_POINTER", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_MATMUL_DESC_B_SCALE_POINTER", ("HIPBLASLT_MATMUL_DESC_B_SCALE_POINTER", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_MATMUL_DESC_D_SCALE_POINTER", ("HIPBLASLT_MATMUL_DESC_D_SCALE_POINTER", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_DESC_A_SCALE_MODE", ("HIPBLASLT_MATMUL_DESC_A_SCALE_MODE", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_DESC_B_SCALE_MODE", ("HIPBLASLT_MATMUL_DESC_B_SCALE_MODE", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F", ("HIPBLASLT_MATMUL_MATRIX_SCALE_OUTER_VEC_32F", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_MATMUL_DESC_AMAX_D_POINTER", ("HIPBLASLT_MATMUL_DESC_AMAX_D_POINTER", CONV_MATH_FUNC, API_BLAS)),
         ("CUBLASLT_MATMUL_DESC_BIAS_DATA_TYPE", ("HIPBLASLT_MATMUL_DESC_BIAS_DATA_TYPE", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_DESC_A_SCALE_MODE", ("HIPBLASLT_MATMUL_DESC_A_SCALE_MODE", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_DESC_B_SCALE_MODE", ("HIPBLASLT_MATMUL_DESC_B_SCALE_MODE", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_DESC_POINTER_MODE", ("HIPBLASLT_MATMUL_DESC_POINTER_MODE", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0", ("HIPBLASLT_MATMUL_MATRIX_SCALE_VEC32_UE8M0", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3", ("HIPBLASLT_MATMUL_MATRIX_SCALE_VEC16_UE4M3", CONV_MATH_FUNC, API_BLAS)),
+        ("CUBLASLT_POINTER_MODE_DEVICE", ("HIPBLASLT_POINTER_MODE_DEVICE", CONV_NUMERIC_LITERAL, API_BLAS)),
+        ("CUBLASLT_POINTER_MODE_HOST", ("HIPBLASLT_POINTER_MODE_HOST", CONV_NUMERIC_LITERAL, API_BLAS)),
         ("cublasLtMatrixLayout_t", ("hipblasLtMatrixLayout_t", CONV_MATH_FUNC, API_BLAS)),
         ("cublasLtMatrixLayoutOpaque_t", ("hipblasLtMatrixLayoutOpaque_t", CONV_MATH_FUNC, API_BLAS)),
         ("cublasLtMatrixLayoutAttribute_t", ("hipblasLtMatrixLayoutAttribute_t", CONV_MATH_FUNC, API_BLAS)),
@@ -8002,6 +8367,7 @@ CUDA_IDENTIFIER_MAP = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CUDA_SPECIAL_MAP = collections.OrderedDict(
     [
         # SPARSE
@@ -8166,11 +8532,15 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
         ("cusparseSpGEMMDescr_t", ("hipsparseSpGEMMDescr_t", CONV_TYPE, API_SPECIAL)),
         ("CUSPARSE_INDEX_32I", ("HIPSPARSE_INDEX_32I", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_INDEX_64I", ("HIPSPARSE_INDEX_64I", CONV_NUMERIC_LITERAL, API_SPECIAL)),
-        ("CUSPARSE_ORDER_COL", ("HIPSPARSE_ORDER_COLUMN", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_ORDER_COL", ("HIPSPARSE_ORDER_COL", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_ORDER_ROW", ("HIPSPARSE_ORDER_ROW", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_MV_ALG_DEFAULT", ("HIPSPARSE_MV_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_MM_ALG_DEFAULT", ("HIPSPARSE_MM_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SPMM_COO_ALG1", ("HIPSPARSE_SPMM_COO_ALG1", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SPMM_COO_ALG2", ("HIPSPARSE_SPMM_COO_ALG2", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPMM_CSR_ALG1", ("HIPSPARSE_SPMM_CSR_ALG1", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPMM_CSR_ALG2", ("HIPSPARSE_SPMM_CSR_ALG2", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_SPMM_CSR_ALG3", ("HIPSPARSE_SPMM_CSR_ALG3", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_COOMV_ALG", ("HIPSPARSE_COOMV_ALG", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SPMM_CSR_ALG1", ("HIPSPARSE_CSRMM_ALG1", CONV_NUMERIC_LITERAL, API_SPECIAL)),
         ("CUSPARSE_SPGEMM_DEFAULT", ("HIPSPARSE_SPGEMM_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
@@ -8247,6 +8617,49 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
             "CUSPARSE_MATRIX_TYPE_GENERAL",
             ("HIPSPARSE_MATRIX_TYPE_GENERAL", CONV_NUMERIC_LITERAL, API_SPECIAL),
         ),
+        # SparseLt
+        ("cuSPARSELt", ("hipSPARSELt", CONV_TYPE, API_SPECIAL)),
+        ("AT_CUSPARSELT_ENABLED", ("AT_HIPSPARSELT_ENABLED", CONV_TYPE, API_SPECIAL)),
+        ("CUSPARSE_ORDER_ROW", ("HIPSPARSE_ORDER_ROW", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_ORDER_COL", ("HIPSPARSE_ORDER_COL", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_SPARSITY_50_PERCENT", ("HIPSPARSELT_SPARSITY_50_PERCENT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("cusparseComputeType", ("hipsparseLtComputetype_t", CONV_TYPE, API_SPECIAL)),
+        ("CUSPARSE_COMPUTE_32F", ("HIPSPARSELT_COMPUTE_32F", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_COMPUTE_16F", ("HIPSPARSELT_COMPUTE_16F", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_COMPUTE_32I", ("HIPSPARSELT_COMPUTE_32I", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSE_COMPUTE_TF32", ("HIPSPARSELT_COMPUTE_TF32", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_ALG_CONFIG_ID", ("HIPSPARSELT_MATMUL_ALG_CONFIG_ID", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_ALG_CONFIG_MAX_ID", ("HIPSPARSELT_MATMUL_ALG_CONFIG_MAX_ID", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_BIAS_POINTER", ("HIPSPARSELT_MATMUL_BIAS_POINTER", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_ALG_DEFAULT", ("HIPSPARSELT_MATMUL_ALG_DEFAULT", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_ALG_CONFIG_ID", ("HIPSPARSELT_MATMUL_ALG_CONFIG_ID", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_ALPHA_VECTOR_SCALING", ("HIPSPARSELT_MATMUL_ALPHA_VECTOR_SCALING", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_SPLIT_K", ("HIPSPARSELT_MATMUL_SPLIT_K", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("CUSPARSELT_MATMUL_SPLIT_K_MODE", ("HIPSPARSELT_MATMUL_SPLIT_K_MODE", CONV_NUMERIC_LITERAL, API_SPECIAL)),
+        ("cusparseLtHandle_t", ("hipsparseLtHandle_t", CONV_TYPE, API_SPECIAL)),
+        ("cusparseLtMatDescriptor_t", ("hipsparseLtMatDescriptor_t", CONV_TYPE, API_SPECIAL)),
+        ("cusparseLtInit", ("hipsparseLtInit", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtStructuredDescriptorInit", ("hipsparseLtStructuredDescriptorInit", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtSplitKMode_t", ("hipsparseLtSplitKMode_t", CONV_TYPE, API_SPECIAL)),
+        ("cusparseLtSpMMACompressedSize2", ("hipsparseLtSpMMACompressedSize2", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtSpMMACompress2", ("hipsparseLtSpMMACompress2", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatmulDescriptor_t", ("hipsparseLtMatmulDescriptor_t", CONV_TYPE, API_SPECIAL)),
+        ("cusparseLtMatmulPlan_t", ("hipsparseLtMatmulPlan_t", CONV_TYPE, API_SPECIAL)),
+        ("cusparseLtMatmulAlgSelection_t", ("hipsparseLtMatmulAlgSelection_t", CONV_TYPE, API_SPECIAL)),
+        ("cusparseLtStructuredDescriptorInit", ("hipsparseLtStructuredDescriptorInit", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtDenseDescriptorInit", ("hipsparseLtDenseDescriptorInit", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatmulDescriptorInit", ("hipsparseLtMatmulDescriptorInit", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatmulDescSetAttribute", ("hipsparseLtMatmulDescSetAttribute", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatmulAlgSelectionInit", ("hipsparseLtMatmulAlgSelectionInit", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatmulAlgSetAttribute", ("hipsparseLtMatmulAlgSetAttribute", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatmulPlanInit", ("hipsparseLtMatmulPlanInit", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatmulGetWorkspace", ("hipsparseLtMatmulGetWorkspace", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatmulSearch", ("hipsparseLtMatmulSearch", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatmulAlgGetAttribute", ("hipsparseLtMatmulAlgGetAttribute", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatmul", ("hipsparseLtMatmul", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatDescriptorDestroy", ("hipsparseLtMatDescriptorDestroy", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseLtMatmulPlanDestroy", ("hipsparseLtMatmulPlanDestroy", CONV_MATH_FUNC, API_SPECIAL)),
+        ("cusparseGetErrorString", ("hipsparseGetErrorString", CONV_MATH_FUNC, API_SPECIAL)),
         # SOLVER
         ("cublasOperation_t", ("hipsolverOperation_t", CONV_TYPE, API_SPECIAL)),
         ("CUBLAS_OP_N", ("HIPSOLVER_OP_N", CONV_NUMERIC_LITERAL, API_SPECIAL)),
@@ -8442,6 +8855,7 @@ CUDA_SPECIAL_MAP = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("USE_CUDA", ("USE_ROCM", API_PYTORCH)),
@@ -8502,6 +8916,310 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
                 "HIPCachingAllocatorMasqueradingAsCUDA::recordStreamMasqueradingAsCUDA",
                 API_PYTORCH,
             ),
+        ),
+        (
+            "cuda::CUDACachingAllocator::raw_alloc",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::raw_alloc", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::raw_alloc",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::raw_alloc", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::raw_alloc_with_stream",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::raw_alloc_with_stream", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::raw_alloc_with_stream",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::raw_alloc_with_stream", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::raw_delete",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::raw_delete", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::raw_delete",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::raw_delete", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::init",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::init", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::init",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::init", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getMemoryFraction",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getMemoryFraction", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getMemoryFraction",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getMemoryFraction", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::setMemoryFraction",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::setMemoryFraction", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::setMemoryFraction",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::setMemoryFraction", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::emptyCache",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::emptyCache", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::emptyCache",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::emptyCache", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::enable",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::enable", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::enable",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::enable", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::isEnabled",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::isEnabled", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::isEnabled",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::isEnabled", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::cacheInfo",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::cacheInfo", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::cacheInfo",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::cacheInfo", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getBaseAllocation",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getBaseAllocation", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getBaseAllocation",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getBaseAllocation", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getDeviceStats",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getDeviceStats", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getDeviceStats",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getDeviceStats", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::resetAccumulatedStats",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::resetAccumulatedStats", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::resetAccumulatedStats",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::resetAccumulatedStats", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::resetPeakStats",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::resetPeakStats", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::resetPeakStats",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::resetPeakStats", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::snapshot",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::snapshot", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::snapshot",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::snapshot", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getCheckpointState",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getCheckpointState", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getCheckpointState",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getCheckpointState", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::setCheckpointState",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::setCheckpointState", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::setCheckpointState",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::setCheckpointState", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::setCheckpointPoolState",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::setCheckpointPoolState", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::setCheckpointPoolState",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::setCheckpointPoolState", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::beginAllocateToPool",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::beginAllocateToPool", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::beginAllocateToPool",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::beginAllocateToPool", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::endAllocateToPool",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::endAllocateToPool", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::endAllocateToPool",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::endAllocateToPool", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::recordHistory",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::recordHistory", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::recordHistory",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::recordHistory", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::recordAnnotation",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::recordAnnotation", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::recordAnnotation",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::recordAnnotation", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::pushCompileContext",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::pushCompileContext", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::pushCompileContext",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::pushCompileContext", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::popCompileContext",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::popCompileContext", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::popCompileContext",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::popCompileContext", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::isHistoryEnabled",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::isHistoryEnabled", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::isHistoryEnabled",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::isHistoryEnabled", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::checkPoolLiveAllocations",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::checkPoolLiveAllocations", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::checkPoolLiveAllocations",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::checkPoolLiveAllocations", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::attachOutOfMemoryObserver",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::attachOutOfMemoryObserver", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::attachOutOfMemoryObserver",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::attachOutOfMemoryObserver", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::attachAllocatorTraceTracker",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::attachAllocatorTraceTracker", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::attachAllocatorTraceTracker",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::attachAllocatorTraceTracker", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::releasePool",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::releasePool", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::releasePool",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::releasePool", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::createOrIncrefPool",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::createOrIncrefPool", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::createOrIncrefPool",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::createOrIncrefPool", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::setUseOnOOM",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::setUseOnOOM", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::setUseOnOOM",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::setUseOnOOM", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::setNoSplit",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::setNoSplit", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::setNoSplit",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::setNoSplit", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getPoolUseCount",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getPoolUseCount", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getPoolUseCount",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getPoolUseCount", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::getIpcDevPtr",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::getIpcDevPtr", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::getIpcDevPtr",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::getIpcDevPtr", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::shareIpcHandle",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::shareIpcHandle", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::shareIpcHandle",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::shareIpcHandle", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::name",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::name", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::name",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::name", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::memcpyAsync",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::memcpyAsync", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::memcpyAsync",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::memcpyAsync", API_PYTORCH),
+        ),
+        (
+            "cuda::CUDACachingAllocator::enablePeerAccess",
+            ("hip::HIPCachingAllocatorMasqueradingAsCUDA::enablePeerAccess", API_PYTORCH),
+        ),
+        (
+            "CUDACachingAllocator::enablePeerAccess",
+            ("HIPCachingAllocatorMasqueradingAsCUDA::enablePeerAccess", API_PYTORCH),
         ),
         (
             "cuda::CUDAAllocator::recordStream",
@@ -8585,6 +9303,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
             ("gloo/hip_allreduce_halving_doubling_pipelined.h", API_PYTORCH),
         ),
         ("gloo/cuda_allreduce_ring.h", ("gloo/hip_allreduce_ring.h", API_PYTORCH)),
+        ("gloo/cuda_allreduce_ring_chunked.h", ("gloo/hip_allreduce_ring_chunked.h", API_PYTORCH)),
         (
             "gloo/cuda_broadcast_one_to_all.h",
             ("gloo/hip_broadcast_one_to_all.h", API_PYTORCH),
@@ -8592,6 +9311,10 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
         (
             "gloo::CudaAllreduceHalvingDoublingPipelined",
             ("gloo::HipAllreduceHalvingDoublingPipelined", API_PYTORCH),
+        ),
+        (
+            "gloo::CudaAllreduceRingChunked",
+            ("gloo::HipAllreduceRingChunked", API_PYTORCH),
         ),
         ("gloo::CudaBroadcastOneToAll", ("gloo::HipBroadcastOneToAll", API_PYTORCH)),
         ("gloo::CudaHostWorkspace", ("gloo::HipHostWorkspace", API_PYTORCH)),
@@ -8605,6 +9328,7 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict(
     ]
 )
 
+# pyrefly: ignore [no-matching-overload]
 CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
     [
         ("PYTORCH_NO_CUDA_MEMORY_CACHING", ("PYTORCH_NO_CUDA_MEMORY_CACHING", API_CAFFE2)),
@@ -8680,7 +9404,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
     ]
 )
 
-# We must tread very carefully here.  Blanket conversions like are done
+# We must treat very carefully here.  Blanket conversions like are done
 # in CAFFE2_SPECIFIC_MAPPINGS are not presently supported on PyTorch,
 # because a regex for CUDA will also match a filename like CUDAGuard.h,
 # but the HIPIFY script doesn't presently move the file and so the substitution
@@ -8690,6 +9414,7 @@ CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict(
 #
 # NB: if you want a transformation to ONLY apply to the c10/ directory,
 # put it as API_CAFFE2
+# pyrefly: ignore [no-matching-overload]
 C10_MAPPINGS = collections.OrderedDict(
     [
         ("CUDA_VERSION", ("TORCH_HIP_VERSION", API_PYTORCH)),
@@ -8749,6 +9474,8 @@ C10_MAPPINGS = collections.OrderedDict(
         ("CUDAAllocator", ("HIPAllocator", API_C10)),
         ("C10_CUDA_KERNEL_LAUNCH_CHECK", ("C10_HIP_KERNEL_LAUNCH_CHECK", API_C10)),
         ("CUDAKernelLaunchRegistry", ("HIPKernelLaunchRegistry", API_C10)),
+        ("c10::cuda::get_cuda_check_suffix", ("c10::hip::get_hip_check_suffix", API_C10)),
+        ("c10::cuda::get_cuda_error_help", ("c10::hip::get_hip_error_help", API_C10)),
     ]
 )
 

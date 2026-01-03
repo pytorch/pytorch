@@ -5,10 +5,15 @@ set -eou pipefail
 
 function do_install() {
     rocm_version=$1
-    rocm_version_nodot=${1//./}
+    if [[ ${rocm_version} =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        # chop off any patch version
+        rocm_version="${rocm_version%.*}"
+    fi
 
-    # Version 2.7.2 + ROCm related updates
-    MAGMA_VERSION=a1625ff4d9bc362906bd01f805dbbe12612953f6
+    rocm_version_nodot=${rocm_version//./}
+
+    # https://github.com/icl-utk-edu/magma/pull/65
+    MAGMA_VERSION=d6e4117bc88e73f06d26c6c2e14f064e8fc3d1ec
     magma_archive="magma-rocm${rocm_version_nodot}-${MAGMA_VERSION}-1.tar.bz2"
 
     rocm_dir="/opt/rocm"

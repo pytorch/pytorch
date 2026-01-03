@@ -20,6 +20,7 @@ if not TEST_CUDA:
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCudaTrace(TestCase):
     def setUp(self):
+        super().setUp()
         torch._C._activate_gpu_trace()
         self.mock = unittest.mock.MagicMock()
 

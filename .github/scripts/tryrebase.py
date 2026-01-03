@@ -132,17 +132,17 @@ def rebase_ghstack_onto(
         # The contents of a successful push result should look like:
         # Summary of changes (ghstack 0.6.0)
 
-        #  - Updated https://github.com/clee2000/random-testing/pull/2
-        #  - Updated https://github.com/clee2000/random-testing/pull/1
+        #  - Updated https://github.com/clee2000/random-testing-public/pull/2
+        #  - Updated https://github.com/clee2000/random-testing-public/pull/1
 
         # Facebook employees can import your changes by running
         # (on a Facebook machine):
 
-        #     ghimport -s https://github.com/clee2000/random-testing/pull/2
+        #     ghimport -s https://github.com/clee2000/random-testing-public/pull/2
 
         # If you want to work on this diff stack on another machine:
 
-        #     ghstack checkout https://github.com/clee2000/random-testing/pull/2
+        #     ghstack checkout https://github.com/clee2000/random-testing-public/pull/2
         org, project = repo.gh_owner_and_name()
         for line in push_result.splitlines():
             if "Updated" in line:

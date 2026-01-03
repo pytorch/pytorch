@@ -6,7 +6,7 @@
 import math
 
 import torch
-from functorch.dim import cat, dimlists, dims, softmax
+from functorch.dim import cat, dimlists, dims
 from torch import nn
 
 
@@ -115,7 +115,7 @@ class BertSelfAttention(nn.Module):
 
             # we can then use that as an indirect index into the embedding table values to look up the features for that index
             # this is just a `gather` primitive op. The resulting tensor will
-            # have all the dimensions of embeddeding_idx (query_sequence x key_sequence),
+            # have all the dimensions of embedding_idx (query_sequence x key_sequence),
             # plus all the dimensions of `embed` that were not indirectly accessed (`embedding_range`).
             # this form of indirect indexing is more straightforward than either advanced indexing or torch.gather which both
             # have a lot of dependencies on the positions of indexing tensors.
@@ -126,7 +126,7 @@ class BertSelfAttention(nn.Module):
 
             if self.position_embedding_type == "relative_key":
                 # these were einsum ops in the positional code because they are not easy to fit to existing matmul operators
-                # eventhough they are degenerate matmuls
+                # even though they are degenerate matmuls
                 relative_position_scores = (q * positional_embedding).sum(features)
                 attention_scores = attention_scores + relative_position_scores
             elif self.position_embedding_type == "relative_key_query":
@@ -142,7 +142,7 @@ class BertSelfAttention(nn.Module):
 
         attention_probs = attention_scores
         # Normalize the attention scores to probabilities.
-        attention_probs = softmax(attention_scores, dim=key_sequence)
+        attention_probs = torch.softmax(attention_scores, dim=key_sequence)
         # # This is actually dropping out entire tokens to attend to, which might
         # # seem a bit unusual, but is taken from the original Transformer paper.
         attention_probs = torch.nn.functional.dropout(

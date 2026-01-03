@@ -1,5 +1,5 @@
 from functools import partial
-from typing import no_type_check, Optional
+from typing import no_type_check
 
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
@@ -21,7 +21,7 @@ def sync_grad_hook(grad, *, device_handle=None, compute_stream=None):
 
 def _flatten_tensor(
     tensor: torch.Tensor,
-) -> tuple[torch.Tensor, Optional[DTensorSpec]]:
+) -> tuple[torch.Tensor, DTensorSpec | None]:
     if isinstance(tensor, DTensor):
         tensor._local_tensor.requires_grad_()
         return tensor._local_tensor, tensor._spec
@@ -30,7 +30,7 @@ def _flatten_tensor(
 
 @no_type_check
 def _unflatten_tensor(tensor, spec, *, device_handle=None, compute_stream=None):
-    # unflatten would mainly be called everytime FSDP allgather parameters.
+    # unflatten would mainly be called every time FSDP allgather parameters.
     result = DTensor.from_local(
         tensor,
         spec.mesh,

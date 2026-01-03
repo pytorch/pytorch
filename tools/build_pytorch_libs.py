@@ -3,25 +3,28 @@ from __future__ import annotations
 import os
 import platform
 import subprocess
-from pathlib import Path
 
+from .optional_submodules import checkout_nccl
 from .setup_helpers.cmake import CMake, USE_NINJA
-from .setup_helpers.env import check_negative_env_flag, IS_64BIT, IS_WINDOWS
-
-
-repo_root = Path(__file__).absolute().parent.parent
-third_party_path = os.path.join(repo_root, "third_party")
+from .setup_helpers.env import (
+    check_env_flag,
+    check_negative_env_flag,
+    IS_64BIT,
+    IS_WINDOWS,
+)
 
 
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
-        from setuptools import distutils  # type: ignore[import]
+        from setuptools import distutils  # type: ignore[import,attr-defined]
 
         return distutils._msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
     except AttributeError:
-        from setuptools._distutils import _msvccompiler  # type: ignore[import]
+        from setuptools._distutils import (
+            _msvccompiler,  # type: ignore[import,attr-defined]
+        )
 
-        return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
+        return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return,attr-defined]
 
 
 def _overlay_windows_vcvars(env: dict[str, str]) -> dict[str, str]:
@@ -75,31 +78,6 @@ def _create_build_env() -> dict[str, str]:
     return my_env
 
 
-def read_nccl_pin() -> str:
-    nccl_file = "nccl-cu12.txt"
-    if os.getenv("DESIRED_CUDA", "").startswith("11") or os.getenv(
-        "CUDA_VERSION", ""
-    ).startswith("11"):
-        nccl_file = "nccl-cu11.txt"
-    nccl_pin_path = os.path.join(
-        repo_root, ".ci", "docker", "ci_commit_pins", nccl_file
-    )
-    with open(nccl_pin_path) as f:
-        return f.read().strip()
-
-
-def checkout_nccl() -> None:
-    release_tag = read_nccl_pin()
-    print(f"-- Checkout nccl release tag: {release_tag}")
-    nccl_basedir = os.path.join(third_party_path, "nccl")
-    if not os.path.exists(nccl_basedir):
-        subprocess.check_call(
-            ["git", "clone", "https://github.com/NVIDIA/nccl.git", "nccl"],
-            cwd=third_party_path,
-        )
-        subprocess.check_call(["git", "checkout", release_tag], cwd=nccl_basedir)
-
-
 def build_pytorch(
     version: str | None,
     cmake_python_library: str | None,
@@ -109,7 +87,12 @@ def build_pytorch(
     cmake: CMake,
 ) -> None:
     my_env = _create_build_env()
-    if os.getenv("USE_SYSTEM_NCCL", "0") == "0":
+    if (
+        not check_negative_env_flag("USE_DISTRIBUTED")
+        and not check_negative_env_flag("USE_CUDA")
+        and not check_negative_env_flag("USE_NCCL")
+        and not check_env_flag("USE_SYSTEM_NCCL")
+    ):
         checkout_nccl()
     build_test = not check_negative_env_flag("BUILD_TEST")
     cmake.generate(
@@ -117,4 +100,20 @@ def build_pytorch(
     )
     if cmake_only:
         return
+    build_custom_step = os.getenv("BUILD_CUSTOM_STEP")
+    if build_custom_step:
+        try:
+            output = subprocess.check_output(
+                build_custom_step,
+                shell=True,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            print("Command output:")
+            print(output)
+        except subprocess.CalledProcessError as e:
+            print("Command failed with return code:", e.returncode)
+            print("Output (stdout and stderr):")
+            print(e.output)
+            raise
     cmake.build(my_env)

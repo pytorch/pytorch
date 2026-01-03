@@ -2,8 +2,8 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Sequence
-from typing import Any, Callable
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from onnxscript import ir
 
@@ -27,6 +27,7 @@ _TORCH_DTYPE_TO_ONNX_COMPATIBLE: dict[torch.dtype, ir.DataType] = {
     torch.float8_e4m3fnuz: ir.DataType.FLOAT8E4M3FNUZ,
     torch.float8_e5m2: ir.DataType.FLOAT8E5M2,
     torch.float8_e5m2fnuz: ir.DataType.FLOAT8E5M2FNUZ,
+    torch.float4_e2m1fn_x2: ir.DataType.FLOAT4E2M1,
     torch.int16: ir.DataType.INT16,
     torch.int32: ir.DataType.INT32,
     torch.int64: ir.DataType.INT64,
@@ -85,7 +86,7 @@ def _param_type_compatible_with_arg(
     assigned_types: dict[str, ir.TypeProtocol],
 ) -> bool:
     # Handle Python types first
-    if isinstance(value, bool):  # noqa: SIM102
+    if isinstance(value, bool):
         if param.type_constraint.allowed_types & {ir.TensorType(ir.DataType.BOOL)}:
             return True
     if isinstance(value, int) and param.type_constraint.allowed_types & {
@@ -95,6 +96,7 @@ def _param_type_compatible_with_arg(
         ir.TensorType(ir.DataType.INT32),
         ir.TensorType(ir.DataType.INT64),
         # Int inputs can be casted to a float too
+        ir.TensorType(ir.DataType.FLOAT4E2M1),
         ir.TensorType(ir.DataType.FLOAT8E4M3FN),
         ir.TensorType(ir.DataType.FLOAT8E4M3FNUZ),
         ir.TensorType(ir.DataType.FLOAT8E5M2),
@@ -105,6 +107,7 @@ def _param_type_compatible_with_arg(
     }:
         return True
     if isinstance(value, float) and param.type_constraint.allowed_types & {
+        ir.TensorType(ir.DataType.FLOAT4E2M1),
         ir.TensorType(ir.DataType.FLOAT8E4M3FN),
         ir.TensorType(ir.DataType.FLOAT8E4M3FNUZ),
         ir.TensorType(ir.DataType.FLOAT8E5M2),
@@ -121,7 +124,7 @@ def _param_type_compatible_with_arg(
         ir.TensorType(ir.DataType.COMPLEX128),
     }:
         return True
-    if isinstance(value, str):  # noqa: SIM102
+    if isinstance(value, str):
         if param.type_constraint.allowed_types & {ir.TensorType(ir.DataType.STRING)}:
             return True
     if isinstance(value, (list, tuple)):

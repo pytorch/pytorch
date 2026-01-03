@@ -2,16 +2,82 @@
 
 import unittest
 
-from torch.testing._internal.inductor_utils import HAS_CUDA, HAS_GPU
+from torch.testing._internal.inductor_utils import (
+    HAS_CUDA_AND_TRITON,
+    HAS_GPU,
+    HAS_XPU_AND_TRITON,
+)
 from torch.utils._triton import has_triton
 
 
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+requires_cuda_and_triton = unittest.skipUnless(
+    HAS_CUDA_AND_TRITON, "requires cuda and triton"
+)
+requires_gpu_and_triton = unittest.skipUnless(
+    HAS_XPU_AND_TRITON or HAS_CUDA_AND_TRITON, "requires gpu and triton"
+)
 requires_gpu = unittest.skipUnless(HAS_GPU, "requires gpu")
 
 if has_triton():
     import triton
     from triton import language as tl
+
+    import torch
+
+    def _get_strange_configs() -> list[triton.Config]:
+        if torch.version.hip:
+            configs = [
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 16,
+                        "BLOCK_SIZE_N": 16,
+                        "BLOCK_SIZE_K": 16,
+                        "GROUP_SIZE_M": 4,
+                        "matrix_instr_nonkdim": 16,
+                        "waves_per_eu": 3,
+                        "kpack": 2,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 128,
+                        "BLOCK_SIZE_N": 64,
+                        "BLOCK_SIZE_K": 16,
+                        "GROUP_SIZE_M": 4,
+                        "matrix_instr_nonkdim": 16,
+                        "waves_per_eu": 3,
+                        "kpack": 2,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+            ]
+        else:
+            configs = [
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 16,
+                        "BLOCK_SIZE_N": 16,
+                        "BLOCK_SIZE_K": 16,
+                        "GROUP_SIZE_M": 4,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+                triton.Config(
+                    {
+                        "BLOCK_SIZE_M": 128,
+                        "BLOCK_SIZE_N": 64,
+                        "BLOCK_SIZE_K": 32,
+                        "GROUP_SIZE_M": 8,
+                    },
+                    num_stages=4,
+                    num_warps=4,
+                ),
+            ]
+        return configs
 
     # Define here so that multiple tests can take advantage of it
     @triton.jit
@@ -257,7 +323,7 @@ if has_triton():
         tl.store(out_ptr + offsets, output, mask=mask)
 
     @triton.jit
-    def add_kernel_with_tma_1d(
+    def add_kernel_with_tma_1d_old_api(
         in_desc_ptr0,
         in_desc_ptr1,
         out_desc_ptr,
@@ -288,7 +354,7 @@ if has_triton():
         )
 
     @triton.jit
-    def add_kernel_with_tma_2d(
+    def add_kernel_with_tma_2d_old_api(
         in_desc_ptr0,
         in_desc_ptr1,
         out_desc_ptr,
@@ -319,6 +385,186 @@ if has_triton():
             out_desc_ptr,
             output,
             [offset_x, offset_y],
+        )
+
+    @triton.jit
+    def add_kernel_with_tma_1d_new_api(
+        in_desc_ptr0,
+        in_desc_ptr1,
+        out_desc_ptr,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        offset = pid * BLOCK_SIZE
+
+        a = tl.load_tensor_descriptor(
+            in_desc_ptr0,
+            [offset],
+        )
+        b = tl.load_tensor_descriptor(
+            in_desc_ptr1,
+            [offset],
+        )
+
+        output = a + b
+
+        tl.store_tensor_descriptor(
+            out_desc_ptr,
+            [offset],
+            output,
+        )
+
+    @triton.jit
+    def add_kernel_with_tma_2d_new_api(
+        in_desc_ptr0,
+        in_desc_ptr1,
+        out_desc_ptr,
+        BLOCK_SIZE_X: "tl.constexpr",
+        BLOCK_SIZE_Y: "tl.constexpr",
+    ):
+        pid_x = tl.program_id(axis=0)
+        pid_y = tl.program_id(axis=1)
+        offset_x = pid_x * BLOCK_SIZE_X
+        offset_y = pid_y * BLOCK_SIZE_Y
+
+        x = tl.load_tensor_descriptor(
+            in_desc_ptr0,
+            [offset_x, offset_y],
+        )
+        y = tl.load_tensor_descriptor(
+            in_desc_ptr1,
+            [offset_x, offset_y],
+        )
+
+        output = x + y
+
+        tl.store_tensor_descriptor(
+            out_desc_ptr,
+            [offset_x, offset_y],
+            output,
+        )
+
+    @triton.jit
+    def add_kernel_on_device_tma_old_api(
+        a_ptr,
+        b_ptr,
+        c_ptr,
+        m,
+        n,
+        workspace,
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        a_desc_ptr = workspace
+        b_desc_ptr = workspace + 128
+        c_desc_ptr = workspace + 256
+        tl.extra.cuda.experimental_device_tensormap_create2d(
+            desc_ptr=a_desc_ptr,
+            global_address=a_ptr,
+            load_size=[BLOCK_SIZE, BLOCK_SIZE],
+            global_size=[m, n],
+            element_ty=a_ptr.dtype.element_ty,
+        )
+        tl.extra.cuda.experimental_device_tensormap_create2d(
+            desc_ptr=b_desc_ptr,
+            global_address=b_ptr,
+            load_size=[BLOCK_SIZE, BLOCK_SIZE],
+            global_size=[m, n],
+            element_ty=b_ptr.dtype.element_ty,
+        )
+        tl.extra.cuda.experimental_device_tensormap_create2d(
+            desc_ptr=c_desc_ptr,
+            global_address=c_ptr,
+            load_size=[BLOCK_SIZE, BLOCK_SIZE],
+            global_size=[m, n],
+            element_ty=c_ptr.dtype.element_ty,
+        )
+
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
+        tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(c_desc_ptr)
+
+        pid_x = tl.program_id(axis=0)
+        pid_y = tl.program_id(axis=1)
+        offset_x = pid_x * BLOCK_SIZE
+        offset_y = pid_y * BLOCK_SIZE
+
+        # Load data using the tensor descriptors
+        a = tl._experimental_descriptor_load(
+            a_desc_ptr,
+            [offset_x, offset_y],
+            [BLOCK_SIZE, BLOCK_SIZE],
+            tl.float32,
+        )
+        b = tl._experimental_descriptor_load(
+            b_desc_ptr,
+            [offset_x, offset_y],
+            [BLOCK_SIZE, BLOCK_SIZE],
+            tl.float32,
+        )
+
+        # Perform addition
+        output = a + b
+
+        # Store the result
+        tl._experimental_descriptor_store(
+            c_desc_ptr,
+            output,
+            [offset_x, offset_y],
+        )
+
+    @triton.jit
+    def add_kernel_on_device_tma_new_api(
+        a_ptr,
+        b_ptr,
+        c_ptr,
+        m,
+        n,
+        workspace,  # unused but left here to match the old API kernel
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        # Create tensor descriptors using the new API
+        a_desc = tl.make_tensor_descriptor(
+            base=a_ptr,
+            shape=[m, n],
+            strides=[n, 1],
+            block_shape=[BLOCK_SIZE, BLOCK_SIZE],
+        )
+        b_desc = tl.make_tensor_descriptor(
+            base=b_ptr,
+            shape=[m, n],
+            strides=[n, 1],
+            block_shape=[BLOCK_SIZE, BLOCK_SIZE],
+        )
+        c_desc = tl.make_tensor_descriptor(
+            base=c_ptr,
+            shape=[m, n],
+            strides=[n, 1],
+            block_shape=[BLOCK_SIZE, BLOCK_SIZE],
+        )
+
+        pid_x = tl.program_id(axis=0)
+        pid_y = tl.program_id(axis=1)
+        offset_x = pid_x * BLOCK_SIZE
+        offset_y = pid_y * BLOCK_SIZE
+
+        # Load data using the tensor descriptors with the new API
+        a = tl.load_tensor_descriptor(
+            a_desc,
+            [offset_x, offset_y],
+        )
+        b = tl.load_tensor_descriptor(
+            b_desc,
+            [offset_x, offset_y],
+        )
+
+        # Perform addition
+        output = a + b
+
+        # Store the result with the new API
+        tl.store_tensor_descriptor(
+            c_desc,
+            [offset_x, offset_y],
+            output,
         )
 
     @triton.jit
@@ -577,7 +823,7 @@ if has_triton():
         mask = offsets < n_elements
         x = tl.load(in_ptr0 + offsets, mask=mask)
         y = tl.load(in_ptr1 + offsets, mask=mask)
-        for i in range(2):
+        for _ in range(2):
             output = x + y
             tl.store(out_ptr + offsets, output, mask=mask)
         i = 2
@@ -666,7 +912,7 @@ if has_triton():
         b_ptrs = b_ptr + (offs_k[:, None] + offs_bn[None, :])
 
         accumulator = tl.zeros((BLOCK_SIZE_M, BLOCK_SIZE_N), dtype=tl.float32)
-        for k in range(0, tl.cdiv(K, BLOCK_SIZE_K)):
+        for k in range(tl.cdiv(K, BLOCK_SIZE_K)):
             a = tl.load(a_ptrs, mask=offs_k[None, :] < K - k * BLOCK_SIZE_K, other=0.0)
             b = tl.load(b_ptrs, mask=offs_k[:, None] < K - k * BLOCK_SIZE_K, other=0.0)
             accumulator = tl.dot(a, b, accumulator)
@@ -679,3 +925,159 @@ if has_triton():
         c_ptrs = c_ptr + offs_cm[:, None] + offs_cn[None, :]
         c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
         tl.store(c_ptrs, c, mask=c_mask)
+
+    @triton.jit
+    def kernel_with_docstring_double_quotes(out_ptr, numel, BLOCK_SIZE: tl.constexpr):
+        """
+        This kernel contains a triple-quote docstring w/ double quotes.
+        Make sure that codegen sanitizes the docstring.
+        """
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        ones = tl.full([BLOCK_SIZE], 1.0, dtype=tl.float32)
+        tl.store(out_ptr + offsets, ones, mask=offsets < numel)
+
+    @triton.jit
+    def kernel_with_docstring_single_quotes(out_ptr, numel, BLOCK_SIZE: tl.constexpr):
+        '''
+        This kernel contains a triple-quote docstring w/ single quotes
+        Make sure that codegen sanitizes the docstring.
+        To prevent it from being linted to double quotes: """!!!"""
+        '''
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        ones = tl.full([BLOCK_SIZE], 1.0, dtype=tl.float32)
+        tl.store(out_ptr + offsets, ones, mask=offsets < numel)
+
+    @triton.jit
+    def kernel_inline_asm_double_quotes(
+        in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        data = tl.load(in_ptr + offsets, mask=offsets < numel)
+        cos_pow = tl.inline_asm_elementwise(
+            asm="""
+            {
+                cos.approx.f32 $0, $1;
+                ex2.approx.f32 $0, $0;
+            }
+                """,
+            constraints=("=r, r"),
+            args=[data],
+            dtype=tl.float32,
+            is_pure=True,
+            pack=1,
+        )
+        tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
+
+    @triton.jit
+    def kernel_inline_asm_single_quotes(
+        in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        data = tl.load(in_ptr + offsets, mask=offsets < numel)
+        cos_pow = tl.inline_asm_elementwise(
+            asm='''
+            {
+                // double quotes to pacify the linter """!!!"""
+                cos.approx.f32 $0, $1;
+                ex2.approx.f32 $0, $0;
+            }
+                ''',
+            constraints=("=r, r"),
+            args=[data],
+            dtype=tl.float32,
+            is_pure=True,
+            pack=1,
+        )
+        tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
+
+    @triton.jit
+    def kernel_inline_asm_rocm_double_quotes(
+        in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        data = tl.load(in_ptr + offsets, mask=offsets < numel)
+        cos_pow = tl.inline_asm_elementwise(
+            asm="""
+            v_sin_f32 $0, $1
+            v_exp_f32 $0, $0
+                """,
+            constraints=("=v, v"),
+            args=[data],
+            dtype=tl.float32,
+            is_pure=True,
+            pack=1,
+        )
+        tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
+
+    @triton.jit
+    def kernel_inline_asm_rocm_single_quotes(
+        in_ptr, out_ptr, numel, BLOCK_SIZE: tl.constexpr
+    ):
+        pid = tl.program_id(axis=0)
+        offsets = tl.arange(0, BLOCK_SIZE) + pid * BLOCK_SIZE
+        data = tl.load(in_ptr + offsets, mask=offsets < numel)
+        cos_pow = tl.inline_asm_elementwise(
+            asm="""
+            v_sin_f32 $0, $1
+            v_exp_f32 $0, $0
+                """,
+            constraints=("=v, v"),
+            args=[data],
+            dtype=tl.float32,
+            is_pure=True,
+            pack=1,
+        )
+        tl.store(out_ptr + offsets, cos_pow, mask=offsets < numel)
+
+    @triton.jit
+    def add_kernel_with_boolean_param(
+        in_ptr0,
+        in_ptr1,
+        out_ptr,
+        n_elements,
+        add_xy,  # boolean param
+        BLOCK_SIZE: "tl.constexpr",
+    ):
+        pid = tl.program_id(axis=0)
+        block_start = pid * BLOCK_SIZE
+        offsets = block_start + tl.arange(0, BLOCK_SIZE)
+        mask = offsets < n_elements
+        x = tl.load(in_ptr0 + offsets, mask=mask)
+        if add_xy:
+            y = tl.load(in_ptr1 + offsets, mask=mask)
+            output = x + y
+        else:
+            output = x
+        tl.store(out_ptr + offsets, output, mask=mask)
+
+    # support the old (experimental) and new (tensor_descriptor) APIs
+    def create_tensor_descriptor_shim(
+        tensor, block_sizes: list[int], new_api: bool = True
+    ):
+        if new_api:
+            return triton.tools.tensor_descriptor.TensorDescriptor.from_tensor(
+                tensor, block_sizes
+            )
+        else:
+            if len(block_sizes) == 1:
+                return triton.tools.experimental_descriptor.create_1d_tma_descriptor(
+                    tensor.data_ptr(),
+                    tensor.size(0),
+                    block_sizes[0],
+                    tensor.element_size(),
+                )
+            else:
+                assert len(block_sizes) == 2
+                return triton.tools.experimental_descriptor.create_2d_tma_descriptor(
+                    tensor.data_ptr(),
+                    tensor.size(0),
+                    tensor.size(1),
+                    block_sizes[0],
+                    block_sizes[1],
+                    tensor.element_size(),
+                )

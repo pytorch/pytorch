@@ -77,7 +77,7 @@ void nnc_aten_{name}(
   at::Tensor& r = tensors[0];
   {nl.join(tensor_decls)}
   try {{
-    at::{name}_out({', '.join(['r'] + arg_names)});
+    at::{name}_out({", ".join(["r"] + arg_names)});
   }} catch (...) {{
   }}
 }}"""

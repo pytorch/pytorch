@@ -54,5 +54,5 @@ echo "Entering interactive shell at the execution root:"
 # quote escape all the arguments to use as a single input string
 cmd="'$shell' --noprofile --rcfile '$rcfile'"
 
-# run the command in a script psuedo terminal and dump to null
+# run the command in a script pseudo terminal and dump to null
 /usr/bin/script -c "$cmd" -q /dev/null

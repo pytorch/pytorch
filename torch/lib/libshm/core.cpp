@@ -16,9 +16,7 @@ static AllocInfo get_alloc_info(const char* filename) {
   info.pid = getpid();
   info.free = false;
   size_t len = strlen(filename);
-  if (len >= sizeof(info.filename)) {
-    throw std::runtime_error("MapAllocatorContext_filename too long");
-  }
+  TORCH_CHECK(len < sizeof(info.filename), "MapAllocatorContext_filename too long");
   memcpy(info.filename, filename, len + 1);
   return info;
 }
@@ -27,8 +25,7 @@ static void start_manager() {
   std::array<int, 2> pipe_ends;
   SYSCHECK_ERR_RETURN_NEG1(pipe(pipe_ends.data()));
 
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  pid_t pid;
+  pid_t pid = -1;
   SYSCHECK_ERR_RETURN_NEG1(pid = fork());
   if (!pid) {
     SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
@@ -58,21 +55,16 @@ static void start_manager() {
     handle.append(buffer.data(), bytes_read);
   }
   SYSCHECK_ERR_RETURN_NEG1(close(pipe_ends[0]));
-  if (handle.length() == 0) {
-    std::string msg("no response from torch_shm_manager at \"");
-    msg += manager_executable_path;
-    msg += "\"";
-    throw std::runtime_error(msg);
-  }
+
+  TORCH_CHECK(!handle.empty(), "no response from torch_shm_manager at \"", manager_executable_path, "\"");
 
   handle.pop_back(); // remove \n
-  if (handle.rfind("ERROR: ", 0) == 0) {
-    std::string msg("torch_shm_manager at \"");
-    msg += manager_executable_path;
-    msg += "\": ";
-    msg += handle.substr(7); // remove "ERROR: "
-    throw std::runtime_error(msg);
-  }
+  TORCH_CHECK(
+      handle.rfind("ERROR: ", 0) != 0,
+      "torch_shm_manager at \"",
+      manager_executable_path,
+      "\": ",
+      handle.substr(7));
 
   ClientSocket manager{handle};
   managers.emplace(std::move(handle), std::move(manager));
@@ -99,8 +91,7 @@ THManagedMapAllocatorInit::THManagedMapAllocatorInit(
     : manager_handle_(manager_handle ? manager_handle : "") {
   // TODO: unlock GIL when contacting the manager
   try {
-    // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-    ClientSocket* socket;
+    ClientSocket* socket = nullptr;
     if (!manager_handle_.empty()) {
       socket = &get_manager_socket(manager_handle_);
     } else {

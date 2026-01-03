@@ -50,6 +50,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     PLATFORM_SUPPORTS_FLASH_ATTENTION,
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
+    TEST_CUDNN_VERSION,
     tf32_on_and_off,
     with_tf32_off,
 )
@@ -734,6 +735,7 @@ class TestVmapAPI(TestCase):
             # warning, not a warning from the vmap fallback path.
             self.assertEqual(len(wa), 1)
 
+    @skipIfTorchDynamo("Flaky test")
     @unittest.expectedFailure
     def test_fallback_warns_when_warnings_are_enabled(self):
         # NB: One day we will implement a batching rule for torch.atan2.
@@ -1532,7 +1534,7 @@ class TestVmapOperators(Namespace.TestVmapBase):
         self._test_unary(op, getter, "cpu")
 
         # test in-place
-        method = getattr(Tensor, f'{op.__name__ + "_"}')
+        method = getattr(Tensor, f"{op.__name__ + '_'}")
         self._test_unary(method, getter, "cpu", check_propagates_grad=False)
 
     def test_clone(self):
@@ -1718,11 +1720,6 @@ class TestVmapOperators(Namespace.TestVmapBase):
         test(op, (getter([], device), getter([B0], device)), in_dims=(None, 0))
         test(op, (getter([2, B0], device), getter([2], device)), in_dims=(1, None))
 
-    @skipIf(
-        TEST_WITH_TORCHDYNAMO
-        and os.getenv("BUILD_ENVIRONMENT", "") == "linux-focal-py3.8-clang10",
-        "Segfaults with dynamo on focal, see https://github.com/pytorch/pytorch/issues/107173",
-    )
     @parametrize(
         "case",
         [
@@ -3931,6 +3928,14 @@ class TestVmapBatchedGradient(Namespace.TestVmapBase):
     def test_randomness(self, device, randomness, backend):
         if device == "cpu":
             raise unittest.SkipTest("This test is only for CUDA for now")
+
+        # xfail for cuDNN version between 9.10 and 9.13
+        if backend == SDPBackend.CUDNN_ATTENTION and randomness == "different":
+            if 91100 <= TEST_CUDNN_VERSION <= 91300:
+                raise unittest.SkipTest(
+                    "xfail on cuDNN 9.10-9.13 with CUDNN backend and randomness='different'"
+                )
+
         backend_ctx = sdpa_kernel([backend])
         with backend_ctx:
             B = 4
@@ -4156,7 +4161,7 @@ class TestVmapOperatorsOpInfo(TestCase):
                 with subtest_ctx(self), skip_xfail_ctx(self):
                     args = (sample_input.input,) + sample_input.args
                     if not any(isinstance(arg, torch.Tensor) for arg in args):
-                        # Atleast one tensor required for vmap.
+                        # At least one tensor required for vmap.
                         continue
                     kwargs = sample_input.kwargs
                     is_batch_norm_and_training = is_batch_norm_training(op.name, kwargs)
@@ -4234,7 +4239,7 @@ class TestVmapOperatorsOpInfo(TestCase):
         xfail("as_strided_copy"),
         xfail(
             "as_strided_scatter"
-        ),  # no batching rule implemented, default doesnt work
+        ),  # no batching rule implemented, default doesn't work
         skip(
             "new_empty_strided"
         ),  # empty tensor data is garbage so it's hard to make comparisons with it
@@ -4479,7 +4484,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("torch.ops.aten._efficient_attention_forward"),  # outputs ints
                 xfail("resize_"),
                 xfail("view_as_complex"),
-                xfail("matrix_exp"),
                 xfail("fft.ihfft2"),
                 xfail("fft.ihfftn"),
                 xfail("allclose"),
@@ -4539,13 +4543,21 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("clamp_min", ""),
                 xfail("sparse.sampled_addmm"),
                 xfail("sparse.mm", "reduce"),
+                xfail("special.chebyshev_polynomial_t"),
+                xfail("special.chebyshev_polynomial_v"),
                 xfail("special.chebyshev_polynomial_u"),
+                xfail("special.chebyshev_polynomial_w"),
+                xfail("special.shifted_chebyshev_polynomial_t"),
+                xfail("special.shifted_chebyshev_polynomial_v"),
+                xfail("special.shifted_chebyshev_polynomial_u"),
+                xfail("special.shifted_chebyshev_polynomial_w"),
                 xfail("_segment_reduce", "offsets"),
                 xfail("index_reduce", "prod"),
                 xfail("index_reduce", "mean"),
                 xfail("index_reduce", "amin"),
                 xfail("index_reduce", "amax"),
                 xfail("special.laguerre_polynomial_l"),
+                xfail("special.legendre_polynomial_p"),
                 xfail("special.hermite_polynomial_h"),
                 xfail("jiterator_binary", device_type="cuda"),
                 xfail("jiterator_4inputs_with_extra_args", device_type="cuda"),
@@ -4553,7 +4565,6 @@ class TestVmapOperatorsOpInfo(TestCase):
                 xfail("lu_solve", ""),
                 xfail("special.hermite_polynomial_he"),
                 xfail("nn.functional.dropout3d", ""),
-                xfail("special.chebyshev_polynomial_t"),
                 xfail("as_strided_scatter", ""),
                 xfail("equal", ""),
                 xfail("linalg.lu", ""),
@@ -6137,9 +6148,9 @@ class TestTransformFailure(TestCase):
         else:
             input = torch.randn(5)
 
-        if transform == vjp:
+        if transform is vjp:
             transform = functools.partial(transform, f)
-        elif transform == jvp:
+        elif transform is jvp:
             input = (input,)
             transform = functools.partial(transform, f, input)
         else:

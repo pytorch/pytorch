@@ -15,10 +15,12 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}-${{ github.event.schedule }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   llm-td:
@@ -47,14 +49,14 @@ jobs:
       curr_branch: ${{ github.head_ref || github.ref_name }}
       curr_ref_type: ${{ github.ref_type }}
 
-  linux-focal-cuda12_6-py3_10-gcc11-sm86-build:
-    name: linux-focal-cuda12.6-py3.10-gcc11-sm86
+  linux-jammy-cuda12_8-py3_10-gcc11-sm86-build:
+    name: linux-jammy-cuda12.8-py3.10-gcc11-sm86
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm86
-      docker-image-name: pytorch-linux-focal-cuda12.6-cudnn9-py3-gcc11
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       cuda-arch-list: 8.6
       test-matrix: |
         { include: [
@@ -64,26 +66,55 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-cuda12_6-py3_10-gcc11-sm86-test:
-    name: linux-focal-cuda12.6-py3.10-gcc11-sm86
+  linux-jammy-cuda12_8-py3_10-gcc11-sm86-test:
+    name: linux-jammy-cuda12.8-py3.10-gcc11-sm86
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-cuda12_6-py3_10-gcc11-sm86-build
+      - linux-jammy-cuda12_8-py3_10-gcc11-sm86-build
       - target-determination
     with:
-      build-environment: linux-focal-cuda12.6-py3.10-gcc11-sm86
-      docker-image: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-sm86-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-cuda12_6-py3_10-gcc11-sm86-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm86-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm86-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm86-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-focal-py3_9-clang10-build:
-    name: linux-focal-py3.9-clang10
+  linux-jammy-cuda13_0-py3_10-gcc11-sm86-build:
+    name: linux-jammy-cuda13.0-py3.10-gcc11-sm86
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-py3.9-clang10
-      docker-image-name: pytorch-linux-focal-py3.9-clang10
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11
+      cuda-arch-list: 8.6
+      test-matrix: |
+        { include: [
+          { config: "slow", shard: 1, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 2, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+          { config: "slow", shard: 3, num_shards: 3, runner: "linux.g5.4xlarge.nvidia.gpu" },
+        ]}
+    secrets: inherit
+
+  linux-jammy-cuda13_0-py3_10-gcc11-sm86-test:
+    name: linux-jammy-cuda13.0-py3.10-gcc11-sm86
+    uses: ./.github/workflows/_linux-test.yml
+    needs:
+      - linux-jammy-cuda13_0-py3_10-gcc11-sm86-build
+      - target-determination
+    with:
+      build-environment: linux-jammy-cuda13.0-py3.10-gcc11-sm86
+      docker-image: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm86-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-cuda13_0-py3_10-gcc11-sm86-build.outputs.test-matrix }}
+    secrets: inherit
+
+  linux-jammy-py3_10-clang12-build:
+    name: linux-jammy-py3.10-clang12
+    uses: ./.github/workflows/_linux-build.yml
+    needs: get-label-type
+    with:
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      build-environment: linux-jammy-py3.10-clang12
+      docker-image-name: ci-image:pytorch-linux-jammy-py3.10-clang12
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 2, runner: "linux.2xlarge" },
@@ -91,56 +122,27 @@ jobs:
         ]}
     secrets: inherit
 
-  linux-focal-py3_9-clang10-test:
-    name: linux-focal-py3.9-clang10
+  linux-jammy-py3_10-clang12-test:
+    name: linux-jammy-py3.10-clang12
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-focal-py3_9-clang10-build
+      - linux-jammy-py3_10-clang12-build
       - target-determination
     with:
-      build-environment: linux-focal-py3.9-clang10
-      docker-image: ${{ needs.linux-focal-py3_9-clang10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-py3_9-clang10-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-clang12-build.outputs.test-matrix }}
     secrets: inherit
 
-  linux-focal-rocm-py3_10-build:
-    name: linux-focal-rocm-py3.10
+  linux-jammy-py3_10-clang18-asan-build:
+    name: linux-jammy-py3.10-clang18-asan
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
+      runner: linux.c7i.4xlarge
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-focal-rocm-py3.10
-      docker-image-name: pytorch-linux-focal-rocm-n-py3
-      test-matrix: |
-        { include: [
-          { config: "slow", shard: 1, num_shards: 2, runner: "linux.rocm.gpu.2", owners: ["module:rocm"] },
-          { config: "slow", shard: 2, num_shards: 2, runner: "linux.rocm.gpu.2", owners: ["module:rocm"] },
-        ]}
-    secrets: inherit
-
-  linux-focal-rocm-py3_10-test:
-    permissions:
-      id-token: write
-      contents: read
-    name: linux-focal-rocm-py3.10
-    uses: ./.github/workflows/_rocm-test.yml
-    needs:
-      - linux-focal-rocm-py3_10-build
-      - target-determination
-    with:
-      build-environment: linux-focal-rocm-py3.10
-      docker-image: ${{ needs.linux-focal-rocm-py3_10-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-focal-rocm-py3_10-build.outputs.test-matrix }}
-    secrets: inherit
-
-  linux-jammy-py3_10-clang15-asan-build:
-    name: linux-jammy-py3.10-clang15-asan
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-py3.10-clang15-asan
-      docker-image-name: pytorch-linux-jammy-py3-clang15-asan
+      build-environment: linux-jammy-py3.10-clang18-asan
+      docker-image-name: ci-image:pytorch-linux-jammy-py3-clang18-asan
       test-matrix: |
         { include: [
           { config: "slow", shard: 1, num_shards: 3, runner: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge" },
@@ -150,15 +152,15 @@ jobs:
       sync-tag: asan-build
     secrets: inherit
 
-  linux-jammy-py3_10-clang15-asan-test:
-    name: linux-jammy-py3.10-clang15-asan
+  linux-jammy-py3_10-clang18-asan-test:
+    name: linux-jammy-py3.10-clang18-asan
     uses: ./.github/workflows/_linux-test.yml
     needs:
-      - linux-jammy-py3_10-clang15-asan-build
+      - linux-jammy-py3_10-clang18-asan-build
       - target-determination
     with:
-      build-environment: linux-jammy-py3.10-clang15-asan
-      docker-image: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.docker-image }}
-      test-matrix: ${{ needs.linux-jammy-py3_10-clang15-asan-build.outputs.test-matrix }}
+      build-environment: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.build-environment }}
+      docker-image: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.docker-image }}
+      test-matrix: ${{ needs.linux-jammy-py3_10-clang18-asan-build.outputs.test-matrix }}
       sync-tag: asan-test
     secrets: inherit

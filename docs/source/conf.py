@@ -62,20 +62,29 @@ extensions = [
     "sphinxcontrib.katex",
     "sphinx_copybutton",
     "sphinx_design",
-    "myst_parser",
+    "myst_nb",
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
-    "sphinxext.opengraph",
+    "sphinx_sitemap",
 ]
-
-ogp_site_url = "http://pytorch.org/"
-ogp_image = "https://pytorch.org/assets/images/social-share.jpg"
 
 myst_enable_extensions = [
     "colon_fence",
     "deflist",
     "html_image",
 ]
+
+html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
+sitemap_locales = [None]
+sitemap_excludes = [
+    "search.html",
+    "genindex.html",
+]
+sitemap_url_scheme = "{link}"
+
+html_additional_pages = {
+    "404": "404.html",
+}
 
 # build the templated autosummary files
 autosummary_generate = True
@@ -124,16 +133,17 @@ html_static_path = ["_static"]
 html_theme_options = {
     "logo": {"text": "Home"},
     "analytics_id": "GTM-T8XT4PS",
-    "canonical_url": "https://pytorch.org/docs/stable/",
+    "canonical_url": "https://docs.pytorch.org/docs/stable/",
     "switcher": {
-        "json_url": "https://pytorch.org/docs/pytorch-versions.json",
+        "json_url": "https://docs.pytorch.org/docs/pytorch-versions.json",
         "version_match": switcher_version,
     },
+    "show_toc_level": 2,
     "navigation_with_keys": False,
     "external_links": [
         {
             "name": "Tutorials",
-            "url": "https://pytorch.org/tutorials/",
+            "url": "https://docs.pytorch.org/tutorials/",
         },
     ],
     "show_version_warning_banner": True,
@@ -163,34 +173,14 @@ html_theme_options = {
     "navbar_start": ["version-switcher", "navbar-logo"],
     "navbar_center": ["navbar-nav"],
     "navbar_end": ["search-field-custom", "theme-switcher", "navbar-icon-links"],
-    "header_links_before_dropdown": 4,
+    "header_links_before_dropdown": 6,
     "navbar_persistent": [],
     "use_edit_page_button": True,
     "pytorch_project": "docs",
 }
 
 theme_variables = pytorch_sphinx_theme2.get_theme_variables()
-# For these links to appear in the right nav, there is an override in
-# the theme:
-# pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html#L17
-community_links = [
-    {"url": "/community/index", "name": "PyTorch Governance"},
-    {"url": "/community/design", "name": "PyTorch Design Philosophy"},
-    {
-        "url": "https://github.com/pytorch/pytorch/wiki/The-Ultimate-Guide-to-PyTorch-Contributions",
-        "name": "The Ultimate Guide to PyTorch Contributions",
-    },
-]
-# For these links to appear in the right nav, there is an override in
-# /pytorch_sphinx_theme2/templates/sections/sidebar-secondary.html
-language_bindings_links = [
-    {"url": "/cpp_index", "name": "C++"},
-    {"url": "https://pytorch.org/javadoc/", "name": "Javadoc"},
-    {"url": "https://github.com/pytorch/multipy", "name": "torch.multiply"},
-]
-
 html_context = {
-    "theme_variables": theme_variables,
     "github_url": "https://github.com",
     "github_user": "pytorch",
     "github_repo": "pytorch",
@@ -198,12 +188,10 @@ html_context = {
     "github_version": "main",
     "pytorch_project": "docs",
     "doc_path": "docs/source",
-    "theme_variables": theme_variables,  # noqa: F601
+    "theme_variables": theme_variables,
     # library links are defined in
     # pytorch_sphinx_theme2/pytorch_sphinx_theme2/links.json
     "library_links": theme_variables.get("library_links", []),
-    "community_links": community_links,
-    "language_bindings_links": language_bindings_links,
     "version": version,
     "date_info": {
         "paths_to_skip": ["generated/", "index"],
@@ -218,14 +206,45 @@ templates_path = [
     os.path.join(os.path.dirname(pytorch_sphinx_theme2.__file__), "templates"),
 ]
 # TODO: document these and remove them from here.
+# Fixes the duplicated
+autosummary_filename_map = {
+    "torch.nn.utils.prune.identity": "torch.nn.utils.prune.identity_function",
+    "torch.nn.utils.prune.Identity": "torch.nn.utils.prune.Identity_class",
+    "torch.optim.adamw.adamw": "torch.optim.adamw.adamw_function",
+    "torch.optim.adamw.AdamW": "torch.optim.adamw.AdamW_class",
+    "torch.optim.asgd.asgd": "torch.optim.asgd.asgd_function",
+    "torch.optim.asgd.ASGD": "torch.optim.asgd.ASGD_class",
+    "torch.optim.nadam.nadam": "torch.optim.nadam.nadam_function",
+    "torch.optim.nadam.NAdam": "torch.optim.nadam.NAdam_class",
+    "torch.optim.radam.radam": "torch.optim.radam.radam_function",
+    "torch.optim.radam.RAdam": "torch.optim.radam.RAdam_class",
+    "torch.optim.rmsprop.rmsprop": "torch.optim.rmsprop.rmsprop_function",
+    "torch.optim.rmsprop.RMSprop": "torch.optim.rmsprop.RMSprop_class",
+    "torch.optim.rprop.rprop": "torch.optim.rprop.rprop_function",
+    "torch.optim.rprop.Rprop": "torch.optim.rprop.Rprop_class",
+    "torch.optim.sgd.sgd": "torch.optim.sgd.sgd_function",
+    "torch.optim.sgd.SGD": "torch.optim.sgd.SGD_class",
+    "torch.optim.adadelta.adadelta": "torch.optim.adadelta.adadelta_function",
+    "torch.optim.adadelta.Adadelta": "torch.optim.adadelta.Adadelta_class",
+    "torch.optim.adagrad.adagrad": "torch.optim.adagrad.adagrad_function",
+    "torch.optim.adagrad.Adagrad": "torch.optim.adagrad.Adagrad_class",
+    "torch.optim.adam.adam": "torch.optim.adam.adam_function",
+    "torch.optim.adam.Adam": "torch.optim.adam.Adam_class",
+    "torch.optim.adamax.adamax": "torch.optim.adamax.adamax_function",
+    "torch.optim.adamax.Adamax": "torch.optim.adamax.Adamax_class",
+    "torch.mtia.stream": "torch.mtia.stream_function",
+    "torch.mtia.Stream": "torch.mtia.Stream_class",
+    "torch.cpu.stream": "torch.cpu.stream_function",
+    "torch.cpu.Stream": "torch.cpu.Stream_class",
+    "torch.cuda.stream": "torch.cuda.stream_function",
+    "torch.cuda.Stream": "torch.cuda.Stream_class",
+    "torch.xpu.stream": "torch.xpu.stream_function",
+    "torch.xpu.Stream": "torch.xpu.Stream_class",
+}
 
 coverage_ignore_functions = [
     # torch
     "typename",
-    # torch.cuda
-    "check_error",
-    "cudart",
-    "is_bf16_supported",
     # torch.cuda._sanitizer
     "zip_arguments",
     "zip_by_key",
@@ -233,9 +252,7 @@ coverage_ignore_functions = [
     "is_available",
     # torch.distributed.checkpoint.state_dict
     "gc_context",
-    "state_dict",
     # torch.distributed.elastic.events
-    "construct_and_record_rdzv_event",
     "record_rdzv_event",
     # torch.distributed.elastic.metrics
     "initialize_metrics",
@@ -275,8 +292,6 @@ coverage_ignore_functions = [
     "flags_frozen",
     # torch.distributed.algorithms.ddp_comm_hooks
     "register_ddp_comm_hook",
-    # torch.nn
-    "factory_kwargs",
     # torch.nn.parallel
     "DistributedDataParallelCPU",
     # torch.utils
@@ -367,20 +382,6 @@ coverage_ignore_functions = [
     # torch.ao.quantization.backend_config.tensorrt
     "get_tensorrt_backend_config",
     "get_tensorrt_backend_config_dict",
-    # torch.ao.quantization.backend_config.utils
-    "entry_to_pretty_str",
-    "get_fused_module_classes",
-    "get_fuser_method_mapping",
-    "get_fusion_pattern_to_extra_inputs_getter",
-    "get_fusion_pattern_to_root_node_getter",
-    "get_module_to_qat_module",
-    "get_pattern_to_dtype_configs",
-    "get_pattern_to_input_type_to_index",
-    "get_qat_module_classes",
-    "get_root_module_to_quantized_reference_module",
-    "pattern_to_human_readable",
-    "remove_boolean_dispatch_from_name",
-    # torch.ao.quantization.backend_config.x86
     "get_x86_backend_config",
     # torch.ao.quantization.fuse_modules
     "fuse_known_modules",
@@ -411,25 +412,6 @@ coverage_ignore_functions = [
     "insert_observers_for_model",
     "prepare",
     "propagate_dtypes_for_known_nodes",
-    # torch.ao.quantization.fx.utils
-    "all_node_args_except_first",
-    "all_node_args_have_no_tensors",
-    "assert_and_get_unique_device",
-    "collect_producer_nodes",
-    "create_getattr_from_value",
-    "create_node_from_old_node_preserve_meta",
-    "get_custom_module_class_keys",
-    "get_linear_prepack_op_for_dtype",
-    "get_new_attr_name_with_prefix",
-    "get_non_observable_arg_indexes_and_types",
-    "get_qconv_prepack_op",
-    "get_skipped_module_name_and_classes",
-    "graph_module_from_producer_nodes",
-    "maybe_get_next_module",
-    "node_arg_is_bias",
-    "node_arg_is_weight",
-    "return_arg_list",
-    # torch.ao.quantization.pt2e.graph_utils
     "bfs_trace_with_node_process",
     "find_sequential_partitions",
     "get_equivalent_types",
@@ -448,7 +430,6 @@ coverage_ignore_functions = [
     "get_default_qconfig_dict",
     "qconfig_equals",
     # torch.ao.quantization.quantization_mappings
-    "get_default_compare_output_module_list",
     "get_default_dynamic_quant_module_mappings",
     "get_default_dynamic_sparse_quant_module_mappings",
     "get_default_float_to_quantized_operator_mappings",
@@ -491,29 +472,13 @@ coverage_ignore_functions = [
     "get_weight_qspec",
     "propagate_annotation",
     "register_annotator",
-    # torch.ao.quantization.utils
     "activation_dtype",
-    "activation_is_dynamically_quantized",
-    "activation_is_int32_quantized",
-    "activation_is_int8_quantized",
-    "activation_is_statically_quantized",
-    "calculate_qmin_qmax",
-    "check_min_max_valid",
     "check_node",
-    "determine_qparams",
-    "get_combined_dict",
-    "get_fqn_to_example_inputs",
-    "get_qconfig_dtypes",
-    "get_qparam_dict",
-    "get_quant_type",
-    "get_swapped_custom_module_class",
-    "getattr_from_fqn",
     "has_no_children_ignoring_parametrizations",
     "is_per_channel",
     "is_per_tensor",
     "op_is_int8_dynamically_quantized",
     "to_underlying_dtype",
-    "validate_qmin_qmax",
     "weight_dtype",
     "weight_is_quantized",
     "weight_is_statically_quantized",
@@ -527,38 +492,8 @@ coverage_ignore_functions = [
     "custom_fwd",
     # torch.cuda.amp.common
     "amp_definitely_not_available",
-    # torch.cuda.graphs
-    "graph_pool_handle",
-    "is_current_stream_capturing",
-    "make_graphed_callables",
-    # torch.cuda.memory
-    "caching_allocator_alloc",
-    "caching_allocator_delete",
-    "change_current_allocator",
-    "empty_cache",
-    "get_allocator_backend",
-    "get_per_process_memory_fraction",
-    "list_gpu_processes",
-    "max_memory_allocated",
-    "max_memory_cached",
-    "max_memory_reserved",
-    "mem_get_info",
-    "memory_allocated",
-    "memory_cached",
-    "memory_reserved",
-    "memory_snapshot",
-    "memory_stats",
-    "memory_stats_as_nested_dict",
-    "host_memory_stats",
-    "host_memory_stats_as_nested_dict",
-    "memory_summary",
-    "reset_accumulated_memory_stats",
-    "reset_accumulated_host_memory_stats",
-    "reset_max_memory_allocated",
-    "reset_max_memory_cached",
+    # torch.mtia.memory
     "reset_peak_memory_stats",
-    "reset_peak_host_memory_stats",
-    "set_per_process_memory_fraction",
     # torch.cuda.nccl
     "all_gather",
     "all_reduce",
@@ -568,25 +503,11 @@ coverage_ignore_functions = [
     "reduce_scatter",
     "unique_id",
     "version",
-    # torch.cuda.nvtx
-    "range",
-    "range_end",
-    "range_start",
     # torch.cuda.profiler
     "init",
     "profile",
     "start",
     "stop",
-    # torch.cuda.random
-    "get_rng_state",
-    "get_rng_state_all",
-    "initial_seed",
-    "manual_seed",
-    "manual_seed_all",
-    "seed",
-    "seed_all",
-    "set_rng_state",
-    "set_rng_state_all",
     # torch.distributed.algorithms.ddp_comm_hooks.ddp_zero_hook
     "hook_with_zero_step",
     "hook_with_zero_step_interleaved",
@@ -615,42 +536,6 @@ coverage_ignore_functions = [
     # torch.distributed.checkpoint.utils
     "find_state_dict_object",
     "find_tensor_shard",
-    # torch.distributed.collective_utils
-    "all_gather",
-    "all_gather_object_enforce_type",
-    "broadcast",
-    # torch.distributed.distributed_c10d
-    "all_gather",
-    "all_gather_coalesced",
-    "all_gather_into_tensor",
-    "all_gather_object",
-    "all_reduce",
-    "all_reduce_coalesced",
-    "all_to_all",
-    "all_to_all_single",
-    "barrier",
-    "batch_isend_irecv",
-    "broadcast",
-    "broadcast_object_list",
-    "destroy_process_group",
-    "gather",
-    "gather_object",
-    "get_backend",
-    "get_backend_config",
-    "get_global_rank",
-    "get_group_rank",
-    "get_process_group_ranks",
-    "get_rank",
-    "get_world_size",
-    "init_process_group",
-    "irecv",
-    "is_backend_available",
-    "is_gloo_available",
-    "is_initialized",
-    "is_mpi_available",
-    "is_nccl_available",
-    "is_torchelastic_launched",
-    "is_ucc_available",
     "isend",
     "monitored_barrier",
     "new_group",
@@ -724,15 +609,8 @@ coverage_ignore_functions = [
     "transformer_auto_wrap_policy",
     "wrap",
     # torch.distributed.nn.functional
-    "all_gather",
-    "all_reduce",
     "all_to_all",
     "all_to_all_single",
-    "broadcast",
-    "gather",
-    "reduce",
-    "reduce_scatter",
-    "scatter",
     # torch.distributed.nn.jit.instantiator
     "get_arg_return_types_from_interface",
     "instantiate_non_scriptable_remote_module_template",
@@ -776,30 +654,7 @@ coverage_ignore_functions = [
     "probs_to_logits",
     "tril_matrix_to_vec",
     "vec_to_tril_matrix",
-    # torch.functional
-    "align_tensors",
-    "atleast_1d",
-    "atleast_2d",
-    "atleast_3d",
-    "block_diag",
-    "broadcast_shapes",
-    "broadcast_tensors",
-    "cartesian_prod",
-    "cdist",
-    "chain_matmul",
-    "einsum",
-    "lu",
-    "meshgrid",
-    "norm",
-    "split",
-    "stft",
-    "tensordot",
-    "unique",
-    "unique_consecutive",
-    "unravel_index",
-    # torch.fx.annotate
     "annotate",
-    # torch.fx.experimental.accelerator_partitioner
     "check_dependency",
     "combine_two_partitions",
     "get_bfs_level_partition",
@@ -810,252 +665,21 @@ coverage_ignore_functions = [
     "reorganize_partitions",
     "reset_partition_device",
     "set_parents_and_children",
-    # torch.fx.experimental.const_fold
     "get_unique_attr_name_in_module",
     "split_const_subgraphs",
-    # torch.fx.experimental.debug
     "set_trace",
-    # torch.fx.experimental.graph_gradual_typechecker
-    "adaptiveavgpool2d_check",
-    "adaptiveavgpool2d_inference_rule",
-    "add_inference_rule",
-    "all_eq",
-    "bn2d_inference_rule",
-    "broadcast_types",
-    "calculate_out_dimension",
-    "conv2d_inference_rule",
-    "conv_refinement_rule",
-    "conv_rule",
-    "element_wise_eq",
-    "expand_to_tensor_dim",
-    "first_two_eq",
-    "flatten_check",
-    "flatten_inference_rule",
-    "flatten_refinement_rule",
-    "get_attr_inference_rule",
-    "get_greatest_upper_bound",
-    "get_parameter",
-    "linear_check",
-    "linear_inference_rule",
-    "linear_refinement_rule",
-    "maxpool2d_check",
-    "maxpool2d_inference_rule",
-    "register_algebraic_expressions_inference_rule",
-    "register_inference_rule",
-    "register_refinement_rule",
-    "relu_inference_rule",
-    "reshape_inference_rule",
-    "transpose_inference_rule",
-    # torch.fx.experimental.merge_matmul
     "are_nodes_independent",
     "may_depend_on",
     "merge_matmul",
     "split_result_tensors",
-    # torch.fx.experimental.meta_tracer
-    "embedding_override",
-    "functional_relu_override",
-    "gen_constructor_wrapper",
-    "nn_layernorm_override",
-    "proxys_to_metas",
-    "symbolic_trace",
-    "torch_abs_override",
-    "torch_nn_relu_override",
-    "torch_relu_override",
-    "torch_where_override",
-    # torch.fx.experimental.migrate_gradual_types.constraint
-    "is_algebraic_expression",
-    "is_bool_expr",
-    "is_dim",
-    # torch.fx.experimental.migrate_gradual_types.constraint_generator
-    "adaptive_inference_rule",
-    "add_layer_norm_constraints",
-    "add_linear_constraints",
-    "arange_inference_rule",
-    "assert_inference_rule",
-    "batchnorm_inference_rule",
-    "bmm_inference_rule",
-    "broadcasting_inference_rule",
-    "conv2d_inference_rule",
-    "cumsum_inference_rule",
-    "embedding_inference_rule",
-    "embedding_inference_rule_functional",
-    "eq_inference_rule",
-    "equality_inference_rule",
-    "expand_inference_rule",
-    "flatten_inference_rule",
-    "full_inference_rule",
-    "gen_broadcasting_constraints",
-    "gen_embedding_rules",
-    "gen_layer_norm_constraints",
-    "generate_flatten_constraints",
-    "get_attr_inference_rule",
-    "getitem_inference_rule",
-    "gt_inference_rule",
-    "index_select_inference_rule",
-    "layer_norm_functional",
-    "layer_norm_inference_rule",
-    "linear_constraints",
-    "linear_inference_rule",
-    "lt_inference_rule",
-    "masked_fill_inference_rule",
-    "maxpool_inference_rule",
-    "neq_inference_rule",
-    "range_check",
-    "register_inference_rule",
-    "relu_inference_rule",
-    "reshape_inference_rule",
-    "size_inference_rule",
-    "tensor_inference_rule",
-    "torch_dim_inference_rule",
-    "torch_linear_inference_rule",
-    "transpose_inference_rule",
-    "type_inference_rule",
-    "view_inference_rule",
-    # torch.fx.experimental.migrate_gradual_types.constraint_transformation
-    "apply_padding",
-    "broadcast_dim",
-    "calc_last_two_dims",
-    "create_equality_constraints_for_broadcasting",
-    "gen_all_reshape_possibilities",
-    "gen_broadcasting_constraints",
-    "gen_consistency_constraints",
-    "gen_greatest_upper_bound",
-    "gen_lists_of_dims",
-    "generate_all_broadcasting_possibilities_no_padding",
-    "generate_all_int_dyn_dim_possibilities",
-    "generate_binconstraint_d",
-    "generate_binconstraint_t",
-    "generate_broadcasting",
-    "generate_calc_conv",
-    "generate_calc_maxpool",
-    "generate_calc_product",
-    "generate_conj",
-    "generate_d_gub",
-    "generate_disj",
-    "generate_gub",
-    "generate_reshape",
-    "is_dim_div_by_target",
-    "is_target_div_by_dim",
-    "no_broadcast_dim_with_index",
-    "register_transformation_rule",
-    "transform_constraint",
-    "transform_get_item",
-    "transform_get_item_tensor",
-    "transform_index_select",
-    "transform_transpose",
-    "valid_index",
-    "valid_index_tensor",
-    # torch.fx.experimental.migrate_gradual_types.transform_to_z3
-    "evaluate_conditional_with_constraints",
-    # torch.fx.experimental.migrate_gradual_types.util
-    "gen_bvar",
-    "gen_dvar",
-    "gen_nat_constraints",
-    "gen_tensor_dims",
-    "gen_tvar",
-    # torch.fx.experimental.optimization
-    "extract_subgraph",
-    "fuse",
-    "gen_mkl_autotuner",
-    "matches_module_pattern",
-    "modules_to_mkldnn",
-    "optimize_for_inference",
-    "remove_dropout",
-    "replace_node_module",
-    "reset_modules",
-    "use_mkl_length",
-    # torch.fx.experimental.partitioner_utils
-    "get_comm_latency_between",
-    "get_extra_size_of",
-    "get_latency_of_one_partition",
-    "get_latency_of_partitioned_graph",
-    "get_partition_to_latency_mapping",
-    # torch.fx.experimental.proxy_tensor
-    "decompose",
-    "disable_autocast_cache",
-    "disable_proxy_modes_tracing",
-    "dispatch_trace",
-    "extract_val",
-    "fake_signature",
-    "fetch_sym_proxy",
-    "fetch_object_proxy",
-    "get_innermost_proxy_mode",
-    "get_isolated_graphmodule",
-    "get_proxy_slot",
-    "get_torch_dispatch_modes",
-    "has_proxy_slot",
-    "is_sym_node",
-    "maybe_handle_decomp",
-    "proxy_call",
-    "set_meta",
-    "set_original_aten_op",
-    "set_proxy_slot",
-    "snapshot_fake",
-    "thunkify",
-    "track_tensor",
-    "track_tensor_tree",
-    "wrap_key",
-    "wrapper_and_args_for_make_fx",
-    # torch.fx.experimental.recording
-    "record_shapeenv_event",
-    "replay_shape_env_events",
-    "shape_env_check_state_equal",
-    # torch.fx.experimental.sym_node
-    "ceil_impl",
-    "floor_ceil_helper",
-    "floor_impl",
-    "method_to_operator",
-    "sympy_is_channels_last_contiguous_2d",
-    "sympy_is_channels_last_contiguous_3d",
-    "sympy_is_channels_last_strides_2d",
-    "sympy_is_channels_last_strides_3d",
-    "sympy_is_channels_last_strides_generic",
-    "sympy_is_contiguous",
-    "sympy_is_contiguous_generic",
-    "to_node",
-    "wrap_node",
     "sym_sqrt",
-    "sym_ite",
-    # torch.fx.experimental.symbolic_shapes
-    "bind_symbols",
-    "cast_symbool_to_symint_guardless",
-    "create_contiguous",
-    "error",
-    "eval_guards",
-    "eval_is_non_overlapping_and_dense",
-    "expect_true",
-    "find_symbol_binding_fx_nodes",
-    "free_symbols",
-    "free_unbacked_symbols",
-    "fx_placeholder_targets",
-    "fx_placeholder_vals",
-    "guard_bool",
-    "guard_float",
-    "guard_int",
-    "guard_scalar",
-    "has_hint",
-    "has_symbolic_sizes_strides",
-    "is_channels_last_contiguous_2d",
-    "is_channels_last_contiguous_3d",
-    "is_channels_last_strides_2d",
-    "is_channels_last_strides_3d",
-    "is_contiguous",
-    "is_non_overlapping_and_dense_indicator",
-    "is_nested_int",
-    "is_symbol_binding_fx_node",
-    "is_symbolic",
-    # torch.fx.experimental.unification.core
-    "reify",
-    # torch.fx.experimental.unification.match
     "edge",
     "match",
     "ordering",
     "supercedes",
-    # torch.fx.experimental.unification.more
     "reify_object",
     "unifiable",
     "unify_object",
-    # torch.fx.experimental.unification.multipledispatch.conflict
     "ambiguities",
     "ambiguous",
     "consistent",
@@ -1063,10 +687,8 @@ coverage_ignore_functions = [
     "ordering",
     "super_signature",
     "supercedes",
-    # torch.fx.experimental.unification.multipledispatch.core
     "dispatch",
     "ismethod",
-    # torch.fx.experimental.unification.multipledispatch.dispatcher
     "ambiguity_warn",
     "halt_ordering",
     "restart_ordering",
@@ -1075,41 +697,19 @@ coverage_ignore_functions = [
     "variadic_signature_matches",
     "variadic_signature_matches_iter",
     "warning_text",
-    # torch.fx.experimental.unification.multipledispatch.utils
     "expand_tuples",
     "groupby",
     "raises",
     "reverse_dict",
-    # torch.fx.experimental.unification.multipledispatch.variadic
     "isvariadic",
-    # torch.fx.experimental.unification.unification_tools
-    "assoc",
-    "assoc_in",
-    "dissoc",
-    "first",
-    "get_in",
-    "getter",
-    "groupby",
-    "itemfilter",
-    "itemmap",
-    "keyfilter",
-    "keymap",
-    "merge",
-    "merge_with",
-    "update_in",
-    "valfilter",
-    "valmap",
-    # torch.fx.experimental.unification.utils
     "freeze",
     "hashable",
     "raises",
     "reverse_dict",
     "transitive_get",
     "xfail",
-    # torch.fx.experimental.unification.variable
     "var",
     "vars",
-    # torch.fx.experimental.unify_refinements
     "check_for_type_equality",
     "convert_eq",
     "infer_symbolic_types",
@@ -1117,21 +717,16 @@ coverage_ignore_functions = [
     "substitute_all_types",
     "substitute_solution_one_type",
     "unify_eq",
-    # torch.fx.experimental.validator
     "bisect",
     "translation_validation_enabled",
     "translation_validation_timeout",
     "z3op",
     "z3str",
-    # torch.fx.graph_module
-    "reduce_deploy_graph_module",
     "reduce_graph_module",
     "reduce_package_graph_module",
-    # torch.fx.node
     "has_side_effect",
     "map_aggregate",
     "map_arg",
-    # torch.fx.operator_schemas
     "check_for_mutable_operation",
     "create_type_hint",
     "get_signature_for_torch_op",
@@ -1166,6 +761,8 @@ coverage_ignore_functions = [
     "loop_pass",
     "these_before_those_pass_constraint",
     "this_before_that_pass_constraint",
+    # torch.fx.passes.regional_inductor
+    "regional_inductor",
     # torch.fx.passes.reinplace
     "reinplace",
     # torch.fx.passes.split_module
@@ -1211,6 +808,8 @@ coverage_ignore_functions = [
     "set_current_meta",
     "set_grad_fn_seq_nr",
     "set_stack_trace",
+    "set_current_replay_node",
+    "get_current_replay_node",
     # torch.jit.annotations
     "ann_to_type",
     "check_fn",
@@ -1286,37 +885,37 @@ coverage_ignore_functions = [
     # torch.multiprocessing.spawn
     "start_processes",
     # torch.nn.functional
-    "adaptive_max_pool1d_with_indices",
-    "adaptive_max_pool2d_with_indices",
-    "adaptive_max_pool3d_with_indices",
-    "assert_int_or_pair",
-    "fractional_max_pool2d_with_indices",
-    "fractional_max_pool3d_with_indices",
-    "max_pool1d_with_indices",
-    "max_pool2d_with_indices",
-    "max_pool3d_with_indices",
+    "adaptive_max_pool1d_with_indices",  # documented as adaptive_max_pool1d
+    "adaptive_max_pool2d_with_indices",  # documented as adaptive_max_pool2d
+    "adaptive_max_pool3d_with_indices",  # documented as adaptive_max_pool3d
+    "assert_int_or_pair",  # looks unintentionally public
+    "fractional_max_pool2d_with_indices",  # documented as fractional_max_pool2d
+    "fractional_max_pool3d_with_indices",  # documented as fractional_max_pool3d
+    "max_pool1d_with_indices",  # documented as max_pool1d
+    "max_pool2d_with_indices",  # documented as max_pool2d
+    "max_pool3d_with_indices",  # documented as max_pool3d
     "multi_head_attention_forward",
     # torch.nn.grad
-    "conv1d_input",
-    "conv1d_weight",
-    "conv2d_input",
-    "conv2d_weight",
-    "conv3d_input",
-    "conv3d_weight",
+    "conv1d_input",  # legacy helper for gradient computation
+    "conv1d_weight",  # legacy helper for gradient computation
+    "conv2d_input",  # legacy helper for gradient computation
+    "conv2d_weight",  # legacy helper for gradient computation
+    "conv3d_input",  # legacy helper for gradient computation
+    "conv3d_weight",  # legacy helper for gradient computation
     # torch.nn.init
-    "constant",
-    "dirac",
-    "eye",
-    "kaiming_normal",
-    "kaiming_uniform",
-    "normal",
-    "orthogonal",
-    "sparse",
-    "uniform",
-    "xavier_normal",
-    "xavier_uniform",
+    "constant",  # deprecated
+    "dirac",  # deprecated
+    "eye",  # deprecated
+    "kaiming_normal",  # deprecated
+    "kaiming_uniform",  # deprecated
+    "normal",  # deprecated
+    "orthogonal",  # deprecated
+    "sparse",  # deprecated
+    "uniform",  # deprecated
+    "xavier_normal",  # deprecated
+    "xavier_uniform",  # deprecated
     # torch.nn.modules.rnn
-    "apply_permutation",
+    "apply_permutation",  # deprecated
     # torch.nn.modules.utils
     "consume_prefix_in_state_dict_if_present",
     # torch.nn.parallel.comm
@@ -1338,38 +937,8 @@ coverage_ignore_functions = [
     "is_namedtuple",
     "scatter",
     "scatter_kwargs",
-    # torch.nn.parameter
-    "is_lazy",
-    # torch.nn.utils.clip_grad
-    "clip_grad_norm",
-    "clip_grad_norm_",
-    "clip_grad_value_",
-    # torch.nn.utils.convert_parameters
-    "parameters_to_vector",
-    "vector_to_parameters",
-    # torch.nn.utils.fusion
-    "fuse_conv_bn_eval",
-    "fuse_conv_bn_weights",
-    "fuse_linear_bn_eval",
-    "fuse_linear_bn_weights",
-    # torch.nn.utils.init
-    "skip_init",
-    # torch.nn.utils.memory_format
-    "convert_conv2d_weight_memory_format",
-    # torch.nn.utils.parametrizations
-    "weight_norm",
-    # torch.nn.utils.parametrize
-    "transfer_parametrizations_and_params",
-    "type_before_parametrizations",
     # torch.nn.utils.rnn
-    "bind",
-    "invert_permutation",
-    # torch.nn.utils.spectral_norm
-    "remove_spectral_norm",
-    "spectral_norm",
-    # torch.nn.utils.weight_norm
-    "remove_weight_norm",
-    "weight_norm",
+    "bind",  # looks unintentionally public
     # torch.onnx.operators
     "reshape_from_tensor_shape",
     "shape_as_tensor",
@@ -1567,353 +1136,14 @@ coverage_ignore_functions = [
     # torch.onnx.symbolic_opset7
     "max",
     "min",
-    # torch.onnx.symbolic_opset8
-    "addmm",
-    "bmm",
-    "empty",
-    "empty_like",
-    "flatten",
-    "full",
-    "full_like",
-    "gt",
-    "lt",
-    "matmul",
-    "mm",
-    "ones",
-    "ones_like",
-    "prelu",
-    "repeat",
-    "zeros",
-    "zeros_like",
-    # torch.onnx.symbolic_opset9
-    "abs",
-    "acos",
-    "adaptive_avg_pool1d",
-    "adaptive_avg_pool2d",
-    "adaptive_avg_pool3d",
-    "adaptive_max_pool1d",
-    "adaptive_max_pool2d",
-    "adaptive_max_pool3d",
-    "add",
-    "addcmul",
-    "addmm",
-    "alias",
-    "amax",
-    "amin",
-    "aminmax",
-    "arange",
-    "argmax",
-    "argmin",
-    "as_strided",
-    "as_tensor",
-    "asin",
-    "atan",
-    "atan2",
-    "avg_pool1d",
-    "avg_pool2d",
-    "avg_pool3d",
-    "baddbmm",
-    "batch_norm",
-    "bernoulli",
-    "bitwise_not",
-    "bitwise_or",
-    "bmm",
-    "broadcast_tensors",
-    "broadcast_to",
-    "bucketize",
-    "cat",
-    "cdist",
-    "ceil",
-    "clamp",
-    "clamp_max",
-    "clamp_min",
-    "clone",
-    "constant_pad_nd",
-    "contiguous",
-    "conv1d",
-    "conv2d",
-    "conv3d",
-    "conv_tbc",
-    "conv_transpose1d",
-    "conv_transpose2d",
-    "conv_transpose3d",
-    "convert_element_type",
-    "convolution",
-    "cos",
-    "cosine_similarity",
-    "cross",
-    "cumsum",
-    "detach",
     "dim",
-    "div",
-    "dot",
-    "dropout",
-    "elu",
-    "embedding",
-    "embedding_bag",
-    "empty",
-    "empty_like",
-    "eq",
-    "erf",
-    "exp",
-    "expand",
-    "expand_as",
-    "eye",
-    "fill",
-    "flatten",
-    "floor",
-    "floor_divide",
-    "floordiv",
-    "frobenius_norm",
-    "full",
-    "full_like",
-    "gather",
-    "ge",
-    "gelu",
-    "get_pool_ceil_padding",
-    "glu",
-    "group_norm",
-    "gru",
-    "gt",
-    "hann_window",
-    "hardshrink",
-    "hardsigmoid",
-    "hardswish",
-    "hardtanh",
-    "index",
-    "index_add",
-    "index_copy",
-    "index_fill",
-    "index_put",
-    "index_select",
-    "instance_norm",
-    "is_floating_point",
-    "is_pinned",
-    "isnan",
-    "item",
-    "kl_div",
-    "layer_norm",
-    "le",
-    "leaky_relu",
-    "lerp",
-    "lift",
-    "linalg_cross",
-    "linalg_matrix_norm",
-    "linalg_norm",
-    "linalg_vector_norm",
-    "linear",
-    "linspace",
-    "log",
-    "log10",
-    "log1p",
-    "log2",
-    "log_sigmoid",
-    "log_softmax",
-    "logical_and",
-    "logical_not",
-    "logical_or",
-    "logical_xor",
-    "logit",
-    "logsumexp",
-    "lstm",
-    "lstm_cell",
-    "lt",
-    "masked_fill",
-    "masked_fill_",
-    "matmul",
-    "max",
-    "max_pool1d",
-    "max_pool1d_with_indices",
-    "max_pool2d",
-    "max_pool2d_with_indices",
-    "max_pool3d",
-    "max_pool3d_with_indices",
-    "maximum",
-    "meshgrid",
-    "min",
-    "minimum",
-    "mish",
-    "mm",
-    "movedim",
-    "mse_loss",
-    "mul",
-    "multinomial",
-    "mv",
-    "narrow",
-    "native_layer_norm",
-    "ne",
-    "neg",
-    "new_empty",
-    "new_full",
-    "new_ones",
-    "new_zeros",
-    "nonzero",
-    "nonzero_numpy",
-    "noop_complex_operators",
-    "norm",
-    "numel",
-    "numpy_T",
-    "one_hot",
-    "ones",
-    "ones_like",
-    "onnx_placeholder",
-    "overload_by_arg_count",
-    "pad",
-    "pairwise_distance",
-    "permute",
-    "pixel_shuffle",
-    "pixel_unshuffle",
-    "pow",
-    "prelu",
-    "prim_constant",
-    "prim_constant_chunk",
-    "prim_constant_split",
-    "prim_data",
-    "prim_device",
-    "prim_dtype",
-    "prim_if",
-    "prim_layout",
-    "prim_list_construct",
-    "prim_list_unpack",
-    "prim_loop",
-    "prim_max",
-    "prim_min",
-    "prim_shape",
-    "prim_tolist",
-    "prim_tuple_construct",
-    "prim_type",
-    "prim_unchecked_cast",
-    "prim_uninitialized",
-    "rand",
-    "rand_like",
-    "randint",
-    "randint_like",
-    "randn",
-    "randn_like",
-    "reciprocal",
-    "reflection_pad",
-    "relu",
-    "relu6",
-    "remainder",
-    "repeat",
-    "repeat_interleave",
-    "replication_pad",
-    "reshape",
-    "reshape_as",
-    "rnn_relu",
-    "rnn_tanh",
-    "roll",
-    "rrelu",
-    "rsqrt",
-    "rsub",
-    "scalar_tensor",
-    "scatter",
-    "scatter_add",
-    "select",
-    "selu",
-    "sigmoid",
-    "sign",
-    "silu",
-    "sin",
-    "size",
-    "slice",
-    "softmax",
-    "softplus",
-    "softshrink",
-    "sort",
-    "split",
-    "split_with_sizes",
-    "sqrt",
-    "square",
-    "squeeze",
-    "stack",
-    "std",
-    "std_mean",
-    "sub",
-    "t",
-    "take",
-    "tan",
-    "tanh",
-    "tanhshrink",
-    "tensor",
-    "threshold",
-    "to",
-    "topk",
-    "transpose",
-    "true_divide",
-    "type_as",
-    "unbind",
-    "unfold",
-    "unsafe_chunk",
-    "unsafe_split",
-    "unsafe_split_with_sizes",
-    "unsqueeze",
-    "unsupported_complex_operators",
-    "unused",
-    "upsample_bilinear2d",
-    "upsample_linear1d",
-    "upsample_nearest1d",
-    "upsample_nearest2d",
-    "upsample_nearest3d",
-    "upsample_trilinear3d",
-    "var",
-    "var_mean",
-    "view",
-    "view_as",
-    "where",
-    "wrap_logical_op_with_cast_to",
-    "wrap_logical_op_with_negation",
-    "zero",
-    "zeros",
-    "zeros_like",
-    # torch.onnx.utils
-    "disable_apex_o2_state_dict_hook",
     "export",
-    "export_to_pretty_string",
-    "exporter_context",
-    "is_in_onnx_export",
-    "model_signature",
-    "register_custom_op_symbolic",
-    "select_model_mode_for_export",
-    "setup_onnx_logging",
-    "unconvertible_ops",
-    "unpack_quantized_tensor",
-    "warn_on_static_input_change",
-    # torch.onnx.verification
     "check_export_model_diff",
     "verify",
     "verify_aten_graph",
-    # torch.optim.adadelta
-    "adadelta",
-    # torch.optim.adagrad
-    "adagrad",
-    # torch.optim.adam
-    "adam",
-    # torch.optim.adamax
-    "adamax",
-    # torch.optim.adamw
-    "adamw",
-    # torch.optim.asgd
-    "asgd",
-    # torch.optim.nadam
-    "nadam",
     # torch.optim.optimizer
     "register_optimizer_step_post_hook",
     "register_optimizer_step_pre_hook",
-    # torch.optim.radam
-    "radam",
-    # torch.optim.rmsprop
-    "rmsprop",
-    # torch.optim.rprop
-    "rprop",
-    # torch.optim.sgd
-    "sgd",
-    # torch.optim.swa_utils
-    "get_ema_avg_fn",
-    "get_ema_multi_avg_fn",
-    "get_swa_avg_fn",
-    "get_swa_multi_avg_fn",
-    "update_bn",
     # torch.overrides
     "enable_reentrant_dispatch",
     # torch.package.analyze.find_first_use_of_broken_modules
@@ -1998,32 +1228,6 @@ coverage_ignore_functions = [
     "noop_context_fn",
     "set_checkpoint_early_stop",
     "set_device_states",
-    # torch.utils.collect_env
-    "check_release_file",
-    "get_cachingallocator_config",
-    "get_clang_version",
-    "get_cmake_version",
-    "get_conda_packages",
-    "get_cpu_info",
-    "get_cuda_module_loading_config",
-    "get_cudnn_version",
-    "get_env_info",
-    "get_gcc_version",
-    "get_gpu_info",
-    "get_libc_version",
-    "get_lsb_version",
-    "get_mac_version",
-    "get_nvidia_driver_version",
-    "get_nvidia_smi",
-    "get_os",
-    "get_pip_packages",
-    "get_platform",
-    "get_pretty_env_info",
-    "get_python_platform",
-    "get_running_cuda_version",
-    "get_windows_version",
-    "is_xnnpack_available",
-    "pretty_str",
     # torch.utils.cpp_backtrace
     "get_cpp_backtrace",
     # torch.utils.cpp_extension
@@ -2087,52 +1291,6 @@ coverage_ignore_functions = [
     "apply_shuffle_seed",
     "apply_shuffle_settings",
     "get_all_graph_pipes",
-    # torch.utils.flop_counter
-    "addmm_flop",
-    "baddbmm_flop",
-    "bmm_flop",
-    "conv_backward_flop",
-    "conv_flop",
-    "conv_flop_count",
-    "convert_num_with_suffix",
-    "get_shape",
-    "get_suffix_str",
-    "mm_flop",
-    "normalize_tuple",
-    "register_flop_formula",
-    "sdpa_backward_flop",
-    "sdpa_backward_flop_count",
-    "sdpa_flop",
-    "sdpa_flop_count",
-    "shape_wrapper",
-    "transpose_shape",
-    # torch.utils.hipify.hipify_python
-    "add_dim3",
-    "compute_stats",
-    "extract_arguments",
-    "file_add_header",
-    "file_specific_replacement",
-    "find_bracket_group",
-    "find_closure_group",
-    "find_parentheses_group",
-    "fix_static_global_kernels",
-    "get_hip_file_path",
-    "hip_header_magic",
-    "hipify",
-    "is_caffe2_gpu_file",
-    "is_cusparse_file",
-    "is_out_of_place",
-    "is_pytorch_file",
-    "is_special_file",
-    "match_extensions",
-    "matched_files_iter",
-    "openf",
-    "preprocess_file_and_save_result",
-    "preprocessor",
-    "processKernelLaunches",
-    "replace_extern_shared",
-    "replace_math_functions",
-    "str2bool",
     # torch.utils.hooks
     "unserializable_hook",
     "warn_if_has_hooks",
@@ -2297,9 +1455,6 @@ coverage_ignore_classes = [
     "EventHandler",
     "SynchronizationError",
     "UnsynchronizedAccessError",
-    # torch.cuda.memory
-    "MemPool",
-    "MemPoolContext",
     # torch.distributed.elastic.multiprocessing.errors
     "ChildFailedError",
     "ProcessFailure",
@@ -2356,71 +1511,6 @@ coverage_ignore_classes = [
     "Quantize",
     # torch.utils.backcompat
     "Warning",
-    # torch.ao.nn.intrinsic.modules.fused
-    "ConvAdd2d",
-    "ConvAddReLU2d",
-    "LinearBn1d",
-    "LinearLeakyReLU",
-    "LinearTanh",
-    # torch.ao.nn.intrinsic.qat.modules.conv_fused
-    "ConvBnReLU1d",
-    "ConvBnReLU2d",
-    "ConvBnReLU3d",
-    "ConvReLU1d",
-    "ConvReLU2d",
-    "ConvReLU3d",
-    # torch.ao.nn.intrinsic.qat.modules.linear_fused
-    "LinearBn1d",
-    # torch.ao.nn.intrinsic.qat.modules.linear_relu
-    "LinearReLU",
-    # torch.ao.nn.intrinsic.quantized.dynamic.modules.linear_relu
-    "LinearReLU",
-    # torch.ao.nn.intrinsic.quantized.modules.bn_relu
-    "BNReLU2d",
-    "BNReLU3d",
-    # torch.ao.nn.intrinsic.quantized.modules.conv_add
-    "ConvAdd2d",
-    "ConvAddReLU2d",
-    # torch.ao.nn.intrinsic.quantized.modules.conv_relu
-    "ConvReLU1d",
-    "ConvReLU2d",
-    "ConvReLU3d",
-    # torch.ao.nn.intrinsic.quantized.modules.linear_relu
-    "LinearLeakyReLU",
-    "LinearReLU",
-    "LinearTanh",
-    # torch.ao.nn.qat.modules.conv
-    "Conv1d",
-    "Conv2d",
-    "Conv3d",
-    # torch.ao.nn.qat.modules.embedding_ops
-    "Embedding",
-    "EmbeddingBag",
-    # torch.ao.nn.qat.modules.linear
-    "Linear",
-    # torch.ao.nn.quantizable.modules.activation
-    "MultiheadAttention",
-    # torch.ao.nn.quantizable.modules.rnn
-    "LSTM",
-    "LSTMCell",
-    # torch.ao.nn.quantized.dynamic.modules.conv
-    "Conv1d",
-    "Conv2d",
-    "Conv3d",
-    "ConvTranspose1d",
-    "ConvTranspose2d",
-    "ConvTranspose3d",
-    # torch.ao.nn.quantized.dynamic.modules.linear
-    "Linear",
-    # torch.ao.nn.quantized.dynamic.modules.rnn
-    "GRU",
-    "GRUCell",
-    "LSTM",
-    "LSTMCell",
-    "PackedParameter",
-    "RNNBase",
-    "RNNCell",
-    "RNNCellBase",
     # torch.ao.nn.quantized.modules.activation
     "ELU",
     "Hardswish",
@@ -2566,34 +1656,10 @@ coverage_ignore_classes = [
     "default_debug_observer",
     "default_placeholder_observer",
     "default_reuse_input_observer",
-    # torch.ao.quantization.pt2e.duplicate_dq_pass
-    "DuplicateDQPass",
-    # torch.ao.quantization.pt2e.port_metadata_pass
-    "PortNodeMetaForQDQ",
     # torch.ao.quantization.qconfig
     "QConfigDynamic",
     # torch.ao.quantization.quant_type
     "QuantType",
-    # torch.ao.quantization.quantizer.composable_quantizer
-    "ComposableQuantizer",
-    # torch.ao.quantization.quantizer.embedding_quantizer
-    "EmbeddingQuantizer",
-    # torch.ao.quantization.quantizer.quantizer
-    "DerivedQuantizationSpec",
-    "FixedQParamsQuantizationSpec",
-    "QuantizationAnnotation",
-    "QuantizationSpec",
-    "QuantizationSpecBase",
-    "SharedQuantizationSpec",
-    # torch.ao.quantization.quantizer.x86_inductor_quantizer
-    "X86InductorQuantizer",
-    # torch.ao.quantization.quantizer.xpu_inductor_quantizer
-    "XPUInductorQuantizer",
-    # torch.ao.quantization.quantizer.xnnpack_quantizer
-    "XNNPACKQuantizer",
-    # torch.ao.quantization.quantizer.xnnpack_quantizer_utils
-    "OperatorConfig",
-    "QuantizationConfig",
     # torch.ao.quantization.stubs
     "DeQuantStub",
     "QuantStub",
@@ -2605,10 +1671,6 @@ coverage_ignore_classes = [
     # torch.amp.grad_scaler
     "GradScaler",
     "OptState",
-    # torch.cuda.graphs
-    "CUDAGraph",
-    # torch.cuda.streams
-    "Event",
     # torch.distributed.algorithms.ddp_comm_hooks.post_localSGD_hook
     "PostLocalSGDState",
     # torch.distributed.algorithms.ddp_comm_hooks.powerSGD_hook
@@ -2633,6 +1695,11 @@ coverage_ignore_classes = [
     # torch.distributed.checkpoint.filesystem
     "FileSystemReader",
     "FileSystemWriter",
+    # torch.distributed.checkpoint.hf_storage
+    "HuggingFaceStorageReader",
+    "HuggingFaceStorageWriter",
+    # torch.distributed.checkpoint.quantized_hf_storage
+    "QuantizedHuggingFaceStorageReader",
     # torch.distributed.checkpoint.metadata
     "BytesStorageMetadata",
     "ChunkStorageMetadata",
@@ -2769,6 +1836,8 @@ coverage_ignore_classes = [
     "ExpRelaxedCategorical",
     # torch.distributions.utils
     "lazy_property",
+    # torch.export.unflatten
+    "UnflattenedModule",
     # torch.export.exported_program
     "ConstantArgument",
     "ExportedProgram",
@@ -2978,151 +2047,18 @@ coverage_ignore_classes = [
     # torch.nn.cpp
     "ModuleWrapper",
     "OrderedDictWrapper",
-    # torch.nn.modules.activation
-    "CELU",
-    "ELU",
-    "GELU",
-    "GLU",
-    "Hardshrink",
-    "Hardsigmoid",
-    "Hardswish",
-    "Hardtanh",
-    "LeakyReLU",
-    "LogSigmoid",
-    "LogSoftmax",
-    "Mish",
-    "MultiheadAttention",
-    "PReLU",
-    "RReLU",
-    "ReLU",
-    "ReLU6",
-    "SELU",
-    "SiLU",
-    "Sigmoid",
-    "Softmax",
-    "Softmax2d",
-    "Softmin",
-    "Softplus",
-    "Softshrink",
-    "Softsign",
-    "Tanh",
-    "Tanhshrink",
-    "Threshold",
-    # torch.nn.modules.adaptive
-    "AdaptiveLogSoftmaxWithLoss",
-    # torch.nn.modules.batchnorm
-    "SyncBatchNorm",
-    # torch.nn.modules.channelshuffle
-    "ChannelShuffle",
     # torch.nn.modules.container
-    "Container",
-    "ModuleList",
-    "ParameterList",
-    "Sequential",
-    # torch.nn.modules.conv
-    "Conv1d",
-    "Conv2d",
-    "Conv3d",
-    "ConvTranspose1d",
-    "ConvTranspose2d",
-    "ConvTranspose3d",
-    # torch.nn.modules.distance
-    "CosineSimilarity",
-    "PairwiseDistance",
-    # torch.nn.modules.dropout
-    "AlphaDropout",
-    "Dropout",
-    "Dropout1d",
-    "Dropout2d",
-    "Dropout3d",
-    "FeatureAlphaDropout",
-    # torch.nn.modules.flatten
-    "Flatten",
-    "Unflatten",
-    # torch.nn.modules.fold
-    "Fold",
-    "Unfold",
+    "Container",  # deprecated
     # torch.nn.modules.linear
-    "Bilinear",
-    "Identity",
-    "LazyLinear",
-    "Linear",
     "NonDynamicallyQuantizableLinear",
-    # torch.nn.modules.loss
-    "BCELoss",
-    "BCEWithLogitsLoss",
-    "CTCLoss",
-    "CosineEmbeddingLoss",
-    "CrossEntropyLoss",
-    "GaussianNLLLoss",
-    "HingeEmbeddingLoss",
-    "HuberLoss",
-    "KLDivLoss",
-    "L1Loss",
-    "MSELoss",
-    "MarginRankingLoss",
-    "MultiLabelMarginLoss",
-    "MultiLabelSoftMarginLoss",
-    "MultiMarginLoss",
-    "NLLLoss",
-    "NLLLoss2d",
-    "PoissonNLLLoss",
-    "SmoothL1Loss",
-    "SoftMarginLoss",
-    "TripletMarginLoss",
-    "TripletMarginWithDistanceLoss",
     # torch.nn.modules.module
+    # TODO: causes multiple sphinx warnings
+    # WARNING: more than one target found for cross-reference 'Module'
     "Module",
+    # torch.nn.modules.loss
+    "NLLLoss2d",  # deprecated
     # torch.nn.modules.normalization
     "CrossMapLRN2d",
-    "GroupNorm",
-    "LayerNorm",
-    "LocalResponseNorm",
-    # torch.nn.modules.padding
-    "CircularPad1d",
-    "CircularPad2d",
-    "CircularPad3d",
-    "ZeroPad1d",
-    "ZeroPad2d",
-    "ZeroPad3d",
-    # torch.nn.modules.pixelshuffle
-    "PixelShuffle",
-    "PixelUnshuffle",
-    # torch.nn.modules.pooling
-    "AdaptiveAvgPool1d",
-    "AdaptiveAvgPool2d",
-    "AdaptiveAvgPool3d",
-    "AdaptiveMaxPool1d",
-    "AdaptiveMaxPool2d",
-    "AdaptiveMaxPool3d",
-    "AvgPool1d",
-    "AvgPool2d",
-    "AvgPool3d",
-    "FractionalMaxPool2d",
-    "FractionalMaxPool3d",
-    "LPPool1d",
-    "LPPool2d",
-    "LPPool3d",
-    "MaxPool1d",
-    "MaxPool2d",
-    "MaxPool3d",
-    "MaxUnpool1d",
-    "MaxUnpool2d",
-    "MaxUnpool3d",
-    # torch.nn.modules.rnn
-    "GRU",
-    "GRUCell",
-    "LSTM",
-    "LSTMCell",
-    "RNN",
-    "RNNBase",
-    "RNNCell",
-    "RNNCellBase",
-    # torch.nn.modules.sparse
-    "Embedding",
-    "EmbeddingBag",
-    # torch.nn.modules.upsampling
-    "Upsample",
     # torch.nn.parallel.data_parallel
     "DataParallel",
     # torch.nn.parallel.distributed
@@ -3153,54 +2089,8 @@ coverage_ignore_classes = [
     # torch.onnx.verification
     "OnnxBackend",
     "OnnxTestCaseRepro",
-    # torch.optim.adadelta
-    "Adadelta",
-    # torch.optim.adagrad
-    "Adagrad",
-    # torch.optim.adam
-    "Adam",
-    # torch.optim.adamax
-    "Adamax",
-    # torch.optim.adamw
-    "AdamW",
-    # torch.optim.asgd
-    "ASGD",
-    # torch.optim.lbfgs
-    "LBFGS",
-    # torch.optim.lr_scheduler
-    "ChainedScheduler",
-    "ConstantLR",
-    "CosineAnnealingLR",
-    "CosineAnnealingWarmRestarts",
-    "CyclicLR",
-    "ExponentialLR",
-    "LRScheduler",
-    "LambdaLR",
-    "LinearLR",
-    "MultiStepLR",
-    "MultiplicativeLR",
-    "OneCycleLR",
-    "PolynomialLR",
-    "ReduceLROnPlateau",
-    "SequentialLR",
-    "StepLR",
-    # torch.optim.nadam
-    "NAdam",
     # torch.optim.optimizer
     "Optimizer",
-    # torch.optim.radam
-    "RAdam",
-    # torch.optim.rmsprop
-    "RMSprop",
-    # torch.optim.rprop
-    "Rprop",
-    # torch.optim.sgd
-    "SGD",
-    # torch.optim.sparse_adam
-    "SparseAdam",
-    # torch.optim.swa_utils
-    "AveragedModel",
-    "SWALR",
     # torch.overrides
     "BaseTorchFunctionMode",
     "TorchFunctionMode",
@@ -3575,6 +2465,11 @@ autodoc_type_aliases = {
 # Enable overriding of function signatures in the first line of the docstring.
 autodoc_docstring_signature = True
 
+# Exclude inherited IntEnum methods that have RST formatting issues in their docstrings
+autodoc_default_options = {
+    "exclude-members": "from_bytes, to_bytes",
+}
+
 # -- katex javascript in header
 #
 #    def setup(app):
@@ -3603,6 +2498,8 @@ html_css_files = [
     "css/custom.css",
     "https://cdn.jsdelivr.net/npm/katex@0.10.0-beta/dist/katex.min.css",
 ]
+
+html_js_files = ["js/runllm-widget.js"]
 
 from sphinx.ext.coverage import CoverageBuilder
 

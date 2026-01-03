@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """This module implements tensor version operations for Dynamo tracing.
 
 It provides primitives for handling tensor versioning during tracing, particularly in the
@@ -18,7 +16,11 @@ Why is this ok?
 Note this is similar to how no_grad is handled.
 """
 
+from contextlib import AbstractContextManager
+from typing import Any
+
 import torch
+from torch import SymInt
 from torch._prims import _make_prim, RETURN_TYPE
 from torch._subclasses import FakeTensorMode
 from torch._subclasses.functional_tensor import FunctionalTensorMode
@@ -33,13 +35,14 @@ _tensor_version = _make_prim(
 )
 
 
-@_tensor_version.py_impl(FakeTensorMode)
-def _tensor_version_fake(fake_mode, self_tensor):
+@_tensor_version.py_impl(FakeTensorMode)  # type: ignore[misc]
+def _tensor_version_fake(fake_mode: FakeTensorMode, self_tensor: Any) -> SymInt:
     """
     The initial dynamo capture of _tensor_version + _unsafe_set_version_counter turns the
     `._version` into an unbacked SymInt so that we don't need to specialize on the `._version`
     of input tensors to the graph.
     """
+    assert fake_mode.shape_env is not None
     return fake_mode.shape_env.create_unbacked_symint()
 
 
@@ -53,11 +56,15 @@ _unsafe_set_version_counter = _make_prim(
 torch.fx.node.has_side_effect(_unsafe_set_version_counter)
 
 
-@_tensor_version.py_impl(FunctionalTensorMode)
-def _tensor_version_functional(mode, self):
+@_tensor_version.py_impl(FunctionalTensorMode)  # type: ignore[misc]
+def _tensor_version_functional(mode: FunctionalTensorMode, self: Any) -> int:
     return self._version
 
 
-@_unsafe_set_version_counter.py_impl(FunctionalTensorMode)
-def _unsafe_set_version_counter_functional(ctx, tensors, versions):
+@_unsafe_set_version_counter.py_impl(FunctionalTensorMode)  # type: ignore[misc]
+def _unsafe_set_version_counter_functional(
+    ctx: AbstractContextManager[Any],
+    tensors: tuple[torch.Tensor, ...],
+    versions: tuple[int, ...],
+) -> None:
     torch._C._autograd._unsafe_set_version_counter(tensors, versions)

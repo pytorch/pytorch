@@ -6,7 +6,6 @@ import logging
 import os
 from typing import Any, IO, Literal, Optional, TYPE_CHECKING, Union
 
-import torch._inductor.config
 import torch.fx
 
 from .standalone_compile import CompiledArtifact  # noqa: TC001
@@ -15,6 +14,8 @@ from .standalone_compile import CompiledArtifact  # noqa: TC001
 if TYPE_CHECKING:
     from torch._inductor.utils import InputType
     from torch.export import ExportedProgram
+    from torch.export.pt2_archive._package import AOTICompiledModel
+    from torch.export.pt2_archive._package_weights import Weights
     from torch.types import FileLike
 
 __all__ = [
@@ -150,6 +151,7 @@ def aoti_compile_and_package(
     return aot_inductor_minifier_wrapper(
         _aoti_compile_and_package_inner,
         exported_program,
+        # pyrefly: ignore [bad-argument-type]
         package_path=package_path,
         inductor_configs=inductor_configs,
     )
@@ -197,13 +199,13 @@ def _aoti_compile_and_package_inner(
         path = [
             os.path.splitext(file)[0]
             for file in aoti_files
-            if os.path.splitext(file)[1] == ".so"
+            if isinstance(file, str) and os.path.splitext(file)[1] == ".so"
         ]
         if len(path) == 0:
             path = [
                 os.path.splitext(file)[0]
                 for file in aoti_files
-                if os.path.splitext(file)[1] == ".cpp"
+                if isinstance(file, str) and os.path.splitext(file)[1] == ".cpp"
             ]
         package_path = path[0] + ".pt2"
 
@@ -222,7 +224,7 @@ def _aoti_compile_and_package_inner(
             not_strict_accuracy = check_accuracy == "accuracy"
             if not same_two_models(
                 gm,
-                compiled_model,
+                compiled_model,  # type: ignore[arg-type]
                 args,
                 only_fwd=True,
                 require_fp64=not_strict_accuracy,
@@ -235,7 +237,9 @@ def _aoti_compile_and_package_inner(
     return package_path
 
 
-def aoti_load_package(path: FileLike, run_single_threaded: bool = False) -> Any:  # type: ignore[type-arg]
+def aoti_load_package(
+    path: FileLike, run_single_threaded: bool = False, device_index: int = -1
+) -> AOTICompiledModel:
     """
     Loads the model from the PT2 package.
 
@@ -254,19 +258,25 @@ def aoti_load_package(path: FileLike, run_single_threaded: bool = False) -> Any:
         run_single_threaded (bool): Whether the model should be run without
             thread synchronization logic. This is useful to avoid conflicts with
             CUDAGraphs.
+        device_index (int): The index of the device to which the PT2 package is
+            to be loaded. By default, `device_index=-1` is used, which corresponds
+            to the device `cuda` when using CUDA. Passing `device_index=1` would
+            load the package to `cuda:1`, for example.
     """
     from torch._inductor.package import load_package
 
-    return load_package(path, run_single_threaded=run_single_threaded)
+    return load_package(
+        path, run_single_threaded=run_single_threaded, device_index=device_index
+    )
 
 
 def aot_compile(
     gm: torch.fx.GraphModule,
-    args: tuple[Any],
+    args: tuple[Any, ...],
     kwargs: Optional[dict[str, Any]] = None,
     *,
     options: Optional[dict[str, Any]] = None,
-) -> Union[str, list[str]]:
+) -> Union[str, list[Union[str, Weights]], torch.fx.GraphModule]:
     """
     Ahead-of-time compile a given FX graph with TorchInductor into a shared library.
 
@@ -283,6 +293,15 @@ def aot_compile(
     """
     from .compile_fx import _aoti_flatten_inputs, compile_fx_aot
 
+    if hasattr(gm, "_guards_fn"):
+        # Do not compile the guards function, since it may contain checks
+        # that are not currently supported by AOTI. In particular, non-Tensor
+        # arguments are converted to None and will fail specialization checks.
+        node = next(iter(gm.graph.find_nodes(op="call_module", target="_guards_fn")))
+        gm.graph.erase_node(node)
+        delattr(gm, "_guards_fn")
+        gm.recompile()
+
     flat_example_inputs, options = _aoti_flatten_inputs(
         gm, args, kwargs, options=options
     )
@@ -294,6 +313,25 @@ def aot_compile(
             flat_example_inputs,  # type: ignore[arg-type]
             config_patches=options,
         )
+
+
+lite_mode_options = {
+    # Fallback by default unless users explicitly annotated with
+    # regional inductor compile.
+    "fallback_by_default": True,
+    "selective_decompose": True,
+    # Disable reorder optimizations
+    "reorder_for_peak_memory": False,
+    "reorder_for_compute_comm_overlap": False,
+    "triton.reorder_for_reducing_graph_partitions": False,
+    # Disable pre-, joint-, post-grad passes
+    "use_pre_grad_passes": False,
+    "use_joint_graph_passes": False,
+    "use_post_grad_passes": False,
+    # Disable dead code elimination (dce) and buffer reuse
+    "use_dce": False,
+    "allow_buffer_reuse": False,
+}
 
 
 def list_mode_options(
@@ -313,6 +351,8 @@ def list_mode_options(
 
     mode_options: dict[str, dict[str, bool]] = {
         "default": {},
+        # lite backend for opt-in optimizations
+        "lite": lite_mode_options,
         # enable cudagraphs
         "reduce-overhead": {
             "triton.cudagraphs": True,
@@ -371,6 +411,7 @@ def standalone_compile(
         "from_example_inputs", "from_tracing_context", "from_graph"
     ] = "from_graph",
     options: Optional[dict[str, Any]] = None,
+    aot: bool = False,  # AOT mode, which uses BundledAOTAutogradCache
 ) -> CompiledArtifact:
     """
     Precompilation API for inductor.
@@ -402,5 +443,5 @@ def standalone_compile(
 
     options = options if options else {}
     return standalone_compile(
-        gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options
+        gm, example_inputs, dynamic_shapes=dynamic_shapes, options=options, aot=aot
     )

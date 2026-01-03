@@ -1,10 +1,6 @@
-#include <ATen/ATen.h>
 #include <ATen/InitialTensorOptions.h>
 #include <ATen/SparseCsrTensorImpl.h>
 #include <ATen/SparseCsrTensorUtils.h>
-#include <ATen/SparseTensorImpl.h>
-#include <ATen/core/LegacyTypeDispatch.h>
-#include <ATen/native/Resize.h>
 
 namespace at {
 
@@ -252,8 +248,7 @@ void SparseCsrTensorImpl::set_stride(int64_t dim, int64_t new_stride) {
 void SparseCsrTensorImpl::set_storage_offset(int64_t storage_offset) {
   TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have set_storage_offset.");
 }
-bool SparseCsrTensorImpl::is_contiguous_custom(MemoryFormat) const {
+c10::SymBool SparseCsrTensorImpl::sym_is_contiguous_custom(MemoryFormat /*memory_format*/) const {
   TORCH_CHECK(false, "Sparse ", at::sparse_csr::layoutToString(layout_, /*upper=*/true), " tensors do not have is_contiguous");
 }
-
 } // namespace at

@@ -4,6 +4,8 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
+import functools
+from collections.abc import Callable
 from types import (
     BuiltinMethodType,
     FunctionType,
@@ -11,11 +13,8 @@ from types import (
     MethodDescriptorType,
     WrapperDescriptorType,
 )
+from typing import Any
 
-from functorch._C import dim as _C
-
-
-_wrap_method = _C._wrap_method
 
 FUNC_TYPES = (
     FunctionType,
@@ -26,24 +25,24 @@ FUNC_TYPES = (
 PROPERTY_TYPES = (GetSetDescriptorType, property)
 
 
-def _py_wrap_method(orig, __torch_function__):
-    def impl(*args, **kwargs):
+def _py_wrap_method(orig: Callable, __torch_function__: Callable) -> Callable:
+    def impl(*args: Any, **kwargs: Any) -> Any:
         return __torch_function__(orig, None, args, kwargs)
+
+    # Copy metadata using functools.update_wrapper for just __name__ and __doc__
+    functools.update_wrapper(impl, orig, assigned=("__name__", "__doc__"), updated=())
 
     return impl
 
 
-def wrap_type(use_c, to_patch, pattern, __torch_function__):
-    if use_c:
-        wrap_method = _wrap_method
-    else:
-        wrap_method = _py_wrap_method
+def wrap_type(to_patch: Any, pattern: type, __torch_function__: Callable) -> None:
+    wrap_method = _py_wrap_method
 
-    all = {}
+    all: dict[str, Any] = {}
     for t in reversed(pattern.mro()[:-1]):  # skip object
         all.update(t.__dict__)
 
-    def wrap_attr(orig):
+    def wrap_attr(orig: Any) -> property:
         return property(wrap_method(orig.__get__, __torch_function__))
 
     for name, obj in all.items():

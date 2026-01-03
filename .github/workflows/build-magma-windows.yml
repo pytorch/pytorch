@@ -19,14 +19,15 @@ concurrency:
 jobs:
   build-windows-magma:
     if: github.repository_owner == 'pytorch'
-    runs-on: windows-2019
+    runs-on: windows-2022
     strategy:
       matrix:
-        cuda_version: ["128", "126", "118"]
+        cuda_version: ["130", "129", "128", "126"]
         config: ["Release", "Debug"]
     env:
       CUDA_VERSION: ${{ matrix.cuda_version }}
       CONFIG: ${{ matrix.config }}
+      VC_YEAR: "2022"
     steps:
       - name: Checkout pytorch/pytorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

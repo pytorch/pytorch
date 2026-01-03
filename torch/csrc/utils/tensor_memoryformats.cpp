@@ -1,11 +1,9 @@
 #include <torch/csrc/utils/tensor_memoryformats.h>
 
 #include <c10/core/MemoryFormat.h>
-#include <torch/csrc/DynamicTypes.h>
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/MemoryFormat.h>
 
-#include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 
 namespace torch::utils {

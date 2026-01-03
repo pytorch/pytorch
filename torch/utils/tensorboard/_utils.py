@@ -45,7 +45,7 @@ def _prepare_video(V):
     Convesrion is done from [batchsize, time(frame), channel(color), height, width]  (5D tensor)
     to [time(frame), new_width, new_height, channel] (4D tensor).
 
-    A batch of images are spreaded to a grid, which forms a frame.
+    A batch of images are spread to a grid, which forms a frame.
     e.g. Video with batchsize 16 will have a 4x4 grid.
     """
     b, t, c, h, w = V.shape
@@ -57,26 +57,31 @@ def _prepare_video(V):
         return num != 0 and ((num & (num - 1)) == 0)
 
     # pad to nearest power of 2, all at once
+    # pyrefly: ignore [index-error]
     if not is_power2(V.shape[0]):
+        # pyrefly: ignore [index-error]
         len_addition = int(2 ** V.shape[0].bit_length() - V.shape[0])
         V = np.concatenate((V, np.zeros(shape=(len_addition, t, c, h, w))), axis=0)
 
     n_rows = 2 ** ((b.bit_length() - 1) // 2)
+    # pyrefly: ignore [index-error]
     n_cols = V.shape[0] // n_rows
 
-    V = np.reshape(V, newshape=(n_rows, n_cols, t, c, h, w))
+    V = np.reshape(V, (n_rows, n_cols, t, c, h, w))
     V = np.transpose(V, axes=(2, 0, 4, 1, 5, 3))
-    V = np.reshape(V, newshape=(t, n_rows * h, n_cols * w, c))
+    V = np.reshape(V, (t, n_rows * h, n_cols * w, c))
 
     return V
 
 
 def make_grid(I, ncols=8):
     # I: N1HW or N3HW
-    assert isinstance(I, np.ndarray), "plugin error, should pass numpy array here"
+    if not isinstance(I, np.ndarray):
+        raise AssertionError("plugin error, should pass numpy array here")
     if I.shape[1] == 1:
         I = np.concatenate([I, I, I], 1)
-    assert I.ndim == 4 and I.shape[1] == 3
+    if I.ndim != 4 or I.shape[1] != 3:
+        raise AssertionError("Input should be a 4D numpy array with 3 channels")
     nimg = I.shape[0]
     H = I.shape[2]
     W = I.shape[3]
@@ -98,13 +103,12 @@ def make_grid(I, ncols=8):
 
 
 def convert_to_HWC(tensor, input_format):  # tensor: numpy array
-    assert len(set(input_format)) == len(
-        input_format
-    ), f"You can not use the same dimension shordhand twice.         input_format: {input_format}"
-    assert len(tensor.shape) == len(
-        input_format
-    ), f"size of input tensor and input format are different. \
-        tensor shape: {tensor.shape}, input_format: {input_format}"
+    if len(set(input_format)) != len(input_format):
+        raise AssertionError(f"You can not use the same dimension shordhand twice. \
+            input_format: {input_format}")
+    if len(tensor.shape) != len(input_format):
+        raise AssertionError(f"size of input tensor and input format are different. \
+        tensor shape: {tensor.shape}, input_format: {input_format}")
     input_format = input_format.upper()
 
     if len(input_format) == 4:

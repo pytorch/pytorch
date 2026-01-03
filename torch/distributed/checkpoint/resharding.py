@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 from torch.distributed.checkpoint.metadata import ChunkStorageMetadata
 
 
@@ -8,7 +6,7 @@ __all__: list[str] = []
 
 def _check_shard_metadata_pair_overlap(
     shard1: ChunkStorageMetadata, shard2: ChunkStorageMetadata
-):
+) -> bool:
     """Check if two shards overlap."""
     # For each dim of each shard, check if one shard resides on the other
     # end of second shard with respect to that dim. As an example for a 2D

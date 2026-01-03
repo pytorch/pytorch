@@ -1,12 +1,16 @@
 # mypy: ignore-errors
 
 import io
+import itertools
 import json
 import sys
 import tempfile
+import token
 from pathlib import Path
 from unittest import mock
 
+from tools.linter.adapters._linter.block import _get_decorators
+from tools.linter.adapters._linter.python_file import PythonFile
 from tools.linter.adapters.docstring_linter import (
     DocstringLinter,
     file_summary,
@@ -23,10 +27,13 @@ if _PARENT in _PATH:
 else:
     from .linter_test_case import LinterTestCase
 
-TEST_FILE = Path("tools/test/docstring_linter_testdata/python_code.py.txt")
-TEST_FILE2 = Path("tools/test/docstring_linter_testdata/more_python_code.py.txt")
-TEST_BLOCK_NAMES = Path("tools/test/docstring_linter_testdata/block_names.py.txt")
-ARGS = "--max-class=3", "--max-def=4", "--min-docstring=16"
+ROOT = Path("tools/test/docstring_linter_testdata")
+TEST_FILE = ROOT / "python_code.py.txt"
+TEST_FILE2 = ROOT / "more_python_code.py.txt"
+TEST_BLOCK_NAMES = ROOT / "block_names.py.txt"
+TEST_INTERFACE = ROOT / "interface_example.py.txt"
+
+ARGS = "--max-class=4", "--max-def=5", "--min-docstring=16"
 
 
 class TestDocstringLinter(LinterTestCase):
@@ -52,7 +59,7 @@ class TestDocstringLinter(LinterTestCase):
             grandfather_file = f"{td}/grandfather.json"
             grandfather = f"--grandfather={grandfather_file}"
 
-            # Find some faiures
+            # Find some failures
             run("before.txt", grandfather)
 
             # Rewrite grandfather file
@@ -63,6 +70,39 @@ class TestDocstringLinter(LinterTestCase):
             # Now there are no failures
             run("after.txt", grandfather)
             run("after.json", grandfather, report)
+
+    def test_interface(self):
+        pf = PythonFile("test", path=TEST_FILE2)
+
+        b = pf.blocks[0]
+        self.assertEqual(b.full_name, "a_very_very_long")
+        self.assertEqual(b.start_line, 1)
+        self.assertEqual(b.end_line, 6)
+        self.assertEqual(b.tokens[b.end].type, token.NAME)
+        self.assertEqual(b.tokens[b.end].string, "pass")
+
+        b = pf.blocks[5]
+        self.assertEqual(b.full_name, "LintInitInit")
+        self.assertEqual(b.start_line, 26)
+        self.assertEqual(b.end_line, 32)
+        self.assertEqual(b.tokens[b.end].string, "pass")
+
+        actual = [b.full_name for b in pf.blocks]
+        expected = [
+            "a_very_very_long",
+            "LintInit",
+            "LintInit.__init__",
+            "LintInitClass",
+            "LintInitClass.__init__",
+            "LintInitInit",
+            "LintInitInit.__init__",
+            "f1",
+            "f2",
+            "TinyInterface",
+            "TinyInterface.__init__",
+        ]
+
+        self.assertEqual(expected, actual)
 
     def test_report(self):
         actual = _dumps(_data())
@@ -119,13 +159,26 @@ class TestDocstringLinter(LinterTestCase):
         ]
         self.assertEqual(actual, expected)
 
+    def test_decorators(self):
+        tests = itertools.product(INDENTS, DECORATORS.items())
+        for indent, (name, (expected, test_inputs)) in tests:
+            ind = indent * " "
+            for data in test_inputs:
+                prog = "".join(ind + d + "\n" for d in data)
+                pf = DocstringLinter.make_file(prog)
+                it = (i for i, t in enumerate(pf.tokens) if t.string == "def")
+                def_t = next(it, 0)
+                with self.subTest("Decorator", indent=indent, name=name, data=data):
+                    actual = list(_get_decorators(pf.tokens, def_t))
+                    self.assertEqual(actual, expected)
+
 
 def _dumps(d: dict) -> str:
     return json.dumps(d, sort_keys=True, indent=2) + "\n"
 
 
-def _data():
-    docstring_file = DocstringLinter.make_file(TEST_FILE)
+def _data(file=TEST_FILE):
+    docstring_file = DocstringLinter.make_file(file)
     return [b.as_data() for b in docstring_file.blocks]
 
 
@@ -135,3 +188,54 @@ def _next_stdout(mock_stdout):
         s = mock_stdout.getvalue()
         yield s[length:]
         length = len(s)
+
+
+CONSTANT = "A = 10"
+COMMENT = "# a simple function"
+OVER = "@override"
+WRAPS = "@functools.wraps(fn)"
+MASSIVE = (
+    "@some.long.path.very_long_function_name(",
+    "    adjust_something_fiddly=1231232,",
+    "    disable_something_critical=True,)",
+)
+MASSIVE_FLAT = (
+    "@some.long.path.very_long_function_name("
+    "adjust_something_fiddly=1231232,"
+    "disable_something_critical=True,)"
+)
+DEF = "def function():", "    pass"
+
+INDENTS = 0, 4, 8
+DECORATORS = {
+    "none": (
+        [],
+        (
+            [],
+            [*DEF],
+            [COMMENT, *DEF],
+            [CONSTANT, "", COMMENT, *DEF],
+            [OVER, CONSTANT, *DEF],  # Probably not even Python. :-)
+        ),
+    ),
+    "one": (
+        [OVER],
+        (
+            [OVER, *DEF],
+            [OVER, COMMENT, *DEF],
+            [OVER, COMMENT, "", *DEF],
+            [COMMENT, OVER, "", COMMENT, "", *DEF],
+        ),
+    ),
+    "two": (
+        [OVER, WRAPS],
+        (
+            [OVER, WRAPS, *DEF],
+            [COMMENT, OVER, COMMENT, WRAPS, COMMENT, *DEF],
+        ),
+    ),
+    "massive": (
+        [MASSIVE_FLAT, OVER],
+        ([*MASSIVE, OVER, *DEF],),
+    ),
+}

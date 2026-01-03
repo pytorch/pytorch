@@ -4,10 +4,11 @@ import copy
 import logging
 import operator
 from collections import defaultdict
+from collections.abc import Callable
 from enum import Enum
 from inspect import Parameter, Signature, signature
 from types import MethodType
-from typing import Any, Callable, Optional, Union
+from typing import Any, Union
 
 import torch
 import torch.fx as fx
@@ -33,6 +34,16 @@ logger = logging.getLogger(__name__)
 # TODO:
 # 1. investigate gradient sync for shared parameters. how does DDP do it?
 # 2. Add parameter movement to split_module
+
+
+PP_SUBMOD_PREFIX = "submod_pp"
+
+
+def get_submod_name(stage_idx: int):
+    """Returns the name of the submod for a given stage index.
+    For example, "submod_pp_0", "submod_pp_1", etc.
+    """
+    return "_".join([PP_SUBMOD_PREFIX, str(stage_idx)])
 
 
 def _find_loss_from_output_and_spec(output_val, spec_val):
@@ -84,7 +95,8 @@ def _find_loss_from_output_and_spec(output_val, spec_val):
 
 def _find_loss_output(mod: torch.nn.Module, g: fx.Graph, output_loss_value_spec):
     output_nodes = [n for n in g.nodes if n.op == "output"]
-    assert len(output_nodes) == 1
+    if not len(output_nodes) == 1:
+        raise AssertionError(f"Expected 1 output node, got {len(output_nodes)}")
     output_node = output_nodes[0]
     output_val = output_node.args[0]
     generated_spec: Any = None
@@ -92,12 +104,13 @@ def _find_loss_output(mod: torch.nn.Module, g: fx.Graph, output_loss_value_spec)
     if isinstance(mod, TrivialLossWrapper):
         # TrivialLossWrapper is pre-defined by PiPPy.
         # It has loss as the only output so we can safely assume the first output arg is the loss.
-        assert len(output_node.args) == 1
+        if not len(output_node.args) == 1:
+            raise AssertionError(f"Expected 1 output arg, got {len(output_node.args)}")
         loss_node = output_val
         generated_spec = TrivialLossWrapper.loss_spec
     elif output_loss_value_spec is None:
         # Use default spec, i.e. search for "loss" in output values
-        if isinstance(output_val, dict) and "loss" in output_val.keys():
+        if isinstance(output_val, dict) and "loss" in output_val:
             loss_node = output_val["loss"]
             generated_spec = {k: k == "loss" for k in output_val}
         else:
@@ -122,12 +135,14 @@ def _insert_stage_symbolic_backward(
             # In the forward pass, only emit placeholder, module calls, and
             # getitem calls. If we have a target other than getitem in this
             # (forward-only) code, there is a bug.
-            assert node.target == operator.getitem, (
-                "Found non-getitem call in forward pass. Please report a bug to PiPPy"
-            )
-            assert len(node.args) == 2, (
-                "Found malformed getitem call. Please report a bug to PiPPy"
-            )
+            if not node.target == operator.getitem:
+                raise AssertionError(
+                    "Found non-getitem call in forward pass. Please report a bug to PiPPy"
+                )
+            if not len(node.args) == 2:
+                raise AssertionError(
+                    "Found malformed getitem call. Please report a bug to PiPPy"
+                )
             indexed_value, node_idx = tuple(node.args)
 
             # indexed_value is a collection that we are indexing into. It could
@@ -154,7 +169,7 @@ def _insert_stage_symbolic_backward(
     # We will only emit backward operations for nodes that can contribute
     # to the specified loss value.
     live_nodes = {loss_node: None}
-    val_to_grad: dict[fx.Node, Optional[fx.Node]] = {loss_node: None}
+    val_to_grad: dict[fx.Node, fx.Node | None] = {loss_node: None}
 
     def assign_or_accumulate_grad(forward_node, grad_value):
         if forward_node in val_to_grad and forward_node.op != "placeholder":
@@ -175,10 +190,10 @@ def _insert_stage_symbolic_backward(
             fx.node.map_arg(node.args, add_to_live_nodes)
             fx.node.map_arg(node.kwargs, add_to_live_nodes)
             if node.op == "call_module":
-                output_grads: Union[tuple[Optional[fx.Node], ...], Optional[fx.Node]]
+                output_grads: tuple[fx.Node | None, ...] | fx.Node | None
                 if node in tuples:
                     stage_output = tuples[node]
-                    output_grads = tuple(val_to_grad.get(n, None) for n in tuples[node])
+                    output_grads = tuple(val_to_grad.get(n) for n in tuples[node])
                     outputs_with_grads_idxs = [
                         i for i, n in enumerate(tuples[node]) if n in live_nodes
                     ]
@@ -271,6 +286,7 @@ class LossWrapper(torch.nn.Module):
 
 
 class TrivialLossWrapper(LossWrapper):
+    # pyrefly: ignore [bad-override]
     def forward(self, x, targets):
         model_out = self.module(x)
         return self.loss_fn(model_out, targets)
@@ -379,7 +395,7 @@ class DetachExecutor(fx.Interpreter):
 
         """
         def dont_traverse_size(a):
-            return type(a) != torch.Size
+            return type(a) is not torch.Size
         """
 
         args = map_aggregate(
@@ -395,7 +411,7 @@ class DetachExecutor(fx.Interpreter):
 
     def call_function(self, target, args, kwargs):
         # HACK to reroute saved input tensors to point to the detach()ed version
-        if target == stage_backward:
+        if target is stage_backward:
             kwargs = dict(kwargs)
             kwargs["input_values"] = [
                 self.value_remap.get(v, v) for v in kwargs["input_values"]
@@ -538,14 +554,15 @@ class Pipe(torch.nn.Module):
         self.loss_spec = loss_spec
 
         for node in split_gm.graph.nodes:
-            assert (
+            if not (
                 node.op in {"call_module", "placeholder", "output"}
                 or (node.op, node.target) == ("call_function", operator.getitem)
                 or (node.op, node.target) == ("call_method", "backward")
                 or (node.op, node.target) == ("call_function", stage_backward)
                 or (node.op, node.target)
                 == ("call_function", _null_coalesce_accumulate)
-            ), node
+            ):
+                raise AssertionError(f"Unexpected node: {node}")
 
         # Detect replicated parameters so we know that we have to do an additional allreduce
         # before applying the optimizer
@@ -593,7 +610,7 @@ class Pipe(torch.nn.Module):
         i = 0
         while True:
             try:
-                name = f"submod_{i}"
+                name = get_submod_name(i)
                 submod = getattr(self.split_gm, name)
                 submod.__class__.__reduce__ = _direct_serialization_reduce
                 i += 1
@@ -639,15 +656,17 @@ class Pipe(torch.nn.Module):
         """
         if stage_idx < 0 or stage_idx >= self.num_stages:
             raise ValueError(f"Invalid stage index {stage_idx}!")
-        return getattr(self.split_gm, f"submod_{stage_idx}")
+
+        submod_name = get_submod_name(stage_idx)
+        return getattr(self.split_gm, submod_name)
 
     @staticmethod
     def _number_and_count_forward_stages(gm: fx.GraphModule):
         num_stages = 0
         found_idxs: dict[int, None] = {}
         for node in gm.graph.nodes:
-            if node.op == "call_module" and node.target.startswith("submod_"):
-                node.meta["stage_idx"] = int(node.target[len("submod_") :])
+            if node.op == "call_module" and node.target.startswith(PP_SUBMOD_PREFIX):
+                node.meta["stage_idx"] = int(node.target[len(PP_SUBMOD_PREFIX) + 1 :])
                 found_idxs.setdefault(node.meta["stage_idx"])
                 num_stages += 1
 
@@ -666,11 +685,10 @@ class Pipe(torch.nn.Module):
     def _from_traced(
         mod: torch.nn.Module,
         exported_program: ExportedProgram,
-        multi_use_param_spec: Optional[MultiUseParamSpec] = None,
+        multi_use_param_spec: MultiUseParamSpec | None = None,
         output_loss_value_spec=None,
-        split_policy: Optional[
-            Callable[[torch.fx.GraphModule], torch.fx.GraphModule]
-        ] = None,
+        split_policy: Callable[[torch.fx.GraphModule], torch.fx.GraphModule]
+        | None = None,
     ):
         """
         Additionally, the ``output_loss_value_spec`` value can be specified to disambiguate
@@ -681,7 +699,7 @@ class Pipe(torch.nn.Module):
         ``output_loss_value_spec={'loss': True, 'model_out': False}``
         """
 
-        traced = exported_program.module()
+        traced = exported_program.module(check_guards=False)
 
         if split_policy is not None:
             logger.info("Auto-splitting model")
@@ -729,7 +747,7 @@ class Pipe(torch.nn.Module):
 
         # TODO: what does split do with module invocations? does it move the modules
         # into the submodules?
-        split = split_module(traced, mod, split_callback)  # type: ignore[arg-type]
+        split = split_module(traced, mod, split_callback, partition_affix="pp")  # type: ignore[arg-type]
         # a (custom) tracer can produce dead code like orphan get_attr nodes
         split.graph.eliminate_dead_code()
 
@@ -758,9 +776,13 @@ class Pipe(torch.nn.Module):
                 - node: a `get_attr` node at root.
                 - user: a submodule node that uses `node`.
             """
-            assert len(user.kwargs) == 0
+            if not len(user.kwargs) == 0:
+                raise AssertionError(
+                    f"Expected user.kwargs to be empty, got {len(user.kwargs)}"
+                )
             use_idxs = [i for i, arg in enumerate(user.args) if arg == node]
-            assert len(use_idxs) == 1
+            if not len(use_idxs) == 1:
+                raise AssertionError(f"Expected 1 use index, got {len(use_idxs)}")
             args_copy = list(user.args)
             args_copy.pop(use_idxs[0])
             user.args = tuple(args_copy)
@@ -804,22 +826,24 @@ class Pipe(torch.nn.Module):
             is_buffer = atoms[-1] in mod_itr._buffers
 
             # Check whether the parameter is a tensor
-            assert isinstance(param_val, torch.Tensor), (
-                f"Expected '{param_fqn}' to be {torch.Tensor} but got {type(param_val)}."
-                + (
-                    f" It might happen if module '{param_fqn}' was passed to some 'leaf function'"
-                    f"(see https://pytorch.org/docs/stable/fx.html#fx.wrap). Please inspect "
-                    f"usages of '{param_fqn}' in the traced graph."
-                    if isinstance(param_val, torch.nn.Module)
-                    else ""
+            if not isinstance(param_val, torch.Tensor):
+                raise AssertionError(
+                    f"Expected '{param_fqn}' to be {torch.Tensor} but got {type(param_val)}."
+                    + (
+                        f" It might happen if module '{param_fqn}' was passed to some 'leaf function'"
+                        f"(see https://pytorch.org/docs/stable/fx.html#fx.wrap). Please inspect "
+                        f"usages of '{param_fqn}' in the traced graph."
+                        if isinstance(param_val, torch.nn.Module)
+                        else ""
+                    )
                 )
-            )
 
             # Get submodule
             callee = root.get_submodule(callee_name)
-            assert not hasattr(callee, param_fqn), (
-                f"Module {callee_name} already has a parameter named {param_fqn}"
-            )
+            if hasattr(callee, param_fqn):
+                raise AssertionError(
+                    f"Module {callee_name} already has a parameter named {param_fqn}"
+                )
 
             # Assign the parameter to the submodule
             if is_buffer:
@@ -857,7 +881,10 @@ class Pipe(torch.nn.Module):
                     f"Parameter {node.target} used in multiple stages: {node.users}."  # noqa: G004
                 )
             for user in node.users:
-                assert user.op == "call_module"
+                if not user.op == "call_module":
+                    raise AssertionError(
+                        f"Expected user.op to be 'call_module', got {user.op}"
+                    )
                 # Move parameter into submodule
                 move_param_to_callee(
                     split,
@@ -910,7 +937,7 @@ class Pipe(torch.nn.Module):
                 pass
 
         # This is done by (1) `_sink_params` at each submodule;
-        for name, submod in split.named_children():
+        for submod in split.children():
             if isinstance(submod, fx.GraphModule):
                 _sink_params(submod, inputs_to_state, [])
                 submod.graph.lint()
@@ -944,7 +971,10 @@ class Pipe(torch.nn.Module):
         for node in attr_nodes:
             # And (2): remove `get_attr` node from submod's arg list
             for user in copy.copy(node.users):
-                assert user.op == "call_module"
+                if not user.op == "call_module":
+                    raise AssertionError(
+                        f"Expected user.op to be 'call_module', got {user.op}"
+                    )
                 delete_user_reference(node, user)
             # And (3): remove the `get_attr` node from the root graph.
             split.graph.erase_node(node)
@@ -998,13 +1028,11 @@ class Pipe(torch.nn.Module):
     def _trace_with_export(
         mod: torch.nn.Module,
         example_args: tuple[Any, ...],
-        example_kwargs: Optional[dict[str, Any]] = None,
+        example_kwargs: dict[str, Any] | None = None,
     ) -> ExportedProgram:
         logger.info("Tracing model ...")
         try:
-            ep = torch.export.export_for_training(
-                mod, example_args, example_kwargs, strict=True
-            )
+            ep = torch.export.export(mod, example_args, example_kwargs)
         except Exception as e:
             raise RuntimeError(
                 "It seems that we cannot capture your model as a full graph. "
@@ -1020,8 +1048,8 @@ class Pipe(torch.nn.Module):
     def from_tracing(
         mod: torch.nn.Module,
         example_args: tuple[Any, ...],
-        example_kwargs: Optional[dict[str, Any]] = None,
-        split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
+        example_kwargs: dict[str, Any] | None = None,
+        split_policy: Callable[[fx.GraphModule], fx.GraphModule] | None = None,
     ):
         # If a param will be used in multiple pipeline stages, we default the strategy to REPLICATE'ing the param across
         # stages instead of TRANSMIT'ting it
@@ -1108,7 +1136,7 @@ class Pipe(torch.nn.Module):
         self,
         stage_index: int,
         device: torch.device,
-        group: Optional[ProcessGroup] = None,
+        group: ProcessGroup | None = None,
     ) -> _PipelineStage:
         """
         Create a `PipelineStage` given a stage index and distributed group.
@@ -1197,9 +1225,9 @@ def annotate_split_points(mod: torch.nn.Module, spec: dict[str, SplitPoint]):
 def pipeline(
     module: torch.nn.Module,
     mb_args: tuple[Any, ...],
-    mb_kwargs: Optional[dict[str, Any]] = None,
-    split_spec: Optional[dict[str, SplitPoint]] = None,
-    split_policy: Optional[Callable[[fx.GraphModule], fx.GraphModule]] = None,
+    mb_kwargs: dict[str, Any] | None = None,
+    split_spec: dict[str, SplitPoint] | None = None,
+    split_policy: Callable[[fx.GraphModule], fx.GraphModule] | None = None,
 ) -> Pipe:
     """
     Split a module based on a specification.
@@ -1209,7 +1237,7 @@ def pipeline(
     Arguments
     ---------
     module:
-        The module to be splitted.
+        The module to be split.
     mb_args:
         Example positional inputs, in micro-batch form.
     mb_kwargs:

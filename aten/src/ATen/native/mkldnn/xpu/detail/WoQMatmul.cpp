@@ -1,6 +1,7 @@
 #include <c10/xpu/XPUFunctions.h>
 
 #include <ATen/native/mkldnn/xpu/detail/Attr.h>
+#include <ATen/native/mkldnn/xpu/detail/DnnlExt.h>
 #include <ATen/native/mkldnn/xpu/detail/Utils.h>
 
 #include <oneapi/dnnl/dnnl.hpp>
@@ -8,22 +9,13 @@
 
 namespace at::native::onednn {
 
-void woq_matmul_int4(
-    Tensor& result, // torchao: [M, K], dtype: fp16,bf16
-    const Tensor& mat1_, // torchao: [M, K], dtype: fp16,bf16
-    const Tensor& mat2_, // torchao quantized weight, [K/8, N], dtype: uint4x8
-    const Tensor& scale, // torchao: [K/group_size, N], dtype: fp16,bf16
-    const Tensor& zp, // torchao: [K/group_size, N], dtype: int8
+void woq_matmul_int4_impl(
+    Tensor& result,
+    const Tensor& mat1_,
+    const Tensor& mat2_,
+    const Tensor& scale,
+    const Tensor& zp,
     int64_t group_size) {
-  size_t dims = result.dim();
-  TORCH_CHECK(
-      dims == 2, "INT4 matmul at XPU only works with 2D input, got ", dims);
-  TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
-
-  at::Device cur_device = at::Device(at::kXPU, at::xpu::current_device());
-  TORCH_CHECK(
-      cur_device == mat1_.device(),
-      "_weight_int4pack_mm_with_scales_and_zeros input should be on current device.");
   auto& engine = GpuEngineManager::Instance().get_engine();
   auto& stream = GpuStreamManager::Instance().get_stream();
 
@@ -49,7 +41,7 @@ void woq_matmul_int4(
       dst_usr_dims;
   dnnl::memory::dims m1_usr_strides, m2_usr_strides, scale_usr_strides,
       zp_usr_strides, dst_usr_strides;
-  int compressed_k = (int)(k / 8);
+  int compressed_k = k / 8;
   int num_groups = (int)(k / group_size);
   m1_usr_dims = {m, k};
   m1_usr_strides = {m1.stride(0), m1.stride(1)};
@@ -164,7 +156,7 @@ void woq_matmul_int4(
 
   int scratchpad_size = matmul_pd.scratchpad_desc().get_size();
   Tensor scratchpad_tensor =
-      at::empty({scratchpad_size}, m1.options().dtype(at::kByte), c10::nullopt);
+      at::empty({scratchpad_size}, m1.options().dtype(at::kByte), std::nullopt);
   auto scratchpad_memory = make_onednn_memory(
       matmul_pd.scratchpad_desc(), engine, scratchpad_tensor.data_ptr());
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad_memory});
@@ -176,4 +168,162 @@ void woq_matmul_int4(
   args.insert({DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS, zp_usr_m});
   dnnl::sycl_interop::execute(matmul_p, stream, args);
 }
+
+static inline void set_quant_primitive_attr(
+    primitive_attr& pattr,
+    const Tensor& scale,
+    const Tensor& zp,
+    const int64_t group_size) {
+  // set scale and zero point for matmul args
+  pattr.set_scales(
+      DNNL_ARG_WEIGHTS,
+      /* mask */ (1 << 0) + (1 << 1),
+      {group_size, 1},
+      get_onednn_dtype(scale));
+  pattr.set_zero_points(
+      DNNL_ARG_WEIGHTS,
+      /* mask */ (1 << 0) + (1 << 1),
+      {group_size, 1},
+      memory::data_type::s8);
+}
+
+void woq_matmul_int4_impl_cache(
+    Tensor& result,
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& scale,
+    const Tensor& zp,
+    int64_t group_size) {
+  auto a_sz = mat1.sizes();
+  auto c_sz = result.sizes();
+
+  const int m =
+      std::reduce(a_sz.begin(), a_sz.end() - 1, 1, std::multiplies<int64_t>());
+  const int n = *(c_sz.end() - 1);
+  const int k = *(a_sz.end() - 1);
+
+  const int64_t ldb = mat2.strides()[mat2.dim() - 2] * 8; // for int4 matmul
+  const int64_t lda = mat1.strides()[mat1.dim() - 2];
+  const int64_t ldc = result.strides()[result.dim() - 2];
+
+  bias_type_t b_type = bias_type_t::none;
+  trans_type_t tt = trans_type_t::nt; // only support nt for int4 matmul
+
+  joint_dtypes_t jd;
+  if (mat1.scalar_type() == at::ScalarType::Half) {
+    jd = joint_dtypes_t::f16_int4;
+  } else if (mat1.scalar_type() == at::ScalarType::BFloat16) {
+    jd = joint_dtypes_t::bf16_int4;
+  } else {
+    TORCH_INTERNAL_ASSERT(
+        false, "Unsupported data type for int4 matmul: ", mat1.scalar_type());
+  }
+
+  auto f_attr = [&](primitive_attr& pattr) {
+    pattr.set_scratchpad_mode(dnnl::scratchpad_mode::user);
+
+    if (jd == joint_dtypes_t::f16_int4) {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::f16, true);
+    } else if (jd == joint_dtypes_t::bf16_int4) {
+      pattr.set_fpmath_mode(dnnl::fpmath_mode::bf16, true);
+    }
+
+    set_quant_primitive_attr(pattr, scale, zp, group_size);
+
+#if ONEDNN_SUPPORT_DETERMINISTIC
+    if (at::globalContext().deterministicAlgorithms() ||
+        at::globalContext().deterministicMkldnn()) {
+      pattr.set_deterministic(true);
+    }
+#endif
+  };
+
+  int64_t zp_group_size = group_size;
+  auto device_id = c10::xpu::current_device();
+  auto& matmul_ext = matmul_primitive_create_and_cache(
+      jd,
+      tt,
+      b_type,
+      m,
+      n,
+      k,
+      lda,
+      ldb,
+      ldc,
+      device_id,
+      f_attr,
+      group_size,
+      zp_group_size);
+
+  auto& engine = GpuEngineManager::Instance().get_engine();
+
+  int arg_off = 0;
+  // set scale and zero point for matmul args
+  matmul_ext.set_attribute(
+      arg_off++,
+      DNNL_ARG_ATTR_SCALES | DNNL_ARG_WEIGHTS,
+      scale.data_ptr(),
+      [&]() {
+        return make_onednn_memory(
+            get_onednn_md(scale), engine, scale.data_ptr());
+      });
+
+  // set zp_md for asymmetric quantization
+  matmul_ext.set_attribute(
+      arg_off++,
+      DNNL_ARG_ATTR_ZERO_POINTS | DNNL_ARG_WEIGHTS,
+      zp.data_ptr(),
+      [&]() {
+        int num_groups = k / group_size;
+        memory zp_usr_m(
+            {{num_groups, n}, memory::data_type::s8, {n, 1}},
+            engine,
+            zp.data_ptr());
+        return zp_usr_m;
+      });
+
+  // set general args
+  std::vector<std::pair<int, void*>> arg_handles;
+  arg_handles.reserve(8);
+
+  arg_handles.emplace_back(DNNL_ARG_SRC, mat1.data_ptr());
+  arg_handles.emplace_back(DNNL_ARG_WEIGHTS, mat2.data_ptr());
+  arg_handles.emplace_back(DNNL_ARG_DST, result.data_ptr());
+
+  int scratchpad_size = matmul_ext.get_scratchpad_size();
+  Tensor scratchpad_tensor = at::empty(
+      {scratchpad_size}, mat1.options().dtype(at::kByte), std::nullopt);
+  arg_handles.emplace_back(DNNL_ARG_SCRATCHPAD, scratchpad_tensor.data_ptr());
+
+  auto& strm = GpuStreamManager::Instance().get_stream();
+  auto qint4_matmul_event =
+      matmul_ext.execute(strm, engine, std::move(arg_handles), arg_off);
+}
+
+void woq_matmul_int4(
+    Tensor& result, // torchao: [M, K], dtype: fp16,bf16
+    const Tensor& mat1_, // torchao: [M, K], dtype: fp16,bf16
+    const Tensor& mat2_, // torchao quantized weight, [K/8, N], dtype: uint4x8
+    const Tensor& scale, // torchao: [K/group_size, N], dtype: fp16,bf16
+    const Tensor& zp, // torchao: [K/group_size, N], dtype: int8
+    int64_t group_size,
+    bool pri_cache) {
+  size_t dims = result.dim();
+  TORCH_CHECK(
+      dims == 2, "INT4 matmul at XPU only works with 2D input, got ", dims);
+  TORCH_CHECK(result.defined(), "oneDNN matmul result should be defined");
+
+  const int device_id = c10::xpu::current_device();
+  at::Device cur_device = at::Device(at::kXPU, device_id);
+  TORCH_CHECK(
+      cur_device == mat1_.device(),
+      "_weight_int4pack_mm_with_scales_and_zeros input should be on current device.");
+
+  if (pri_cache) {
+    woq_matmul_int4_impl_cache(result, mat1_, mat2_, scale, zp, group_size);
+  } else {
+    woq_matmul_int4_impl(result, mat1_, mat2_, scale, zp, group_size);
+  }
+}
+
 } // namespace at::native::onednn

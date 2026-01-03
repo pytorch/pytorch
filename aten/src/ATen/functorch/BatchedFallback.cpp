@@ -6,7 +6,6 @@
 
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/LegacyVmapTransforms.h>
-#include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/PlumbingHelper.h>
 
@@ -191,7 +190,7 @@ static void batchedTensorInplaceForLoopFallback(const c10::OperatorHandle& op, t
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
       if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
-          || (int64_t)arg_idx != *batched_tensor_inputs_pos_iter) {
+          || static_cast<int64_t>(arg_idx) != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
         torch::jit::push(stack, argument);
         continue;
@@ -224,7 +223,7 @@ static Tensor safeStack(TensorList tensors) {
   // is possible for the backward function to return an undefined grad for some
   // grad_input for each example. In that case, we return an undefined grad.
   //
-  // It is theoretically posssible for *some* of the examples to produce an
+  // It is theoretically possible for *some* of the examples to produce an
   // undefined grad (a kernel could peek at the gradient values and return an
   // undefined tensor if it determines the gradient is full of zeros). We
   // could handle this by treating the undefined grad as a zero-filled tensor
@@ -345,7 +344,7 @@ void batchedTensorForLoopFallback(const c10::OperatorHandle& op, torch::jit::Sta
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
       if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
-          || (int64_t)arg_idx != *batched_tensor_inputs_pos_iter) {
+          || static_cast<int64_t>(arg_idx) != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
         torch::jit::push(stack, argument);
         continue;
@@ -473,7 +472,7 @@ void batchedNestedTensorForLoopFallback(const c10::OperatorHandle& op, torch::ji
       // simplicity. When that is not the case, this code should be updated.
       const auto& argument = (*stack)[arguments_begin + arg_idx];
       if (batched_tensor_inputs_pos_iter == batched_tensor_inputs_position.end()
-          || (int64_t)arg_idx != *batched_tensor_inputs_pos_iter) {
+          || static_cast<int64_t>(arg_idx) != *batched_tensor_inputs_pos_iter) {
         // argument isn't a BatchedTensor
         torch::jit::push(stack, argument);
         continue;

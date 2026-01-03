@@ -78,6 +78,9 @@ struct TORCH_API MPSHooksInterface : AcceleratorHooksInterface {
   virtual uint32_t acquireEvent(bool enable_timing) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }
+  Device getDeviceFromPtr(void* data) const override {
+    TORCH_CHECK(false, "Cannot get device of pointer on MPS without ATen_mps library. ");
+  }
   virtual void releaseEvent(uint32_t event_id) const {
     FAIL_MPSHOOKS_FUNC(__func__);
   }

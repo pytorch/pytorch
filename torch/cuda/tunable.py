@@ -124,11 +124,11 @@ Workflow
 There are basically two steps:
 1) Set the environment variables to collect the untuned GEMM and this will generate ``tunableop_untuned0.csv``:
 
-.. code-block:: python
+.. code-block:: bash
 
-   PYTORCH_TUNABLEOP_ENABLED=1
-   PYTORCH_TUNABLEOP_TUNING=0
-   PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
+   export PYTORCH_TUNABLEOP_ENABLED=1
+   export PYTORCH_TUNABLEOP_TUNING=0
+   export PYTORCH_TUNABLEOP_RECORD_UNTUNED=1
    ...
 
 2) Run a Python script that reads the ``tunableop_untuned0.csv`` and generates the ``tunableop_results0.csv``, like this:
@@ -138,9 +138,9 @@ There are basically two steps:
    import torch.cuda.tunable as tunable
    import os
 
-   os.putenv('PYTORCH_TUNABLEOP_ENABLED', '1')
-   os.putenv('PYTORCH_TUNABLEOP_TUNING', '1')
-   os.putenv('PYTORCH_TUNABLEOP_RECORD_UNTUNED', '0')
+   os.putenv("PYTORCH_TUNABLEOP_ENABLED", "1")
+   os.putenv("PYTORCH_TUNABLEOP_TUNING", "1")
+   os.putenv("PYTORCH_TUNABLEOP_RECORD_UNTUNED", "0")
    tunable.tune_gemm_in_file("tunableop_untuned0.csv")
 
 
@@ -155,7 +155,7 @@ configuration on N GPUs.
 .. code-block:: python
 
    if __name__ == "__main__":
-       num_gpus = 8 # number of GPUs that will be used during the tuning process
+       num_gpus = 8  # number of GPUs that will be used during the tuning process
        tunable.mgpu_tune_gemm_in_file("tunableop_untuned?.csv", num_gpus)
 
 Note that the usage of the ``mgpu_tune_gemm_in_file`` API is different from its single GPU counterpart
@@ -179,13 +179,13 @@ environment variable interface programmatically since the settings become fixed.
 Use the C++ or Python APIs instead.
 
 """
+
 import concurrent.futures
 import glob
 import multiprocessing as mp
 import os
 import shutil
 import warnings
-from typing import Optional
 
 import torch
 
@@ -205,13 +205,12 @@ __all__ = [
     "get_filename",
     "get_results",
     "get_validators",
-    "write_file_on_exit",
-    "write_file",
     "read_file",
     "tune_gemm_in_file",
     "mgpu_tune_gemm_in_file",
     "set_rotating_buffer_size",
     "get_rotating_buffer_size",
+    "set_numerical_check_tolerances",
 ]
 
 
@@ -285,7 +284,7 @@ def set_filename(filename: str, insert_device_ordinal: bool = False) -> None:
 
     If :attr:`insert_device_ordinal` is ``True`` then the current device ordinal
     will be added to the given filename automatically. This can be used in a
-    1-process-per-gpu cenario to ensure all processes write to a separate file.
+    1-process-per-gpu scenario to ensure all processes write to a separate file.
     """
     torch._C._cuda_tunableop_set_filename(filename, insert_device_ordinal)  # type: ignore[attr-defined]
 
@@ -305,26 +304,7 @@ def get_validators() -> tuple[str, str]:
     return torch._C._cuda_tunableop_get_validators()  # type: ignore[attr-defined]
 
 
-def write_file_on_exit(val: bool) -> None:
-    r"""During Tuning Context destruction, write file to disk.
-
-    This is useful as a final flush of your results to disk if your application
-    terminates as result of normal operation or an error. Manual flushing of
-    your results can be achieved by manually calling ``write_file()``."""
-    torch._C._cuda_tunableop_write_file_on_exit(val)  # type: ignore[attr-defined]
-
-
-def write_file(filename: Optional[str] = None) -> bool:
-    r"""Write results to a CSV file.
-
-    If :attr:`filename` is not given, ``get_filename()`` is called.
-    """
-    if filename is None:
-        filename = get_filename()
-    return torch._C._cuda_tunableop_write_file(filename)  # type: ignore[attr-defined]
-
-
-def read_file(filename: Optional[str] = None) -> bool:
+def read_file(filename: str | None = None) -> bool:
     r"""Read results from a TunableOp CSV file.
 
     If :attr:`filename` is not given, ``get_filename()`` is called.
@@ -345,6 +325,13 @@ def set_rotating_buffer_size(buffer_size: int) -> None:
 def get_rotating_buffer_size() -> int:
     r"""Get the rotating buffer size in kilobytes."""
     return torch._C._cuda_tunableop_get_rotating_buffer_size()  # type: ignore[attr-defined]
+
+
+def set_numerical_check_tolerances(
+    enable: bool, atol: float = 1e-5, rtol: float = 1e-5
+) -> None:
+    r"""Set the atol and rtol values in numeric check"""
+    return torch._C._cuda_tunableop_set_numerical_check_tolerances(enable, atol, rtol)  # type: ignore[attr-defined]
 
 
 def tune_gemm_in_file(filename: str) -> None:
@@ -448,7 +435,7 @@ def _create_matrices(
     transB: bool,
     dtypeA: torch.dtype,
     deviceid: str,
-    dtypeB: Optional[torch.dtype] = None,
+    dtypeB: torch.dtype | None = None,
     randn: bool = True,
     subMatrix: bool = False,
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -590,7 +577,6 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         transA = layout[1] == "T"
         dtype = dtype_dict.get(data_type)
         if data_type == "tf32":
-            # User must still set HIPBLASLT_ALLOW_TF32=1
             torch.backends.cuda.matmul.allow_tf32 = True
         else:
             torch.backends.cuda.matmul.allow_tf32 = False
@@ -600,7 +586,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         assert count in [6, 7]
         untuned_gemm_temp = untuned_gemm[0].split("_")
         # dtypeC = might not be FP8 type, keep track
-        # of the the number of underscores
+        # of the number of underscores
         op_sig = untuned_gemm_temp[0]
         data_typeA = untuned_gemm_temp[1] + "_" + untuned_gemm_temp[2]
         data_typeB = untuned_gemm_temp[3] + "_" + untuned_gemm_temp[4]
@@ -639,7 +625,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
             else:
                 warnings.warn(
                     "Offline tuning is not supported for this GEMM. Use online tuning instead. "
-                    + f"Skipped tuning for: {untuned_gemm[1]}"
+                    + f"Skipped tuning for: {untuned_gemm[1]}",
+                    stacklevel=2,
                 )
                 return
 
@@ -657,7 +644,8 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         if m == 1 or n == 1 or k == 1:
             warnings.warn(
                 "Offline tuning is not support for this GEMM. Use online tuning instead. "
-                + f"Skipped tuning for: {untuned_gemm[1]}"
+                + f"Skipped tuning for: {untuned_gemm[1]}",
+                stacklevel=2,
             )
             return
 
@@ -760,7 +748,7 @@ def _process_single_offline_gemm(untuned_gemm_line: str, gpu_id: int) -> None:
         matA = matA.t()
         torch.nn.functional.linear(X, matA, bias)
     else:
-        warnings.warn(f"error: unknown op {op_sig}")
+        warnings.warn(f"error: unknown op {op_sig}", stacklevel=2)
 
 
 def _check_tuning_assertions() -> None:
@@ -769,7 +757,7 @@ def _check_tuning_assertions() -> None:
     """
 
     if is_enabled() is False:
-        warnings.warn("TunableOp was disabled. Trying to enable now.")
+        warnings.warn("TunableOp was disabled. Trying to enable now.", stacklevel=2)
         enable(True)
     assert is_enabled() is True
     assert tuning_is_enabled() is True
@@ -787,7 +775,6 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
     mp_context = mp.get_context("spawn")
 
     futures = []  # empty list to hold futures
-    flush_results = []  # empty list to hold futures
 
     # GEMM are assigned to GPUs in a round robin manner
     h = 0
@@ -808,13 +795,6 @@ def mgpu_tune_gemm_in_file(filename_pattern: str, num_gpus: int) -> None:
 
         for future in concurrent.futures.as_completed(futures):
             future.result()
-
-        for g in range(num_gpus):
-            flush_result = executor.submit(write_file)
-            flush_results.append(flush_result)
-
-        for flush_result in concurrent.futures.as_completed(flush_results):
-            flush_result.result()
 
     torch.cuda.synchronize()
 

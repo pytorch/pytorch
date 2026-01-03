@@ -115,8 +115,7 @@ Tensor _cudnn_init_dropout_state(
 
 #include <ATen/native/cudnn/RNNUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 // DropoutDescriptor
@@ -216,7 +215,7 @@ struct RNNDescriptorParams {
       cudnnDataType_t datatype,
       cudnnDataType_t input_datatype) {
 #endif
-      this->set_mode(mode);
+      this -> set_mode(mode);
 #ifdef USE_CUDNN_RNN_V8_API
   this->input_size = input_size;
   this->packed = packed;
@@ -245,7 +244,7 @@ descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
       datatype,
       input_datatype,
       algo,
-      at::globalContext().allowTF32CuDNN());
+      at::globalContext().allowTF32CuDNN(at::Float32Op::RNN));
 #else
     rnn_desc.set(
         handle,
@@ -261,7 +260,7 @@ descriptor(cudnnHandle_t handle, DropoutDescriptor&& dropout_desc) const {
         datatype,
         input_datatype,
         algo,
-        at::globalContext().allowTF32CuDNN());
+        at::globalContext().allowTF32CuDNN(at::Float32Op::RNN));
 #endif
   return rnn_desc;
 }
@@ -432,8 +431,8 @@ struct TensorDescriptorListParams {
   // Only valid when !is_input_packed
   int64_t batch_sizes_sum; // == sum(batch_sizes)
 
-  bool is_input_packed() const {
-    return batch_sizes.size() != 0;
+  [[nodiscard]] bool is_input_packed() const {
+    return !batch_sizes.empty();
   }
 
   void set(
@@ -465,8 +464,7 @@ struct TensorDescriptorListParams {
 #ifndef USE_CUDNN_RNN_V8_API
   // TODO: check x for consistency with input_size?
   std::vector<TensorDescriptor> descriptors(Tensor x) const {
-    auto is_input_packed = batch_sizes.size() != 0;
-    if (is_input_packed) {
+    if (is_input_packed()) {
       return rnn_descriptor_sequence(x, batch_sizes);
     } else {
       return rnn_descriptor(x[0], seq_length);
@@ -474,8 +472,7 @@ struct TensorDescriptorListParams {
   }
 #else
   auto descriptors(Tensor x) const {
-    auto is_input_packed = batch_sizes.size() != 0;
-    if (is_input_packed) {
+    if (is_input_packed()) {
       return rnn_descriptor_sequence(
           x, mini_batch, batch_sizes, seq_length, x.size(-1));
     } else {
@@ -658,7 +655,8 @@ void add_projection_weights(
   TORCH_INTERNAL_ASSERT(
       nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
   auto elem_size = dataSize(getCudnnDataType(weight_buf));
-  auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
+  auto offset_bytes = static_cast<const char*>(matrix_pointer) -
+      static_cast<const char*>(weight_buf.data_ptr());
   TORCH_INTERNAL_ASSERT(
       offset_bytes % elem_size == 0,
       "offset_bytes = ",
@@ -796,8 +794,8 @@ get_parameters(
             "; min_dim  = ",
             min_dim);
         auto elem_size = dataSize(getCudnnDataType(weight_buf));
-        auto offset_bytes =
-            (char*)matrix_pointer - (char*)weight_buf.data_ptr();
+        auto offset_bytes = static_cast<const char*>(matrix_pointer) -
+            static_cast<const char*>(weight_buf.data_ptr());
         TORCH_INTERNAL_ASSERT(
             offset_bytes % elem_size == 0,
             "offset_bytes = ",
@@ -1224,7 +1222,7 @@ cudnnRNNAlgo_t get_algo(
 }
 
 cudnnDataType_t promote_rnn_math_type(cudnnDataType_t dtype) {
-  if (dtype == CUDNN_DATA_HALF) {
+  if (dtype == CUDNN_DATA_HALF || dtype == CUDNN_DATA_BFLOAT16) {
     return CUDNN_DATA_FLOAT;
   }
   return dtype;
@@ -1253,7 +1251,7 @@ int64_t _cudnn_rnn_flatten_weight_prologue(
   // typeMetaToScalarType is a surprisingly nontrivial function.  We should
   // avoid it if we can.
   TORCH_CHECK(
-      weight_arr.size() > 0,
+      !weight_arr.empty(),
       "copy_weights_to_flat_buf_views: cannot flatten empty weight list");
 
   rnn.set(
@@ -1285,7 +1283,7 @@ int64_t _cudnn_rnn_flatten_weight_prologue(
 #endif
 }
 
-} // namespace native
+} // namespace at::native
 
 // Utilities exposed in RNNUtils.h
 namespace cudnn_rnn {
@@ -1306,7 +1304,7 @@ copy_weights_to_flat_buf_views(
     bool set_orig_weights_to_flat_buf,
     bool allow_type_change /*=false*/,
     bool include_bias /*=true*/) {
-  TORCH_CHECK(weight_arr.size() > 0, "empty weight list");
+  TORCH_CHECK(!weight_arr.empty(), "empty weight list");
   auto handle = getCudnnHandle();
   RNNDescriptorParams rnn;
   RNNDescriptor rnn_desc;
@@ -1390,7 +1388,7 @@ Tensor _cudnn_rnn_flatten_weight(
     int64_t fn_num_layers,
     bool batch_first,
     bool fn_bidirectional) {
-  TORCH_CHECK(weight_arr.size() > 0, "empty weight list");
+  TORCH_CHECK(!weight_arr.empty(), "empty weight list");
   // returns flat weight_buf
   return std::get<0>(copy_weights_to_flat_buf_views(
       weight_arr,
@@ -1417,7 +1415,7 @@ Tensor _cudnn_rnn_flatten_weight_meta(
     int64_t num_layers,
     bool batch_first,
     bool bidirectional) {
-  TORCH_CHECK(weight_arr.size() > 0, "empty weight list");
+  TORCH_CHECK(!weight_arr.empty(), "empty weight list");
   auto handle = getCudnnHandle();
   RNNDescriptorParams rnn;
   RNNDescriptor rnn_desc;
@@ -1498,7 +1496,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
       datatype);
 #else
   auto input_size = input_r.size(-1);
-  auto packed = fn_batch_sizes.size() != 0;
+  auto packed = !fn_batch_sizes.empty();
   fn.rnn.set(
       fn_mode,
       input_size,
@@ -1520,7 +1518,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   }
 
   // TODO: can batch_first be a wrapper around this function?
-  auto is_input_packed = fn.tensors.batch_sizes.size() != 0;
+  auto is_input_packed = !fn.tensors.batch_sizes.empty();
   if (batch_first && !is_input_packed) {
     input = input.transpose(0, 1);
   }
@@ -1680,7 +1678,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
         CUDNN_FWD_MODE_INFERENCE,
         x_descs_arr.desc(),
         &workspace_size,
-        NULL));
+        nullptr));
 #endif
     workspace = at::empty(workspace_size, input.options().dtype(kByte));
     reserve = at::empty({0}, input.options().dtype(kByte));
@@ -1775,7 +1773,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
       datatype);
 #else
   auto cudnn_input_size = input_r.size(-1);
-  auto packed = fn_batch_sizes.size() != 0;
+  auto packed = !fn_batch_sizes.empty();
   fn.rnn.set(
       fn_mode,
       cudnn_input_size,
@@ -1797,7 +1795,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
     TORCH_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
   }
 
-  auto is_input_packed = fn_batch_sizes.size() != 0;
+  auto is_input_packed = !fn_batch_sizes.empty();
   if (batch_first && !is_input_packed) {
     input = input.transpose(0, 1);
     grad_output = grad_output.transpose(0, 1);
@@ -1900,7 +1898,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
       CUDNN_FWD_MODE_TRAINING,
       x_descs_arr.desc(),
       &workspace_size,
-      NULL));
+      nullptr));
 #endif
   // TODO: put this in the correct device???
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
@@ -2004,7 +2002,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
       datatype);
 #else
   auto cudnn_input_size = input_r.size(-1);
-  auto packed = fn_batch_sizes.size() != 0;
+  auto packed = !fn_batch_sizes.empty();
   fn.rnn.set(
       fn_mode,
       cudnn_input_size,
@@ -2025,7 +2023,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
     TORCH_CHECK(!cx.defined(), "rnn: illegal defined cx for non-LSTM RNN");
   }
 
-  auto is_input_packed = fn_batch_sizes.size() != 0;
+  auto is_input_packed = !fn_batch_sizes.empty();
   if (batch_first && !is_input_packed) {
     input = input.transpose(0, 1);
     output = output.transpose(0, 1);
@@ -2088,7 +2086,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
       CUDNN_FWD_MODE_TRAINING,
       x_descs_arr.desc(),
       &workspace_size,
-      NULL));
+      nullptr));
 #endif
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
 #ifndef USE_CUDNN_RNN_V8_API
@@ -2820,7 +2818,6 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
 
 } // namespace
 
-} // namespace at
-} // namespace at
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED()

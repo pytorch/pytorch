@@ -5,14 +5,16 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/macros/Macros.h>
 
-// Two warninngs in Cutlass included header files
+// Two warnings in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wmissing-field-initializers")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
 // https://github.com/NVIDIA/cutlass/issues/1571
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION)
 
 #define BUILD_ROWWISE_FP8_KERNEL
 #endif
@@ -45,13 +47,13 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
+C10_DIAGNOSTIC_POP()
 
 namespace {
 
 using DtypeScale = float;
 using DtypeAccum = float;
 using DtypeEpilogue = float;
-using DtypeOutput = cutlass::bfloat16_t;
 
 using Multiply = cutlass::epilogue::fusion::Sm90Compute<
     cutlass::multiplies,
@@ -62,12 +64,6 @@ using Multiply = cutlass::epilogue::fusion::Sm90Compute<
 using Add = cutlass::epilogue::fusion::Sm90Compute<
     cutlass::plus,
     DtypeEpilogue,
-    DtypeEpilogue,
-    cutlass::FloatRoundStyle::round_to_nearest>;
-
-using Cast = cutlass::epilogue::fusion::Sm90Compute<
-    cutlass::epilogue::thread::Identity,
-    DtypeOutput,
     DtypeEpilogue,
     cutlass::FloatRoundStyle::round_to_nearest>;
 
@@ -117,7 +113,8 @@ template <
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
-    typename DtypeBias>
+    typename DtypeBias,
+    typename DtypeOutput>
 void f8f8bf16_rowwise_impl(
     at::Tensor XQ, // FP8
     at::Tensor WQ, // FP8
@@ -178,6 +175,11 @@ void f8f8bf16_rowwise_impl(
       WScale,
       cutlass::epilogue::fusion::Sm90EVT<Multiply, XScale, Accum>>;
 
+  using Cast = cutlass::epilogue::fusion::Sm90Compute<
+      cutlass::epilogue::thread::Identity,
+      DtypeOutput,
+      DtypeEpilogue,
+      cutlass::FloatRoundStyle::round_to_nearest>;
   using EpilogueEVT = cutlass::epilogue::fusion::Sm90EVT<
       Cast,
       cutlass::epilogue::fusion::Sm90EVT<
@@ -301,16 +303,18 @@ void f8f8bf16_rowwise_impl(
 }
 
 
-// Cutlass rowwise kernel for SM100
+// Cutlass rowwise kernel for SM100/SM120
 template <
+    typename ArchTag,
     typename TileShape,
     typename ClusterShape,
     typename Transposed,
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
-    typename DtypeBias>
-void f8f8bf16_rowwise_impl_sm100(
+    typename DtypeBias,
+    typename DtypeOutput>
+void f8f8bf16_rowwise_impl_sm100_sm120(
     at::Tensor XQ, // FP8
     at::Tensor WQ, // FP8
     at::Tensor x_scale,
@@ -343,8 +347,6 @@ void f8f8bf16_rowwise_impl_sm100(
       cutlass::layout::RowMajor>;
   constexpr int AlignmentOutput = 16 / sizeof(DtypeOutput);
 
-  // Tag indicating the minimum SM that supports the intended feature
-  using ArchTag = cutlass::arch::Sm100;
   using OperatorClass = cutlass::arch::OpClassTensorOp;
 
   // Implement rowwise scaling epilogue.
@@ -370,6 +372,11 @@ void f8f8bf16_rowwise_impl_sm100(
       WScale,
       cutlass::epilogue::fusion::Sm90EVT<Multiply, XScale, Accum>>;
 
+  using Cast = cutlass::epilogue::fusion::Sm90Compute<
+      cutlass::epilogue::thread::Identity,
+      DtypeOutput,
+      DtypeEpilogue,
+      cutlass::FloatRoundStyle::round_to_nearest>;
   using EpilogueEVT = cutlass::epilogue::fusion::Sm90EVT<
       Cast,
       cutlass::epilogue::fusion::Sm90EVT<
@@ -379,7 +386,7 @@ void f8f8bf16_rowwise_impl_sm100(
 
   using EpilogueScheduleType = cutlass::epilogue::collective::EpilogueScheduleAuto;
   using CollectiveEpilogue = typename cutlass::epilogue::collective::CollectiveBuilder<
-      cutlass::arch::Sm100, OperatorClass,
+      ArchTag, OperatorClass,
       TileShape, ClusterShape,
       cutlass::epilogue::collective::EpilogueTileAuto,
       DtypeAccum, DtypeEpilogue,
@@ -388,7 +395,13 @@ void f8f8bf16_rowwise_impl_sm100(
       EpilogueScheduleType,
       EpilogueEVT>::CollectiveOp;
 
-  using MainloopScheduleType = cutlass::gemm::collective::KernelScheduleAuto;
+  // as of CUTLASS 3.9.2, on sm120, KernelScheduleAuto resolves to
+  // KernelTmaWarpSpecializedCooperativeSm120<2>>,
+  // which does not support TileShape.M < 128
+  using MainloopScheduleType = std::conditional_t<
+      std::is_same_v<ArchTag, cutlass::arch::Sm120> && cute::size<0>(TileShape{}) < 128,
+      cutlass::gemm::KernelTmaWarpSpecializedPingpong,
+      cutlass::gemm::collective::KernelScheduleAuto>;
   using CollectiveMainloop =
       typename cutlass::gemm::collective::CollectiveBuilder<
           ArchTag,
@@ -490,7 +503,8 @@ template <
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
-    typename DtypeBias>
+    typename DtypeBias,
+    typename DtypeOutput>
 void f8f8bf16_rowwise_impl_sm89(
     at::Tensor XQ, // FP8
     at::Tensor WQ, // FP8
@@ -697,7 +711,7 @@ void f8f8bf16_rowwise_impl_sm89(
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-template <typename ClusterShape, typename... Types>
+template <typename ClusterShape, typename ArchTag, typename... Types>
 void dispatch_fp8_rowwise_kernel_on_tile_size(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -714,9 +728,6 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
     smTarget -= at::globalContext()._SMCarveout_EXPERIMENTAL().value();
   }
 
-  cudaDeviceProp* properties = at::cuda::getCurrentDeviceProperties();
-  const bool sm10x = properties != nullptr && properties->major == 10;
-
   // We prefer to use smaller tiles (less wasted compute in case of padding),
   // but if this causes us to have more CUDA blocks than there are SMs on the
   // GPU then we'll hit wave quantization, hence we'll switch to larger tiles.
@@ -725,37 +736,43 @@ void dispatch_fp8_rowwise_kernel_on_tile_size(
       smTarget / cute::size(ClusterShape{});
 
   if (use_smaller_tiles) {
-    if (sm10x) {
-      return f8f8bf16_rowwise_impl_sm100<
+    if constexpr (std::is_same_v<ArchTag, cutlass::arch::Sm90>) {
+      return f8f8bf16_rowwise_impl<
+          /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
+          ClusterShape,
+          Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+    } else {
+      return f8f8bf16_rowwise_impl_sm100_sm120<
+        ArchTag,
         /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
         ClusterShape,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
     }
-    return f8f8bf16_rowwise_impl<
-        /*TileShape=*/cute::Shape<cute::_64, cute::_128, cute::_128>,
-        ClusterShape,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   } else {
-    if (sm10x) {
-      return f8f8bf16_rowwise_impl_sm100<
+    if constexpr (std::is_same_v<ArchTag, cutlass::arch::Sm90>) {
+      return f8f8bf16_rowwise_impl<
+        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
+        ClusterShape,
+        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+    } else {
+      return f8f8bf16_rowwise_impl_sm100_sm120<
+        ArchTag,
         /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
         ClusterShape,
         Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
     }
-    return f8f8bf16_rowwise_impl<
-        /*TileShape=*/cute::Shape<cute::_128, cute::_128, cute::_128>,
-        ClusterShape,
-        Types...>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   }
 }
 
 template <
     typename ClusterShape,
     typename Transposed,
+    typename ArchTag,
     typename FastAccum,
     typename DtypeA,
     typename DtypeB,
-    typename DtypeBias>
+    typename DtypeBias,
+    typename DtypeOutput>
 void handle_transposition(
     at::Tensor XQ,
     at::Tensor WQ,
@@ -767,19 +784,23 @@ void handle_transposition(
   if constexpr (!Transposed::value) {
     dispatch_fp8_rowwise_kernel_on_tile_size<
         ClusterShape,
+        ArchTag,
         Transposed,
         FastAccum,
         DtypeA,
         DtypeB,
-        DtypeBias>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
+        DtypeBias,
+        DtypeOutput>(XQ, WQ, x_scale, w_scale, bias, out, swizzle);
   } else {
     dispatch_fp8_rowwise_kernel_on_tile_size<
         ClusterShape,
+        ArchTag,
         Transposed,
         FastAccum,
         DtypeB,
         DtypeA,
-        DtypeBias>(WQ.t(), XQ.t(), w_scale.t(), x_scale.t(), bias, out.t(), swizzle);
+        DtypeBias,
+        DtypeOutput>(WQ.t(), XQ.t(), w_scale.t(), x_scale.t(), bias, out.t(), swizzle);
   }
 }
 
@@ -937,13 +958,28 @@ void dispatch_fp8_rowwise_kernel_on_sm(
   const bool sm89 = properties != nullptr && properties->major == 8 && properties->minor == 9;
   const bool sm9x = properties != nullptr && properties->major == 9;
   const bool sm10x = properties != nullptr && properties->major == 10;
-  if (!(sm89 || sm9x || sm10x)) {
+  const bool sm11x = properties != nullptr && properties->major == 11;
+  const bool sm12x = properties != nullptr && properties->major == 12;
+  if (!(sm89 || sm9x || sm10x || sm11x || sm12x)) {
     TORCH_CHECK(
         false, "Rowwise scaling is not currently supported on your device");
   }
 
-  if (sm9x || sm10x) {
-    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  if (sm9x) {
+    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+      /*ArchTag=*/cutlass::arch::Sm90,
+      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (sm10x || sm11x) {
+    dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
+      /*ArchTag=*/cutlass::arch::Sm100,
+      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
+  } else if (sm12x) {
+    // sm12x doesn't have multicast feature
+    handle_transposition<
+      /*ClusterShape=*/cute::Shape<cute::_1, cute::_1, cute::_1>,
+      /*Transposed=*/std::false_type,
+      /*ArchTag=*/cutlass::arch::Sm120,
+      Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   } else {
     dispatch_fp8_rowwise_kernel_sm89<Types...>(XQ, WQ, x_scale, w_scale, bias, out);
   }
@@ -1001,11 +1037,19 @@ void dispatch_fp8_rowwise_kernel_on_bias_dtype(
     at::Tensor out) {
   if (bias.has_value() && bias->dtype() == at::kBFloat16) {
     dispatch_fp8_rowwise_kernel_on_input_dtypes<
+        cutlass::bfloat16_t,
         cutlass::bfloat16_t>
+        (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
+  } else if (bias.has_value() && bias->dtype() == at::kHalf){
+    TORCH_CHECK(out.dtype() == at::kHalf, "Output should be Float16 when bias is Float16");
+    dispatch_fp8_rowwise_kernel_on_input_dtypes<
+        cutlass::half_t,
+        cutlass::half_t>
         (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   } else {
     dispatch_fp8_rowwise_kernel_on_input_dtypes<
-        float>
+        float,
+        cutlass::bfloat16_t>
         //Types...>
         (XQ, WQ, x_scale, w_scale, bias, use_fast_accum, out);
   }
@@ -1047,14 +1091,14 @@ void check_inputs(
 
   if (bias.has_value()) {
     TORCH_CHECK(bias->device() == b.device());
-    TORCH_CHECK(bias->dtype() == at::kFloat || bias->dtype() == at::kBFloat16);
+    TORCH_CHECK(bias->dtype() == at::kFloat || bias->dtype() == at::kBFloat16 || bias->dtype() == at::kHalf);
     TORCH_CHECK(bias->dim() == 1);
     TORCH_CHECK(bias->size(0) == b.size(1));
     TORCH_CHECK(bias->stride(0) == 1);
   }
 
   TORCH_CHECK(out.device() == a.device());
-  TORCH_CHECK(out.dtype() == at::kBFloat16);
+  TORCH_CHECK(out.dtype() == at::kBFloat16 || out.dtype() == at::kHalf);
   TORCH_CHECK(out.dim() == 2);
   TORCH_CHECK(out.size(0) == a.size(0));
   TORCH_CHECK(out.size(1) == b.size(1));

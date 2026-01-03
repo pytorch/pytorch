@@ -1,6 +1,4 @@
-#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDADataType.h>
-#include <ATen/cuda/CUDASparse.h>
 #include <ATen/cuda/CUDASparseDescriptors.h>
 #include <ATen/native/LinearAlgebraUtils.h>
 #include <ATen/native/cuda/MiscUtils.h>
@@ -11,8 +9,6 @@ cusparseStatus_t destroyConstDnMat(const cusparseDnMatDescr* dnMatDescr) {
   // NOLINTNEXTLINE(*const-cast)
   return cusparseDestroyDnMat(const_cast<cusparseDnMatDescr*>(dnMatDescr));
 }
-
-#if AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 namespace {
 
@@ -75,12 +71,7 @@ cusparseDnMatDescr_t createRawDnMatDescriptor(const Tensor& input, int64_t batch
   auto leading_dimension =
       is_row_major ? input_strides[ndim - 2] : input_strides[ndim - 1];
 
-#if !defined(USE_ROCM)
   auto order = is_row_major ? CUSPARSE_ORDER_ROW : CUSPARSE_ORDER_COL;
-#else
-  TORCH_INTERNAL_ASSERT(is_column_major, "Expected column major input.");
-  auto order = CUSPARSE_ORDER_COL;
-#endif
 
   auto batch_stride = ndim > 2 && batch_offset >= 0 ? input_strides[ndim - 3] : 0;
   // NOLINTNEXTLINE(*const-cast)
@@ -186,7 +177,7 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
           batch_offset * values_batch_stride * values.itemsize(),
       index_type, // data type of row offsets index
       index_type, // data type of col indices
-      CUSPARSE_INDEX_BASE_ZERO, // base index of row offset and col indes
+      CUSPARSE_INDEX_BASE_ZERO, // base index of row offset and col index
       value_type // data type of values
       ));
 
@@ -214,7 +205,5 @@ CuSparseSpMatCsrDescriptor::CuSparseSpMatCsrDescriptor(const Tensor& input, int6
 
   descriptor_.reset(raw_descriptor);
 }
-
-#endif // AT_USE_CUSPARSE_GENERIC_API() || AT_USE_HIPSPARSE_GENERIC_API()
 
 } // namespace at::cuda::sparse

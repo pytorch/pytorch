@@ -58,12 +58,24 @@ struct BlendHalfRegs<index, false> {
   }
 };
 
+template <>
+struct is_vec_specialized_for<c10::Half> : std::bool_constant<true> {};
+
 // On ARM, Half type supports float16_t->Half constructor and Half->float16_t
 // conversion
 template <>
-class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendHalfRegs, Vectorized<c10::Half>> {
-  using Base = Vectorized16<float16x8_t, c10::Half, BlendHalfRegs, Vectorized<c10::Half>>;
+class Vectorized<c10::Half> : public Vectorized16<
+                                  float16x8_t,
+                                  c10::Half,
+                                  BlendHalfRegs,
+                                  Vectorized<c10::Half>> {
+  using Base = Vectorized16<
+      float16x8_t,
+      c10::Half,
+      BlendHalfRegs,
+      Vectorized<c10::Half>>;
   friend Base;
+
  private:
   // We use these private map functions to implement various methods
   Vectorized<c10::Half> map_with_vec_float_method(
@@ -85,8 +97,10 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
     float32x4_t v01 = vcvt_f32_f16(vget_high_f16(values));
     float32x4_t second_v00 = vcvt_f32_f16(vget_low_f16(second.values));
     float32x4_t second_v01 = vcvt_f32_f16(vget_high_f16(second.values));
-    Vectorized<float> mv0 = (Vectorized<float>(v00).*m)(Vectorized<float>(second_v00));
-    Vectorized<float> mv1 = (Vectorized<float>(v01).*m)(Vectorized<float>(second_v01));
+    Vectorized<float> mv0 =
+        (Vectorized<float>(v00).*m)(Vectorized<float>(second_v00));
+    Vectorized<float> mv1 =
+        (Vectorized<float>(v01).*m)(Vectorized<float>(second_v01));
     float16x4_t r00 = vcvt_f16_f32(mv0);
     float16x4_t r01 = vcvt_f16_f32(mv1);
 
@@ -102,12 +116,17 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
     float32x4_t v01 = vcvt_f32_f16(vget_high_f16(values));
     float32x4_t second_v00 = vcvt_f32_f16(vget_low_f16(second.values));
     float32x4_t second_v01 = vcvt_f32_f16(vget_high_f16(second.values));
-    Vectorized<float> mv0 = (Vectorized<float>(v00).*m)(Vectorized<float>(second_v00));
-    Vectorized<float> mv1 = (Vectorized<float>(v01).*m)(Vectorized<float>(second_v01));
+    Vectorized<float> mv0 =
+        (Vectorized<float>(v00).*m)(Vectorized<float>(second_v00));
+    Vectorized<float> mv1 =
+        (Vectorized<float>(v01).*m)(Vectorized<float>(second_v01));
     // Assume the operator returns a bitmask, not "real" floats, and
-    // just narrow the bits. All-ones is a NaN and will get mangled by conversion!
-    float16x4_t r00 = vreinterpret_f16_u16(vmovn_u32(vreinterpretq_u32_f32(mv0)));
-    float16x4_t r01 = vreinterpret_f16_u16(vmovn_u32(vreinterpretq_u32_f32(mv1)));
+    // just narrow the bits. All-ones is a NaN and will get mangled by
+    // conversion!
+    float16x4_t r00 =
+        vreinterpret_f16_u16(vmovn_u32(vreinterpretq_u32_f32(mv0)));
+    float16x4_t r01 =
+        vreinterpret_f16_u16(vmovn_u32(vreinterpretq_u32_f32(mv1)));
 
     // Pack result into Vectorized<c10::Half>
     return Vectorized<c10::Half>(vcombine_f16(r00, r01));
@@ -120,10 +139,8 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
 
   // A ctor that accepts c10::Half is needed to fit interface with vec_base.h
   // A second constructor that takes float16_t is also included
-  Vectorized(c10::Half val)
-      : Vectorized((float16_t)val) {}
-  Vectorized(float16_t val)
-      : Vectorized16(vdupq_n_f16(val)) {}
+  Vectorized(c10::Half val) : Vectorized((float16_t)val) {}
+  Vectorized(float16_t val) : Vectorized16(vdupq_n_f16(val)) {}
   Vectorized(
       value_type val0,
       value_type val1,
@@ -133,16 +150,8 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
       value_type val5,
       value_type val6,
       value_type val7)
-      : Vectorized16(float16x8_t{
-            val0,
-            val1,
-            val2,
-            val3,
-            val4,
-            val5,
-            val6,
-            val7}) {}
-
+      : Vectorized16(
+            float16x8_t{val0, val1, val2, val3, val4, val5, val6, val7}) {}
 
   static Vectorized<c10::Half> blendv(
       const Vectorized<c10::Half>& a,
@@ -162,11 +171,10 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
     // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC. vbslq_u16 generates the
     // same instruction anyway. see https://godbolt.org/z/cY4a55Y7P
     Vectorized<c10::Half> vec(mask.values);
-    vec.values = vreinterpretq_f16_u16(
-        vbslq_u16(
-            vreinterpretq_u16_f16(vec.values),
-            vreinterpretq_u16_f16(b.values),
-            vreinterpretq_u16_f16(a.values)));
+    vec.values = vreinterpretq_f16_u16(vbslq_u16(
+        vreinterpretq_u16_f16(vec.values),
+        vreinterpretq_u16_f16(b.values),
+        vreinterpretq_u16_f16(a.values)));
     return vec;
   }
   static Vectorized<c10::Half> set(
@@ -181,12 +189,10 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
 
     // Using blendv is awkward because 0xFFFF is one of many NaN's in FP16
     // so we directly use vbslq_u16 instead. (See NOTE [vbslq_f16] above.)
-    Vectorized<c10::Half> vec(
-        vreinterpretq_f16_u16(
-            vbslq_u16(
-                mask,
-                vreinterpretq_u16_f16(b.values),
-                vreinterpretq_u16_f16(a.values))));
+    Vectorized<c10::Half> vec(vreinterpretq_f16_u16(vbslq_u16(
+        mask,
+        vreinterpretq_u16_f16(b.values),
+        vreinterpretq_u16_f16(a.values))));
 
     return vec;
   }
@@ -214,8 +220,32 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
       std::memcpy(ptr, tmp_values, count * sizeof(float16_t));
     }
   }
-  // For boolean version where we want to if any 1/all zero
-  // etc. can be done faster in a different way.
+  int zero_mask() const {
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+    uint16x8_t is_zero_vec = vceqzq_f16(values);
+    const int16x8_t shift = vcombine_s16(
+        vcreate_s16(
+            0x0 | (int64_t(0x1) << 16) | (int64_t(0x2) << 32) |
+            (int64_t(0x3) << 48)),
+        vcreate_s16(
+            0x4 | (int64_t(0x5) << 16) | (int64_t(0x6) << 32) |
+            (int64_t(0x7) << 48)));
+    uint16x8_t bits_vec =
+        vshlq_u16(vandq_u16(is_zero_vec, vdupq_n_u16(1)), shift);
+    return vaddvq_u16(bits_vec);
+#else // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+    // use known working implementation.
+    __at_align__ value_type tmp[size()];
+    store(tmp);
+    int mask = 0;
+    for (int i = 0; i < size(); ++i) {
+      if (tmp[i] == 0) {
+        mask |= (1 << i);
+      }
+    }
+    return mask;
+#endif // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+  }
   Vectorized<c10::Half> isnan() const {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
     return vreinterpretq_f16_u16(vmvnq_u16(vceqq_f16(values, values)));
@@ -284,50 +314,61 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
   }
   Vectorized<c10::Half> operator==(const Vectorized<c10::Half>& other) const {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    return Vectorized<c10::Half>(vreinterpretq_f16_u16(vceqq_f16(values, other.values)));
+    return Vectorized<c10::Half>(
+        vreinterpretq_f16_u16(vceqq_f16(values, other.values)));
 #else
-    return map2_bitmask_with_vec_float_method(other, &Vectorized<float>::operator==);
+    return map2_bitmask_with_vec_float_method(
+        other, &Vectorized<float>::operator==);
 #endif
   }
 
   Vectorized<c10::Half> operator!=(const Vectorized<c10::Half>& other) const {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    return Vectorized<c10::Half>(vreinterpretq_f16_u16(
-                                     vmvnq_u16(vceqq_f16(values, other.values))));
+    return Vectorized<c10::Half>(
+        vreinterpretq_f16_u16(vmvnq_u16(vceqq_f16(values, other.values))));
 #else
-    return map2_bitmask_with_vec_float_method(other, &Vectorized<float>::operator!=);
+    return map2_bitmask_with_vec_float_method(
+        other, &Vectorized<float>::operator!=);
 #endif
   }
 
   Vectorized<c10::Half> operator<(const Vectorized<c10::Half>& other) const {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    return Vectorized<c10::Half>(vreinterpretq_f16_u16(vcltq_f16(values, other.values)));
+    return Vectorized<c10::Half>(
+        vreinterpretq_f16_u16(vcltq_f16(values, other.values)));
 #else
-    return map2_bitmask_with_vec_float_method(other, &Vectorized<float>::operator<);
+    return map2_bitmask_with_vec_float_method(
+        other, &Vectorized<float>::operator<);
 #endif
   }
 
   Vectorized<c10::Half> operator<=(const Vectorized<c10::Half>& other) const {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    return Vectorized<c10::Half>(vreinterpretq_f16_u16(vcleq_f16(values, other.values)));
+    return Vectorized<c10::Half>(
+        vreinterpretq_f16_u16(vcleq_f16(values, other.values)));
 #else
-    return map2_bitmask_with_vec_float_method(other, &Vectorized<float>::operator<=);
+    return map2_bitmask_with_vec_float_method(
+        other, &Vectorized<float>::operator<=);
 #endif
   }
 
   Vectorized<c10::Half> operator>(const Vectorized<c10::Half>& other) const {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    return Vectorized<c10::Half>(vreinterpretq_f16_u16(vcgtq_f16(values, other.values)));
+    return Vectorized<c10::Half>(
+        vreinterpretq_f16_u16(vcgtq_f16(values, other.values)));
 #else
-    return map2_bitmask_with_vec_float_method(other, &Vectorized<float>::operator>);
+    return map2_bitmask_with_vec_float_method(
+        other, &Vectorized<float>::operator>);
 #endif
   }
 
   Vectorized<c10::Half> operator>=(const Vectorized<c10::Half>& other) const {
 #ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-    return Vectorized<c10::Half>(vreinterpretq_f16_u16(vcgeq_f16(values, other.values)));
+    return Vectorized<c10::Half>(
+        vreinterpretq_f16_u16(vcgeq_f16(values, other.values)));
 #else
-    return map2_bitmask_with_vec_float_method(other, &Vectorized<float>::operator>=);
+    return map2_bitmask_with_vec_float_method(
+        other, &Vectorized<float>::operator>=);
 #endif
   }
 
@@ -339,14 +380,17 @@ class Vectorized<c10::Half> : public Vectorized16<float16x8_t, c10::Half, BlendH
   Vectorized<c10::Half> le(const Vectorized<c10::Half>& other) const;
 }; // Vectorized<Half>
 
-inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(const Vectorized<Half>& a) {
+inline std::tuple<Vectorized<float>, Vectorized<float>> convert_half_float(
+    const Vectorized<Half>& a) {
   static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
   float16x8_t x = a;
   float32x4_t x1 = vcvt_f32_f16(vget_low_f16(x));
   float32x4_t x2 = vcvt_f32_f16(vget_high_f16(x));
-  return { Vectorized<float>(x1), Vectorized<float>(x2) };
+  return {Vectorized<float>(x1), Vectorized<float>(x2)};
 }
-inline Vectorized<Half> convert_float_half(const Vectorized<float>& a, const Vectorized<float>& b) {
+inline Vectorized<Half> convert_float_half(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b) {
   static_assert(Vectorized<Half>::size() == 2 * Vectorized<float>::size());
   float32x4_t x = a;
   float32x4_t y = b;
@@ -363,8 +407,7 @@ Vectorized<c10::Half> binary_operator_via_float(
   const auto [a_float_low, a_float_high] = convert_half_float(a);
   const auto [b_float_low, b_float_high] = convert_half_float(b);
   return convert_float_half(
-      op(a_float_low, b_float_low),
-      op(a_float_high, b_float_high));
+      op(a_float_low, b_float_low), op(a_float_high, b_float_high));
 }
 
 template <>
@@ -426,7 +469,8 @@ Vectorized<c10::Half> inline maximum(
   return Vectorized<c10::Half>(vmaxq_f16(a, b));
 #else
   return binary_operator_via_float(
-      static_cast<Vectorized<float>(*)(const Vectorized<float>&, const Vectorized<float>&)>(&maximum),
+      static_cast<Vectorized<float> (*)(
+          const Vectorized<float>&, const Vectorized<float>&)>(&maximum),
       a,
       b);
 #endif
@@ -442,7 +486,8 @@ Vectorized<c10::Half> inline minimum(
   return Vectorized<c10::Half>(vminq_f16(a, b));
 #else
   return binary_operator_via_float(
-      static_cast<Vectorized<float>(*)(const Vectorized<float>&, const Vectorized<float>&)>(&minimum),
+      static_cast<Vectorized<float> (*)(
+          const Vectorized<float>&, const Vectorized<float>&)>(&minimum),
       a,
       b);
 #endif
@@ -474,24 +519,24 @@ template <>
 Vectorized<c10::Half> inline operator&(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b) {
-  return Vectorized<c10::Half>(vreinterpretq_f16_u16(vandq_u16(
-      vreinterpretq_u16_f16(a), vreinterpretq_u16_f16(b))));
+  return Vectorized<c10::Half>(vreinterpretq_f16_u16(
+      vandq_u16(vreinterpretq_u16_f16(a), vreinterpretq_u16_f16(b))));
 }
 
 template <>
 Vectorized<c10::Half> inline operator|(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b) {
-  return Vectorized<c10::Half>(vreinterpretq_f16_u16(vorrq_u16(
-      vreinterpretq_u16_f16(a), vreinterpretq_u16_f16(b))));
+  return Vectorized<c10::Half>(vreinterpretq_f16_u16(
+      vorrq_u16(vreinterpretq_u16_f16(a), vreinterpretq_u16_f16(b))));
 }
 
 template <>
 Vectorized<c10::Half> inline operator^(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b) {
-  return Vectorized<c10::Half>(vreinterpretq_f16_u16(veorq_u16(
-      vreinterpretq_u16_f16(a), vreinterpretq_u16_f16(b))));
+  return Vectorized<c10::Half>(vreinterpretq_f16_u16(
+      veorq_u16(vreinterpretq_u16_f16(a), vreinterpretq_u16_f16(b))));
 }
 
 inline Vectorized<c10::Half> Vectorized<c10::Half>::eq(
@@ -524,46 +569,6 @@ inline Vectorized<c10::Half> Vectorized<c10::Half>::le(
   return (*this <= other) & Vectorized<c10::Half>(1);
 }
 
-// These are global functions, so the defaults in vec_base.h should
-// work fine if __ARM_FEATURE_FP16_VECTOR_ARITHMETIC is not available.
-#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-template <>
-inline void convert(const float16_t* src, int16_t* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<c10::Half>::size());
-       i += Vectorized<c10::Half>::size()) {
-    vst1q_s16(dst + i, vcvtq_s16_f16(vld1q_f16(src + i)));
-  }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<int16_t>(src[i]);
-  }
-}
-
-template <>
-inline void convert(const int16_t* src, float16_t* dst, int64_t n) {
-  int64_t i;
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (i = 0; i <= (n - Vectorized<c10::Half>::size());
-       i += Vectorized<c10::Half>::size()) {
-    vst1q_f16(dst + i, vcvtq_f16_s16(vld1q_s16(src + i)));
-  }
-#ifndef __msvc_cl__
-#pragma unroll
-#endif
-  for (; i < n; i++) {
-    dst[i] = static_cast<float16_t>(src[i]);
-  }
-}
-#endif // __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
-
 template <>
 Vectorized<c10::Half> inline fmadd(
     const Vectorized<c10::Half>& a,
@@ -577,6 +582,18 @@ Vectorized<c10::Half> inline fmadd(
 }
 
 template <>
+Vectorized<c10::Half> inline fnmadd(
+    const Vectorized<c10::Half>& a,
+    const Vectorized<c10::Half>& b,
+    const Vectorized<c10::Half>& c) {
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+  return Vectorized<c10::Half>(vfmsq_f16(c, a, b));
+#else
+  return -a * b + c;
+#endif
+}
+
+template <>
 Vectorized<c10::Half> inline fmsub(
     const Vectorized<c10::Half>& a,
     const Vectorized<c10::Half>& b,
@@ -585,6 +602,18 @@ Vectorized<c10::Half> inline fmsub(
   return Vectorized<c10::Half>(vnegq_f16(vfmsq_f16(c, a, b)));
 #else
   return a * b - c;
+#endif
+}
+
+template <>
+Vectorized<c10::Half> inline fnmsub(
+    const Vectorized<c10::Half>& a,
+    const Vectorized<c10::Half>& b,
+    const Vectorized<c10::Half>& c) {
+#ifdef __ARM_FEATURE_FP16_VECTOR_ARITHMETIC
+  return Vectorized<c10::Half>(vnegq_f16(vfmaq_f16(c, a, b)));
+#else
+  return -a * b - c;
 #endif
 }
 #endif // !defined(C10_MOBILE) && defined(__aarch64__)

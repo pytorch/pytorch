@@ -143,6 +143,7 @@ def event_id(i: int) -> EventId:
 
 class TestEventHandler(TestCase):
     def setUp(self):
+        super().setUp()
         self.handler = csan.EventHandler()
 
     def kernel_launch(
@@ -397,6 +398,7 @@ class TestEventHandler(TestCase):
 
 class TestMessages(TestCase):
     def setUp(self):
+        super().setUp()
         self.handler = csan.EventHandler()
 
     def test_ensure_exists(self):

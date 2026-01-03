@@ -73,8 +73,8 @@ def dump_chrome_trace(
 
 
 def get_chrome_trace_events(filename):
-    f = open(filename)
-    data = json.load(f)
+    with open(filename) as f:
+        data = json.load(f)
     events = data["traceEvents"]
     return events
 
@@ -185,8 +185,12 @@ def benchmark_utilization(
     ```
     def f(a):
         return a.sum()
+
+
     a = torch.rand(2**20, device="cuda")
-    utilization, mm_conv_utilization = benchmark_utilization(f, a, "tmp", trace_file_name = "tmp_chrome_trace")
+    utilization, mm_conv_utilization = benchmark_utilization(
+        f, a, "tmp", trace_file_name="tmp_chrome_trace"
+    )
     ```
 
     Args:

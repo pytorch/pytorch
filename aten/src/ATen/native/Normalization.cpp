@@ -62,7 +62,7 @@
 #include <utility>
 #include <vector>
 
-static const int MIOPEN_DIM_MAX = 5;
+static constexpr int MIOPEN_DIM_MAX = 5;
 
 namespace at::meta {
 
@@ -92,7 +92,7 @@ namespace {
              arg_name, " should contain ", expected, " elements not ", actual);
   }
 
-  static inline Tensor repeat_if_defined(const Tensor& t, const SymInt& repeat) {
+  inline Tensor repeat_if_defined(const Tensor& t, const SymInt& repeat) {
     if (t.defined()) {
       return t.repeat_symint(repeat);
     }
@@ -520,20 +520,31 @@ BatchNormBackend _select_batch_norm_backend(
     return BatchNormBackend::Cudnn;
   }
 
+  // TODO: Remove PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM once ROCm officially supports NHWC in MIOpen
+  // See https://github.com/pytorch/pytorch/issues/64427.
+  // non static variable is used to be able to change environment variable in runtime for testing
+  // enabled by default for ROCm >= 7.0.0 with miopen 3.5
+  int miopen_version = detail::getCUDAHooks().compiledWithMIOpen() ? detail::getCUDAHooks().versionMIOpen() : 0;
+  bool is_miopen_3_4 = miopen_version >= 30400;  // ROCm 6.4
+  bool is_miopen_3_5 = miopen_version >= 30500;  // ROCm 7.0
+  bool PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM = c10::utils::check_env("PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM").value_or(is_miopen_3_5);
+
   if (
-      input.is_cuda()
+      detail::getCUDAHooks().compiledWithMIOpen()
+      && cudnn_enabled
+      && input.is_cuda()
       && input.dim() <= MIOPEN_DIM_MAX
+      && input.dim() >= 3
       && input.scalar_type() != at::kDouble
-      && input.scalar_type() != at::kBFloat16
-      && (weight.scalar_type() != at::kHalf)
+      && (is_miopen_3_4 || input.scalar_type() != at::kBFloat16)
+      && weight.scalar_type() == at::kFloat // only FP32 weight for FP32 or FP16/BF16(mixed) input
       && weight.defined() && bias.defined()
       && ((running_mean.defined() && running_var.defined())
         || (!running_mean.defined() && !running_var.defined() && training))
-      && (input.dim() >= 3)
-      && detail::getCUDAHooks().compiledWithMIOpen()
-      && cudnn_enabled
-      && input.suggest_memory_format() != MemoryFormat::ChannelsLast
-      && input.suggest_memory_format() != MemoryFormat::ChannelsLast3d
+      && (input.suggest_memory_format() == MemoryFormat::Contiguous
+          || (is_miopen_3_5 && PYTORCH_MIOPEN_SUGGEST_NHWC_BATCHNORM &&
+              (input.suggest_memory_format() == MemoryFormat::ChannelsLast
+               || input.suggest_memory_format() == MemoryFormat::ChannelsLast3d)))
   ) {
     return BatchNormBackend::Miopen;
   }
@@ -613,7 +624,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, int64_t> _batch_norm_impl_index(
   if (backend == BatchNormBackend::Miopen) {
     return std::tuple_cat(
              at::miopen_batch_norm(
-               input.contiguous(), weight.contiguous(), bias.contiguous(),
+               input.contiguous(input.suggest_memory_format()),
+               weight.contiguous(),
+               bias.contiguous(),
                running_mean.defined() ? running_mean.contiguous() : running_mean,
                running_var.defined() ? running_var.contiguous() : running_var,
                training, momentum, eps),
@@ -770,6 +783,11 @@ std::tuple<Tensor, Tensor> batch_norm_update_stats_cpu(
 
 std::tuple<Tensor&, Tensor&, Tensor&> batch_norm_cpu_out(const Tensor& self, const std::optional<Tensor>& weight_opt, const std::optional<Tensor>& bias_opt, const std::optional<Tensor>& running_mean_opt, const std::optional<Tensor>& running_var_opt,
                                                   bool train, double momentum, double eps, Tensor& out, Tensor& save_mean, Tensor& save_var) {
+  const bool has_running_mean = (running_mean_opt.has_value() && running_mean_opt->defined());
+  const bool has_running_var = (running_var_opt.has_value() && running_var_opt->defined());
+  TORCH_CHECK_VALUE(has_running_mean == has_running_var,
+    "running_mean and running_var must either both be None or neither be None");
+
   // See [Note: hacky wrapper removal for optional tensor]
   c10::MaybeOwned<Tensor> weight_maybe_owned = at::borrow_from_optional_tensor(weight_opt);
   const Tensor& weight = *weight_maybe_owned;

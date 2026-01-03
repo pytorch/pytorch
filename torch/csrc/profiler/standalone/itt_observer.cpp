@@ -1,7 +1,6 @@
 #include <torch/csrc/profiler/standalone/itt_observer.h>
 
 #include <torch/csrc/profiler/stubs/base.h>
-#include <torch/csrc/profiler/util.h>
 
 namespace torch::profiler::impl {
 
@@ -20,8 +19,12 @@ struct ITTThreadLocalState : ProfilerStateBase {
     return ActiveProfilerType::ITT;
   }
 
-  void reportMemoryUsage(void*, int64_t, size_t, size_t, c10::Device) override {
-  }
+  void reportMemoryUsage(
+      void* /*ptr*/,
+      int64_t /*alloc_size*/,
+      size_t /*total_allocated*/,
+      size_t /*total_reserved*/,
+      c10::Device /*device*/) override {}
 
   static ITTThreadLocalState* getTLS() {
     auto tls = ProfilerStateBase::get(/*global=*/false);

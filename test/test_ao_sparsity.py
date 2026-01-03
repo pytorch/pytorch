@@ -1,4 +1,5 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
+import logging
 
 # Kernels
 from ao.sparsity.test_kernels import (  # noqa: F401
@@ -56,4 +57,9 @@ from ao.sparsity.test_sparsity_utils import TestSparsityUtilFunctions  # noqa: F
 
 
 if __name__ == "__main__":
+    logging.basicConfig(
+        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+        level=logging.INFO,
+    )
+
     run_tests()

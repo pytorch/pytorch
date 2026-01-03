@@ -12,16 +12,16 @@ import shutil
 import signal
 import subprocess
 import sys
+import sysconfig
 import tempfile
 import time
 from collections import defaultdict
 from collections.abc import Sequence
 from contextlib import ExitStack
 from datetime import datetime
+from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 from typing import Any, cast, NamedTuple, Optional, Union
-
-import pkg_resources
 
 import torch
 import torch.distributed as dist
@@ -34,10 +34,11 @@ from torch.testing._internal.common_utils import (
     set_cwd,
     shell,
     TEST_CUDA,
+    TEST_SAVE_XML,
     TEST_WITH_ASAN,
-    TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
     TEST_WITH_SLOW_GRADCHECK,
+    TEST_XPU,
 )
 
 
@@ -72,7 +73,26 @@ from tools.testing.test_selections import (
     ShardedTest,
     THRESHOLD,
 )
-from tools.testing.upload_artifacts import zip_and_upload_artifacts
+
+
+try:
+    from tools.testing.upload_artifacts import (
+        parse_xml_and_upload_json,
+        upload_adhoc_failure_json,
+        zip_and_upload_artifacts,
+    )
+except ImportError:
+    # some imports in those files might fail, e.g., boto3 not installed. These
+    # functions are only needed under specific circumstances (CI) so we can
+    # define dummy functions here.
+    def parse_xml_and_upload_json():
+        pass
+
+    def zip_and_upload_artifacts(*args, **kwargs):
+        pass
+
+    def upload_adhoc_failure_json(*args, **kwargs):
+        pass
 
 
 # Make sure to remove REPO_ROOT after import is done
@@ -171,6 +191,7 @@ ROCM_BLOCKLIST = [
     "distributed/rpc/test_tensorpipe_agent",
     "distributed/rpc/test_share_memory",
     "distributed/rpc/cuda/test_tensorpipe_agent",
+    "inductor/test_max_autotune",  # taking excessive time, many tests >30 min
     "test_determination",
     "test_jit_legacy",
     "test_cuda_nvml_based_avail",
@@ -182,42 +203,28 @@ S390X_BLOCKLIST = [
     "dynamo/test_misc",
     "inductor/test_cpu_repro",
     "inductor/test_cpu_select_algorithm",
-    "inductor/test_aot_inductor_arrayref",
     "inductor/test_torchinductor_codegen_dynamic_shapes",
     "lazy/test_meta_kernel",
     "onnx/test_utility_funs",
     "profiler/test_profiler",
-    "test_ao_sparsity",
-    "test_cpp_extensions_open_device_registration",
     "test_jit",
-    "test_metal",
-    "test_mps",
-    "dynamo/test_torchrec",
-    "inductor/test_aot_inductor_utils",
-    "inductor/test_coordinate_descent_tuner",
-    "test_jiterator",
-    "inductor/test_cpu_cpp_wrapper",
-    "export/test_converter",
-    "inductor/test_inductor_freezing",
     "dynamo/test_utils",
     "test_nn",
-    "functorch/test_ops",
     # these tests run long and fail in addition to that
     "dynamo/test_dynamic_shapes",
     "test_quantization",
     "inductor/test_torchinductor",
     "inductor/test_torchinductor_dynamic_shapes",
     "inductor/test_torchinductor_opinfo",
-    "test_binary_ufuncs",
-    "test_unary_ufuncs",
     # these tests fail when cuda is not available
     "inductor/test_aot_inductor",
+    "inductor/test_best_config",
     "inductor/test_cudacodecache",
     "inductor/test_inductor_utils",
     "inductor/test_inplacing_pass",
     "inductor/test_kernel_benchmark",
     "inductor/test_max_autotune",
-    "inductor/test_move_constructors_to_cuda",
+    "inductor/test_move_constructors_to_gpu",
     "inductor/test_multi_kernel",
     "inductor/test_pattern_matcher",
     "inductor/test_perf",
@@ -227,9 +234,12 @@ S390X_BLOCKLIST = [
     # these tests fail when mkldnn is not available
     "inductor/test_custom_post_grad_passes",
     "inductor/test_mkldnn_pattern_matcher",
+    "test_metal",
     # lacks quantization support
     "onnx/test_models_quantized_onnxruntime",
     "onnx/test_pytorch_onnx_onnxruntime",
+    # sysctl -n hw.memsize is not available
+    "test_mps",
     # https://github.com/pytorch/pytorch/issues/102078
     "test_decomp",
     # https://github.com/pytorch/pytorch/issues/146698
@@ -239,17 +249,23 @@ S390X_BLOCKLIST = [
     "test_fx",
     # some false errors
     "doctests",
+    # new failures to investigate and fix
+    "test_tensorboard",
+    # onnx + protobuf failure, see
+    # https://github.com/protocolbuffers/protobuf/issues/22104
+    "dynamo/test_backends",
+    "dynamo/test_modules",
+    "inductor/test_config",
+    "test_public_bindings",
+    "test_testing",
+    # depend on z3-solver
+    "fx/test_z3_gradual_types",
+    "test_proxy_tensor",
 ]
 
 XPU_BLOCKLIST = [
     "test_autograd",
-    "profiler/test_cpp_thread",
-    "profiler/test_execution_trace",
     "profiler/test_memory_profiler",
-    "profiler/test_profiler",
-    "profiler/test_profiler_tree",
-    "profiler/test_record_function",
-    "profiler/test_torch_tidy",
 ]
 
 XPU_TEST = [
@@ -260,7 +276,6 @@ XPU_TEST = [
 RUN_PARALLEL_BLOCKLIST = [
     "test_extension_utils",
     "test_cpp_extensions_jit",
-    "test_cpp_extensions_open_device_registration",
     "test_cpp_extensions_stream_and_event",
     "test_cpp_extensions_mtia_backend",
     "test_jit_disabled",
@@ -268,7 +283,6 @@ RUN_PARALLEL_BLOCKLIST = [
     "test_multiprocessing",
     "test_multiprocessing_spawn",
     "test_namedtuple_return_api",
-    "test_openreg",
     "test_overrides",
     "test_show_pickle",
     "test_tensorexpr",
@@ -279,6 +293,7 @@ RUN_PARALLEL_BLOCKLIST = [
     # temporarily sets a global config
     "test_autograd_fallback",
     "inductor/test_compiler_bisector",
+    "test_privateuseone_python_backend",
 ] + FSDP_TEST
 
 # Test files that should always be run serially with other test files,
@@ -394,8 +409,18 @@ AOT_DISPATCH_TESTS = [
     test for test in TESTS if test.startswith("functorch/test_aotdispatch")
 ]
 FUNCTORCH_TESTS = [test for test in TESTS if test.startswith("functorch")]
+DYNAMO_CORE_TESTS = [test for test in TESTS if test.startswith("dynamo")]
 ONNX_TESTS = [test for test in TESTS if test.startswith("onnx")]
-CPP_TESTS = [test for test in TESTS if test.startswith(CPP_TEST_PREFIX)]
+QUANTIZATION_TESTS = [test for test in TESTS if test.startswith("test_quantization")]
+
+
+def _is_cpp_test(test):
+    # Note: tests underneath cpp_extensions are different from other cpp tests
+    # in that they utilize the usual python test infrastructure.
+    return test.startswith(CPP_TEST_PREFIX) and not test.startswith("cpp_extensions")
+
+
+CPP_TESTS = [test for test in TESTS if _is_cpp_test(test)]
 
 TESTS_REQUIRING_LAPACK = [
     "distributions/test_constraints",
@@ -413,11 +438,13 @@ TESTS_NOT_USING_GRADCHECK = [
     "test_decomp",
     "test_cpp_extensions_jit",
     "test_jit",
+    "test_matmul_cuda",
     "test_ops",
     "test_ops_jit",
     "dynamo/test_recompile_ux",
     "inductor/test_compiled_optimizers",
     "inductor/test_cutlass_backend",
+    "inductor/test_max_autotune",
     "inductor/test_select_algorithm",
     "inductor/test_smoke",
     "test_quantization",
@@ -466,7 +493,7 @@ def run_test(
     stepcurrent_key = test_file
 
     is_distributed_test = test_file.startswith(DISTRIBUTED_TEST_PREFIX)
-    is_cpp_test = test_file.startswith(CPP_TEST_PREFIX)
+    is_cpp_test = _is_cpp_test(test_file)
     # NB: Rerun disabled tests depends on pytest-flakefinder and it doesn't work with
     # pytest-cpp atm. We also don't have support to disable C++ test yet, so it's ok
     # to just return successfully here
@@ -509,7 +536,7 @@ def run_test(
             )
         )
         unittest_args.extend(test_module.get_pytest_args())
-        replacement = {"-f": "-x"}
+        replacement = {"-f": "-x", "-dist=loadfile": "--dist=loadfile"}
         unittest_args = [replacement.get(arg, arg) for arg in unittest_args]
 
     if options.showlocals:
@@ -542,7 +569,7 @@ def run_test(
         # case such as coverage for C++ test. So just returning ok makes sense
         return 0
 
-    if test_file.startswith(CPP_TEST_PREFIX):
+    if is_cpp_test:
         # C++ tests are not the regular test directory
         if CPP_TESTS_DIR:
             cpp_test = os.path.join(
@@ -609,6 +636,8 @@ def run_test(
                 stepcurrent_key,
                 output,
                 options.continue_through_error,
+                test_file,
+                options,
             )
         else:
             command.extend([f"--sc={stepcurrent_key}", "--print-items"])
@@ -637,26 +666,33 @@ def run_test(
     return ret_code
 
 
-def install_cpp_extensions(cpp_extensions_test_dir, env=os.environ):
+def install_cpp_extensions(extensions_dir, env=os.environ):
     # Wipe the build folder, if it exists already
-    cpp_extensions_test_build_dir = os.path.join(cpp_extensions_test_dir, "build")
-    if os.path.exists(cpp_extensions_test_build_dir):
-        shutil.rmtree(cpp_extensions_test_build_dir)
+    build_dir = os.path.join(extensions_dir, "build")
+    if os.path.exists(build_dir):
+        shutil.rmtree(build_dir)
 
     # Build the test cpp extensions modules
-    cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    return_code = shell(cmd, cwd=cpp_extensions_test_dir, env=env)
+    cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-build-isolation",
+        ".",
+        "--root",
+        "./install",
+    ]
+    return_code = shell(cmd, cwd=extensions_dir, env=env)
     if return_code != 0:
         return None, return_code
 
-    install_directory = ""
-    # install directory is the one that is named site-packages
-    for root, directories, _ in os.walk(
-        os.path.join(cpp_extensions_test_dir, "install")
-    ):
-        for directory in directories:
-            if "-packages" in directory:
-                install_directory = os.path.join(root, directory)
+    # Get the site-packages directory prepared for PYTHONPATH
+    platlib_path = sysconfig.get_paths()["platlib"]
+    platlib_rel = os.path.relpath(
+        platlib_path, os.path.splitdrive(platlib_path)[0] + os.sep
+    )
+    install_directory = os.path.join(extensions_dir, "install", platlib_rel)
 
     assert install_directory, "install_directory must not be empty"
     return install_directory, 0
@@ -687,6 +723,8 @@ def run_test_retries(
     stepcurrent_key,
     output,
     continue_through_error,
+    test_file,
+    options,
 ):
     # Run the test with -x to stop at first failure.  Rerun the test by itself.
     # If it succeeds, move on to the rest of the tests in a new process.  If it
@@ -704,6 +742,16 @@ def run_test_retries(
         print(s, file=output, flush=True)
 
     num_failures = defaultdict(int)
+
+    def read_pytest_cache(key: str) -> Any:
+        cache_file = (
+            REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key / key
+        )
+        try:
+            with open(cache_file) as f:
+                return f.read()
+        except FileNotFoundError:
+            return None
 
     print_items = ["--print-items"]
     sc_command = f"--sc={stepcurrent_key}"
@@ -725,10 +773,11 @@ def run_test_retries(
 
         # Read what just failed/ran
         try:
-            with open(
-                REPO_ROOT / ".pytest_cache/v/cache/stepcurrent" / stepcurrent_key
-            ) as f:
-                current_failure = f.read()
+            current_failure = read_pytest_cache("lastrun")
+            if current_failure is None:
+                raise FileNotFoundError
+            if current_failure == "null":
+                current_failure = f"'{test_file}'"
         except FileNotFoundError:
             print_to_file(
                 "No stepcurrent file found. Either pytest didn't get to run (e.g. import error)"
@@ -745,9 +794,19 @@ def run_test_retries(
             # skip it and move on
             sc_command = f"--scs={stepcurrent_key}"
             print_to_file(
-                "Test succeeeded in new process, continuing with the rest of the tests"
+                "Test succeeded in new process, continuing with the rest of the tests"
             )
         elif num_failures[current_failure] >= 3:
+            # This is for log classifier so it can prioritize consistently
+            # failing tests instead of reruns. [1:-1] to remove quotes
+            print_to_file(f"FAILED CONSISTENTLY: {current_failure[1:-1]}")
+            if (
+                read_pytest_cache("made_failing_xml") == "false"
+                and IS_CI
+                and options.upload_artifacts_while_running
+            ):
+                upload_adhoc_failure_json(test_file, current_failure[1:-1])
+
             if not continue_through_error:
                 print_to_file("Stopping at first consistent failure")
                 break
@@ -762,8 +821,8 @@ def run_test_retries(
             print_to_file("Retrying single test...")
         print_items = []  # do not continue printing them, massive waste of space
 
-    consistent_failures = [x[1:-1] for x in num_failures.keys() if num_failures[x] >= 3]
-    flaky_failures = [x[1:-1] for x in num_failures.keys() if 0 < num_failures[x] < 3]
+    consistent_failures = [x[1:-1] for x in num_failures if num_failures[x] >= 3]
+    flaky_failures = [x[1:-1] for x in num_failures if 0 < num_failures[x] < 3]
     if len(flaky_failures) > 0:
         print_to_file(
             "The following tests failed and then succeeded when run in a new process"
@@ -800,8 +859,17 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
     # Build the test cpp extensions modules
     shell_env = os.environ.copy()
     shell_env["USE_NINJA"] = str(1 if use_ninja else 0)
-    install_cmd = [sys.executable, "setup.py", "install", "--root", "./install"]
-    wheel_cmd = [sys.executable, "setup.py", "bdist_wheel"]
+    install_cmd = [
+        sys.executable,
+        "-m",
+        "pip",
+        "install",
+        "--no-build-isolation",
+        ".",
+        "--root",
+        "./install",
+    ]
+    wheel_cmd = [sys.executable, "-m", "build", "--wheel", "--no-isolation"]
     return_code = shell(install_cmd, cwd=cpp_extensions_test_dir, env=shell_env)
     if return_code != 0:
         return return_code
@@ -809,9 +877,11 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         exts_to_build = [
             (install_cmd, "no_python_abi_suffix_test"),
         ]
-        if TEST_CUDA:
+        if TEST_CUDA or TEST_XPU:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
-            exts_to_build.append((install_cmd, "libtorch_agnostic_extension"))
+        if TEST_CUDA:
+            exts_to_build.append((install_cmd, "libtorch_agn_2_9_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agn_2_10_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
                 cmd,
@@ -839,12 +909,16 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
                 if "-packages" in directory:
                     install_directories.append(os.path.join(root, directory))
 
-        for root, directories, _ in os.walk(
-            os.path.join(cpp_extensions, "libtorch_agnostic_extension", "install")
-        ):
-            for directory in directories:
-                if "-packages" in directory:
-                    install_directories.append(os.path.join(root, directory))
+        for extension_name in [
+            "libtorch_agn_2_9_extension",
+            "libtorch_agn_2_10_extension",
+        ]:
+            for root, directories, _ in os.walk(
+                os.path.join(cpp_extensions, extension_name, "install")
+            ):
+                for directory in directories:
+                    if "-packages" in directory:
+                        install_directories.append(os.path.join(root, directory))
 
         with extend_python_path(install_directories):
             return run_test(ShardedTest(test_module, 1, 1), test_directory, options)
@@ -886,23 +960,34 @@ def _test_autoload(test_directory, options, enable=True):
         os.environ.pop("TORCH_DEVICE_BACKEND_AUTOLOAD")
 
 
-def run_test_with_openreg(test_module, test_directory, options):
+# test_openreg is designed to run all tests under torch_openreg, which
+# is an torch backend similar to CUDA or MPS and implemented by using
+# third-party accelerator integration mechanism. Therefore, if all the
+# tests under torch_openreg are passing, it can means that the mechanism
+# mentioned above is working as expected.
+def test_openreg(test_module, test_directory, options):
     openreg_dir = os.path.join(
-        test_directory, "cpp_extensions", "open_registration_extension"
+        test_directory, "cpp_extensions", "open_registration_extension", "torch_openreg"
     )
     install_dir, return_code = install_cpp_extensions(openreg_dir)
     if return_code != 0:
         return return_code
 
     with extend_python_path([install_dir]):
-        return run_test(test_module, test_directory, options)
+        cmd = [
+            sys.executable,
+            "-m",
+            "unittest",
+            "discover",
+            "-s",
+            os.path.join(openreg_dir, "tests"),
+            "-v",
+        ]
+        return shell(cmd, cwd=test_directory, env=os.environ)
 
 
 def test_distributed(test_module, test_directory, options):
-    # MPI tests are broken with Python-3.9
-    mpi_available = subprocess.call(
-        "command -v mpiexec", shell=True
-    ) == 0 and sys.version_info < (3, 9)
+    mpi_available = shutil.which("mpiexec")
     if options.verbose and not mpi_available:
         print_to_stderr("MPI not available -- MPI backend tests will be skipped")
 
@@ -1071,6 +1156,9 @@ def run_doctests(test_module, test_directory, options):
     if torch.mps.is_available():
         os.environ["TORCH_DOCTEST_MPS"] = "1"
 
+    if torch.distributed.is_available():
+        os.environ["TORCH_DOCTEST_DISTRIBUTED"] = "1"
+
     if 0:
         # TODO: could try to enable some of these
         os.environ["TORCH_DOCTEST_QUANTIZED_DYNAMIC"] = "1"
@@ -1142,12 +1230,14 @@ def handle_log_file(
 
 
 def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
-    if RERUN_DISABLED_TESTS:
-        # Distributed tests are too slow, so running them x50 will cause the jobs to timeout after
+    if is_distributed_test:
+        # Distributed tests do not support rerun, see https://github.com/pytorch/pytorch/issues/162978
+        rerun_options = ["-x", "--reruns=0"]
+    elif RERUN_DISABLED_TESTS:
+        # ASAN tests are too slow, so running them x50 will cause the jobs to timeout after
         # 3+ hours. So, let's opt for less number of reruns. We need at least 150 instances of the
-        # test every 2 weeks to satisfy the SQL query (15 x 14 = 210). The same logic applies
-        # to ASAN, which is also slow
-        count = 15 if is_distributed_test or TEST_WITH_ASAN else 50
+        # test every 2 weeks to satisfy the SQL query (15 x 14 = 210).
+        count = 15 if TEST_WITH_ASAN else 50
         # When under rerun-disabled-tests mode, run the same tests multiple times to determine their
         # flakiness status. Default to 50 re-runs
         rerun_options = ["--flake-finder", f"--flake-runs={count}"]
@@ -1169,7 +1259,7 @@ def get_pytest_args(options, is_cpp_test=False, is_distributed_test=False):
         # is much slower than running them directly
         pytest_args.extend(["-n", str(NUM_PROCS)])
 
-        if IS_CI:
+        if TEST_SAVE_XML:
             # Add the option to generate XML test report here as C++ tests
             # won't go into common_utils
             test_report_path = get_report_path(pytest=True)
@@ -1224,9 +1314,7 @@ CUSTOM_HANDLERS = {
     "test_ci_sanity_check_fail": run_ci_sanity_check,
     "test_autoload_enable": test_autoload_enable,
     "test_autoload_disable": test_autoload_disable,
-    "test_cpp_extensions_open_device_registration": run_test_with_openreg,
-    "test_openreg": run_test_with_openreg,
-    "test_transformers_privateuse1": run_test_with_openreg,
+    "test_openreg": test_openreg,
 }
 
 
@@ -1260,6 +1348,26 @@ def parse_args():
         help="Run all distributed tests",
     )
     parser.add_argument(
+        "--include-dynamo-core-tests",
+        "--include-dynamo-core-tests",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run dynamo tests. "
+            "If this flag is not present, we will run all tests "
+            "(including dynamo tests)."
+        ),
+    )
+    parser.add_argument(
+        "--include-inductor-core-tests",
+        "--include-inductor-core-tests",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run inductor tests. "
+            "If this flag is not present, we will run all tests "
+            "(including inductor tests)."
+        ),
+    )
+    parser.add_argument(
         "--functorch",
         "--functorch",
         action="store_true",
@@ -1267,6 +1375,16 @@ def parse_args():
             "If this flag is present, we will only run functorch tests. "
             "If this flag is not present, we will run all tests "
             "(including functorch tests)."
+        ),
+    )
+    parser.add_argument(
+        "--einops",
+        "--einops",
+        action="store_true",
+        help=(
+            "If this flag is present, we will only run einops tests. "
+            "If this flag is not present, we will run all tests "
+            "(including einops tests)."
         ),
     )
     parser.add_argument(
@@ -1280,6 +1398,12 @@ def parse_args():
         "--xpu",
         action="store_true",
         help=("If this flag is present, we will run xpu tests except XPU_BLOCK_LIST"),
+    )
+    parser.add_argument(
+        "--openreg",
+        "--openreg",
+        action="store_true",
+        help=("If this flag is present, we will only run test_openreg"),
     )
     parser.add_argument(
         "--cpp",
@@ -1364,23 +1488,21 @@ def parse_args():
         help="Set a timeout based on the test times json file.  Only works if there are test times available",
         default=IS_CI and not strtobool(os.environ.get("NO_TEST_TIMEOUT", "False")),
     )
+    GITHUB_WORKFLOW = os.environ.get("GITHUB_WORKFLOW", "slow")
     parser.add_argument(
         "--enable-td",
         action="store_true",
         help="Enables removing tests based on TD",
         default=IS_CI
-        and (
-            TEST_WITH_CROSSREF
-            or TEST_CONFIG == "distributed"
-            or TEST_CONFIG == "default"
-        )
         and get_pr_number() is not None
         and not strtobool(os.environ.get("NO_TD", "False"))
-        and not TEST_WITH_ROCM
         and not IS_MACOS
         and "xpu" not in BUILD_ENVIRONMENT
         and "onnx" not in BUILD_ENVIRONMENT
-        and os.environ.get("GITHUB_WORKFLOW", "slow") in ("trunk", "pull"),
+        and (
+            GITHUB_WORKFLOW in ("trunk", "pull")
+            or GITHUB_WORKFLOW.startswith(("rocm-", "periodic-rocm-"))
+        ),
     )
     parser.add_argument(
         "--shard",
@@ -1416,6 +1538,11 @@ def parse_args():
         help="exclude inductor tests",
     )
     parser.add_argument(
+        "--exclude-quantization-tests",
+        action="store_true",
+        help="exclude quantization tests",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="Only list the test that will run.",
@@ -1438,6 +1565,7 @@ def parse_args():
     parser.add_argument(
         "--upload-artifacts-while-running",
         action="store_true",
+        default=IS_CI,
     )
 
     group = parser.add_mutually_exclusive_group()
@@ -1514,10 +1642,31 @@ def get_selected_tests(options) -> list[str]:
             filter(lambda test_name: test_name in CORE_TEST_LIST, selected_tests)
         )
 
+    # Filter to only run dynamo tests when --include-dynamo-core-tests option is specified
+    if options.include_dynamo_core_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in DYNAMO_CORE_TESTS, selected_tests)
+        )
+
+    # Filter to only run dynamo tests when --include-inductor-core-tests option is specified
+    if options.include_inductor_core_tests:
+        selected_tests = list(
+            filter(lambda test_name: test_name in INDUCTOR_TESTS, selected_tests)
+        )
+
     # Filter to only run functorch tests when --functorch option is specified
     if options.functorch:
         selected_tests = list(
             filter(lambda test_name: test_name in FUNCTORCH_TESTS, selected_tests)
+        )
+
+    # Filter to only run einops tests when --einops option is specified
+    if options.einops:
+        selected_tests = list(
+            filter(
+                lambda test_name: test_name.startswith("dynamo/test_einops"),
+                selected_tests,
+            )
         )
 
     if options.cpp:
@@ -1541,6 +1690,8 @@ def get_selected_tests(options) -> list[str]:
             "test_nn",
             "inductor/test_mps_basic",
             "inductor/test_torchinductor",
+            "inductor/test_aot_inductor",
+            "inductor/test_torchinductor_dynamic_shapes",
         ]
     else:
         # Exclude all mps tests otherwise
@@ -1549,8 +1700,13 @@ def get_selected_tests(options) -> list[str]:
     if options.xpu:
         selected_tests = exclude_tests(XPU_BLOCKLIST, selected_tests, "on XPU")
     else:
-        # Exclude all xpu specifc tests otherwise
+        # Exclude all xpu specific tests otherwise
         options.exclude.extend(XPU_TEST)
+
+    if options.openreg:
+        selected_tests = ["test_openreg"]
+    else:
+        options.exclude.append("test_openreg")
 
     # Filter to only run onnx tests when --onnx option is specified
     onnx_tests = [tname for tname in selected_tests if tname in ONNX_TESTS]
@@ -1576,6 +1732,9 @@ def get_selected_tests(options) -> list[str]:
     if options.exclude_aot_dispatch_tests:
         options.exclude.extend(AOT_DISPATCH_TESTS)
 
+    if options.exclude_quantization_tests:
+        options.exclude.extend(QUANTIZATION_TESTS)
+
     # these tests failing in CUDA 11.6 temporary disabling. issue https://github.com/pytorch/pytorch/issues/75375
     if torch.version.cuda is not None:
         options.exclude.extend(["distributions/test_constraints"])
@@ -1590,6 +1749,13 @@ def get_selected_tests(options) -> list[str]:
                 "functorch/test_memory_efficient_fusion",
                 "torch_np/numpy_tests/core/test_multiarray",
             ]
+        )
+
+    if sys.version_info[:2] < (3, 13) or sys.version_info[:2] >= (3, 14):
+        # Skip tests for older Python versions as they may use syntax or features
+        # not supported in those versions
+        options.exclude.extend(
+            [test for test in selected_tests if test.startswith("dynamo/cpython/3_13/")]
         )
 
     selected_tests = exclude_tests(options.exclude, selected_tests)
@@ -1739,9 +1905,14 @@ def run_test_module(
         test_name = test.name
 
         # Printing the date here can help diagnose which tests are slow
-        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}]")
+        start = time.perf_counter()
+        print_to_stderr(f"Running {str(test)} ... [{datetime.now()}][{start}]")
         handler = CUSTOM_HANDLERS.get(test_name, run_test)
         return_code = handler(test, test_directory, options)
+        end = time.perf_counter()
+        print_to_stderr(
+            f"Finished {str(test)} ... [{datetime.now()}][{end}], took {(end - start) / 60:.2f}min"
+        )
         assert isinstance(return_code, int) and not isinstance(return_code, bool), (
             f"While running {str(test)} got non integer return code {return_code}"
         )
@@ -1775,11 +1946,6 @@ def run_tests(
         x for x in selected_tests if x not in selected_tests_parallel
     ]
 
-    # See Note [ROCm parallel CI testing]
-    pool = get_context("spawn").Pool(
-        NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
-    )
-
     # NB: This is a hack to make conftest.py and files it depends on available
     # on CPP_TESTS_DIR. We should see if the file could be turned into a
     # full-fledge ptest plugin instead
@@ -1797,36 +1963,30 @@ def run_tests(
         ):
             shutil.copy(os.path.join(test_directory, conftest_file), cpp_file)
 
-    def handle_error_messages(failure: Optional[TestFailure]):
-        if failure is None:
+    def handle_complete(failure: Optional[TestFailure]):
+        failed = failure is not None
+        if IS_CI and options.upload_artifacts_while_running:
+            parse_xml_and_upload_json()
+            zip_and_upload_artifacts(failed)
+        if not failed:
             return False
         failures.append(failure)
         print_to_stderr(failure.message)
         return True
-
-    def parallel_test_completion_callback(failure):
-        test_failed = handle_error_messages(failure)
-        if IS_CI and options.upload_artifacts_while_running:
-            zip_and_upload_artifacts(test_failed)
-        if (
-            test_failed
-            and not options.continue_through_error
-            and not RERUN_DISABLED_TESTS
-        ):
-            pool.terminate()
 
     keep_going_message = (
         "\n\nTip: You can keep running tests even on failure by passing --keep-going to run_test.py.\n"
         "If running on CI, add the 'keep-going' label to your PR and rerun your jobs."
     )
 
+    pool = None
     try:
         for test in selected_tests_serial:
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
                 options_clone.pytest = True
             failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
+            test_failed = handle_complete(failure)
             if (
                 test_failed
                 and not options.continue_through_error
@@ -1841,7 +2001,7 @@ def run_tests(
                 options_clone.pytest = True
             options_clone.additional_args.extend(["-m", "serial"])
             failure = run_test_module(test, test_directory, options_clone)
-            test_failed = handle_error_messages(failure)
+            test_failed = handle_complete(failure)
             if (
                 test_failed
                 and not options.continue_through_error
@@ -1849,7 +2009,24 @@ def run_tests(
             ):
                 raise RuntimeError(failure.message + keep_going_message)
 
-        os.environ["NUM_PARALLEL_PROCS"] = str(NUM_PROCS)
+        # This is used later to constrain memory per proc on the GPU. On ROCm
+        # the number of procs is the number of GPUs, so we don't need to do this
+        os.environ["NUM_PARALLEL_PROCS"] = str(1 if torch.version.hip else NUM_PROCS)
+
+        # See Note [ROCm parallel CI testing]
+        pool = get_context("spawn").Pool(
+            NUM_PROCS, maxtasksperchild=None if torch.version.hip else 1
+        )
+
+        def parallel_test_completion_callback(failure):
+            test_failed = handle_complete(failure)
+            if (
+                test_failed
+                and not options.continue_through_error
+                and not RERUN_DISABLED_TESTS
+            ):
+                pool.terminate()
+
         for test in selected_tests_parallel:
             options_clone = copy.deepcopy(options)
             if can_run_in_pytest(test):
@@ -1865,8 +2042,9 @@ def run_tests(
         del os.environ["NUM_PARALLEL_PROCS"]
 
     finally:
-        pool.terminate()
-        pool.join()
+        if pool:
+            pool.terminate()
+            pool.join()
 
     return
 
@@ -1877,19 +2055,34 @@ def check_pip_packages() -> None:
         "pytest-flakefinder",
         "pytest-xdist",
     ]
-    installed_packages = [i.key for i in pkg_resources.working_set]
-    for package in packages:
-        if package not in installed_packages:
-            print_to_stderr(
-                f"Missing pip dependency: {package}, please run `pip install -r .ci/docker/requirements-ci.txt`"
-            )
-            sys.exit(1)
+    try:
+        for pkg in packages:
+            version(pkg)
+    except PackageNotFoundError:
+        print_to_stderr(
+            f"Missing pip dependency: {pkg}, please run `pip install -r .ci/docker/requirements-ci.txt`"
+        )
+        sys.exit(1)
 
 
 def main():
     check_pip_packages()
 
     options = parse_args()
+    tests_to_include_env = os.environ.get("TESTS_TO_INCLUDE", "").strip()
+    if tests_to_include_env:
+        # Parse env var tests to module names (strips .py suffix and ::method)
+        env_tests = {parse_test_module(t) for t in tests_to_include_env.split()}
+
+        if options.include != TESTS:
+            # --include was explicitly provided, intersect with env var
+            cli_tests = {parse_test_module(t) for t in options.include}
+            options.include = list(env_tests & cli_tests)
+        else:
+            # No explicit --include, use env var tests
+            options.include = list(env_tests)
+
+        options.enable_td = False
 
     # Include sharding info in all metrics
     which_shard, num_shards = get_sharding_opts(options)
@@ -2004,7 +2197,7 @@ def main():
         if IS_CI:
             for test, _ in all_failures:
                 test_stats = test_prioritizations.get_test_stats(test)
-                print_to_stderr("Emiting td_test_failure_stats_v2")
+                print_to_stderr("Emitting td_test_failure_stats_v2")
                 emit_metric(
                     "td_test_failure_stats_v2",
                     {

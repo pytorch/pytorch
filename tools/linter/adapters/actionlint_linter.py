@@ -73,6 +73,8 @@ def check_file(
                 binary,
                 "-ignore",
                 '"runs-on" section must be sequence node but got mapping node with "!!map" tag',
+                "-ignore",
+                'input "freethreaded" is not defined in action "actions/setup-python@v',
                 file,
             ]
         )

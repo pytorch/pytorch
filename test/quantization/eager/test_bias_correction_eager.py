@@ -18,6 +18,7 @@ from torch.testing._internal.common_quantization import (
     QuantizationTestCase,
     skipIfNoFBGEMM,
 )
+from torch.testing._internal.common_utils import raise_on_run_directly
 
 
 class TestBiasCorrectionEager(QuantizationTestCase):
@@ -38,7 +39,7 @@ class TestBiasCorrectionEager(QuantizationTestCase):
         torch.ao.quantization.convert(artificial_model, inplace=True)
 
         # manually changing bias
-        for name, submodule in artificial_model.named_modules():
+        for submodule in artificial_model.modules():
             if type(submodule) in _supported_modules:
                 x = get_param(submodule, "bias")
                 weight = get_param(submodule, "weight")
@@ -119,3 +120,7 @@ class TestBiasCorrectionEager(QuantizationTestCase):
             for _ in range(50)
         ]
         self.correct_artificial_bias_quantize(float_model, img_data)
+
+
+if __name__ == "__main__":
+    raise_on_run_directly("test/test_quantization.py")

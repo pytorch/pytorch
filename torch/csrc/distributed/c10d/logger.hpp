@@ -7,6 +7,37 @@
 
 namespace c10d {
 
+// A struct to hold the latest status of the process group.
+struct ProcessGroupStatus {
+  // the sequential number of the last collective enqueued into workMetaList_
+  // This is useful for identifying a rank that has not join a collective
+  // initialized to be -1 to indicate no collective has been enqueued
+  int64_t lastEnqueuedSeq{-1};
+  // the sequential number of the last collective started as the kernel
+  int64_t lastStartedSeq{-1};
+  // the sequential number of the last collective completed marked by
+  // the watchdog thread
+  // initialized to be -1 to indicate no collective has been completed
+  int64_t lastCompletedSeq{-1};
+
+  // the name of the last collective enqueued into workMetaList_
+  std::string lastEnqueuedWorkName;
+  // the name of the last collective started as the kernel
+  std::string lastStartedWorkName;
+  // the name of the last collective completed
+  std::string lastCompletedWorkName;
+
+  // the sizes of the last work enqueued
+  size_t lastEnqueuedNumelIn;
+  size_t lastEnqueuedNumelOut;
+  // the sizes of the last work completed
+  size_t lastCompletedNumelIn;
+  size_t lastCompletedNumelOut;
+  // the sizes of the last work started
+  size_t lastStartedNumelIn;
+  size_t lastStartedNumelOut;
+};
+
 class TORCH_API Logger {
  public:
   explicit Logger(std::shared_ptr<c10d::Reducer> reducer);
@@ -122,7 +153,7 @@ class TORCH_API C10dLogger {
   virtual ~C10dLogger() = default;
   virtual void log(const C10dLoggingData& data);
   static C10dLogger* getLogger();
-  static void registerLogger(std::unique_ptr<C10dLogger>);
+  static void registerLogger(std::unique_ptr<C10dLogger> /*logger*/);
 
  protected:
   // singletion, hide constructor from the public
