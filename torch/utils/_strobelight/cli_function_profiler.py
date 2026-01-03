@@ -8,7 +8,7 @@ import subprocess
 import time
 from collections.abc import Callable, Sequence
 from threading import Lock
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 
@@ -34,14 +34,14 @@ class StrobelightCLIProfilerError(Exception):
     """
 
 
-def _pid_namespace_link(pid: Optional[int] = None) -> str:
+def _pid_namespace_link(pid: int | None = None) -> str:
     """Returns the link to the process's namespace, example: pid:[4026531836]"""
     PID_NAMESPACE_PATH = "/proc/{}/ns/pid"
     pid = pid or os.getpid()
     return os.readlink(PID_NAMESPACE_PATH.format(pid))
 
 
-def _pid_namespace(pid: Optional[int] = None) -> int:
+def _pid_namespace(pid: int | None = None) -> int:
     """Returns the process's namespace id"""
     pid = pid or os.getpid()
     link = _pid_namespace_link(pid)
@@ -77,11 +77,11 @@ class StrobelightCLIFunctionProfiler:
         run_user_name: str = "pytorch-strobelight-ondemand",
         timeout_wait_for_running_sec: int = 60,
         timeout_wait_for_finished_sec: int = 60,
-        recorded_env_variables: Optional[list[str]] = None,
-        sample_tags: Optional[list[str]] = None,
+        recorded_env_variables: list[str] | None = None,
+        sample_tags: list[str] | None = None,
         stack_max_len: int = 127,
         async_stack_max_len: int = 127,
-    ):
+    ) -> None:
         self.stop_at_error = stop_at_error
         self.max_profile_duration_sec = max_profile_duration_sec
         self.sample_each = sample_each
@@ -90,7 +90,7 @@ class StrobelightCLIFunctionProfiler:
         self.timeout_wait_for_finished_sec = timeout_wait_for_finished_sec
         # Results of the most recent run.
         # Tracks the strobelight run id of the most recent run
-        self.current_run_id: Optional[int] = None
+        self.current_run_id: int | None = None
         self.sample_tags = sample_tags
 
     def _run_async(self) -> None:
@@ -253,7 +253,7 @@ class StrobelightCLIFunctionProfiler:
 
     def profile(
         self, work_function: Callable[_P, _R], *args: _P.args, **kwargs: _P.kwargs
-    ) -> Optional[_R]:
+    ) -> _R | None:
         self.current_run_id = None
 
         if locked := StrobelightCLIFunctionProfiler._lock.acquire(False):
@@ -295,16 +295,16 @@ class StrobelightCLIFunctionProfiler:
 # @strobelight(profiler = StrobelightFunctionProfiler(stop_at_error=True,..))
 # @strobelight(stop_at_error=True,...)
 def strobelight(
-    profiler: Optional[StrobelightCLIFunctionProfiler] = None, **kwargs: Any
-) -> Callable[[Callable[_P, _R]], Callable[_P, Optional[_R]]]:
+    profiler: StrobelightCLIFunctionProfiler | None = None, **kwargs: Any
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R | None]]:
     if not profiler:
         profiler = StrobelightCLIFunctionProfiler(**kwargs)
 
     def strobelight_inner(
         work_function: Callable[_P, _R],
-    ) -> Callable[_P, Optional[_R]]:
+    ) -> Callable[_P, _R | None]:
         @functools.wraps(work_function)
-        def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> Optional[_R]:
+        def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _R | None:
             # pyrefly: ignore [bad-argument-type]
             return profiler.profile(work_function, *args, **kwargs)
 

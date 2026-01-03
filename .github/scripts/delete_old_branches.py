@@ -1,10 +1,11 @@
 # Delete old branches
 import os
 import re
+from collections.abc import Callable
 from datetime import datetime
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Callable
+from typing import Any
 
 from github_utils import gh_fetch_json_dict, gh_graphql
 from gitutils import GitRepo
@@ -124,7 +125,10 @@ def get_branches(repo: GitRepo) -> dict[str, Any]:
     for line in git_response.splitlines():
         branch, date = line.split(" ")
         re_branch = re.match(r"refs/remotes/origin/(.*)", branch)
-        assert re_branch
+        if not re_branch:
+            raise AssertionError(
+                f"Branch name '{branch}' does not match expected pattern"
+            )
         branch = branch_base_name = re_branch.group(1)
         if x := re.match(r"(gh\/.+)\/(head|base|orig)", branch):
             branch_base_name = x.group(1)

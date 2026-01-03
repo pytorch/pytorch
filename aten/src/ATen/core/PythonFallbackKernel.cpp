@@ -1,7 +1,6 @@
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/core/impl/PythonDispatcherTLS.h>
 #include <ATen/core/PythonFallbackKernel.h>
-#include <c10/core/SafePyObject.h>
 #include <ATen/record_function.h>
 
 namespace {

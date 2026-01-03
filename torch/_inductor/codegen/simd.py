@@ -11,7 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import Any, Callable, Generic, Optional, TYPE_CHECKING, Union
+from typing import Any, Generic, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 
 import sympy
@@ -40,12 +40,14 @@ from ..dependencies import MemoryDep, StarDep, WeakDep
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ..ir import IRNode
 
 from ..optimize_indexing import indexing_dtype_strength_reduction
 from ..runtime.coordinate_descent_tuner import CoordescTuner
 from ..runtime.hints import DeviceProperties
-from ..runtime.runtime_utils import green_text, next_power_of_2, yellow_text
+from ..runtime.runtime_utils import green_text, last_power_of_2, yellow_text
 from ..scheduler import BaseSchedulerNode, BaseScheduling, WhyNoFuse
 from ..utils import (
     cache_property_on_self,
@@ -592,6 +594,17 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
 
+    def create_constant_mask(self, entry) -> str:
+        x = entry.prefix
+        if entry.tensor_dim is None:
+            sizestr = self.dense_size_str()
+            return f"{x}mask = tl.full({sizestr}, True, tl.int1)"
+        sizes = ["None"] * self.triton_tensor_ndim()
+        sizes[entry.tensor_dim] = ":"
+        suffix = ", ".join(sizes)
+        out = f"{x}mask = tl.full([{x.upper()}BLOCK], True, tl.int1)[{suffix}]"
+        return out
+
     def dense_size_str(self) -> str:
         sizes = self.dense_size_list()
         return f"[{', '.join(sizes)}]"
@@ -692,7 +705,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         def add_range(i: int, expr: sympy.Expr) -> int:
             expr = sv.simplify(expr)
             if not sv.statically_known_multiple_of(remaining[i], expr):
-                raise CantSplit
+                raise CantSplit(remaining[i], expr)
             # guard on the last item out
             remaining[i] = FloorDiv(remaining[i], expr)
             new_ranges[i].append(expr)
@@ -770,15 +783,29 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
                     )
 
-                # Two-dimensional tiling
-                elif current_group + 1 < len(remaining) and sv.statically_known_gt(
-                    size, remaining[current_group]
+                # Two-dimensional tiling: split size across current_group and next group.
+                elif current_group + 1 < len(remaining) and (
+                    sv.statically_known_gt(size, remaining[current_group])
+                    or
+                    # statically_known_gt(size, remaining) may return False for symbolic
+                    # expressions like 64*u0 vs u0, because both could be 0. Similarly for
+                    # backed expressions like s25*(((s70 - 5)//4)) - s25 and
+                    # (s25*(((s70 - 5)//4)) - s25)*64.
+                    # We want to assume tensor sizes are not 0 and pass the gt
+                    # using the following logic.
+                    #
+                    # if A//B = C and C >= 1
+                    # then A = B * C + R
+                    # and assuming A!=0
+                    # A must be > B .
+                    #
+                    sv.statically_known_gt(FloorDiv(size, remaining[current_group]), 1)
                 ):
                     # need to break size in two
                     if not sv.statically_known_multiple_of(
                         size, remaining[current_group]
                     ):
-                        raise CantSplit
+                        raise CantSplit(size, remaining[current_group])
 
                     size1 = remaining[current_group]
                     size2 = FloorDiv(size, remaining[current_group])
@@ -1597,10 +1624,7 @@ class SIMDScheduling(BaseScheduling):
     def _codegen_mix_order_reduction(self, node1, node2):
         numel, rnumel = scheduler.MixOrderReduction.get_numel_rnumel(node1)
 
-        if not V.graph.sizevars.statically_known_gt(
-            numel,
-            rnumel,
-        ):
+        if not V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel)):
             return self._codegen_mix_order_reduction(node2, node1)
 
         def _pick_split_size():
@@ -1612,7 +1636,10 @@ class SIMDScheduling(BaseScheduling):
             device_prop = DeviceProperties.create(node1.get_device())
             num_sm = device_prop.multi_processor_count
             estimated_num_splits = num_sm * 8
-            split_size = max(next_power_of_2(numel // estimated_num_splits), 16)
+
+            # split_size is decided based on hint
+            numel_hint = V.graph.sizevars.size_hint(numel)
+            split_size = max(last_power_of_2(numel_hint // estimated_num_splits), 16)
             split_size = min(split_size, 128)
             return split_size
 
@@ -1621,10 +1648,7 @@ class SIMDScheduling(BaseScheduling):
         # pyrefly: ignore [bad-assignment]
         metrics.codegen_mix_order_reduction += 1
 
-        assert V.graph.sizevars.statically_known_gt(
-            numel,
-            rnumel,
-        )
+        assert V.graph.sizevars.evaluate_expr(sympy.Gt(numel, rnumel))
 
         # split epilogue out of node2
         node2_reductions, node2_epilogue = self._split_mix_order_reduction_epilogue(
@@ -1646,7 +1670,11 @@ class SIMDScheduling(BaseScheduling):
         if (
             not torch._inductor.config.deterministic
             and config.triton.mix_order_reduction_split_size is None
-            and config.triton.mix_order_reduction_autotune_split_size
+            and (
+                config.triton.mix_order_reduction_autotune_split_size
+                or config.max_autotune
+                or config.coordinate_descent_tuning
+            )
         ):
 
             def _bench(candidate_split_size):
@@ -1664,7 +1692,6 @@ class SIMDScheduling(BaseScheduling):
                 split_size,
                 8,
             )
-            # print(f"Autotuning pick split size {split_size}")
 
         kernel, ws_name, src_code = self._generate_kernel_code_for_mix_order_reduction(
             kernel_features,
@@ -1709,6 +1736,8 @@ class SIMDScheduling(BaseScheduling):
                 if node.get_outputs()[0].node.get_name() not in rename:
                     node.mark_run()
 
+        V.graph.wrapper_code.make_comment("# Call mix order reduction kernel")
+        self.codegen_comment(node_schedule, None)
         # workspace args is still needed after the call
         kernel.call_kernel(kernel.kernel_name, deallocate_ws=False)
         V.graph.removed_buffers |= kernel.removed_buffers
@@ -1716,7 +1745,9 @@ class SIMDScheduling(BaseScheduling):
 
         # a extra round of reduction
         assert len(converted_nodes) == len(kernel.saved_partial_accumulate)
-        nsplit = (numel + split_size - 1) // split_size
+        nsplit = V.graph.wrapper_code.codegen_python_sizevar(
+            (numel + split_size - 1) // split_size
+        )
         for idx, partial_accum in enumerate(kernel.saved_partial_accumulate):
             buffer_name = partial_accum.buffer_name
 
@@ -1731,9 +1762,12 @@ class SIMDScheduling(BaseScheduling):
                 partial_accum.reduction_type, partial_accum.reduction_type
             )
 
-            V.graph.wrapper_code.writeline(
-                f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)",
-            )
+            final_reduce = f"{buffer_name} = {ws_name}[{start} : {end}].view({nsplit}, {rnumel}).{opname}(dim=0)"
+            # The workspace tensor is in torch.float, need a cast if the buffer is
+            # not.
+            if (buffer_dtype := V.graph.get_dtype(buffer_name)) != torch.float:
+                final_reduce += f".to({buffer_dtype})"
+            V.graph.wrapper_code.writeline(final_reduce)
             # mark the buffer as allocated, so we don't try to allocate
             # it again when it's later used
             V.graph.wrapper_code.allocated.add(buffer_name)
@@ -2050,7 +2084,7 @@ class SIMDScheduling(BaseScheduling):
 
             # TODO: Maybe unify CUDATemplateKernel to also use PartialRender for flexible epilogue fusion.
 
-            for input_name in kernel.named_input_nodes.keys():
+            for input_name in kernel.named_input_nodes:
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
                 # pyrefly: ignore [missing-attribute]
                 partial_code.finalize_hook(subgraph_name, strict=False)
@@ -2287,13 +2321,12 @@ class SIMDScheduling(BaseScheduling):
         for node_group in partitions:
             if len(node_group) == 0:
                 continue
-            fused_node_lists = [node.get_nodes() for node in node_group]
             kernel = ComboKernel(
                 enable_autotune=enable_autotune,
                 mixed_sizes=mixed_sizes,
             )
 
-            for pn, nodes in zip(node_group, fused_node_lists):
+            for pn in node_group:
                 self.codegen_node_schedule_with_kernel(
                     node_schedule_map[pn][0],
                     kernel.create_sub_kernel(subkernel_map[pn]),
@@ -2548,8 +2581,10 @@ class SIMDScheduling(BaseScheduling):
                 all_var_ranges = [*dep.ranges.items()]
                 pointwise_vars_numel = sympy.S.One
                 sizevars = V.graph.sizevars
-                for pointwise_end_idx, (var, numel) in enumerate(all_var_ranges):
+                pointwise_end_idx = 0
+                for idx, (_var, numel) in enumerate(all_var_ranges):
                     pointwise_vars_numel *= numel
+                    pointwise_end_idx = idx
                     if sizevars.statically_known_geq(
                         pointwise_vars_numel, pointwise_numel
                     ):
@@ -2651,13 +2686,17 @@ class SIMDScheduling(BaseScheduling):
         pw_ranges = [ranges[v] for v in all_iter_vars]
         red_ranges = [ranges[v] for v in all_red_vars]
 
+        # Sometimes dynamic shapes is unable to prove equality without hint
+        get_hint = functools.partial(
+            V.graph.sizevars.size_hint, fallback=config.unbacked_symint_fallback
+        )
         torch._check(
-            sympy_product(pw_ranges) == pointwise_numel,
+            get_hint(sympy_product(pw_ranges)) == get_hint(pointwise_numel),
             lambda: f"{pw_ranges}, {pointwise_numel}, {node_schedule}",
         )
 
         torch._check(
-            sympy_product(red_ranges) == reduction_numel,
+            get_hint(sympy_product(red_ranges)) == get_hint(reduction_numel),
             lambda: f"{red_ranges}, {reduction_numel}, {node_schedule}",
         )
 
@@ -2801,6 +2840,8 @@ class SIMDScheduling(BaseScheduling):
         bad_size_additional_tiling_penalty = 1.025
         good_size_tiling_penalty = 1.005
 
+        total_uncoalesced = sum(coalesce_analysis.uncoalesced_addrs.values())
+
         def score_mod(t):
             score_factor = 1.0
             for tile_size in t[0].tiling.values():
@@ -2809,12 +2850,19 @@ class SIMDScheduling(BaseScheduling):
                 else:
                     score_factor = score_factor / good_size_tiling_penalty
 
-            return -t[0].score * score_factor
+            # Add uncoalesced memory score to prevent small coalesced benefits
+            # from dominating large amounts of uncoalesced memory
+            uncoalesced_penalty = total_uncoalesced * 0.05
+
+            return -(t[0].score + uncoalesced_penalty) * score_factor
 
         # apply penalty for longer tilings that dont increase score much
         for cand, tiling_score in sorted(tilings, key=score_mod):
-            if cls.tiling_is_compatible(
-                node_schedule, pointwise_numel, reduction_numel, cand.tiling
+            if (
+                cls.tiling_is_compatible(
+                    node_schedule, pointwise_numel, reduction_numel, cand.tiling
+                )
+                or cand.tiling == default_tiling
             ):
                 # we always include default reduction numel == 1, dont include
                 tiling_len = len(cand.tiling) - (1 if reduction_numel == 1 else 0)
@@ -3078,9 +3126,15 @@ class CandidateTiling:
     @staticmethod
     def is_good_size(s):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
-        s = V.graph.sizevars.size_hint(s)
+        s = V.graph.sizevars.size_hint(s, fallback=8192)
         return s >= 32 and (s % 32 == 0)
 
 
 class CantSplit(Exception):
-    pass
+    def __init__(self, expr, remaining):
+        super().__init__()
+        self.expr = expr
+        self.remaining = remaining
+
+    def __str__(self):
+        return f"{self.expr} not divisible by {self.remaining}"

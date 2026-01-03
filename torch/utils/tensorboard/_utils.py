@@ -67,9 +67,9 @@ def _prepare_video(V):
     # pyrefly: ignore [index-error]
     n_cols = V.shape[0] // n_rows
 
-    V = np.reshape(V, newshape=(n_rows, n_cols, t, c, h, w))
+    V = np.reshape(V, (n_rows, n_cols, t, c, h, w))
     V = np.transpose(V, axes=(2, 0, 4, 1, 5, 3))
-    V = np.reshape(V, newshape=(t, n_rows * h, n_cols * w, c))
+    V = np.reshape(V, (t, n_rows * h, n_cols * w, c))
 
     return V
 

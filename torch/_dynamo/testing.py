@@ -87,6 +87,12 @@ def extract_graph_and_tracker(fn, *args, **kwargs):  # type: ignore[no-untyped-d
     return gm.graph, region_tracker  # type: ignore[union-attr]
 
 
+def extract_graph(fn, *args, **kwargs):  # type: ignore[no-untyped-def]
+    backend = AotEagerAndRecordGraphs()
+    result = torch.compile(backend=backend)(fn)(*args, **kwargs)
+    return result, backend.graphs, backend.fw_graphs, backend.bw_graphs
+
+
 def collect_results(
     model: torch.nn.Module, prediction: Any, loss: Any, example_inputs: Any
 ) -> list[Any]:
@@ -347,10 +353,27 @@ def remove_trailing_space(code: str) -> str:
     return "\n".join([line.rstrip() for line in code.split("\n")])
 
 
+def _squash_blank_lines(code: str) -> str:
+    lines = code.split("\n")
+    result: list[str] = []
+    saw_blank = False
+    for line in lines:
+        if line.strip() == "":
+            if saw_blank:
+                continue
+            saw_blank = True
+        else:
+            saw_blank = False
+        result.append(line)
+    return "\n".join(result)
+
+
 def normalize_gm(gm_str: str) -> str:
     # strip comments as comments have path to files which may differ from
     # system to system.
-    return remove_trailing_space(strip_comment(gm_str))
+    stripped = strip_comment(gm_str)
+    no_trailing = remove_trailing_space(stripped)
+    return _squash_blank_lines(no_trailing)
 
 
 def empty_line_normalizer(code: str) -> str:
@@ -558,3 +581,25 @@ def _skipped_function_for_test_reconstruct(
     f: Callable[_P, _T], *args: _P.args, **kwargs: _P.kwargs
 ) -> _T:
     return f(*args, **kwargs)
+
+
+_testing_invoke_subgraph_inductor_compile_captured_gms = None
+
+
+@contextlib.contextmanager
+def _testing_capture_invoke_subgraph_inductor_compile_gms():
+    """
+    Context manager to capture graph modules compiled by invoke_subgraph_inductor_compile.
+
+    Usage:
+        with _testing_capture_invoke_subgraph_inductor_compile_gms() as captured_gms:
+            # code that triggers invoke_subgraph_inductor_compile
+            pass
+        # captured_gms will contain the list of captured graph modules
+    """
+    global _testing_invoke_subgraph_inductor_compile_captured_gms
+    _testing_invoke_subgraph_inductor_compile_captured_gms = []
+    try:
+        yield _testing_invoke_subgraph_inductor_compile_captured_gms
+    finally:
+        _testing_invoke_subgraph_inductor_compile_captured_gms = None

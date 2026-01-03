@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import functools
-from typing import Optional
 
 import torch
 from torch._C import _len_torch_function_stack
@@ -8,7 +7,7 @@ from torch.overrides import _pop_mode, _push_mode, TorchFunctionMode
 from torch.utils._contextlib import context_decorator
 
 
-CURRENT_DEVICE: Optional[torch.device] = None
+CURRENT_DEVICE: torch.device | None = None
 
 
 @functools.lru_cache(1)
@@ -59,7 +58,7 @@ def _device_constructors():
 
 # NB: This is directly called from C++ in torch/csrc/Device.cpp
 class DeviceContext(TorchFunctionMode):
-    def __init__(self, device):
+    def __init__(self, device) -> None:
         # pyrefly: ignore [read-only]
         self.device = torch.device(device)
 

@@ -23,7 +23,7 @@ Decl mergeTypesFromTypeComment(
         << type_annotation_decl.params().size()
         << ") did not match the number of "
         << (is_method ? "method" : "function") << " parameters ("
-        << expected_num_annotations << ")";
+        << expected_num_annotations << ')';
   }
   auto old = decl.params();
   auto _new = type_annotation_decl.params();

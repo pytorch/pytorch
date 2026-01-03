@@ -20,7 +20,7 @@ TEST(XPUStreamTest, CopyAndMoveTest) {
     return;
   }
 
-  int32_t device = -1;
+  c10::DeviceIndex device = -1;
   sycl::queue queue;
   c10::xpu::XPUStream copyStream = c10::xpu::getStreamFromPool();
   {
@@ -119,8 +119,10 @@ TEST(XPUStreamTest, MultithreadStreamBehavior) {
 
   c10::xpu::XPUStream cur_stream = c10::xpu::getCurrentXPUStream();
 
-  EXPECT_NE(cur_stream, *s0);
-  EXPECT_NE(cur_stream, *s1);
+  EXPECT_TRUE(s0);
+  EXPECT_TRUE(s1);
+  EXPECT_NE(cur_stream, s0);
+  EXPECT_NE(cur_stream, s1);
   EXPECT_NE(s0, s1);
 }
 
@@ -167,6 +169,7 @@ TEST(XPUStreamTest, StreamFunction) {
   }
 
   constexpr int numel = 1024;
+  // NOLINTNEXTLINE(*-c-arrays)
   int hostData[numel];
   initHostData(hostData, numel);
 

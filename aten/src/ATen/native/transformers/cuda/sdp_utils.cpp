@@ -84,8 +84,9 @@ bool check_prefer_cudnn_attention() {
   try {
     auto dprops = at::cuda::getCurrentDeviceProperties();
     auto major = dprops->major;
-    return (major == 9 || major == 10) && !dprops->minor;
-  } catch (c10::Error const& e) {
+    auto minor = dprops->minor;
+    return (major == 9 || major == 10) && (!minor || minor == 3);
+  } catch ([[maybe_unused]] c10::Error const& e) {
 #ifdef DEBUG
     TORCH_WARN("check_prefer_cudnn_attention() caught exception ", e.what());
 #endif
@@ -142,6 +143,9 @@ int64_t minimum_gemm_alignment(sdp_params const& params) {
 template<bool caller_is_meff = false>
 bool check_head_dim_size_flash(sdp_params const& params, bool debug) {
 #if USE_ROCM_ATTENTION
+  if (at::cuda::device_count() == 0) {
+    return false;
+  }
   // AOTriton 0.9+ supports head_dim up to 512
   const static auto max_hdim = []() {
 #if AOTRITON_VERSION_CURRENT == AOTRITON_VERSION_INT(0, 11)
@@ -351,6 +355,9 @@ bool check_mem_efficient_hardware_support(sdp_params const& params, bool debug) 
   using sm121 = SMVersion<12, 1>;
 #if USE_ROCM
 #if USE_ROCM_ATTENTION
+  if (at::cuda::device_count() == 0) {
+    return false;
+  }
   if(at::globalContext().getROCmFAPreferredBackend() == at::ROCmFABackend::Ck) {
     // User explicitly set CK as the flash attention backend. Return true for now
     // TODO: Flesh out sanity checks
@@ -478,7 +485,7 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   const auto s_k = params.key.sym_size(2);
   const auto d_qk = params.query.sym_size(3);
   const auto d_v = params.value.sym_size(3);
-  long cudnn_version = at::detail::getCUDAHooks().versionCuDNN();
+  long cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
   if (cudnn_version < 8903) {
     if (debug) {
       TORCH_WARN("SDPA fprop requires cudnn 8.9.3 or higher");
@@ -709,7 +716,7 @@ bool can_use_cudnn_attention(const sdp_params& params, bool debug) {
   return false;
 #endif
 #if defined(CUDNN_VERSION)
-  static auto cudnn_version = cudnnGetVersion();
+  static auto cudnn_version = at::detail::getCUDAHooks().versionRuntimeCuDNN();
   if (params.dropout > 0.0 && cudnn_version > 91100 && cudnn_version < 91400) {
     if (debug) {
       TORCH_WARN(CUDNN_VERSION, " cuDNN version does not support droppout in SDPA (9.11 - 9.13).");

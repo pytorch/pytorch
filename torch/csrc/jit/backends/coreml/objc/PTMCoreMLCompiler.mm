@@ -97,7 +97,7 @@ static NSString *gVersionExtension = @"version";
   NSURL *temporaryURL;
   try {
     temporaryURL = [MLModel compileModelAtURL:modelURL error:&error];
-  } catch (std::runtime_error &e) {
+  } catch (std::runtime_error&) {
     // Could not compile.
     return NO;
   }

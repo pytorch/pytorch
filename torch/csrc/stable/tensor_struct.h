@@ -4,15 +4,18 @@
 #include <torch/headeronly/core/ScalarType.h>
 #include <torch/headeronly/macros/Macros.h>
 #include <torch/headeronly/util/Exception.h>
+#include <torch/headeronly/util/HeaderOnlyArrayRef.h>
 #include <torch/headeronly/util/shim_utils.h>
 #include <climits>
 #include <memory>
 
 #include <torch/csrc/stable/accelerator.h>
+#include <torch/csrc/stable/device_struct.h>
 
 HIDDEN_NAMESPACE_BEGIN(torch, stable)
 
 using accelerator::DeviceIndex;
+using torch::headeronly::IntHeaderOnlyArrayRef;
 using torch::headeronly::ScalarType;
 
 // The torch::stable::Tensor class is a highlevel C++ wrapper around
@@ -75,11 +78,38 @@ class Tensor {
   // semantics as their counterparts in TensorBase.h.
   // =============================================================================
 
+  // Do not add new uses of data_ptr(), use const_data_ptr() if
+  // possible, mutable_data_ptr() otherwise.
   void* data_ptr() const {
     void* data_ptr;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_data_ptr(ath_.get(), &data_ptr));
     return data_ptr;
   }
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+  void* mutable_data_ptr() const {
+    void* data_ptr{};
+    TORCH_ERROR_CODE_CHECK(torch_get_mutable_data_ptr(ath_.get(), &data_ptr));
+    return data_ptr;
+  }
+
+  const void* const_data_ptr() const {
+    const void* data_ptr{};
+    TORCH_ERROR_CODE_CHECK(torch_get_const_data_ptr(ath_.get(), &data_ptr));
+    return data_ptr;
+  }
+
+  template <typename T>
+  T* mutable_data_ptr() const;
+
+  template <typename T, std::enable_if_t<!std::is_const_v<T>, int> = 0>
+  const T* const_data_ptr() const;
+
+  const Tensor& set_requires_grad(bool requires_grad) const {
+    TORCH_ERROR_CODE_CHECK(torch_set_requires_grad(ath_.get(), requires_grad));
+    return *this;
+  }
+#endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 
   int64_t dim() const {
     int64_t dim;
@@ -91,6 +121,32 @@ class Tensor {
     int64_t numel;
     TORCH_ERROR_CODE_CHECK(aoti_torch_get_numel(ath_.get(), &numel));
     return numel;
+  }
+
+  // note: this API is, for all intents and purposes, the same as the one in
+  // TensorBase.h: it returns a borrowed reference of the dimension sizes of
+  // a Tensor.
+  //
+  // The only difference is that it returns a header-only IntHeaderOnlyArrayRef,
+  // which has slightly less functionality than a regular IntArrayRef. See
+  // [HeaderOnlyArrayRef vs ArrayRef note] for more details.
+  IntHeaderOnlyArrayRef sizes() const {
+    int64_t* sizes;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_sizes(ath_.get(), &sizes));
+    return IntHeaderOnlyArrayRef(sizes, dim());
+  }
+
+  // note: this API is, for all intents and purposes, the same as the one in
+  // TensorBase.h: it returns a borrowed reference of the strides of a
+  // Tensor.
+  //
+  // The only difference is that it returns a header-only IntHeaderOnlyArrayRef,
+  // which has slightly less functionality than a regular IntArrayRef. See
+  // [HeaderOnlyArrayRef vs ArrayRef note] for more details.
+  IntHeaderOnlyArrayRef strides() const {
+    int64_t* strides;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_strides(ath_.get(), &strides));
+    return IntHeaderOnlyArrayRef(strides, dim());
   }
 
   // note: this is a subset of the original TensorBase API. It takes no
@@ -161,8 +217,24 @@ class Tensor {
     return defined;
   }
 
+  int64_t storage_offset() const {
+    int64_t storage_offset;
+    TORCH_ERROR_CODE_CHECK(
+        aoti_torch_get_storage_offset(ath_.get(), &storage_offset));
+    return storage_offset;
+  }
+
+  size_t element_size() const {
+    int32_t dtype;
+    TORCH_ERROR_CODE_CHECK(aoti_torch_get_dtype(ath_.get(), &dtype));
+    return aoti_torch_dtype_element_size(dtype);
+  }
+
   // defined in tensor-inl.h to avoid circular dependencies
   ScalarType scalar_type() const;
+
+  // defined in tensor-inl.h to avoid circular dependencies
+  Device device() const;
 
   // =============================================================================
   // END of C-shimified TensorBase APIs

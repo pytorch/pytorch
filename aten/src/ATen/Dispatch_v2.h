@@ -1,3 +1,8 @@
+#pragma once
+
+#include <torch/headeronly/core/Dispatch_v2.h>
+
+// Get AT_DISPATCH_SWITCH and AT_DISPATCH_CASE:
 #include <ATen/Dispatch.h>
 
 // This is a new implementation of the AT_DISPATCH macro family from
@@ -74,41 +79,19 @@
 // macro expansion occurs, mediated with AT_EXPAND and AT_GUARD.  I mostly
 // relied on GPT4 to help me get it right.
 
-// Public API macros
-
 // See documentation above
 #define AT_DISPATCH_V2(TYPE, NAME, BODY, ...) \
-  AT_DISPATCH_SWITCH(TYPE, NAME, AT_AP_VAR(AT_WRAP(BODY), TYPE, __VA_ARGS__))
+  THO_DISPATCH_V2_TMPL(                       \
+      AT_DISPATCH_SWITCH,                     \
+      AT_DISPATCH_CASE,                       \
+      TYPE,                                   \
+      NAME,                                   \
+      AT_WRAP(BODY),                          \
+      __VA_ARGS__)
 
-// This macro lets you pass an arbitrary expression that may contain internal
-// commas to another macro without having the commas causing the expression
-// to be interpreted as being multiple arguments
-#define AT_WRAP(...) __VA_ARGS__
-
-#define AT_FLOAT8_TYPES                                          \
-  c10::kFloat8_e5m2, c10::kFloat8_e5m2fnuz, c10::kFloat8_e4m3fn, \
-      c10::kFloat8_e4m3fnuz, c10::kFloat8_e8m0fnu
-
-#define AT_INTEGRAL_TYPES \
-  c10::kByte, c10::kChar, c10::kInt, c10::kLong, c10::kShort
-#define AT_FLOATING_TYPES c10::kDouble, c10::kFloat
-#define AT_BAREBONES_UNSIGNED_TYPES c10::kUInt16, c10::kUInt32, c10::kUInt64
-#define AT_INTEGRAL_TYPES_V2 \
-  AT_EXPAND(AT_INTEGRAL_TYPES), AT_EXPAND(AT_BAREBONES_UNSIGNED_TYPES)
-#define AT_COMPLEX_TYPES c10::kComplexDouble, c10::kComplexFloat
-#define AT_QINT_TYPES c10::kQInt8, c10::kQUInt8, c10::kQInt32
-// NB: not *actually* all types
-#define AT_ALL_TYPES AT_EXPAND(AT_INTEGRAL_TYPES), AT_EXPAND(AT_FLOATING_TYPES)
-#define AT_ALL_TYPES_AND_COMPLEX \
-  AT_EXPAND(AT_ALL_TYPES), AT_EXPAND(AT_COMPLEX_TYPES)
-
-// Helper macros
-
+// Unused helper macros, kept for BC:
 #define AT_AP_VAR(N, T, ...) \
   AT_EXPAND(AT_CONCAT(AT_AP, AT_NUM_ARGS(__VA_ARGS__))(AT_WRAP(N), __VA_ARGS__))
-#define AT_CONCAT(a, b) AT_CONCAT_AUX(a, b)
-#define AT_CONCAT_AUX(a, b) a##b
-#define AT_EXPAND(X) X
 
 // Ensure we never have too many scalar types for the expansion here to
 // support.  To bump this, you must regenerate the macros below.
@@ -118,12 +101,6 @@ static_assert(static_cast<int>(c10::ScalarType::NumOptions) < 60);
 #if 0
 
 num_args = 60
-
-nums = ', '.join(str(i) for i in reversed(range(num_args+1)))
-args = ', '.join(f'_{i}' for i in range(1, num_args+1))
-
-print(f'#define AT_NUM_ARGS(...) AT_EXPAND(AT_NUM_ARGS_AUX(__VA_ARGS__, {nums}))')
-print(f'#define AT_NUM_ARGS_AUX({args}, N, ...) N')
 
 for i in range(1, num_args+1):
     args = ', '.join(f'_{i}' for i in range(1, i+1))
@@ -135,8 +112,6 @@ for i in range(1, num_args+1):
 // Begin generated code
 // clang-format off
 
-#define AT_NUM_ARGS(...) AT_EXPAND(AT_NUM_ARGS_AUX(__VA_ARGS__, 60, 59, 58, 57, 56, 55, 54, 53, 52, 51, 50, 49, 48, 47, 46, 45, 44, 43, 42, 41, 40, 39, 38, 37, 36, 35, 34, 33, 32, 31, 30, 29, 28, 27, 26, 25, 24, 23, 22, 21, 20, 19, 18, 17, 16, 15, 14, 13, 12, 11, 10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0))
-#define AT_NUM_ARGS_AUX(_1, _2, _3, _4, _5, _6, _7, _8, _9, _10, _11, _12, _13, _14, _15, _16, _17, _18, _19, _20, _21, _22, _23, _24, _25, _26, _27, _28, _29, _30, _31, _32, _33, _34, _35, _36, _37, _38, _39, _40, _41, _42, _43, _44, _45, _46, _47, _48, _49, _50, _51, _52, _53, _54, _55, _56, _57, _58, _59, _60, N, ...) N
 #define AT_AP1(N, _1) AT_DISPATCH_CASE(_1, N)
 #define AT_AP2(N, _1, _2) AT_DISPATCH_CASE(_1, N) AT_DISPATCH_CASE(_2, N)
 #define AT_AP3(N, _1, _2, _3) AT_DISPATCH_CASE(_1, N) AT_DISPATCH_CASE(_2, N) AT_DISPATCH_CASE(_3, N)

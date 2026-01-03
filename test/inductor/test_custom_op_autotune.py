@@ -216,136 +216,39 @@ class TestCustomOpAutoTune(TestCase):
                 test_rmsnorm_op, (input_tensor, weight), expected, f"RMSNorm_{i}"
             )
 
-    @skipIfXpu
-    def test_mlp_custom_op_autotune(self):
-        """Test MLP autotuning with method parameter controlling different decomposition variants.
-
-        Validates parametric tuning where the same decomposition function uses different
-        algorithmic approaches based on a method parameter (standard matmul, batched mm, fused weights).
-        """
-        test_op_name = f"test_lib::mlp_{id(self)}"
-
-        def mlp_variants(
-            input_tensor: torch.Tensor,
-            gate_weight: torch.Tensor,
-            up_weight: torch.Tensor,
-            down_weight: torch.Tensor,
-            method: int = 0,
-        ) -> torch.Tensor:
-            """MLP implementation with different computational approaches controlled by method parameter."""
-
-            if method == 0:
-                gate_proj = torch.matmul(input_tensor, gate_weight)
-                up_proj = torch.matmul(input_tensor, up_weight)
-                gated = torch.relu(gate_proj) * up_proj
-                return torch.matmul(gated, down_weight)
-
-            elif method == 1:
-                batch_shape = input_tensor.shape[:-1]
-                hidden_dim = input_tensor.shape[-1]
-                output_dim = down_weight.shape[-1]
-
-                input_2d = input_tensor.view(-1, hidden_dim)
-
-                gate_proj = torch.mm(input_2d, gate_weight)
-                up_proj = torch.mm(input_2d, up_weight)
-
-                gated = torch.relu(gate_proj) * up_proj
-                output_2d = torch.mm(gated, down_weight)
-
-                return output_2d.view(*batch_shape, output_dim)
-
-        @torch.library.custom_op(test_op_name, mutates_args=())
-        def test_mlp_op(
-            input_tensor: torch.Tensor,
-            gate_weight: torch.Tensor,
-            up_weight: torch.Tensor,
-            down_weight: torch.Tensor,
-            method: int = 0,
-        ) -> torch.Tensor:
-            return mlp_variants(
-                input_tensor, gate_weight, up_weight, down_weight, method=method
-            )
-
-        @test_mlp_op.register_fake
-        def _(
-            input_tensor: torch.Tensor,
-            gate_weight: torch.Tensor,
-            up_weight: torch.Tensor,
-            down_weight: torch.Tensor,
-            method: int = 0,
-        ):
-            return torch.empty(
-                input_tensor.shape[:-1] + (down_weight.shape[-1],),
-                device=input_tensor.device,
-                dtype=input_tensor.dtype,
-            )
-
-        # Use explicit config with method parameter as tuning knob
-        register_custom_op_autotuning(
-            test_mlp_op,
-            configs=[
-                CustomOpConfig(method=0),
-                CustomOpConfig(method=1),
-            ],
-            name="test_mlp_autotuned",
-            input_gen_fns={
-                "input_tensor": lambda fake_tensor: torch.randn_like(
-                    fake_tensor, device=self.device
-                )
-                * 0.1,
-                "gate_weight": lambda fake_tensor: torch.randn_like(
-                    fake_tensor, device=self.device
-                )
-                * 0.05,
-                "up_weight": lambda fake_tensor: torch.randn_like(
-                    fake_tensor, device=self.device
-                )
-                * 0.05,
-                "down_weight": lambda fake_tensor: torch.randn_like(
-                    fake_tensor, device=self.device
-                )
-                * 0.05,
-            },
-        )
-
-        # Create test inputs
-        input_tensor, gate_weight, up_weight, down_weight = self._create_mlp_inputs()
-
-        # Test that all method variants produce numerically equivalent results
-        expected = mlp_variants(
-            input_tensor, gate_weight, up_weight, down_weight, method=0
-        )
-
-        # Test autotuning
-        self._run_autotune_test(
-            test_mlp_op,
-            (input_tensor, gate_weight, up_weight, down_weight),
-            expected,
-            "MLP",
-        )
-
     def _create_decompose_k_inputs(self, m=256, k=65536, n=1024):
-        """Create test inputs for decompose_k matrix multiplication - divisible by all k_splits values."""
+        """Create test inputs for decompose_k matrix multiplication.
+        Tensor a: Input matrix of shape (m, k)
+        Tensor b: Weight matrix of shape (k, n)
+        Tensor bias: Bias vector of shape (n,)
+        """
         # Ensure k is divisible by all k_splits values: [2, 32, 64, 128, 256]
         k = ((k + 255) // 256) * 256  # Round up to nearest multiple of 256
         a = torch.randn(m, k, device=self.device, dtype=self.dtype, requires_grad=False)
         b = torch.randn(k, n, device=self.device, dtype=self.dtype, requires_grad=False)
-        return a, b
+        bias = (
+            torch.randn(n, device=self.device, dtype=self.dtype, requires_grad=False)
+            * 0.1
+        )
+        return a, b, bias
 
     @skipIfXpu
-    def test_decompose_k_custom_op_autotune(self):
-        """Test decompose_k autotuning with parametric tuning for k_splits values.
+    def test_decompose_k_custom_op_autotune_dynamic_config_for_input_shape(self):
+        """Test decompose_k autotuning with with epilogue fusion(matmul+bias+relu+scale) and
+        dynamic config generation based on matmul input shapes.
 
-        Validates numerical parameter sweep where k_splits controls how the K dimension
-        is decomposed for matrix multiplication (k_splits in [32, 64, 128, 256]).
+        Validates that the custom op encapsulates the entire fused operation (matmul + bias
+        + relu + scale) with parametric tuning for k_splits values controlling how the K
+        dimension is decomposed. The config generator receives correct parameter names and
+        shapes, dynamically generates different k_split configs using get_k_splits for
+        different input shapes, and produces correct results matching the reference implementation.
         """
-        test_op_name = f"test_lib::decompose_k_{id(self)}"
+        test_op_name = f"test_lib::matmul_relu_epilogue_dynamic_{id(self)}"
 
         def decompose_k_implementation(
             a: torch.Tensor, b: torch.Tensor, k_splits: int = 4
         ) -> torch.Tensor:
-            """Matrix multiply with k-way decomposition - Python implementation."""
+            """Matrix multiply with k-way decomposition."""
             m = a.shape[0]
             n = b.shape[1]
             k = a.shape[1]
@@ -363,29 +266,38 @@ class TestCustomOpAutoTune(TestCase):
             return torch.sum(result, dim=0)  # [m, n]
 
         @torch.library.custom_op(test_op_name, mutates_args=())
-        def test_decompose_k_op(
-            a: torch.Tensor, b: torch.Tensor, k_splits: int = 4
+        def matmul_relu_epilogue_dynamic_op(
+            a: torch.Tensor, b: torch.Tensor, bias: torch.Tensor, k_splits: int = 4
         ) -> torch.Tensor:
-            """Matrix multiply with k-way decomposition - custom op using the decomposition."""
-            return decompose_k_implementation(a, b, k_splits)
+            """Matmul with decompose_k + bias + relu + scale (complete epilogue fusion)."""
+            matmul_result = decompose_k_implementation(a, b, k_splits)
+            biased = matmul_result + bias
+            activated = torch.relu(biased)
+            scaled = activated * 2.0
+            return scaled
 
-        @test_decompose_k_op.register_fake
-        def _(a: torch.Tensor, b: torch.Tensor, k_splits: int = 4):
+        @matmul_relu_epilogue_dynamic_op.register_fake
+        def _(a: torch.Tensor, b: torch.Tensor, bias: torch.Tensor, k_splits: int = 4):
             return torch.empty(a.shape[0], b.shape[1], device=a.device, dtype=a.dtype)
 
-        # Register autotuning with different k_splits values using decomposition function
+        # Define dynamic config generator using get_k_splits
+        def generate_k_split_configs(
+            fake_tensors: dict[str, torch.Tensor],
+        ) -> list[CustomOpConfig]:
+            """Generate k_split configs based on input matrix dimensions."""
+            from torch._inductor.utils import get_k_splits
+
+            m, k = fake_tensors["a"].shape[-2:]
+            _, n = fake_tensors["b"].shape[-2:]
+
+            k_splits_list = get_k_splits(m, n, k)
+
+            return [CustomOpConfig(k_splits=k) for k in k_splits_list]
+
         register_custom_op_autotuning(
-            test_decompose_k_op,
-            configs=[
-                CustomOpConfig(k_splits=2),
-                CustomOpConfig(k_splits=4),
-                CustomOpConfig(k_splits=8),
-                CustomOpConfig(k_splits=16),
-                CustomOpConfig(k_splits=32),
-                CustomOpConfig(k_splits=64),
-                CustomOpConfig(k_splits=128),
-            ],
-            name="test_decompose_k_autotuned",
+            matmul_relu_epilogue_dynamic_op,
+            config_generator=generate_k_split_configs,
+            name="matmul_relu_epilogue_dynamic_autotuned",
             input_gen_fns={
                 "a": lambda fake_tensor: torch.randn_like(
                     fake_tensor, device=self.device
@@ -395,12 +307,51 @@ class TestCustomOpAutoTune(TestCase):
                     fake_tensor, device=self.device
                 )
                 * 0.1,
+                "bias": lambda fake_tensor: torch.randn_like(
+                    fake_tensor, device=self.device
+                )
+                * 0.1,
             },
         )
 
-        a, b = self._create_decompose_k_inputs()
-        expected = a @ b
-        self._run_autotune_test(test_decompose_k_op, (a, b), expected, "DecomposeK")
+        # Test multiple shapes to verify dynamic config generation
+        test_shapes = [
+            (256, 16384, 1024),
+            (256, 65536, 1024),
+        ]
+
+        for m, k, n in test_shapes:
+            # Use helper function to create test inputs
+            a, b, bias = self._create_decompose_k_inputs(m, k, n)
+
+            @torch.compile
+            def test_model(a, b, bias):
+                return matmul_relu_epilogue_dynamic_op(a, b, bias)
+
+            torch._dynamo.reset()
+
+            with config.patch(
+                max_autotune=True,
+                benchmark_fusion=True,
+            ):
+                compiled_result = test_model(a, b, bias)
+
+            def reference_model(a, b, bias):
+                matmul_result = a @ b
+                biased = matmul_result + bias
+                activated = torch.relu(biased)
+                scaled = activated * 2.0
+                return scaled
+
+            expected = reference_model(a, b, bias)
+
+            torch.testing.assert_close(
+                compiled_result,
+                expected,
+                rtol=2e-1,
+                atol=5e-1,
+                msg=f"Failed for shape ({m}, {k}, {n})",
+            )
 
     @skipIfXpu
     def test_multi_parameter_tuning(self):
@@ -501,6 +452,109 @@ class TestCustomOpAutoTune(TestCase):
         self._run_autotune_test(
             multi_param_op, (test_x, test_factor), expected_result, "MultiParam"
         )
+
+    @skipIfXpu
+    def test_range_based_static_shape_no_cond_dispatch(self):
+        """Test dispatch code generation for static vs dynamic shapes.
+
+        Static shapes (dynamic=False): No dispatch logic, best impl is inlined.
+        Dynamic shapes (dynamic=True): Dispatch logic generated for runtime selection.
+        """
+        import re
+
+        from torch._inductor.utils import run_and_get_code
+
+        test_op_name = f"test_lib::static_no_cond_{id(self)}"
+
+        def impl_a(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x + weight
+
+        def impl_b(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x + weight.view(1, 1, -1).expand_as(x)
+
+        def impl_c(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return torch.add(x, weight)
+
+        @torch.library.custom_op(test_op_name, mutates_args=())
+        def static_no_cond_op(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+            return x + weight
+
+        @static_no_cond_op.register_fake
+        def _(x: torch.Tensor, weight: torch.Tensor):
+            return torch.empty_like(x)
+
+        register_custom_op_autotuning(
+            static_no_cond_op,
+            configs=[
+                CustomOpConfig(impl_a),
+                CustomOpConfig(impl_b),
+                CustomOpConfig(impl_c),
+            ],
+            dispatch_on={"tensor_name": "x", "dim": 1},
+            split_points=[64, 128, 256, 512],
+            input_gen_fns={
+                "x": lambda fake: torch.randn_like(fake, device=self.device),
+                "weight": lambda fake: torch.randn_like(fake, device=self.device),
+            },
+        )
+
+        autotune_backends = "TRITON" if self.device == "cuda" else "ATEN"
+        test_x = torch.randn(2, 96, 32, device=self.device, dtype=self.dtype)
+        test_weight = torch.randn(32, device=self.device, dtype=self.dtype)
+
+        def find_shape_dispatch(code_list):
+            pattern = re.compile(r"if\s+s\d+\s*[<>=]")
+            return [
+                line.strip()
+                for code in code_list
+                for line in code.split("\n")
+                if pattern.search(line)
+            ]
+
+        def test_model(x, weight):
+            return static_no_cond_op(x, weight)
+
+        # Static shape (dynamic=False) - should NOT have shape dispatch
+        torch._dynamo.reset()
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends=autotune_backends,
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+            result_static, code_list_static = run_and_get_code(
+                torch.compile(test_model, dynamic=False), test_x, test_weight
+            )
+            self.assertEqual(result_static, test_x + test_weight)
+
+        dispatch_static = find_shape_dispatch(code_list_static)
+        if dispatch_static:
+            print(f"[Static] Found dispatch logic: {dispatch_static}")
+        else:
+            print("[Static] No dispatch logic found (expected for static shapes)")
+        self.assertFalse(
+            dispatch_static, "Static shapes should not have dispatch logic"
+        )
+
+        # Dynamic shape (dynamic=True) - SHOULD have shape dispatch
+        torch._dynamo.reset()
+        with config.patch(
+            max_autotune=True,
+            max_autotune_gemm_backends=autotune_backends,
+            fx_graph_cache=False,
+            benchmark_kernel=True,
+        ):
+            result_dynamic, code_list_dynamic = run_and_get_code(
+                torch.compile(test_model, dynamic=True), test_x, test_weight
+            )
+            self.assertEqual(result_dynamic, test_x + test_weight)
+
+        dispatch_dynamic = find_shape_dispatch(code_list_dynamic)
+        if dispatch_dynamic:
+            print(f"[Dynamic] Found dispatch logic: {dispatch_dynamic}")
+        else:
+            print("[Dynamic] No dispatch logic found (unexpected for dynamic shapes)")
+        self.assertTrue(dispatch_dynamic, "Dynamic shapes should have dispatch logic")
 
 
 if __name__ == "__main__":

@@ -17,6 +17,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class RunTest(TestCase):
     def setUp(self):
+        super().setUp()
         # Save original environment variable if it exists
         self.original_signals_env = os.environ.get(
             "TORCHELASTIC_SIGNALS_TO_HANDLE", None

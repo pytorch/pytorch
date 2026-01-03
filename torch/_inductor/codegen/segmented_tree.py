@@ -1,4 +1,5 @@
-from typing import Callable, Generic, Optional, TypeVar
+from collections.abc import Callable
+from typing import Generic, Optional, TypeVar
 
 
 T = TypeVar("T")

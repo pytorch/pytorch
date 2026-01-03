@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -102,13 +102,13 @@ class DTypeWithConstraints:
       the quantization parameters don't match, then the QConfig will be ignored.
     """
 
-    dtype: Optional[torch.dtype] = None
-    quant_min_lower_bound: Union[int, float, None] = None
-    quant_max_upper_bound: Union[int, float, None] = None
-    scale_min_lower_bound: Union[int, float, None] = None
-    scale_max_upper_bound: Union[int, float, None] = None
-    scale_exact_match: Optional[float] = None
-    zero_point_exact_match: Optional[int] = None
+    dtype: torch.dtype | None = None
+    quant_min_lower_bound: int | float | None = None
+    quant_max_upper_bound: int | float | None = None
+    scale_min_lower_bound: int | float | None = None
+    scale_max_upper_bound: int | float | None = None
+    scale_exact_match: float | None = None
+    zero_point_exact_match: int | None = None
 
 
 @dataclass
@@ -185,16 +185,16 @@ scale_min_lower_bound=None, scale_max_upper_bound=None)
     input_dtype_with_constraints: DTypeWithConstraints
     output_dtype_with_constraints: DTypeWithConstraints
     weight_dtype_with_constraints: DTypeWithConstraints
-    bias_dtype: Optional[torch.dtype]
-    is_dynamic: Optional[bool]
+    bias_dtype: torch.dtype | None
+    is_dynamic: bool | None
 
     def __init__(
         self,
-        input_dtype: Union[torch.dtype, DTypeWithConstraints, None] = None,
-        output_dtype: Union[torch.dtype, DTypeWithConstraints, None] = None,
-        weight_dtype: Union[torch.dtype, DTypeWithConstraints, None] = None,
-        bias_dtype: Optional[torch.dtype] = None,
-        is_dynamic: Optional[bool] = None,
+        input_dtype: torch.dtype | DTypeWithConstraints | None = None,
+        output_dtype: torch.dtype | DTypeWithConstraints | None = None,
+        weight_dtype: torch.dtype | DTypeWithConstraints | None = None,
+        bias_dtype: torch.dtype | None = None,
+        is_dynamic: bool | None = None,
     ):
         if isinstance(input_dtype, DTypeWithConstraints):
             self.input_dtype_with_constraints = input_dtype
@@ -219,15 +219,15 @@ scale_min_lower_bound=None, scale_max_upper_bound=None)
         self.is_dynamic = is_dynamic
 
     @property
-    def input_dtype(self) -> Optional[torch.dtype]:
+    def input_dtype(self) -> torch.dtype | None:
         return self.input_dtype_with_constraints.dtype
 
     @property
-    def output_dtype(self) -> Optional[torch.dtype]:
+    def output_dtype(self) -> torch.dtype | None:
         return self.output_dtype_with_constraints.dtype
 
     @property
-    def weight_dtype(self) -> Optional[torch.dtype]:
+    def weight_dtype(self) -> torch.dtype | None:
         return self.weight_dtype_with_constraints.dtype
 
     @classmethod
@@ -442,22 +442,22 @@ class BackendPatternConfig:
     For a detailed example usage, see :class:`~torch.ao.quantization.backend_config.BackendConfig`.
     """
 
-    def __init__(self, pattern: Optional[Pattern] = None):
-        self.pattern: Optional[Pattern] = pattern
+    def __init__(self, pattern: Pattern | None = None):
+        self.pattern: Pattern | None = pattern
         self.observation_type = ObservationType.OUTPUT_USE_DIFFERENT_OBSERVER_AS_INPUT
         self.dtype_configs: list[DTypeConfig] = []
-        self.root_module: Optional[type[torch.nn.Module]] = None
-        self.qat_module: Optional[type[torch.nn.Module]] = None
-        self.reference_quantized_module: Optional[type[torch.nn.Module]] = None
-        self.fused_module: Optional[type[torch.nn.Module]] = None
-        self.fuser_method: Optional[Callable] = None
+        self.root_module: type[torch.nn.Module] | None = None
+        self.qat_module: type[torch.nn.Module] | None = None
+        self.reference_quantized_module: type[torch.nn.Module] | None = None
+        self.fused_module: type[torch.nn.Module] | None = None
+        self.fuser_method: Callable | None = None
 
         # Temporary/internal configs
-        self._root_node_getter: Optional[Callable] = None
-        self._extra_inputs_getter: Optional[Callable] = None
+        self._root_node_getter: Callable | None = None
+        self._extra_inputs_getter: Callable | None = None
         self._num_tensor_args_to_observation_type: dict[int, ObservationType] = {}
         self._input_type_to_index: dict[str, int] = {}
-        self._pattern_complex_format: Optional[Pattern] = None
+        self._pattern_complex_format: Pattern | None = None
 
     def __repr__(self):
         dict_nonempty = {

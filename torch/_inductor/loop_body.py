@@ -6,7 +6,7 @@ import functools
 import itertools
 import re
 from enum import auto, Enum
-from typing import Any, Callable, NamedTuple, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, NamedTuple, Optional, TYPE_CHECKING, TypeVar
 
 import sympy
 
@@ -28,7 +28,7 @@ from .virtualized import ops, V
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 T = TypeVar("T")
@@ -95,7 +95,6 @@ class LoopBody:
     """
 
     indexing_exprs: dict[str, sympy.Expr]
-    indexing_exprs_name: dict[sympy.Expr, str]
     submodules: dict[str, Any]
     subblocks: dict[str, LoopBodyBlock]
     indirect_vars: list[sympy.Symbol]
@@ -103,6 +102,9 @@ class LoopBody:
     root_block: LoopBodyBlock
     memory_usage: dict[MemoryUsageType, list[MemoryEntry]]
     op_counts: collections.Counter[str]
+
+    # defined only temporarily
+    indexing_exprs_name: dict[sympy.Expr, str]
 
     def __init__(
         self,

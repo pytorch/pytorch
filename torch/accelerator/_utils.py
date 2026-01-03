@@ -1,5 +1,3 @@
-from typing import Optional
-
 import torch
 from torch.types import Device as _device_t
 
@@ -9,7 +7,7 @@ def _get_device_index(device: _device_t, optional: bool = False) -> int:
         return device
     if isinstance(device, str):
         device = torch.device(device)
-    device_index: Optional[int] = None
+    device_index: int | None = None
     if isinstance(device, torch.device):
         acc = torch.accelerator.current_accelerator()
         if acc is None:

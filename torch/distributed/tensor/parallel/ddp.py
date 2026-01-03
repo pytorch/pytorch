@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any
 
 import torch.nn as nn
 from torch.distributed.tensor.parallel._data_parallel_utils import (
@@ -48,7 +48,7 @@ def _reconstruct_dtensor(module: nn.Module, _input: Any):
 
 
 def _localize_dtensor(
-    module: nn.Module, *_: Any, ignored_params: Optional[set[nn.Parameter]] = None
+    module: nn.Module, *_: Any, ignored_params: set[nn.Parameter] | None = None
 ):
     """
     Convert DTensor parameters to local tensors

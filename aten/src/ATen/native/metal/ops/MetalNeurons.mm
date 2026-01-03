@@ -86,4 +86,4 @@ TORCH_LIBRARY_IMPL(aten, Metal, m) {
   m.impl(TORCH_SELECTIVE_NAME("aten::hardsigmoid_"), TORCH_FN(hardsigmoid_));
 }
 
-} // namepsace at::native::metal
+} // namespace at::native::metal

@@ -55,7 +55,7 @@ std::ostream& operator<<(std::ostream& stream, const Vectorized<T>& vec) {
     }
     stream << buf[i];
   }
-  stream << "]";
+  stream << ']';
   return stream;
 }
 

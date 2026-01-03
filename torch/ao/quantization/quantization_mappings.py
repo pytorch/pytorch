@@ -1,6 +1,6 @@
 import copy
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 import torch.ao.nn as ao_nn
@@ -178,7 +178,7 @@ _INCLUDE_QCONFIG_PROPAGATE_LIST: set[Callable] = {
 
 # Default mapping from floating point function or torch ops to quantized ops
 # TODO: merge with default static mapping
-DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS: dict[Union[Callable, str], Callable] = {
+DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS: dict[Callable | str, Callable] = {
     F.elu: torch.ops.quantized.elu,
     F.hardswish: torch.ops.quantized.hardswish,
     F.instance_norm: torch.ops.quantized.instance_norm,
@@ -237,7 +237,7 @@ def get_default_static_sparse_quant_module_mappings() -> dict[Callable, Any]:
 
 def get_static_quant_module_class(
     float_module_class: Callable,
-    additional_static_quant_mapping: Optional[dict[Callable, Any]] = None,
+    additional_static_quant_mapping: dict[Callable, Any] | None = None,
     is_reference: bool = False,
 ) -> Any:
     r"""n Get the statically quantized module class corresponding to
@@ -262,7 +262,7 @@ def get_static_quant_module_class(
 
 def get_dynamic_quant_module_class(
     float_module_class: Callable,
-    additional_dynamic_quant_mapping: Optional[dict[Callable, Any]] = None,
+    additional_dynamic_quant_mapping: dict[Callable, Any] | None = None,
 ) -> Any:
     r"""n Get the dynamically quantized module class corresponding to
     the floating point module class
@@ -337,13 +337,13 @@ def get_default_compare_output_module_list() -> set[Callable]:
 
 
 def get_default_float_to_quantized_operator_mappings() -> dict[
-    Union[Callable, str], Callable
+    Callable | str, Callable
 ]:
     return copy.deepcopy(DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS)
 
 
 # TODO: merge with get_static_quant_module_class
-def get_quantized_operator(float_op: Union[Callable, str]) -> Callable:
+def get_quantized_operator(float_op: Callable | str) -> Callable:
     """Get the quantized operator corresponding to the float operator"""
     quantized_op = DEFAULT_FLOAT_TO_QUANTIZED_OPERATOR_MAPPINGS.get(float_op)
     if quantized_op is None:
@@ -353,16 +353,14 @@ def get_quantized_operator(float_op: Union[Callable, str]) -> Callable:
     return quantized_op
 
 
-def _get_special_act_post_process(module: torch.nn.Module) -> Optional[Callable]:
+def _get_special_act_post_process(module: torch.nn.Module) -> Callable | None:
     r"""Get the special activation post process for `module`, this has
     higher priority than the activation post process in `qconfig`
     e.g.
     input: torch.nn.Sigmoid
     output: default_affine_fixed_qparam_fake_quant
     """
-    return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(
-        type_before_parametrizations(module), None
-    )
+    return DEFAULT_MODULE_TO_ACT_POST_PROCESS.get(type_before_parametrizations(module))
 
 
 def _has_special_act_post_process(module: torch.nn.Module) -> bool:

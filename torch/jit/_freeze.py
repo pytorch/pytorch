@@ -125,7 +125,7 @@ def freeze(
 
 def run_frozen_optimizations(
     mod, optimize_numerics: bool = True, preserved_methods: Optional[list[str]] = None
-):
+) -> None:
     r"""
     Run a series of optimizations looking for patterns that occur in frozen graphs.
 

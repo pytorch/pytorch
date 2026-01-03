@@ -91,7 +91,7 @@ struct OperationInfo : BaseInfo {
     std::stringstream kernelStr;
     kernelStr << kernelName;
     for (const Tensor& tensor : tensors) {
-      kernelStr << ":" << BaseInfo::buildTensorString(tensor, includeBufferId);
+      kernelStr << ':' << BaseInfo::buildTensorString(tensor, includeBufferId);
     }
     return kernelStr.str();
   }

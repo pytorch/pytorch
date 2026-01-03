@@ -6,8 +6,6 @@ on:
       - ciflow/inductor-perf-test-nightly-rocm-mi300/*
   schedule:
     - cron: 15 0 * * *
-  # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
-  # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
   workflow_dispatch:
     inputs:
       training:
@@ -120,8 +118,8 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: linux-jammy-rocm-py3_10-inductor-benchmark-build
     with:
-      build-environment: linux-jammy-rocm-py3_10
-      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
+      build-environment: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.build-environment }}
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true
       docker-image: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-rocm-py3_10-inductor-benchmark-build.outputs.test-matrix }}
       timeout-minutes: 720

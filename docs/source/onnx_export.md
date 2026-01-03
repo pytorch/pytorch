@@ -179,7 +179,7 @@ The overall ONNX graph has the following `metadata_props`:
 
   This property contains a string representation of the graph_signature from the original PyTorch ExportedProgram. The graph signature describes the structure of the model's inputs and outputs and how they map to the ONNX graph. The inputs are defined as `InputSpec` objects, which include the kind of input (e.g., `InputKind.PARAMETER` for parameters, `InputKind.USER_INPUT` for user-defined inputs), the argument name, the target (which can be a specific node in the model), and whether the input is persistent. The outputs are defined as `OutputSpec` objects, which specify the kind of output (e.g., `OutputKind.USER_OUTPUT`) and the argument name.
 
-  To read more about the graph signature, please see the {doc}`torch.export <export>` for more information.
+  To read more about the graph signature, please see the {doc}`torch.export <user_guide/torch_compiler/export>` for more information.
 
 - **pkg.torch.export.ExportedProgram.range_constraints**
 
@@ -188,7 +188,7 @@ The overall ONNX graph has the following `metadata_props`:
   *Example:*
   `s0: VR[2, int_oo]`, which indicates that the size of the input tensor must be at least 2.
 
-  To read more about range constraints, please see the {doc}`torch.export <export>` for more information.
+  To read more about range constraints, please see the {doc}`torch.export <user_guide/torch_compiler/export>` for more information.
 
 Each input value in the ONNX graph may have the following metadata property:
 

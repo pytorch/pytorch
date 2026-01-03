@@ -53,7 +53,7 @@ class GPULimits:
         else:
             dict_key = "unknown"
 
-        if dict_key not in hardcoded_device_values.keys():
+        if dict_key not in hardcoded_device_values:
             raise RuntimeError(
                 f"No data for sm_{self.compute_capability} and {data_type}."
             )
@@ -96,7 +96,7 @@ class GPULimits:
         else:
             dict_key = "unknown"
 
-        if dict_key not in hardcoded_device_values.keys():
+        if dict_key not in hardcoded_device_values:
             raise RuntimeError(
                 f"No data for sm_{self.compute_capability} and {data_type}."
             )

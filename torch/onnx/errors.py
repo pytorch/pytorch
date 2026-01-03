@@ -30,7 +30,7 @@ class UnsupportedOperatorError(OnnxExporterError):
 
     # NOTE: This is legacy and is only used by the torchscript exporter
     # Clean up when the torchscript exporter is removed
-    def __init__(self, name: str, version: int, supported_version: int | None):
+    def __init__(self, name: str, version: int, supported_version: int | None) -> None:
         if supported_version is not None:
             msg = (
                 f"Exporting the operator '{name}' to ONNX opset version {version} "
@@ -57,7 +57,7 @@ class SymbolicValueError(OnnxExporterError):
 
     # NOTE: This is legacy and is only used by the torchscript exporter
     # Clean up when the torchscript exporter is removed
-    def __init__(self, msg: str, value: _C.Value):
+    def __init__(self, msg: str, value: _C.Value) -> None:
         message = (
             f"{msg}  [Caused by the value '{value}' (type '{value.type()}') in the "
             f"TorchScript graph. The containing node has kind '{value.node().kind()}'.] "

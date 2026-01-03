@@ -565,7 +565,7 @@ class TestQuantizeEagerQAT(QuantizationTestCase):
 
     def test_train_save_load_eval(self):
         r"""Test QAT flow of creating a model, doing QAT and saving the quantized state_dict
-        During eval, we first call prepare_qat and conver on the model and then load the state_dict
+        During eval, we first call prepare_qat and convert on the model and then load the state_dict
         and compare results against original model
         """
         for qengine in supported_qengines:

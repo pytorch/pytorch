@@ -2,17 +2,13 @@
   Provides the implementations of CUDA BLAS function templates.
  */
 
-#include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/Exceptions.h>
 #include <ATen/cuda/CUDADataType.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
-#include <c10/cuda/CUDACachingAllocator.h>
-#include <c10/cuda/CUDAFunctions.h>
 #include <c10/macros/Export.h>
-#include <c10/util/env.h>
 #include <c10/util/irange.h>
 #include <c10/core/ScalarType.h>
 
@@ -388,6 +384,7 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #ifndef USE_ROCM
   at::Half halpha;
   at::Half hbeta;
+  uint32_t mask = -1;
 #endif
   void * alpha_ptr = &alpha;
   void * beta_ptr = &beta;
@@ -422,12 +419,12 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
     }
 #endif
     abType = CUDA_R_16F;
-    cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
+    cType = std::is_same_v<C_Dtype, float> ? CUDA_R_32F : CUDA_R_16F;
 #ifndef USE_ROCM
     auto fp16_reduction = at::globalContext().allowFP16ReductionCuBLAS();
     if (fp16_reduction !=
         at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
-      uint32_t mask =
+      mask =
           fp16_reduction ==
                   at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
               ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
@@ -439,12 +436,12 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
 #endif
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abType = CUDA_R_16BF;
-    cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16BF;
+    cType = std::is_same_v<C_Dtype, float> ? CUDA_R_32F : CUDA_R_16BF;
 #ifndef USE_ROCM
     auto bf16_reduction = at::globalContext().allowBF16ReductionCuBLAS();
     if (bf16_reduction !=
         at::CuBLASReductionOption::AllowReducedPrecisionWithSplitK) {
-      uint32_t mask =
+      mask =
           bf16_reduction ==
                   at::CuBLASReductionOption::DisallowReducedPrecisionAllowSplitK
               ? (CUBLASLT_REDUCTION_SCHEME_COMPUTE_TYPE |
@@ -511,17 +508,41 @@ static inline bool bgemm_internal_cublaslt(CUDABLAS_BGEMM_ARGTYPES_AND_C_DTYPE(D
   cublasStatus_t cublasStatus = CUBLAS_STATUS_SUCCESS;
   cublasLtMatmulHeuristicResult_t heuristicResult = {};
   int returnedResult = 0;
-  TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
-      ltHandle,
-      computeDesc.descriptor(),
-      Adesc.descriptor(),
-      Bdesc.descriptor(),
-      Cdesc.descriptor(),
-      Cdesc.descriptor(),
-      preference.descriptor(),
-      1,
-      &heuristicResult,
-      &returnedResult));
+  // on Blackwell+, we fake a n > 1 matmul when querying heuristics
+  // to prevent cuBLASLt from dispatching to a GEMV kernel for batch-invariance
+#ifndef USE_ROCM
+  const bool lie_to_cublaslt = mask == CUBLASLT_REDUCTION_SCHEME_NONE && n == 1 && at::cuda::getCurrentDeviceProperties()->major >= 10;
+#else
+  const bool lie_to_cublaslt = false;
+#endif
+  if (lie_to_cublaslt) {
+     CuBlasLtMatrixLayout FakeBdesc(abType, k, 2, ldb, opb == CUBLAS_OP_T);
+     CuBlasLtMatrixLayout FakeCdesc(cType, m, 2, ldc);
+
+     TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+        ltHandle,
+        computeDesc.descriptor(),
+        Adesc.descriptor(),
+        FakeBdesc.descriptor(),
+        FakeCdesc.descriptor(),
+        FakeCdesc.descriptor(),
+        preference.descriptor(),
+        1,
+        &heuristicResult,
+        &returnedResult));
+  } else {
+    TORCH_CUDABLAS_CHECK(cublasLtMatmulAlgoGetHeuristic(
+        ltHandle,
+        computeDesc.descriptor(),
+        Adesc.descriptor(),
+        Bdesc.descriptor(),
+        Cdesc.descriptor(),
+        Cdesc.descriptor(),
+        preference.descriptor(),
+        1,
+        &heuristicResult,
+        &returnedResult));
+  }
   if (returnedResult == 0) {
     cublasStatus = CUBLAS_STATUS_NOT_SUPPORTED;
   }
@@ -1572,7 +1593,7 @@ bool gemm_and_bias(
   }
 
   using opmath_t = at::opmath_type<Dtype>;
-  opmath_t beta_val = 0; // bias is added in epilogue
+  opmath_t beta_val = bias ? 0 : 1; // bias is added in epilogue unless nullptr
 
   cudaDataType_t abType = CUDA_R_32F;
   cudaDataType_t cType = CUDA_R_32F;
@@ -1607,7 +1628,7 @@ bool gemm_and_bias(
     }
 #endif
     abType = CUDA_R_16F;
-    cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16F;
+    cType = std::is_same_v<C_Dtype, float> ? CUDA_R_32F : CUDA_R_16F;
 #ifndef USE_ROCM
     auto fp16_reduction = at::globalContext().allowFP16ReductionCuBLAS();
     if (fp16_reduction !=
@@ -1624,7 +1645,7 @@ bool gemm_and_bias(
 #endif
   } else if constexpr (std::is_same_v<Dtype, at::BFloat16>) {
     abType = CUDA_R_16BF;
-    cType = (std::is_same_v<C_Dtype, float>) ? CUDA_R_32F : CUDA_R_16BF;
+    cType = std::is_same_v<C_Dtype, float> ? CUDA_R_32F : CUDA_R_16BF;
 #ifndef USE_ROCM
     auto bf16_reduction = at::globalContext().allowBF16ReductionCuBLAS();
     if (bf16_reduction !=
@@ -1661,15 +1682,22 @@ bool gemm_and_bias(
     _syncCurrentWithCarveoutStream(stream, true);
   }
 #endif
-  cublasLtEpilogue_t epilogue = CUBLASLT_EPILOGUE_BIAS;
-  if (activation == GEMMAndBiasActivationEpilogue::RELU) {
-    epilogue = CUBLASLT_EPILOGUE_RELU_BIAS;
-  } else if (activation == GEMMAndBiasActivationEpilogue::GELU) {
-    epilogue = CUBLASLT_EPILOGUE_GELU_BIAS;
-  }
+  const auto epilogue = [&]() -> cublasLtEpilogue_t {
+    // The cuBLAS documentation indicates that
+    // *_<ACTIVATION>_BIAS = *_<ACTIVATION>,
+    // but we keep it verbose here for clarity.
+    switch (activation) {
+      case GEMMAndBiasActivationEpilogue::RELU:
+        return bias ? CUBLASLT_EPILOGUE_RELU_BIAS : CUBLASLT_EPILOGUE_RELU;
+      case GEMMAndBiasActivationEpilogue::GELU:
+        return bias ? CUBLASLT_EPILOGUE_GELU_BIAS : CUBLASLT_EPILOGUE_GELU;
+      default:
+        return bias ? CUBLASLT_EPILOGUE_BIAS : CUBLASLT_EPILOGUE_DEFAULT;
+    }
+  }();
+  computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
 
-  if (bias != nullptr) {
-    computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_EPILOGUE, epilogue);
+  if (bias) {
     computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_BIAS_POINTER, bias);
   }
 
@@ -1965,6 +1993,10 @@ void scaled_gemm(
   // Note: alpha_val may change later depending on user-passed argument
   float alpha_val = 1.0;
   float beta_val = 0.0;
+#ifndef USE_ROCM
+  // Note: unused, but cublasLtMatmul requires a C pointer that is not result_ptr or nullptr
+  const void* dummy_C_ptr = mat1_ptr;
+#endif // ifndef USE_ROCM
   CuBlasLtMatmulDescriptor computeDesc(computeType, scaleType);
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSA, _cublasOpFromChar(transa));
   computeDesc.setAttribute(CUBLASLT_MATMUL_DESC_TRANSB, _cublasOpFromChar(transb));
@@ -2148,8 +2180,11 @@ void scaled_gemm(
       mat2_ptr,
       Bdesc.descriptor(),
       beta_ptr,
-      // NOTE: always use result_ptr here, because cuBLASLt w/device beta=0 can't handle nullptr either
+#ifdef USE_ROCM
       result_ptr, // unused, since beta_val is 0, but hipblaslt can't handle nullptr
+#else
+      dummy_C_ptr, // also unused, but cuBLAS can't use nullptr or result_ptr
+#endif // ifdef USE_ROCM
       Cdesc.descriptor(),
       result_ptr,
       Ddesc.descriptor(),

@@ -71,8 +71,7 @@
 //  - Things that happen in TensorArg
 //    - Check arguments (type, GPU, shape)
 
-namespace at {
-namespace native {
+namespace at::native {
 
 // ---------------------------------------------------------------------
 //
@@ -82,15 +81,15 @@ namespace native {
 
 std::ostream& operator<<(std::ostream& out, const ConvolutionParams& params) {
   out << "ConvolutionParams \n"
-      << "    memory_format = " << params.memory_format << "\n"
-      << "    data_type = " << cudnnTypeToString(params.dataType) << "\n"
-      << "    padding = " << ArrayRef<int>{params.padding} << "\n"
-      << "    stride = " << ArrayRef<int>{params.stride} << "\n"
-      << "    dilation = " << ArrayRef<int>{params.dilation} << "\n"
-      << "    groups = " << params.groups << "\n"
+      << "    memory_format = " << params.memory_format << '\n'
+      << "    data_type = " << cudnnTypeToString(params.dataType) << '\n'
+      << "    padding = " << ArrayRef<int>{params.padding} << '\n'
+      << "    stride = " << ArrayRef<int>{params.stride} << '\n'
+      << "    dilation = " << ArrayRef<int>{params.dilation} << '\n'
+      << "    groups = " << params.groups << '\n'
       << "    deterministic = " << (params.deterministic ? "true" : "false")
-      << "\n"
-      << "    allow_tf32 = " << (params.allow_tf32 ? "true" : "false") << "\n";
+      << '\n'
+      << "    allow_tf32 = " << (params.allow_tf32 ? "true" : "false") << '\n';
 
   return out;
 }
@@ -173,16 +172,16 @@ std::string repro_from_args(const ConvolutionParams& params) {
             at::globalContext().float32Precision(
                 at::Float32Backend::CUDA, at::Float32Op::MATMUL) ==
             at::Float32Precision::TF32)
-     << "\n";
+     << '\n';
   ss << "torch.backends.cudnn.benchmark = "
-     << pybool(at::globalContext().benchmarkCuDNN()) << "\n";
+     << pybool(at::globalContext().benchmarkCuDNN()) << '\n';
   ss << "torch.backends.cudnn.deterministic = " << pybool(params.deterministic)
-     << "\n";
+     << '\n';
   ss << "torch.backends.cudnn.allow_tf32 = " << pybool(params.allow_tf32)
-     << "\n";
+     << '\n';
   ss << "data = torch.randn(" << ArrayRef<int>(params.input_size, dim)
      << ", dtype=" << full_dtype << ", ";
-  ss << "device='cuda', requires_grad=True)" << to_channels_last << "\n";
+  ss << "device='cuda', requires_grad=True)" << to_channels_last << '\n';
   ss << "net = torch.nn.Conv" << dim - 2 << "d(" << in_channels << ", "
      << out_channels << ", ";
   ss << "kernel_size=" << ArrayRef<int>(&params.weight_size[2], dim - 2)
@@ -192,7 +191,7 @@ std::string repro_from_args(const ConvolutionParams& params) {
   ss << "dilation=" << ArrayRef<int>(params.dilation, dim - 2) << ", ";
   ss << "groups=" << params.groups << ")\n";
   ss << "net = net.cuda()." << partial_dtype << "()" << to_channels_last
-     << "\n";
+     << '\n';
   ss << "out = net(data)\n";
   ss << "out.backward(torch.randn_like(out))\n";
   ss << "torch.cuda.synchronize()\n\n";
@@ -825,7 +824,6 @@ REGISTER_CUDA_DISPATCH(
     cudnn_convolution_transpose_backward_stub,
     &cudnn_convolution_transpose_backward)
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED

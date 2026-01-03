@@ -211,7 +211,9 @@ class SymNode:
                 # for the unbacked symints, we may need to beef it up at some point.
                 unbacked_symbols = free_unbacked_symbols(self.expr)
                 replacements = {
-                    s: 4096 if s in unbacked_symbols else self.shape_env.var_to_val[s]
+                    s: fallback
+                    if s in unbacked_symbols
+                    else self.shape_env.var_to_val[s]
                     for s in self.expr.free_symbols
                 }
                 return self.expr.xreplace(replacements)
@@ -448,6 +450,9 @@ class SymNode:
     def bitwise_or(self, other):
         return self._bitwise_or(other)  # type: ignore[attr-defined]
 
+    def bitwise_xor(self, other):
+        return self._bitwise_xor(other)  # type: ignore[attr-defined]
+
     # There is no int_truediv available from C++
     def truediv(self, other):
         return self.float_truediv(other)
@@ -669,6 +674,7 @@ METHOD_TO_OPERATOR = {
     "neg": operator.neg,
     "or": operator.or_,
     "bitwise_or": operator.or_,
+    "bitwise_xor": operator.xor,
     "float_pow": operator.pow,
     "pow_by_natural": operator.pow,
     "round": builtins.round,
@@ -748,10 +754,7 @@ only_float_magic_methods = {"is_integer", "round", "sym_int", "sym_log2"}
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 # remap necessary because an op name can have a bitwise and boolean implementation
-bitwise_ops = {
-    "bitwise_and": "and",
-    "bitwise_or": "or",
-}
+bitwise_ops = {"bitwise_and": "and", "bitwise_or": "or", "bitwise_xor": "xor"}
 
 
 always_float_magic_methods = {"int_truediv", "float_truediv", "sym_float", "float_pow"}
@@ -951,8 +954,14 @@ def _bitwise_or(a, b):
     return BitwiseFn_bitwise_or(a, b)
 
 
+def _bitwise_xor(a, b):
+    from torch.utils._sympy.functions import BitwiseFn_bitwise_xor
+
+    return BitwiseFn_bitwise_xor(a, b)
+
+
 reflectable_magic_methods = {
-    "add": _optimized_add,
+    "add": operator.add,
     "sub": operator.sub,
     "mul": operator.mul,
     "mod": _sympy_mod,
@@ -962,6 +971,7 @@ reflectable_magic_methods = {
     "bitwise_and": _bitwise_and,
     "or": _sympy_or,
     "bitwise_or": _bitwise_or,
+    "bitwise_xor": _bitwise_xor,
     "float_truediv": _sympy_float_truediv,
     "int_truediv": _sympy_int_truediv,
     "int_floordiv": _sympy_floordiv,
@@ -1390,7 +1400,7 @@ def _make_node_magic(method, func):
                     out = PythonMod(self.expr, other.expr)
             elif method == "add":
                 # see Note [optimized_summation]
-                (optimized_summation, out) = func(
+                (optimized_summation, out) = _optimized_add(
                     self.expr,
                     other.expr,
                     self._optimized_summation,
@@ -1871,7 +1881,7 @@ def _make_user_magic(method, user_type):
             setattrs(user_type, f"__r{method_name}__", rbinary_magic_impl)
 
 
-for method in magic_methods.keys():  # type: ignore[assignment]
+for method in magic_methods:  # type: ignore[assignment]
     if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
         continue
