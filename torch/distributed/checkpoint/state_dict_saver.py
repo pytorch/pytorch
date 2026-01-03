@@ -324,9 +324,6 @@ def async_save(
 
     staging_future_or_state_dict = stage_state_dict()
 
-    if _internally_created_stager:
-        async_stager.close()
-
     upload_executor: _AsyncCheckpointExecutor = (
         _ProcessBasedAsyncCheckpointExecutor()
         if async_checkpointer_type == AsyncCheckpointerType.PROCESS
@@ -379,6 +376,8 @@ def async_save(
                 async_stager.synchronize_staging()
 
         maybe_synchronize_staging()
+        if _internally_created_stager:
+            async_stager.close()
         return upload_future
 
 

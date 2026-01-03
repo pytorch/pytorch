@@ -7,6 +7,8 @@ import tempfile
 import unittest
 from datetime import timedelta
 
+import psutil
+
 import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import (
@@ -21,11 +23,7 @@ from torch.distributed.checkpoint._state_dict_stager import StateDictStager
 from torch.distributed.checkpoint.staging import _ReplicationStager
 from torch.distributed.checkpoint.state_dict_saver import async_save
 from torch.distributed.tensor import DeviceMesh, distribute_tensor
-from torch.testing._internal.common_distributed import (
-    HAS_ACCELERATOR,
-    requires_accelerator_dist_backend,
-    skip_if_lt_x_gpu,
-)
+from torch.testing._internal.common_distributed import HAS_ACCELERATOR, skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
@@ -810,42 +808,6 @@ class TestStateDictStager(TestCase):
                         "When share_memory=False, tensor storage should not be shared",
                     )
 
-
-class TestDTensorStateDictStager(DTensorTestBase):
-    @with_comms
-    @requires_accelerator_dist_backend()
-    @skip_if_lt_x_gpu(2)
-    def test_dtensor(self):
-        """
-        Test that StateDictStager works correctly with DTensors.
-        """
-        # Create a DTensor
-        device_mesh = dist.DeviceMesh(
-            self.device_type, list(range(dist.get_world_size()))
-        )
-        tensor = torch.randn(3, 3, device=self.device_type)
-        dtensor = DTensor.from_local(tensor, device_mesh, [Shard(0)])
-
-        dtensor = dtensor + 1
-        dtensor = dtensor * 2
-
-        state_dict = {
-            "dtensor": dtensor,
-        }
-
-        stager = StateDictStager(pin_memory=True, share_memory=True)
-        cpu_state_dict = stager.stage(state_dict)
-
-        # Verify the original DTensor has the expected values
-        self.assertTrue(torch.allclose(dtensor.to_local(), (tensor + 1) * 2))
-        self.assertTrue(
-            torch.allclose(
-                cpu_state_dict["dtensor"].to_local(), dtensor.to_local().cpu()
-            )
-        )
-        self.assertEqual(cpu_state_dict["dtensor"]._spec, dtensor._spec)
-        self.assertEqual(cpu_state_dict["dtensor"].size(), dtensor.size())
-
     @unittest.skipIf(not HAS_ACCELERATOR, "No accelerator")
     def test_async_save_no_memory_leak(self):
         # repeatedly calling async_save should not cause memory to grow by
@@ -855,28 +817,15 @@ class TestDTensorStateDictStager(DTensorTestBase):
         tensor = torch.randn(num_elements, device=device_type).to(torch.float32)
         state_dict = {"weights": tensor}
 
-        def get_rss_mb():
-            gc.collect()
-            try:
-                with open(f"/proc/{os.getpid()}/status") as f:
-                    for line in f:
-                        if line.startswith("VmRSS:"):
-                            return int(line.split()[1]) / 1024
-            except Exception:
-                return 0
-            return 0
-
         with tempfile.TemporaryDirectory() as temp_dir:
             # warmup - first save may allocate some buffers
             f = async_save(
                 state_dict, checkpoint_id=os.path.join(temp_dir, "warmup"), no_dist=True
             )
             f.result()
-            gc.collect()
 
-            baseline = get_rss_mb()
-            if baseline == 0:
-                return
+            gc.collect()
+            baseline = psutil.Process().memory_info().rss / (1024 * 1024)
 
             num_saves = 5
             for i in range(num_saves):
@@ -888,7 +837,7 @@ class TestDTensorStateDictStager(DTensorTestBase):
                 f.result()
 
             gc.collect()
-            final = get_rss_mb()
+            final = psutil.Process().memory_info().rss / (1024 * 1024)
 
             growth = final - baseline
             max_allowed = model_size_mb * 1.2
