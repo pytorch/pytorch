@@ -67,6 +67,15 @@ def define_targets(rules):
     )
 
     rules.cc_test(
+        name = "util/nofatal_test",
+        srcs = ["util/nofatal_test.cpp"],
+        deps = [
+            "//c10/util:base",
+            "@com_google_googletest//:gtest_main",
+        ],
+    )
+
+    rules.cc_test(
         name = "util/ssize_test",
         srcs = ["util/ssize_test.cpp"],
         deps = [

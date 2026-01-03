@@ -404,7 +404,7 @@ void LazyGraphExecutor::SyncLiveTensorsGraph(
     bool wait) {
   auto tensors = GetLiveTensors(device);
   VLOG(4) << tensors.size() << " live tensors: devices=("
-          << c10::Join(", ", devices) << ")";
+          << c10::Join(", ", devices) << ')';
   SyncTensorsGraph(&tensors, devices, wait, /*sync_ltc_data=*/true);
 }
 

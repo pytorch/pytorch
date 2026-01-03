@@ -14,7 +14,7 @@ import warnings
 from abc import ABCMeta, abstractmethod
 from collections import OrderedDict
 from functools import partial
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -1158,6 +1158,7 @@ class HistogramObserver(UniformQuantizationObserverBase):
             # find the left and right bins between the quantile bounds
             l = start_bin
             r = end_bin
+            # pyrefly: ignore [bad-assignment]
             while l < end_bin and cSum[l] < next_alpha * total:
                 l = l + 1
             while r > start_bin and cSum[r] > next_beta * total:
@@ -1547,7 +1548,7 @@ class RecordingObserver(ObserverBase):
         reduce_range: Reduces the range of the quantized data type by 1 bit
     """
 
-    __annotations__ = {"tensor_val": list[Optional[torch.Tensor]]}
+    __annotations__ = {"tensor_val": list[torch.Tensor | None]}
 
     def __init__(self, dtype=torch.quint8):
         super().__init__(dtype=dtype, is_dynamic=False)
@@ -1838,13 +1839,13 @@ class AffineQuantizedObserverBase(ABC, torch.nn.Module):
         mapping_type: MappingType,
         target_dtype: torch.dtype,
         granularity: Granularity,
-        quant_min: Optional[int] = None,
-        quant_max: Optional[int] = None,
-        eps: Optional[float] = None,
-        scale_dtype: Optional[torch.dtype] = None,
-        zero_point_dtype: Optional[torch.dtype] = None,
+        quant_min: int | None = None,
+        quant_max: int | None = None,
+        eps: float | None = None,
+        scale_dtype: torch.dtype | None = None,
+        zero_point_dtype: torch.dtype | None = None,
         preserve_zero: bool = True,
-        zero_point_domain: Optional[ZeroPointDomain] = ZeroPointDomain.INT,
+        zero_point_domain: ZeroPointDomain | None = ZeroPointDomain.INT,
         # there could be some extra args that's ignored
         **kwargs,
     ):

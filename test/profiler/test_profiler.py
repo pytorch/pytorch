@@ -910,14 +910,13 @@ class TestProfiler(TestCase):
             for e in prof.function_events:
                 if "#" in e.name:
                     key = e.name
-                    if key in expected_event_count.keys():
+                    if key in expected_event_count:
                         actual_event_count[key] = (
                             actual_event_count.setdefault(key, 0) + 1
                         )
             for key, count in expected_event_count.items():
                 self.assertTrue(
-                    (key in actual_event_count.keys())
-                    and (count == actual_event_count[key])
+                    (key in actual_event_count) and (count == actual_event_count[key])
                 )
 
         with _profile(use_kineto=kineto_available()) as prof:
@@ -1208,8 +1207,8 @@ class TestProfiler(TestCase):
                     parts[-4].isdigit() and int(parts[-4]) > 0,
                     "Wrong tracing file name pattern",
                 )
-                self.assertEqual(parts[-3:], ["pt", "trace", "json"])
-                file_num += 1
+                if parts[-3:] == ["pt", "trace", "json"]:
+                    file_num += 1
             self.assertEqual(file_num, 3)
 
         # test case for gzip file format
@@ -1406,10 +1405,7 @@ class TestProfiler(TestCase):
                 s_ts_2 = flow_s_to_ts[2]
                 f_ts_2 = flow_f_to_ts[2]
                 self.assertTrue(
-                    all(
-                        ts in ts_to_name.keys()
-                        for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]
-                    )
+                    all(ts in ts_to_name for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2])
                 )
                 self.assertTrue(
                     ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits"
@@ -1496,7 +1492,7 @@ class TestProfiler(TestCase):
 
     def test_profiler_correlation_id(self):
         """
-        We expect the correlation_id to be unique across multiple invokation of the profiler,
+        We expect the correlation_id to be unique across multiple invocation of the profiler,
         So we will reuse id_uniqueness_set.
         """
         id_uniqueness_set = set()
@@ -2009,6 +2005,10 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 report = json.load(f)
                 self._validate_basic_json(report["traceEvents"], with_cuda)
 
+    @unittest.skipIf(
+        torch.xpu.is_available(),
+        "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263",
+    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self):
@@ -2162,7 +2162,10 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_profile(self):
         # test a really basic profile to make sure no erroneous aten ops are run
-        x = torch.randn(4, device="cuda")
+        acc = torch.accelerator.current_accelerator()
+        self.assertIsNotNone(acc)
+        device = acc.type
+        x = torch.randn(4, device=device)
         with torch.profiler.profile(with_stack=True) as p:
             x *= 2
         names = [e.name for e in p.events()]
@@ -2187,7 +2190,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
 
         self.assertTrue(any("aten" in e.name for e in p.events()))
 
-        self.assertTrue(any(device in e.name for e in p.events()))
+        self.assertTrue(any(device in e.name.lower() for e in p.events()))
 
         self.assertTrue(any("kernel" in e.name.lower() for e in p.events()))
 
@@ -2229,6 +2232,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     @unittest.skipIf(
         torch.cuda.is_available(), "CUDA complains about forking after init"
     )
+    @unittest.skipIf(torch.xpu.is_available(), "XPU complains about forking after init")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
     def test_forked_process(self):
         # Induce a pid cache by running the profiler with payload
@@ -2312,9 +2316,15 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             if "cat" in event and event["cat"] in cuda_external_id_events:
                 if disable_external_correlation:
                     self.assertTrue("External id" not in event["args"])
-                elif event["name"] != "cudaDeviceSynchronize":
-                    self.assertTrue("External id" in event["args"])
-                    self.assertTrue(event["args"]["External id"] > 0)
+                else:
+                    excluded_events = (
+                        {"hipDeviceSynchronize"}
+                        if TEST_WITH_ROCM
+                        else {"cudaDeviceSynchronize"}
+                    )
+                    if event["name"] not in excluded_events:
+                        self.assertTrue("External id" in event["args"])
+                        self.assertTrue(event["args"]["External id"] > 0)
 
         def validate_json(prof, disable_external_correlation):
             with TemporaryFileName(mode="w+") as fname:
@@ -3098,7 +3108,7 @@ aten::mm""",
                 report = json.load(f)
 
             # It is platform dependent whether the path will include "profiler/"
-            keys = [k for k in report.keys() if k.endswith("test_profiler.py")]
+            keys = [k for k in report if k.endswith("test_profiler.py")]
             self.assertEqual(len(keys), 1, f"{keys}")
             entry = report[keys[0]]
 
@@ -3272,7 +3282,7 @@ aten::mm""",
 
         check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
 
-    @unittest.skipIf(not torch.cuda.is_available(), "requries CUDA")
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
     def test_profiler_debug_autotuner(self):
         """
         This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.

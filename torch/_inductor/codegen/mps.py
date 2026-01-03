@@ -167,6 +167,12 @@ class MetalExprPrinter(ExprPrinter_):
         x = self.doprint(expr.args[0])
         return f"metal::log2({x})"
 
+    def _print_Where(self, expr: sympy.Expr) -> str:
+        c, p, q = (
+            self.parenthesize(arg, PRECEDENCE["Atom"] - 0.5) for arg in expr.args
+        )
+        return f"{c} ? {p} : {q}"
+
 
 class MetalOverrides(OpOverrides):
     """Implements Metal-specific overrides for ops. Base class emits Python-friendly overrides."""
@@ -955,7 +961,7 @@ class MetalKernel(SIMDKernel):
         """
         wrapper = V.graph.wrapper_code
         # Make sure sizevars has been computed
-        for v in self.args.sizevars.keys():
+        for v in self.args.sizevars:
             wrapper.ensure_size_computed(v)
 
         _, call_args, _, arg_types = self.args.python_argdefs()
@@ -965,7 +971,7 @@ class MetalKernel(SIMDKernel):
 
         args = [*self.args.output_buffers.keys(), *self.args.input_buffers.keys()]
         args = [arg for arg in args if arg not in self.removed_buffers]
-        args += [str(v) for v in self.args.sizevars.keys()]
+        args += [str(v) for v in self.args.sizevars]
         arg_types = [arg_name_to_type[arg] for arg in args]
 
         # Add any dynamic ints as inputs

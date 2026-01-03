@@ -1,11 +1,13 @@
 # mypy: allow-untyped-defs
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor.codegen.cutedsl.cutedsl_template import CuteDSLTemplate
 from torch._inductor.runtime.triton_compat import tl
+from torch._inductor.template_heuristics.cutedsl import get_groupgemm_configs
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
 
@@ -22,11 +24,13 @@ from ..utils import (
     get_num_sms,
     has_free_symbols,
     use_aten_gemm_kernels,
+    use_blackwell_cutedsl_grouped_mm,
     use_triton_template,
 )
 from .mm_common import (
     _is_static_problem,
     check_supported_striding,
+    load_kernel_template,
     persistent_grouped_mm_grid,
 )
 
@@ -121,6 +125,15 @@ def early_config_prune(g, m, dtsize, configs, named_args):
 
 
 triton_grouped_mm_source = r"""
+{% macro assign_maybe_constexpr(name, value_expr) -%}
+    {%- set value_str = value_expr | string -%}
+    {%- set sentinel = "__NOT_A_NUMBER__" -%}
+    {%- set as_int = value_str | int(default=sentinel) -%}
+    {%- set as_float = value_str | float(default=sentinel) -%}
+    {%- set is_constexpr = (as_int != sentinel) or (as_float != sentinel) -%}
+    {{ name }}{{ ": tl.constexpr" if is_constexpr else "" }} = {{ value_expr }}
+{%- endmacro %}
+
 import triton
 import triton.language as tl
 
@@ -207,38 +220,39 @@ def do_mma(a, b, accumulator):
 
 {%- if A_IS_2D %}
 {%- if B_IS_2D %}
-    G = {{size("offsets_ptr", 0)}}
+    {{ assign_maybe_constexpr("G", size("offsets_ptr", 0)) }}
 {%- else %}
-    G = {{size("b_ptr", 0)}}
+    {{ assign_maybe_constexpr("G", size("b_ptr", 0)) }}
 {%- endif %}
 {%- else %}
 {%- if B_IS_2D %}
-    G = {{size("a_ptr", 0)}}
+    {{ assign_maybe_constexpr("G", size("a_ptr", 0)) }}
 {%- else %}
-    G = {{size("a_ptr", 0)}}
+    {{ assign_maybe_constexpr("G", size("a_ptr", 0)) }}
 {%- endif %}
 {%- endif %}
 
     # the b_ptr tensor is given with its last two dims transposed, revert here
 
-    M = {{size("a_ptr", -2)}}
-    N = {{size("b_ptr", -1)}}
-    K = {{size("a_ptr", -1)}}
+    {{ assign_maybe_constexpr("M", size("a_ptr", -2)) }}
+    {{ assign_maybe_constexpr("N", size("b_ptr", -1)) }}
+    {{ assign_maybe_constexpr("K", size("a_ptr", -1)) }}
 
-    A_STRIDE_M = {{stride("a_ptr", -2)}}
-    A_STRIDE_K = {{stride("a_ptr", -1)}}
+    {{ assign_maybe_constexpr("A_STRIDE_M", stride("a_ptr", -2)) }}
+    {{ assign_maybe_constexpr("A_STRIDE_K", stride("a_ptr", -1)) }}
 {%- if not A_IS_2D %}
-    A_STRIDE_G = {{stride("a_ptr", 0)}}
+    {{ assign_maybe_constexpr("A_STRIDE_G", stride("a_ptr", 0)) }}
 {%- if SCALED %}
-    SCALE_A_STRIDE_G = {{stride("scale_a_ptr", 0)}}
+    {{ assign_maybe_constexpr("SCALE_A_STRIDE_G", stride("scale_a_ptr", 0)) }}
 {%- endif %}
 {%- endif %}
-    B_STRIDE_N = {{stride("b_ptr", -1)}}
-    B_STRIDE_K = {{stride("b_ptr", -2)}}
+    {{ assign_maybe_constexpr("B_STRIDE_N", stride("b_ptr", -1)) }}
+    {{ assign_maybe_constexpr("B_STRIDE_K", stride("b_ptr", -2)) }}
 {%- if not B_IS_2D %}
+    {{ assign_maybe_constexpr("B_STRIDE_G", stride("b_ptr", 0)) }}
     B_STRIDE_G = {{stride("b_ptr", 0)}}
 {%- if SCALED %}
-    SCALE_B_STRIDE_G = {{stride("scale_b_ptr", 0)}}
+    {{ assign_maybe_constexpr("SCALE_B_STRIDE_G", stride("scale_b_ptr", 0)) }}
 {%- endif %}
 {%- endif %}
 
@@ -252,25 +266,21 @@ def do_mma(a, b, accumulator):
 {%- if A_IS_2D %}
 {%- if A_IS_K_MAJOR %}
         shape=[M, K],
-        # fixme: strides=[A_STRIDE_M, A_STRIDE_K],
-        strides=[{{stride("a_ptr", -2)}}, {{stride("a_ptr", -1)}}],
+        strides=[A_STRIDE_M, A_STRIDE_K],
         block_shape=[BLOCK_M, BLOCK_K],
 {%- else %}
         shape=[K, M],
-        # fixme: strides=[A_STRIDE_K, A_STRIDE_M],
-        strides=[{{stride("a_ptr", -1)}}, {{stride("a_ptr", -2)}}],
+        strides=[A_STRIDE_K, A_STRIDE_M],
         block_shape=[BLOCK_K, BLOCK_M],
 {%- endif %}
 {%- else %}
 {%- if A_IS_K_MAJOR %}
         shape=[G, M, K],
-        # fixme: strides=[A_STRIDE_G, A_STRIDE_M, A_STRIDE_K],
-        strides=[{{stride("a_ptr", 0)}}, {{stride("a_ptr", -2)}}, {{stride("a_ptr", -1)}}],
+        strides=[A_STRIDE_G, A_STRIDE_M, A_STRIDE_K],
         block_shape=[1, BLOCK_M, BLOCK_K],
 {%- else %}
         shape=[G, K, M],
-        # fixme: strides=[A_STRIDE_G, A_STRIDE_K, A_STRIDE_M],
-        strides=[{{stride("a_ptr", 0)}}, {{stride("a_ptr", -1)}}, {{stride("a_ptr", -2)}}],
+        strides=[A_STRIDE_G, A_STRIDE_K, A_STRIDE_M],
         block_shape=[1, BLOCK_K, BLOCK_M],
 {%- endif %}
 {%- endif %}
@@ -285,25 +295,21 @@ def do_mma(a, b, accumulator):
 {%- if B_IS_2D %}
 {%- if B_IS_K_MAJOR %}
         shape=[N, K],
-        # fixme: strides=[B_STRIDE_N, B_STRIDE_K],
-        strides=[{{stride("b_ptr", -1)}}, {{stride("b_ptr", -2)}}],
+        strides=[B_STRIDE_N, B_STRIDE_K],
         block_shape=[BLOCK_N, BLOCK_K],
 {%- else %}
         shape=[K, N],
-        # fixme: strides=[B_STRIDE_K, B_STRIDE_N],
-        strides=[{{stride("b_ptr", -2)}}, {{stride("b_ptr", -1)}}],
+        strides=[B_STRIDE_K, B_STRIDE_N],
         block_shape=[BLOCK_K, BLOCK_N],
 {%- endif %}
 {%- else %}
 {%- if B_IS_K_MAJOR %}
         shape=[G, N, K],
-        # fixme: strides=[B_STRIDE_G, B_STRIDE_N, B_STRIDE_K],
-        strides=[{{stride("b_ptr", 0)}}, {{stride("b_ptr", -1)}}, {{stride("b_ptr", -2)}}],
+        strides=[B_STRIDE_G, B_STRIDE_N, B_STRIDE_K],
         block_shape=[1, BLOCK_N, BLOCK_K],
 {%- else %}
         shape=[G, K, N],
-        # fixme: strides=[B_STRIDE_G, B_STRIDE_K, B_STRIDE_N],
-        strides=[{{stride("b_ptr", 0)}}, {{stride("b_ptr", -2)}}, {{stride("b_ptr", -1)}}],
+        strides=[B_STRIDE_G, B_STRIDE_K, B_STRIDE_N],
         block_shape=[1, BLOCK_K, BLOCK_N],
 {%- endif %}
 {%- endif %}
@@ -513,6 +519,11 @@ triton_scaled_grouped_mm_template = TritonTemplate(
     source=triton_grouped_mm_source,
 )
 
+cutedsl_grouped_mm_template = CuteDSLTemplate(
+    name="grouped_gemm_cutedsl",
+    source=load_kernel_template("cutedsl_mm_grouped"),
+)
+
 
 def grouped_mm_args(
     mat1: TensorBox,
@@ -613,35 +624,26 @@ def can_use_triton_kernel(
         return offs is None
 
 
-def create_offsets(x, m1_size, m2_size, offs_size):
-    m1_is_2d = len(m1_size) == 2
-    m2_is_2d = len(m2_size) == 2
+def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
     if m1_is_2d:
         if m2_is_2d:
-            k = V.graph.sizevars.size_hint(m1_size[1])
-            noffs = V.graph.sizevars.size_hint(offs_size[0])
-            step = k / noffs
-            return torch.linspace(
-                step, k, noffs, dtype=x.get_dtype(), device=x.get_device()
-            )
-
+            end = k
         else:
-            m = V.graph.sizevars.size_hint(m1_size[0])
-            noffs = V.graph.sizevars.size_hint(offs_size[0])
-            step = m / noffs
-            return torch.linspace(
-                step, m, noffs, dtype=x.get_dtype(), device=x.get_device()
-            )
+            end = m
     else:
         if m2_is_2d:
-            n = V.graph.sizevars.size_hint(m2_size[0])
-            noffs = V.graph.sizevars.size_hint(offs_size[0])
-            step = n / noffs
-            return torch.linspace(
-                step, n, noffs, dtype=x.get_dtype(), device=x.get_device()
-            )
+            end = n
         else:
             return None
+
+    end_hint = V.graph.sizevars.size_hint(end)
+    noffs_hint = V.graph.sizevars.size_hint(offs_box.get_size()[0])
+    offs = torch.arange(1, noffs_hint + 1, dtype=torch.float32) * (
+        end_hint / noffs_hint
+    )
+    offs[:-1] = (offs[:-1] / alignment).round() * alignment
+    offs[-1] = end_hint
+    return offs.to(dtype=offs_box.get_dtype(), device=offs_box.get_device())
 
 
 def _tuned_grouped_mm_common(
@@ -714,43 +716,44 @@ def _tuned_grouped_mm_common(
     # Checking only for the equality of corresponding dims of
     # multiplicands here, relying on meta function checks for
     # everything else.
+    if len(m1_size) == 2:
+        if len(m2_size) == 2:
+            m, k1 = m1_size
+            k2, n = m2_size
+            # pyrefly: ignore [missing-attribute]
+            g = offs.get_size()[0]
+            k = V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = True, True
+        else:
+            # pyrefly: ignore [missing-attribute]
+            g1 = offs.layout.size[0]
+            m, k1 = m1_size
+            g2, k2, n = m2_size
+            g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+            k = V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = True, False
+    else:
+        if len(m2_size) == 2:
+            # pyrefly: ignore [missing-attribute]
+            g1 = offs.layout.size[0]
+            g2, m, k1 = m1_size
+            k2, n = m2_size
+            g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+            k = V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = False, True
+        else:
+            g1, m, k1 = m1_size
+            g2, k2, n = m2_size
+            g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
+            k = V.graph.sizevars.check_equals(k1, k2)
+            a_is_2d, b_is_2d = False, False
+
     if (
         is_nonzero
         and use_triton_template(layout)
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
     ):
         scaled = scale_a is not None
-        if len(m1_size) == 2:
-            if len(m2_size) == 2:
-                m, k1 = m1_size
-                k2, _ = m2_size
-                # pyrefly: ignore [missing-attribute]
-                g = offs.get_size()[0]
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = True, True
-            else:
-                # pyrefly: ignore [missing-attribute]
-                g1 = offs.layout.size[0]
-                m, k1 = m1_size
-                g2, k2, _ = m2_size
-                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = True, False
-        else:
-            if len(m2_size) == 2:
-                # pyrefly: ignore [missing-attribute]
-                g1 = offs.layout.size[0]
-                g2, m, k1 = m1_size
-                k2, _ = m2_size
-                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = False, True
-            else:
-                g1, m, k1 = m1_size
-                g2, k2, _ = m2_size
-                g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
-                V.graph.sizevars.check_equals(k1, k2)
-                a_is_2d, b_is_2d = False, False
 
         a_is_k_major = mat_a.get_stride()[-1] == 1
         b_is_k_major = mat_b.get_stride()[-2] == 1
@@ -788,11 +791,29 @@ def _tuned_grouped_mm_common(
                 **config.kwargs,
             )
 
-    input_gen_fns = {
-        4: lambda x: create_offsets(
-            x, m1_size, m2_size, offs.get_size() if offs is not None else None
-        ),
-    }
+    if use_blackwell_cutedsl_grouped_mm(
+        mat_a, mat_b, layout, a_is_2d, b_is_2d, offs, bias, scale_result
+    ):
+        for config in get_groupgemm_configs():
+            kwargs = dict(
+                ACC_DTYPE="cutlass.Float32",
+            )
+
+            cutedsl_grouped_mm_template.maybe_append_choice(
+                choices,
+                input_nodes=input_nodes,
+                layout=layout,
+                **kwargs,
+                **asdict(config),
+            )
+
+    input_gen_fns = {}
+    if offs is not None:
+        input_offs_idx = 2 if scale_a is None else 4
+        alignment = 16 // mat_a.dtype.itemsize
+        input_gen_fns[input_offs_idx] = lambda x: create_offsets(
+            x, a_is_2d, b_is_2d, m, n, k, alignment
+        )
     return autotune_select_algorithm(
         algorithm_name, choices, input_nodes, layout, input_gen_fns=input_gen_fns
     )

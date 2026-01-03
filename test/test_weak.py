@@ -84,12 +84,12 @@ class WeakTest(TestCase):
         weakdict = klass()
         weakdict.update(dict)
         self.assertEqual(len(weakdict), len(dict))
-        for k in weakdict.keys():
+        for k in weakdict:
             self.assertIn(k, dict, "mysterious new key appeared in weak dict")
             v = dict.get(k)
             self.assertIs(v, weakdict[k])
             self.assertIs(v, weakdict.get(k))
-        for k in dict.keys():
+        for k in dict:
             self.assertIn(k, weakdict, "original key disappeared in weak dict")
             v = dict[k]
             self.assertIs(v, weakdict[k])
@@ -328,7 +328,7 @@ class WeakKeyDictionaryTestCase(TestCase):
         for key, value in self.reference.items():
             p[key] = value
             self.assertEqual(p[key], value)
-        for key in self.reference.keys():
+        for key in self.reference:
             del p[key]
             self.assertRaises(KeyError, lambda: p[key])
         p = self._empty_mapping()
@@ -582,6 +582,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         return x
 
     def setUp(self):
+        super().setUp()
         if IS_MACOS:
             raise unittest.SkipTest("non-portable load_library call used in test")
 
@@ -661,7 +662,7 @@ class WeakKeyDictionaryScriptObjectTestCase(TestCase):
         for key, value in self.reference.items():
             p[key] = value
             self.assertEqual(p[key], value)
-        for key in self.reference.keys():
+        for key in self.reference:
             del p[key]
             self.assertRaises(KeyError, lambda: p[key])
         p = self._empty_mapping()

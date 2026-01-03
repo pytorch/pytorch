@@ -26,7 +26,7 @@ find_library(Gloo_CUDA_LIBRARY
 # if Gloo + HIP is desired, Gloo_HIP_LIBRARY
 # needs to be linked to desired target
 find_library(Gloo_HIP_LIBRARY
-  NAMES gloo_hiop
+  NAMES gloo_hip
   DOC "Gloo's HIP support/code"
 )
 

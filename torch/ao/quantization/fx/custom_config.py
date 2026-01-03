@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any
 
 from torch.ao.quantization import QConfigMapping
 from torch.ao.quantization.backend_config import BackendConfig
@@ -37,10 +37,10 @@ PRESERVED_ATTRIBUTES_DICT_KEY = "preserved_attributes"
 class StandaloneModuleConfigEntry:
     # qconfig_mapping for the prepare function called in the submodule,
     # None means use qconfig from parent qconfig_mapping
-    qconfig_mapping: Optional[QConfigMapping]
+    qconfig_mapping: QConfigMapping | None
     example_inputs: tuple[Any, ...]
-    prepare_custom_config: Optional[PrepareCustomConfig]
-    backend_config: Optional[BackendConfig]
+    prepare_custom_config: PrepareCustomConfig | None
+    backend_config: BackendConfig | None
 
 
 class PrepareCustomConfig:
@@ -80,10 +80,10 @@ class PrepareCustomConfig:
     def set_standalone_module_name(
         self,
         module_name: str,
-        qconfig_mapping: Optional[QConfigMapping],
+        qconfig_mapping: QConfigMapping | None,
         example_inputs: tuple[Any, ...],
-        prepare_custom_config: Optional[PrepareCustomConfig],
-        backend_config: Optional[BackendConfig],
+        prepare_custom_config: PrepareCustomConfig | None,
+        backend_config: BackendConfig | None,
     ) -> PrepareCustomConfig:
         """
         Set the configuration for running a standalone module identified by ``module_name``.
@@ -100,10 +100,10 @@ class PrepareCustomConfig:
     def set_standalone_module_class(
         self,
         module_class: type,
-        qconfig_mapping: Optional[QConfigMapping],
+        qconfig_mapping: QConfigMapping | None,
         example_inputs: tuple[Any, ...],
-        prepare_custom_config: Optional[PrepareCustomConfig],
-        backend_config: Optional[BackendConfig],
+        prepare_custom_config: PrepareCustomConfig | None,
+        backend_config: BackendConfig | None,
     ) -> PrepareCustomConfig:
         """
         Set the configuration for running a standalone module identified by ``module_class``.
@@ -207,7 +207,7 @@ class PrepareCustomConfig:
         This function is primarily for backward compatibility and may be removed in the future.
         """
 
-        def _get_qconfig_mapping(obj: Any, dict_key: str) -> Optional[QConfigMapping]:
+        def _get_qconfig_mapping(obj: Any, dict_key: str) -> QConfigMapping | None:
             """
             Convert the given object into a QConfigMapping if possible, else throw an exception.
             """
@@ -221,7 +221,7 @@ class PrepareCustomConfig:
 
         def _get_prepare_custom_config(
             obj: Any, dict_key: str
-        ) -> Optional[PrepareCustomConfig]:
+        ) -> PrepareCustomConfig | None:
             """
             Convert the given object into a PrepareCustomConfig if possible, else throw an exception.
             """
@@ -233,7 +233,7 @@ class PrepareCustomConfig:
                 f"Expected PrepareCustomConfig in prepare_custom_config_dict[\"{dict_key}\"], got '{type(obj)}'"
             )
 
-        def _get_backend_config(obj: Any, dict_key: str) -> Optional[BackendConfig]:
+        def _get_backend_config(obj: Any, dict_key: str) -> BackendConfig | None:
             """
             Convert the given object into a BackendConfig if possible, else throw an exception.
             """

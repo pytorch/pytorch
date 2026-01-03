@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import warnings
 from fnmatch import fnmatch
-from typing import Optional, Union
 
 import torch
 import torch.nn as nn
@@ -14,10 +13,10 @@ __all__ = ["parallelize_module"]
 
 def parallelize_module(  # type: ignore[return]
     module: nn.Module,
-    device_mesh: Optional[DeviceMesh] = None,
-    parallelize_plan: Optional[Union[ParallelStyle, dict[str, ParallelStyle]]] = None,
+    device_mesh: DeviceMesh | None = None,
+    parallelize_plan: ParallelStyle | dict[str, ParallelStyle] | None = None,
     *,
-    src_data_rank: Optional[int] = 0,
+    src_data_rank: int | None = 0,
 ) -> nn.Module:
     """
     Apply Tensor Parallelism in PyTorch by parallelizing modules or sub-modules based on a user-specified plan.

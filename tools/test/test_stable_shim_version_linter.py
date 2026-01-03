@@ -1,6 +1,12 @@
+import sys
 import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import MagicMock, patch
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(REPO_ROOT))
 
 from tools.linter.adapters.stable_shim_version_linter import (
     check_file,
@@ -95,7 +101,6 @@ index 365c954dbe7..c5fcf7a09cf 100644
 
     def test_get_current_version(self):
         """Test that we can get the current version from version.txt."""
-        # This tests the real version.txt file
         version = get_current_version()
         self.assertIsInstance(version, tuple)
         self.assertEqual(len(version), 2)
@@ -105,7 +110,6 @@ index 365c954dbe7..c5fcf7a09cf 100644
 
     def test_check_file_with_simulated_content(self):
         """Test checking a file with simulated content and git diffs."""
-        # Create a temporary file with test content
         with tempfile.NamedTemporaryFile(mode="w", suffix=".h", delete=False) as f:
             f.write("""
 #ifndef TEST_H
@@ -127,7 +131,7 @@ AOTI_TORCH_EXPORT int function_without_version();
 
 #endif
 """)
-            f.flush()  # Ensure content is written to disk
+            f.flush()
             temp_file = f.name
 
             # Mock git diff to say lines 8, 12, and 15 are new

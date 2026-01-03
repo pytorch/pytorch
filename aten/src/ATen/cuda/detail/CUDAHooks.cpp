@@ -21,6 +21,8 @@
 
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
+#include <cudnn_frontend.h>
+#include <cudnn_frontend_shim.h>
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -35,7 +37,6 @@
 #include <ATen/cuda/detail/LazyNVRTC.h>
 #endif
 
-#include <cuda.h>
 
 #include <sstream>
 #include <cstddef>
@@ -59,7 +60,7 @@ void set_magma_init_fn(void (*fn)()) {
 namespace {
 bool _hasPrimaryContext(DeviceIndex device_index) {
   TORCH_CHECK(device_index >= 0 && device_index < at::cuda::device_count(),
-              "hasPrimaryContext expects a valid device index, but got device_index=", device_index);
+              "hasPrimaryContext expects a valid device index, but got device_index=", static_cast<int>(device_index));
   unsigned int ctx_flags = 0;
   // In standalone tests of cuDevicePrimaryCtxGetState, I've seen the "active" argument end up with weird
   // (garbage-looking nonzero) values when the context is not active, unless I initialize it to zero.
@@ -351,6 +352,26 @@ long CUDAHooks::versionCuDNN() const {
 #endif
 }
 
+long CUDAHooks::versionRuntimeCuDNN() const {
+#if AT_CUDNN_ENABLED()
+#ifndef USE_STATIC_CUDNN
+  return cudnnGetVersion();
+#else
+  return CUDNN_VERSION;
+#endif
+#else
+  TORCH_CHECK(false, "Cannot query CuDNN version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+long CUDAHooks::versionCuDNNFrontend() const {
+#if AT_CUDNN_ENABLED()
+  return CUDNN_FRONTEND_VERSION;
+#else
+  TORCH_CHECK(false, "Cannot query CuDNN Frontend version if ATen_cuda is not built with CuDNN");
+#endif
+}
+
 long CUDAHooks::versionMIOpen() const {
 #if AT_ROCM_ENABLED()
   return MIOPEN_VERSION_MAJOR * 10000 +
@@ -390,16 +411,16 @@ std::string CUDAHooks::showConfig() const {
     // HIP_VERSION value format was changed after ROCm v4.2 to include the patch number
     if(v < 500) {
       // If major=xx, minor=yy then format -> xxyy
-      oss << (v / 100) << "." << (v % 10);
+      oss << (v / 100) << '.' << (v % 10);
     }
     else {
       // If major=xx, minor=yy & patch=zzzzz then format -> xxyyzzzzz
-      oss << (v / 10000000) << "." << (v / 100000 % 100) << "." << (v % 100000);
+      oss << (v / 10000000) << '.' << (v / 100000 % 100) << '.' << (v % 100000);
     }
 #else
-    oss << (v / 1000) << "." << (v / 10 % 100);
+    oss << (v / 1000) << '.' << (v / 10 % 100);
     if (v % 10 != 0) {
-      oss << "." << (v % 10);
+      oss << '.' << (v % 10);
     }
 #endif
   };
@@ -410,52 +431,43 @@ std::string CUDAHooks::showConfig() const {
   oss << "  - HIP Runtime ";
 #endif
   printCudaStyleVersion(runtimeVersion);
-  oss << "\n";
+  oss << '\n';
 
   // TODO: Make HIPIFY understand CUDART_VERSION macro
 #if !defined(USE_ROCM)
   if (runtimeVersion != CUDART_VERSION) {
     oss << "  - Built with CUDA Runtime ";
     printCudaStyleVersion(CUDART_VERSION);
-    oss << "\n";
+    oss << '\n';
   }
-  oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << "\n";
+  oss << "  - NVCC architecture flags: " << NVCC_FLAGS_EXTRA << '\n';
 #endif
 
 #if !defined(USE_ROCM)
 #if AT_CUDNN_ENABLED()
-
-
-  auto printCudnnStyleVersion = [&](size_t v) {
-    oss << (v / 1000) << "." << (v / 100 % 10);
-    if (v % 100 != 0) {
-      oss << "." << (v % 100);
-    }
-  };
-
   size_t cudnnVersion = cudnnGetVersion();
-  oss << "  - CuDNN ";
-  printCudnnStyleVersion(cudnnVersion);
+  oss << "  - CuDNN runtime version ";
+  oss << cudnn_frontend::detail::convert_version_to_str(cudnnVersion);
   size_t cudnnCudartVersion = cudnnGetCudartVersion();
   if (cudnnCudartVersion != CUDART_VERSION) {
     oss << "  (built against CUDA ";
     printCudaStyleVersion(cudnnCudartVersion);
-    oss << ")";
+    oss << ')';
   }
-  oss << "\n";
+  oss << '\n';
   if (cudnnVersion != CUDNN_VERSION) {
-    oss << "    - Built with CuDNN ";
-    printCudnnStyleVersion(CUDNN_VERSION);
-    oss << "\n";
+    oss << "    - Built with CuDNN compile-time version";
+    oss << cudnn_frontend::detail::convert_version_to_str(CUDNN_VERSION);
+    oss << '\n';
   }
 #endif
 #else
   // TODO: Check if miopen has the functions above and unify
-  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << "." << MIOPEN_VERSION_MINOR << "." << MIOPEN_VERSION_PATCH << "\n";
+  oss << "  - MIOpen " << MIOPEN_VERSION_MAJOR << '.' << MIOPEN_VERSION_MINOR << '.' << MIOPEN_VERSION_PATCH << '\n';
 #endif
 
 #if AT_MAGMA_ENABLED()
-  oss << "  - Magma " << MAGMA_VERSION_MAJOR << "." << MAGMA_VERSION_MINOR << "." << MAGMA_VERSION_MICRO << "\n";
+  oss << "  - Magma " << MAGMA_VERSION_MAJOR << '.' << MAGMA_VERSION_MINOR << '.' << MAGMA_VERSION_MICRO << '\n';
 #endif
 
   return oss.str();

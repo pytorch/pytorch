@@ -17,7 +17,143 @@ from pathlib import Path
 from typing import NamedTuple
 
 
+# Add repo root to sys.path so we can import from tools.setup_helpers
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
+
+from tools.setup_helpers.gen_version_header import parse_version
+
+
 LINTER_CODE = "STABLE_SHIM_VERSION"
+
+
+class PreprocessorTracker:
+    """
+    Helper class to track preprocessor directives and version blocks.
+
+    This class maintains state as it processes C/C++ preprocessor directives
+    (#if, #elif, #else, #endif) and tracks which code is inside version blocks.
+    """
+
+    def __init__(self):
+        """Initialize the preprocessor tracker."""
+        # Stack of (is_version_block, version_tuple) tuples
+        # is_version_block: True if this is a TORCH_FEATURE_VERSION >= TORCH_VERSION_X_Y_0 block
+        # version_tuple: (major, minor) if is_version_block is True, else None
+        self.preprocessor_stack: list[tuple[bool, tuple[int, int] | None]] = []
+
+        # Current version requirement (if inside a version block)
+        self.version_of_block: tuple[int, int] | None = None
+
+        # Track if we're inside a block comment
+        self.in_block_comment: bool = False
+
+        # Regex to match version conditions in #if or #elif
+        self.version_pattern = re.compile(
+            r"#(?:if|elif)\s+TORCH_FEATURE_VERSION\s*>=\s*TORCH_VERSION_(\d+)_(\d+)_\d+"
+        )
+
+    def process_line(self, line: str) -> bool:
+        """
+        Process a line and update the preprocessor state.
+
+        Args:
+            line: The line to process
+
+        Returns:
+            True if the line was processed (is a preprocessor directive or comment),
+            False if it's a regular code line that should be further analyzed.
+        """
+        stripped = line.strip()
+
+        # Handle block comments (/* ... */)
+        # Check if we're entering a block comment
+        if "/*" in line:
+            self.in_block_comment = True
+
+        # If we're in a block comment, check if we're exiting
+        if self.in_block_comment:
+            if "*/" in line:
+                self.in_block_comment = False
+            return True  # Skip the line if we're in a block comment
+
+        # Skip line comments - they're not active code
+        if stripped.startswith("//"):
+            return True
+
+        # Track #if directives
+        if stripped.startswith("#if"):
+            version_match = self.version_pattern.match(stripped)
+            if version_match:
+                major = int(version_match.group(1))
+                minor = int(version_match.group(2))
+                version_tuple = (major, minor)
+                self.preprocessor_stack.append((True, version_tuple))
+                self.version_of_block = version_tuple
+            else:
+                # Regular #if (not a version block)
+                self.preprocessor_stack.append((False, None))
+            return True
+
+        # Track #ifdef and #ifndef directives (not version blocks)
+        if stripped.startswith(("#ifdef", "#ifndef")):
+            self.preprocessor_stack.append((False, None))
+            return True
+
+        # Track #endif directives
+        if stripped.startswith("#endif"):
+            if self.preprocessor_stack:
+                is_version_block, _ = self.preprocessor_stack.pop()
+                if is_version_block:
+                    # Restore previous version block if any
+                    self.version_of_block = None
+                    for i in range(len(self.preprocessor_stack) - 1, -1, -1):
+                        if self.preprocessor_stack[i][0]:
+                            self.version_of_block = self.preprocessor_stack[i][1]
+                            break
+            return True
+
+        # Track #else directives
+        # #else replaces the previous #if or #elif, so we pop and push
+        if stripped.startswith("#else"):
+            if self.preprocessor_stack:
+                self.preprocessor_stack.pop()
+            # #else is never versioned, so push (False, None)
+            self.preprocessor_stack.append((False, None))
+            self.version_of_block = None
+            return True
+
+        # Track #elif directives
+        # #elif replaces the previous #if or #elif, so we pop and push
+        if stripped.startswith("#elif"):
+            if self.preprocessor_stack:
+                self.preprocessor_stack.pop()
+
+            self.version_of_block = None
+
+            # Check if this #elif has a version condition
+            version_match_elif = self.version_pattern.match(stripped)
+            if version_match_elif:
+                major = int(version_match_elif.group(1))
+                minor = int(version_match_elif.group(2))
+                version_tuple = (major, minor)
+                self.preprocessor_stack.append((True, version_tuple))
+                self.version_of_block = version_tuple
+            else:
+                # Not a version elif, treat as regular conditional
+                self.preprocessor_stack.append((False, None))
+            return True
+
+        # Not a preprocessor directive or comment
+        return False
+
+    def is_in_version_block(self) -> bool:
+        """Check if currently inside any version block."""
+        return self.version_of_block is not None
+
+    def get_current_version(self) -> tuple[int, int] | None:
+        """Get the current version requirement, or None if not in a version block."""
+        return self.version_of_block
 
 
 class LintSeverity(str, Enum):
@@ -39,29 +175,6 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
-def parse_version(version: str) -> tuple[int, int, int]:
-    """
-    Parses a version string into (major, minor, patch) version numbers.
-    This function is copied from tools/setup_helpers/gen_version_header.py
-    to ensure consistency with how PyTorch parses its version.
-
-    Args:
-        version: Full version number string, possibly including revision / commit hash.
-
-    Returns:
-        A tuple of (major, minor, patch) version numbers.
-    """
-    # Extract version number part (i.e. toss any revision / hash parts).
-    version_number_str = version
-    for i in range(len(version)):
-        c = version[i]
-        if not (c.isdigit() or c == "."):
-            version_number_str = version[:i]
-            break
-
-    return tuple([int(n) for n in version_number_str.split(".")])  # type: ignore[return-value]
-
-
 def get_current_version() -> tuple[int, int]:
     """
     Get the current PyTorch version from version.txt.
@@ -75,7 +188,7 @@ def get_current_version() -> tuple[int, int]:
 
     if not version_file.exists():
         raise RuntimeError(
-            "Could not find version.txt. This linter require version.txt to run"
+            "Could not find version.txt. This linter requires version.txt to run"
         )
 
     with open(version_file) as f:
@@ -155,8 +268,15 @@ def check_file(filename: str) -> list[LintMessage]:
     Parse the stable/c/shim.h file and check that:
     1. All function declarations are within TORCH_FEATURE_VERSION blocks
     2. New functions added in this commit use the current version macro
+
+    For the AOTI shim (torch/csrc/inductor/aoti_torch/c/shim.h), we only
+    enforce versioning on NEW function declarations, since existing functions
+    are intentionally not version-guarded.
     """
     lint_messages: list[LintMessage] = []
+
+    # Check if this is the AOTI shim - only enforce versioning on new lines
+    is_aoti_shim = "torch/csrc/inductor/aoti_torch/c/shim.h" in filename
 
     # Get current version
     current_version = get_current_version()
@@ -170,19 +290,13 @@ def check_file(filename: str) -> list[LintMessage]:
     with open(filename) as f:
         lines = f.readlines()
 
-    # Track state
-    inside_version_block = False
-    current_version_macro = None
+    # Use PreprocessorTracker to handle preprocessor directives
+    tracker = PreprocessorTracker()
+
+    # Track extern "C" blocks separately
     inside_extern_c = False
 
-    # Track ALL preprocessor conditional blocks to properly match #if/#endif pairs
-    # Each element is (is_version_block, version_macro_or_none)
-    preprocessor_stack: list[tuple[bool, str | None]] = []
-
-    # Patterns
-    version_start_pattern = re.compile(
-        r"#if\s+TORCH_FEATURE_VERSION\s*>=\s*(TORCH_VERSION_\d+_\d+_\d+)"
-    )
+    # Patterns for extern "C" blocks
     extern_c_pattern = re.compile(r'extern\s+"C"\s*{')
     extern_c_end_pattern = re.compile(r'}\s*//\s*extern\s+"C"')
 
@@ -196,53 +310,14 @@ def check_file(filename: str) -> list[LintMessage]:
     for line_num, line in enumerate(lines, 1):
         stripped = line.strip()
 
-        # Skip empty lines and comments
-        if not stripped or stripped.startswith("//"):
+        # Skip empty lines
+        if not stripped:
             continue
 
-        # Check for TORCH_FEATURE_VERSION block start
-        version_match = version_start_pattern.match(stripped)
-        if version_match:
-            version_macro = version_match.group(1)
-            preprocessor_stack.append((True, version_macro))
-            inside_version_block = True
-            current_version_macro = version_macro
-            continue
+        # Let the tracker process preprocessor directives and comments
+        is_directive_or_comment = tracker.process_line(line)
 
-        # Track any other #if/#ifdef/#ifndef directives
-        if stripped.startswith(("#if", "#ifdef", "#ifndef")) and not version_match:
-            # Not a TORCH_FEATURE_VERSION block, just a regular conditional
-            preprocessor_stack.append((False, None))
-            continue
-
-        # Track #endif directives
-        if stripped.startswith("#endif"):
-            if preprocessor_stack:
-                is_version_block, _ = preprocessor_stack.pop()
-                # If we just closed a version block, check if we're still in one
-                if is_version_block:
-                    # Look for any remaining version blocks in the stack
-                    inside_version_block = False
-                    current_version_macro = None
-                    for is_ver, ver_macro in reversed(preprocessor_stack):
-                        if is_ver:
-                            inside_version_block = True
-                            current_version_macro = ver_macro
-                            break
-            continue
-
-        # Track #else and #elif (they don't change the stack depth, but exit version blocks)
-        if stripped.startswith(("#else", "#elif")):
-            # If we're in a version block, exit it (the #else branch is not versioned)
-            if inside_version_block and preprocessor_stack:
-                # Check if the topmost block is a version block
-                if preprocessor_stack[-1][0]:
-                    inside_version_block = False
-                    current_version_macro = None
-            continue
-
-        # Skip other preprocessor directives
-        if stripped.startswith("#"):
+        if is_directive_or_comment:
             continue
 
         # Track extern "C" blocks
@@ -263,8 +338,30 @@ def check_file(filename: str) -> list[LintMessage]:
                 # Check if this is a newly added line
                 is_new_line = line_num in added_lines
 
+                # Get current version state from tracker
+                inside_version_block = tracker.is_in_version_block()
+                tracker_version = tracker.get_current_version()
+                current_version_macro = (
+                    f"TORCH_VERSION_{tracker_version[0]}_{tracker_version[1]}_0"
+                    if tracker_version
+                    else None
+                )
+
                 if not inside_version_block:
                     # Function declaration outside of version block
+                    if not is_new_line:
+                        # Existing function declaration outside of version block in aoti shim is ignored
+                        if is_aoti_shim:
+                            continue
+                        expected_version_macro_str = "TORCH_VERSION_X_Y_Z"
+                        expected_version_check_str = (
+                            f"#if TORCH_FEATURE_VERSION >= {expected_version_macro}"
+                        )
+                        additional_text = "\nX, Y, and Z correspond to the TORCH_ABI_VERSION when the function was added."
+                    else:
+                        expected_version_macro_str = expected_version_macro
+                        expected_version_check_str = expected_version_check
+                        additional_text = ""
                     lint_messages.append(
                         LintMessage(
                             path=filename,
@@ -278,9 +375,10 @@ def check_file(filename: str) -> list[LintMessage]:
                             description=(
                                 f"Function declaration found outside of TORCH_FEATURE_VERSION block. "
                                 f"All function declarations must be wrapped in:\n"
-                                f"{expected_version_check}\n"
+                                f"{expected_version_check_str}\n"
                                 f"// ... your declarations ...\n"
-                                f"#endif // TORCH_FEATURE_VERSION >= {expected_version_macro}"
+                                f"#endif // TORCH_FEATURE_VERSION >= {expected_version_macro_str}"
+                                f"{additional_text}"
                             ),
                         )
                     )

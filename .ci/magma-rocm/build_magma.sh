@@ -6,8 +6,8 @@ set -eou pipefail
 # The script expects DESIRED_CUDA and PACKAGE_NAME to be set
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-# post merge of https://github.com/icl-utk-edu/magma/pull/65
-MAGMA_VERSION=c0792ae825fb36872784892ea643dd6f3456bc5f
+# https://github.com/icl-utk-edu/magma/pull/65
+MAGMA_VERSION=d6e4117bc88e73f06d26c6c2e14f064e8fc3d1ec
 
 # Folders for the build
 PACKAGE_FILES=${ROOT_DIR}/magma-rocm/package_files # metadata
@@ -20,7 +20,7 @@ mkdir -p ${PACKAGE_DIR} ${PACKAGE_OUTPUT}/linux-64 ${PACKAGE_BUILD} ${PACKAGE_RE
 
 # Fetch magma sources and verify checksum
 pushd ${PACKAGE_DIR}
-git clone https://github.com/icl-utk-edu/magma
+git clone https://github.com/jeffdaily/magma
 pushd magma
 git checkout ${MAGMA_VERSION}
 popd

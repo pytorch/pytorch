@@ -14,7 +14,7 @@ from torch._subclasses import fake_tensor
 
 
 if TYPE_CHECKING:
-    import onnx.defs  # noqa: TCH004
+    import onnx.defs
 
 
 # Enable both TorchScriptTensor and torch.Tensor to be tested

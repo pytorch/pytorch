@@ -19,6 +19,7 @@
 #include <torch/csrc/distributed/c10d/FakeProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroup.hpp>
 #include <torch/csrc/distributed/c10d/PyProcessGroup.hpp>
+#include <torch/csrc/distributed/c10d/python_callback_work.hpp>
 
 #ifdef USE_C10D_GLOO
 #include <torch/csrc/distributed/c10d/ProcessGroupGloo.hpp>
@@ -45,6 +46,7 @@
 
 #include <fmt/format.h>
 #include <pybind11/chrono.h>
+#include <pybind11/functional.h>
 #include <torch/csrc/distributed/c10d/PrefixStore.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/DMAConnectivity.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
@@ -1135,6 +1137,14 @@ This class does not support ``__members__`` property.)");
           &::c10d::symmetric_memory::has_multicast_support)
       .def_static("set_backend", &::c10d::symmetric_memory::set_backend)
       .def_static("get_backend", &::c10d::symmetric_memory::get_backend)
+      .def_property_static(
+          "signal_pad_size",
+          [](py::object /* self */) {
+            return ::c10d::symmetric_memory::get_signal_pad_size();
+          },
+          [](py::object /* self */, size_t size) {
+            ::c10d::symmetric_memory::set_signal_pad_size(size);
+          })
       .def_static(
           "get_mempool_allocator",
           &::c10d::symmetric_memory::get_mempool_allocator)
@@ -1175,8 +1185,6 @@ This class does not support ``__members__`` property.)");
             return reinterpret_cast<uintptr_t>(symm_mem->get_multicast_ptr());
           })
       .def_property_readonly("buffer_size", &SymmetricMemory::get_buffer_size)
-      .def_property_readonly(
-          "signal_pad_size", &SymmetricMemory::get_signal_pad_size)
       .def_property_readonly("offset", &SymmetricMemory::get_offset)
       .def(
           "get_buffer",
@@ -1655,6 +1663,12 @@ See queue_push for more details.
 
 Arguments:
     key (str): The key of the queue to get the length.
+)")
+          .def(
+              "list_keys",
+              &::c10d::Store::listKeys,
+              R"(
+Returns a list of all keys in the store.
 )")
           .def(
               "has_extended_api",
@@ -2734,12 +2748,23 @@ Arguments:
               "supports_time_estimate",
               &::c10d::Backend::supportsTimeEstimation,
               "(test whether the backend supports collective time estimation)")
+          .def_property_readonly(
+              "supports_shrinking",
+              &::c10d::Backend::supportsShrinking,
+              "(test whether the backend supports communicator shrinking)")
           .def(
               "set_timeout",
               &::c10d::Backend::setTimeout,
               py::arg("timeout"),
               py::call_guard<py::gil_scoped_release>(),
               R"(Sets the default timeout for all future operations.)")
+          .def(
+              "shrink",
+              &::c10d::Backend::shrink,
+              py::arg("ranks_to_exclude"),
+              py::arg("shrink_flags") = 0,
+              py::arg("opts_override") = nullptr,
+              py::call_guard<py::gil_scoped_release>())
           .def(
               "broadcast",
               &::c10d::Backend::broadcast,
@@ -3876,6 +3901,33 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           .def("wait", &::c10d::FakeWork::wait, py::arg("timeout") = kNoTimeout)
           .def("getFuture", &::c10d::FakeWork::getFuture);
 
+  auto pythonCallbackWork =
+      intrusive_ptr_no_gil_destructor_class_<::c10d::PythonCallbackWork>(
+          module, "PythonCallbackWork", work)
+          .def(py::init<py::object>(), py::arg("callback"))
+          .def(
+              "wait",
+              &::c10d::PythonCallbackWork::wait,
+              py::arg("timeout") = kNoTimeout,
+              R"(
+              Waits until the callback completes. Blocking operation.
+              The callback is invoked with the timeout parameter and should return a boolean.
+              Throws if the callback completes with an exception.
+              Returns the boolean value returned by the callback.
+            )")
+          .def(
+              "get_future",
+              [](::c10d::PythonCallbackWork& work)
+                  -> std::shared_ptr<jit::PythonFutureWrapper> {
+                return std::make_shared<jit::PythonFutureWrapper>(
+                    work.getFuture());
+              },
+              R"(
+            Returns:
+                A ``torch.futures.Future`` object which is associated with the completion of
+                the ``PythonCallbackWork``.
+           )");
+
   py::class_<c10::DDPLoggingData>(module, "DDPLoggingData")
       .def(py::init<>())
       .def_readwrite("strs_map", &c10::DDPLoggingData::strs_map)
@@ -4164,7 +4216,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
           }),
           py::arg("host_or_file"),
           py::arg("port") = -1)
-      .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown);
+      .def("shutdown", &::c10d::control_plane::WorkerServer::shutdown)
+      .def_property_readonly(
+          "port", &::c10d::control_plane::WorkerServer::port);
 
   module.def(
       "_get_handler",
@@ -4179,6 +4233,25 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       R"(
       Returns the handler with the specified name.
     )");
+
+  module.def(
+      "_register_handler",
+      [](const std::string& name, const py::function& handler) {
+        ::c10d::control_plane::registerHandler(
+            name,
+            [handler](
+                const ::c10d::control_plane::Request& req,
+                ::c10d::control_plane::Response& res) {
+              py::gil_scoped_acquire acquire;
+              handler(std::ref(req), std::ref(res));
+            });
+      },
+
+      py::arg("name"),
+      py::arg("handler"),
+      R"(
+    Registers a handler by name.
+  )");
 
   module.def(
       "_get_handler_names",
@@ -4197,12 +4270,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       // Default constructor.
       .def(py::init<>())
       .def("body", &::c10d::control_plane::Request::body)
-      .def("params", &::c10d::control_plane::Request::params);
+      .def("get_param", &::c10d::control_plane::Request::getParam);
 
-  py::class_<
-      ::c10d::control_plane::Response,
-      std::shared_ptr<::c10d::control_plane::Response>,
-      PythonResponse>(
+  py::class_<::c10d::control_plane::Response, PythonResponse>(
       module,
       "_Response",
       R"(

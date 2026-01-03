@@ -207,7 +207,7 @@ def assert_equal(actual, desired, err_msg="", verbose=True):
         if not isinstance(actual, dict):
             raise AssertionError(repr(type(actual)))
         assert_equal(len(actual), len(desired), err_msg, verbose)
-        for k in desired.keys():
+        for k in desired:
             if k not in actual:
                 raise AssertionError(repr(k))
             assert_equal(actual[k], desired[k], f"key={k!r}\n{err_msg}", verbose)

@@ -3,12 +3,10 @@
 #include <ATen/Context.h>
 
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/Logging.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <stdexcept>
 #include <string>
 
 #include <ATen/cpu/FlushDenormal.h>
@@ -22,8 +20,6 @@ C10_DIAGNOSTIC_POP()
 #include <cpuinfo.h>
 #endif
 namespace at {
-
-namespace {
 
 /*
   These const variables defined the fp32 precisions for different backend
@@ -40,16 +36,6 @@ namespace {
                 ->conv
                 ->rnn
 */
-
-  C10_ALWAYS_INLINE void warn_deprecated_fp32_precision_api(){
-    TORCH_WARN_ONCE(
-      "Please use the new API settings to control TF32 behavior, such as torch.backends.cudnn.conv.fp32_precision = 'tf32' "
-      "or torch.backends.cuda.matmul.fp32_precision = 'ieee'. Old settings, e.g, torch.backends.cuda.matmul.allow_tf32 = True, "
-      "torch.backends.cudnn.allow_tf32 = True, allowTF32CuDNN() and allowTF32CuBLAS() will be deprecated after Pytorch 2.9. Please see "
-      "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices"
-    );
-  }
-} // namespace
 
 Float32Backend str2backend(const std::string& name) {
   if (name == "generic")
@@ -98,6 +84,10 @@ std::string precision2str(Float32Precision prec) {
   }
   TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
 }
+
+#ifdef USE_ROCM
+static constexpr const auto rocm_allow_group_gemm_ck = "ROCM_ALLOW_GROUP_GEMM_CK";
+#endif
 
 Context::Context() = default;
 
@@ -206,7 +196,6 @@ bool Context::allowTF32CuDNN(std::optional<Float32Op> op) const {
   } else {
     return float32Precision(Float32Backend::CUDA, op.value()) == Float32Precision::TF32;
   }
-  warn_deprecated_fp32_precision_api();
   return allow_tf32_cudnn;
 }
 
@@ -214,7 +203,6 @@ void Context::setAllowTF32CuDNN(bool b) {
   setFloat32Precision(Float32Backend::CUDA, Float32Op::RNN, b ? Float32Precision::TF32 : Float32Precision::NONE);
   setFloat32Precision(Float32Backend::CUDA, Float32Op::CONV, b ? Float32Precision::TF32 : Float32Precision::NONE);
   allow_tf32_cudnn = b;
-  warn_deprecated_fp32_precision_api();
 }
 
 void Context::setSDPPriorityOrder(const std::vector<int64_t>& order) {
@@ -243,6 +231,13 @@ bool Context::allowTF32OneDNN() const {
   TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
   #endif
 }
+
+#ifdef USE_ROCM
+bool Context::rocmAllowGroupGemmCk() const {
+    const auto allow_group_gemm_ck = c10::utils::check_env(rocm_allow_group_gemm_ck) == true;
+    return allow_group_gemm_ck;
+}
+#endif
 
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
@@ -325,7 +320,6 @@ bool Context::allowTF32CuBLAS() const {
       "Current status indicate that you have used mix of the legacy and new APIs to set the TF32 status for cublas matmul. ",
       "We suggest only using the new API to set the TF32 flag. See also: ",
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
-  warn_deprecated_fp32_precision_api();
   return allow_tf32_new;
 }
 
@@ -349,7 +343,6 @@ Float32MatmulPrecision Context::float32MatmulPrecision() const {
       "Current status indicate that you have used mix of the legacy and new APIs to set the matmul precision. ",
       "We suggest only using the new API for matmul precision. See also: ",
       "https://pytorch.org/docs/main/notes/cuda.html#tensorfloat-32-tf32-on-ampere-and-later-devices");
-  warn_deprecated_fp32_precision_api();
   return float32_matmul_precision;
 }
 
@@ -377,7 +370,6 @@ Float32Precision Context::float32Precision(Float32Backend backend, Float32Op op)
 
 void Context::setFloat32MatmulPrecision(const std::string &s) {
   auto match = [this](const std::string & s_) {
-    warn_deprecated_fp32_precision_api();
     // TODO: consider if CuDNN field needs to also be set for potential future CuDNN ops like multi-headed attention
     if (s_ == "highest") {
       float32_matmul_precision = at::Float32MatmulPrecision::HIGHEST;

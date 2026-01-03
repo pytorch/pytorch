@@ -26,9 +26,6 @@ class InvokeQuantUnpacked(BaseHOP):
     def __init__(self) -> None:
         super().__init__("invoke_quant")
 
-    def __call__(self, subgraph, *operands, scheme=None):
-        return super().__call__(subgraph, *operands, scheme=scheme)
-
 
 invoke_quant = InvokeQuantUnpacked()
 

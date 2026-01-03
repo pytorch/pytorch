@@ -22,7 +22,8 @@ optimizer-specific optimizations and safety guarantees.
 
 import logging
 import weakref
-from typing import Any, Iterable, Optional, TYPE_CHECKING
+from collections.abc import Iterable
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 from torch._dynamo.variables.tensor import TensorVariable
@@ -145,7 +146,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # Note: this allows us to intercept the call in call_method
         # in the typical case, we return a UserMethodVariable
         # which will directly inline
-        if name in ("_init_group", "step"):
+        if name in ("_init_group"):
             assert self.source
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
@@ -170,9 +171,14 @@ class OptimizerVariable(UserDefinedObjectVariable):
                 side_effects = tx.output.side_effects
                 variable = side_effects.id_to_variable.get(id(p), None)
                 if variable and side_effects.has_pending_mutation(variable):
-                    from ..exc import Unsupported
+                    from ..exc import unimplemented
 
-                    raise Unsupported("Pending mutation on parameter")
+                    unimplemented(
+                        gb_type="optimizer: pending mutation on parameter",
+                        context=f"variable: {variable}, parameter: {p}",
+                        explanation="Pending mutations on a parameter (e.g. due to using closure) require a graph break.",
+                        hints=[],
+                    )
 
     def _set_capturable(self, tx: "InstructionTranslator") -> None:
         from . import LazyVariableTracker
@@ -212,7 +218,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Get python values equivalent to the variable tracker args"""
 
         def map_arg(arg: Any) -> Any:
-            if isinstance(arg, ConstantVariable):
+            if isinstance(arg, VariableTracker) and arg.is_python_constant():
                 return arg.as_python_constant()
             elif isinstance(arg, ListVariable) and not arg.items:
                 return []
@@ -317,7 +323,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # Note: to avoid spam logs only warn if perf hint artifact is enabled
             # (NB: artifacts are only enabled at the debug or warning level)
             if not all_static and perf_hint_log.isEnabledFor(logging.DEBUG):
-                non_static_grad_names = [src.name() for src in non_static_grads]
+                non_static_grad_names = [src.name for src in non_static_grads]
                 perf_hint_log.warning(
                     (
                         "Grad tensors %s will be copied during cudagraphs execution."
@@ -359,7 +365,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
             # mark these tensors as static for cudagraphs
             mark_static_address(tensor_value, guard=True)
             source = self.tensor_to_source[tensor_value]
-            self.static_tensor_names.add(tx.output.module_key_name(source.name()))
+            self.static_tensor_names.add(tx.output.module_key_name(source.name))
         elif tensor_value in self.grad_to_source:
             source = self.grad_to_source[tensor_value]
         else:
@@ -368,7 +374,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
 
             global_name = tx.store_global_weakref_by_id(GLOBAL_KEY_PREFIX, tensor_value)
             source = GlobalWeakRefSource(global_name)
-            self.static_tensor_names.add(tx.output.module_key_name(source.name()))
+            self.static_tensor_names.add(tx.output.module_key_name(source.name))
 
         return VariableTracker.build(tx, tensor_value, source)
 

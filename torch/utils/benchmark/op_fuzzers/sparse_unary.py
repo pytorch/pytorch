@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -20,7 +20,7 @@ _POW_TWO_SIZES = tuple(2 ** i for i in range(
 ))
 
 class UnaryOpSparseFuzzer(Fuzzer):
-    def __init__(self, seed: Optional[int], dtype: _dtype | None = None, cuda: bool = False) -> None:
+    def __init__(self, seed: int | None, dtype: _dtype | None = None, cuda: bool = False) -> None:
         if dtype is None:
             dtype = getattr(torch, 'float32', None)
         super().__init__(
