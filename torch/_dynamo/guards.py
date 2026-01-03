@@ -2225,7 +2225,6 @@ class GuardBuilder(GuardBuilderBase):
         # assertion failure:
         #   Attempted to set the storage of a tensor on device
         #   "meta" to a storage on different device "cpu"...
-
         with no_dispatch():
             value = deepcopy(self.get(guard))
 

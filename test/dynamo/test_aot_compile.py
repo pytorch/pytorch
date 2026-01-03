@@ -100,54 +100,6 @@ class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
         return self.gm(*args, **kwargs)
 
 
-def _qkv_to_local(
-    query: DTensor,
-    key: DTensor,
-    value: DTensor,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    q_grad_placements = []
-    kv_grad_placements = []
-
-    for query_p, key_p, value_p in zip(
-        query.placements, key.placements, value.placements
-    ):
-        if (
-            (
-                query_p.is_shard(dim=0)
-                and key_p.is_shard(dim=0)
-                and value_p.is_shard(dim=0)
-            )
-            or (
-                query_p.is_shard(dim=1)
-                and key_p.is_shard(dim=1)
-                and value_p.is_shard(dim=1)
-            )
-            or (
-                query_p.is_replicate()
-                and key_p.is_replicate()
-                and value_p.is_replicate()
-            )
-        ):
-            q_grad_placements.append(query_p)
-            kv_grad_placements.append(key_p)
-        elif (
-            query_p.is_shard(dim=2) and key_p.is_replicate() and value_p.is_replicate()
-        ):
-            q_grad_placements.append(query_p)
-            kv_grad_placements.append(Partial())
-        else:
-            raise NotImplementedError(
-                "Currently only supports Data Parallel, Tensor Parallel, "
-                "and all-gather based Context Parallel."
-            )
-
-    return (
-        query.to_local(grad_placements=q_grad_placements),
-        key.to_local(grad_placements=kv_grad_placements),
-        value.to_local(grad_placements=kv_grad_placements),
-    )
-
-
 class MultiHeadSelfAttention(nn.Module):
     _flex_attention_cache: dict = {}
     _create_block_mask_fn = None
@@ -222,9 +174,7 @@ class MultiHeadSelfAttention(nn.Module):
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        # Use compile_with_inductor annotation AND compiled create_block_mask
         with fx_traceback.annotate({"compile_with_inductor": 1}):
-            # Use the compiled create_block_mask function
             block_mask = MultiHeadSelfAttention._create_block_mask_fn(
                 causal_mask, B, self.num_heads, S, S, device=x.device
             )
@@ -338,6 +288,54 @@ class TextModel(torch.nn.Module):
 class TestVLLMModel(MultiModalMixin, TextModel):
     def forward(self, x):
         return super().forward(x)
+
+
+def _qkv_to_local(
+    query: DTensor,
+    key: DTensor,
+    value: DTensor,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    q_grad_placements = []
+    kv_grad_placements = []
+
+    for query_p, key_p, value_p in zip(
+        query.placements, key.placements, value.placements
+    ):
+        if (
+            (
+                query_p.is_shard(dim=0)
+                and key_p.is_shard(dim=0)
+                and value_p.is_shard(dim=0)
+            )
+            or (
+                query_p.is_shard(dim=1)
+                and key_p.is_shard(dim=1)
+                and value_p.is_shard(dim=1)
+            )
+            or (
+                query_p.is_replicate()
+                and key_p.is_replicate()
+                and value_p.is_replicate()
+            )
+        ):
+            q_grad_placements.append(query_p)
+            kv_grad_placements.append(key_p)
+        elif (
+            query_p.is_shard(dim=2) and key_p.is_replicate() and value_p.is_replicate()
+        ):
+            q_grad_placements.append(query_p)
+            kv_grad_placements.append(Partial())
+        else:
+            raise NotImplementedError(
+                "Currently only supports Data Parallel, Tensor Parallel, "
+                "and all-gather based Context Parallel."
+            )
+
+    return (
+        query.to_local(grad_placements=q_grad_placements),
+        key.to_local(grad_placements=kv_grad_placements),
+        value.to_local(grad_placements=kv_grad_placements),
+    )
 
 
 def _subprocess_entry(fn, queue):

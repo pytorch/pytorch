@@ -54,6 +54,11 @@ def process_inputs(
             if not isinstance(x, torch.Tensor):
                 return x
             if isinstance(x, FakeTensor):
+                # In the case of cross compilation we will have an outer
+                # fake mode to construct tensors on a device without the
+                # actual physical hardware (eg. cuda tensors without a GPU).
+                # In these cases we want to clone the fake tensor from the
+                # outer fake mode to the inner fake mode.
                 if x.fake_mode is not fake_mode:
                     return fake_mode.from_tensor(x)
                 return x
