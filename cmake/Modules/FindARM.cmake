@@ -106,6 +106,37 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
       }
     ")
 
+    SET(SVE2_CODE "
+      #include <arm_neon.h>
+      #include <arm_sve.h>
+      int main()
+      {
+         //SVE2
+         svuint8_t a = svdup_n_u8(0);
+         svuint8_t b = svdup_n_u8(1);
+         svuint8_t c = svdup_n_u8(2);
+         a = sveor3_u8(a, b, c);
+         //sha3
+         uint8x16_t x = vdupq_n_u8(0);
+         uint8x16_t y = vdupq_n_u8(1);
+         uint8x16_t z = vdupq_n_u8(2);
+         x = veor3q_u8(x, y, z);
+         //fp16fml
+         float32x4_t i = vdupq_n_f32(1.0);
+         float16x8_t j = vdupq_n_f16(1.0);
+         float16x8_t k = vdupq_n_f16(1.0);
+         i = vfmlalq_low_f16(i, j, k);
+         //bf16
+         bfloat16x8_t h = vreinterpretq_bf16_f16(j);
+         //i8mm
+         int32x4_t d = vdupq_n_s32(1);
+         int8x16_t e = vdupq_n_s8(2);
+         int8x16_t f = vdupq_n_s8(3);
+         d = vmmlaq_s32(d, e, f);
+         return 0;
+      }
+    ")
+
     SET(ARM_BF16_CODE "
       #include <arm_neon.h>
       int main()
@@ -153,6 +184,7 @@ IF(CMAKE_SYSTEM_NAME MATCHES "Linux")
 
     # Check for SVE256 vector length
     CHECK_COMPILES(CXX "SVE256" "-march=armv8.2-a+sve -msve-vector-bits=256" "${SVE_CODE}")
+    CHECK_COMPILES(CXX "ARMV9A" "-march=armv9-a+sve2+fp16fml+sha3+bf16+i8mm" "${SVE2_CODE}")
     CHECK_COMPILES(CXX "ARM_BF16" "-march=armv8.2-a+sve+bf16 -msve-vector-bits=256" "${ARM_BF16_CODE}")
 
     # If SVE256 support is not found, set CXX_SVE_FOUND to FALSE and notify the user
