@@ -172,7 +172,7 @@ def get_gluon_grouped_mm_source():
     from pathlib import Path
 
     template_path = (
-        Path(__file__).parent / "templates" / "gluon_grouped_mm_kernel.py.jinja"
+        Path(__file__).parent / "templates" / "gluon_mm_grouped.py.jinja"
     )
     return template_path.read_text()
 
