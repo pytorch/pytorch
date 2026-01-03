@@ -126,18 +126,18 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
   for (const auto i : c10::irange(numInputs)) {
     auto spec = inputSpecs_[i];
     const auto& input = inputs[runArgsIdx_[i]];
-    runInputs.push_back(
-        {spec.logical_tensor(), Engine::getEngine(), input.data_ptr()});
+    runInputs.emplace_back(
+        spec.logical_tensor(), Engine::getEngine(), input.data_ptr());
   }
   auto numConstantInputs = constantInputs_.size();
   for (size_t i = 0; i < numConstantInputs; i++) {
     // constantInputSpecs are placed after graphInputSpecs
     auto constantInputSpecIdx = nGraphInputs_ + i;
     auto constantInputSpec = inputSpecs_[constantInputSpecIdx];
-    runInputs.push_back(
-        {constantLogicalTensors_[i],
-         Engine::getEngine(),
-         constantInputs_[i].data_ptr()});
+    runInputs.emplace_back(
+        constantLogicalTensors_[i],
+        Engine::getEngine(),
+        constantInputs_[i].data_ptr());
   }
 
   for (const auto i : c10::irange(nOutputs_)) {
@@ -174,10 +174,8 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
           }
         }
         outputs.push_back(inputTensor);
-        runOutputs.push_back(
-            {spec.logical_tensor(),
-             Engine::getEngine(),
-             inputTensor.data_ptr()});
+        runOutputs.emplace_back(
+            spec.logical_tensor(), Engine::getEngine(), inputTensor.data_ptr());
         return std::make_tuple(runInputs, runOutputs);
       }
     }
@@ -197,8 +195,8 @@ std::tuple<RunArgs, RunArgs> LlgaKernel::prepareRunArgs(
 #endif
       auto tensor = at::empty_strided(spec.sizes(), spec.strides(), opt);
       outputs.push_back(tensor);
-      runOutputs.push_back(
-          {spec.logical_tensor(), Engine::getEngine(), tensor.data_ptr()});
+      runOutputs.emplace_back(
+          spec.logical_tensor(), Engine::getEngine(), tensor.data_ptr());
     }
   }
 
