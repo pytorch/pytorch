@@ -101,31 +101,31 @@ def get_shim_functions(
 
             # Only look for function declarations if not a comment/directive and inside a version block
             if not is_directive_or_comment:
-                current_version = tracker.get_current_version()
-                if current_version:
+                version_of_block = tracker.get_version_of_block()
+                if version_of_block:
                     stripped = line.strip()
                     func_match = function_pattern.search(stripped)
                     if func_match:
                         func_name = func_match.group(1)
-                        functions[func_name] = current_version
+                        functions[func_name] = version_of_block
                         continue
 
                     typedef_match = typedef_pattern.search(stripped)
                     if typedef_match:
                         func_name = typedef_match.group(1)
-                        functions[func_name] = current_version
+                        functions[func_name] = version_of_block
                         continue
 
                     using_match = using_pattern.search(stripped)
                     if using_match:
                         type_name = using_match.group(1)
-                        functions[type_name] = current_version
+                        functions[type_name] = version_of_block
                         continue
 
                     struct_class_match = struct_class_pattern.search(stripped)
                     if struct_class_match:
                         type_name = struct_class_match.group(1)
-                        functions[type_name] = current_version
+                        functions[type_name] = version_of_block
                         continue
 
     if not functions:
@@ -199,7 +199,7 @@ def check_file(
         if is_directive_or_comment:
             continue
 
-        current_version = tracker.get_current_version()
+        version_of_block = tracker.get_version_of_block()
 
         for func_name, required_version in shim_functions.items():
             # Look for:
@@ -211,7 +211,7 @@ def check_file(
                 major, minor = required_version
                 required_macro = f"TORCH_VERSION_{major}_{minor}_0"
 
-                if current_version is None:
+                if version_of_block is None:
                     # Not inside any version block
                     lint_messages.append(
                         LintMessage(
@@ -232,9 +232,9 @@ def check_file(
                             ),
                         )
                     )
-                elif current_version < required_version:
+                elif version_of_block < required_version:
                     # Inside a version block, but version is too old
-                    current_major, current_minor = current_version
+                    current_major, current_minor = version_of_block
                     current_macro = f"TORCH_VERSION_{current_major}_{current_minor}_0"
                     lint_messages.append(
                         LintMessage(

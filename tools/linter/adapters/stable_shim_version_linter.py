@@ -151,7 +151,7 @@ class PreprocessorTracker:
         """Check if currently inside any version block."""
         return self.version_of_block is not None
 
-    def get_current_version(self) -> tuple[int, int] | None:
+    def get_version_of_block(self) -> tuple[int, int] | None:
         """Get the current version requirement, or None if not in a version block."""
         return self.version_of_block
 
@@ -175,7 +175,7 @@ class LintMessage(NamedTuple):
     description: str | None
 
 
-def get_current_version() -> tuple[int, int]:
+def get_version_of_block() -> tuple[int, int]:
     """
     Get the current PyTorch version from version.txt.
     This uses the same logic as tools/setup_helpers/gen_version_header.py
@@ -279,8 +279,8 @@ def check_file(filename: str) -> list[LintMessage]:
     is_aoti_shim = "torch/csrc/inductor/aoti_torch/c/shim.h" in filename
 
     # Get current version
-    current_version = get_current_version()
-    major, minor = current_version
+    version_of_block = get_version_of_block()
+    major, minor = version_of_block
     expected_version_macro = f"TORCH_VERSION_{major}_{minor}_0"
     expected_version_check = f"#if TORCH_FEATURE_VERSION >= {expected_version_macro}"
 
@@ -340,8 +340,8 @@ def check_file(filename: str) -> list[LintMessage]:
 
                 # Get current version state from tracker
                 inside_version_block = tracker.is_in_version_block()
-                tracker_version = tracker.get_current_version()
-                current_version_macro = (
+                tracker_version = tracker.get_version_of_block()
+                version_of_block_macro = (
                     f"TORCH_VERSION_{tracker_version[0]}_{tracker_version[1]}_0"
                     if tracker_version
                     else None
@@ -382,7 +382,7 @@ def check_file(filename: str) -> list[LintMessage]:
                             ),
                         )
                     )
-                elif is_new_line and current_version_macro != expected_version_macro:
+                elif is_new_line and version_of_block_macro != expected_version_macro:
                     # New function declaration using wrong version macro
                     lint_messages.append(
                         LintMessage(
@@ -396,7 +396,7 @@ def check_file(filename: str) -> list[LintMessage]:
                             replacement=None,
                             description=(
                                 f"New function declaration should use {expected_version_macro}, "
-                                f"but is wrapped in {current_version_macro}. "
+                                f"but is wrapped in {version_of_block_macro}. "
                                 f"New additions in this commit must use the current version:\n"
                                 f"{expected_version_check}\n"
                                 f"// ... your declarations ...\n"
