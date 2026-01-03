@@ -8,7 +8,9 @@ set -ex -o pipefail
 # for ROCm environment variables
 if [[ "${BUILD_ENVIRONMENT}" == *rocm* ]]; then
   # shellcheck disable=SC1091
-  source /etc/rocm_env.sh
+  if [[ -f /etc/rocm_env.sh ]]; then
+    source /etc/rocm_env.sh
+  fi
 fi
 
 # Required environment variables:
