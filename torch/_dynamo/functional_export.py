@@ -372,16 +372,18 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         if hasattr(self.module, "meta"):
             # pyrefly: ignore [unsupported-operation]
             if "dynamo_flat_name_to_original_fqn" in self.module.meta:
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     "dynamo_flat_name_to_original_fqn"
                 ]
             # pyrefly: ignore [unsupported-operation]
             if "dynamo_compile_id" in self.module.meta:
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_compile_id"] = self.module.meta[
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     "dynamo_compile_id"
                 ]
 
@@ -524,6 +526,7 @@ def pytreeify(
             )
 
             def backend_dummy(*example_inputs):
+                # pyrefly: ignore [bad-assignment]
                 self.gm_inputs = example_inputs
                 raise Yield
 
@@ -540,7 +543,10 @@ def pytreeify(
     if fake_mode and fake_mode.shape_env is None:
         fake_mode.shape_env = ShapeEnv()
     in_shuffle_graph = make_fx(
-        InShuffle(), tracing_mode="symbolic", proxy_module_inputs=True
+        # pyrefly: ignore [bad-argument-type]
+        InShuffle(),
+        tracing_mode="symbolic",
+        proxy_module_inputs=True,
     )(*flat_real_args)
     _normalize_shuffle_graph(in_shuffle_graph)
 
@@ -587,7 +593,10 @@ def pytreeify(
         fake_mode.shape_env = ShapeEnv()
     with enable_python_dispatcher():
         out_shuffle_graph = make_fx(
-            out_shuffle, tracing_mode="real", proxy_module_inputs=True
+            # pyrefly: ignore [bad-argument-type]
+            out_shuffle,
+            tracing_mode="real",
+            proxy_module_inputs=True,
         )(*flat_out_shuffle_args)
     _normalize_shuffle_graph(out_shuffle_graph)
 

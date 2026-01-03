@@ -91,9 +91,9 @@ class TORCH_API DistributedRandomSampler : public DistributedSampler<> {
  private:
   void populate_indices();
 
-  size_t begin_index_;
-  size_t end_index_;
-  size_t sample_index_;
+  size_t begin_index_{0};
+  size_t end_index_{0};
+  size_t sample_index_{0};
   std::vector<size_t> all_indices_;
 };
 
@@ -124,9 +124,9 @@ class TORCH_API DistributedSequentialSampler : public DistributedSampler<> {
  private:
   void populate_indices();
 
-  size_t begin_index_;
-  size_t end_index_;
-  size_t sample_index_;
+  size_t begin_index_{0};
+  size_t end_index_{0};
+  size_t sample_index_{0};
   std::vector<size_t> all_indices_;
 };
 
