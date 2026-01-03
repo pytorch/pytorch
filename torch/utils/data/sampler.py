@@ -355,7 +355,7 @@ class BatchSampler(Sampler[list[int]]):
             return (len(self.sampler) + self.batch_size - 1) // self.batch_size  # type: ignore[arg-type]
 
 
-class RandomBatchSampler(Sampler[Union[torch.Tensor, list[int]]]):
+class RandomBatchSampler(Sampler[list[int]]):
     def __init__(
         self,
         data_source: Sized,
@@ -375,8 +375,8 @@ class RandomBatchSampler(Sampler[Union[torch.Tensor, list[int]]]):
         self.generator = generator
 
         self.n_batches = len(self.data_source) // self.batch_size
-        last_size = len(self.data_source) % self.batch_size
-        if not self.drop_last and last_size > 0:
+        self.last_size = len(self.data_source) % self.batch_size
+        if not self.drop_last and self.last_size > 0:
             self.n_batches += 1
 
     def sample_indices(self) -> torch.Tensor:
@@ -392,20 +392,18 @@ class RandomBatchSampler(Sampler[Union[torch.Tensor, list[int]]]):
 
         return indices
 
-    def __iter__(self) -> Iterator[Union[torch.Tensor, list[int]]]:
-        indices = self.sample_indices()
+    def __iter__(self) -> Iterator[list[int]]:
+        indices = self.sample_indices().tolist()
 
-        # Slicing is faster on list when batch size is small
-        if self.batch_size < 16:
-            indices = indices.tolist()  # type: ignore[assignment]
+        indices_batched = (
+            indices[i: i + self.batch_size]
+            for i in range(0, len(indices) - self.last_size, self.batch_size)
+        )
 
-        indices_batches = [
-            indices[i : i + self.batch_size]
-            for i in range(0, len(indices), self.batch_size)
-        ]
-        if self.drop_last:
-            indices_batches.pop()
-        yield from indices_batches
+        yield from indices_batched
+
+        if not self.drop_last and self.last_size > 0:
+            yield indices[-self.last_size:]
 
     def __len__(self):
         return self.n_batches
