@@ -1,4 +1,4 @@
-# Python dependencies required for unit tests
+# Python dependencies required for unit tests. TEST
 
 #awscli==1.6 #this breaks some platforms
 #Description: AWS command line interface
