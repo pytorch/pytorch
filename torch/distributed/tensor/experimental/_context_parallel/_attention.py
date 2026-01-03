@@ -892,7 +892,7 @@ def _sdpa_handler(
 ) -> object:
     # extract local tensor and sharding infos to a OpInfo
     op_info = DTensor._op_dispatcher.unwrap_to_op_info(op_call, args, kwargs)
-    logger.debug("Dispatching op_call: %s", op_info.schema)
+    logger.debug("Dispatching op_call: %s", op_info.schema or op_call)
 
     # sharding propagation
     # TODO: remove the context parallel strategy from the default propagation
@@ -1089,8 +1089,6 @@ def _context_parallel_buffers(
     sharded_buffer: torch.Tensor | BlockMask
     for buffer, seq_dim in zip(buffers, buffer_seq_dims):
         if isinstance(buffer, torch.Tensor):
-            # TODO: the load balance doesn't perform error handling.
-
             # NOTE: assuming batch dim is 0
 
             if load_balance_indices is not None:
@@ -1108,6 +1106,8 @@ def _context_parallel_buffers(
                     )
 
                 if seq_dim == 0:
+                    # buffer has shape [seq_len] or [seq_len, ...]
+                    # Just use the first (and only) batch of indices
                     buffer = torch.index_select(
                         buffer, dim=0, index=load_balance_indices[0]
                     )
@@ -1117,12 +1117,27 @@ def _context_parallel_buffers(
                         size = [data_batch_size] + list(indices.size())[1:]
                         indices = indices.expand(*size)
 
-                    for i in range(data_batch_size):
-                        buffer[i] = torch.index_select(
-                            buffer[i], dim=seq_dim - 1, index=indices[i]
-                        )
+                    # load_balance_indices that has shape [B, seq_len] where:
+                    #   - dim 0 corresponds to buffer dim 0 (batch)
+                    #   - dim 1 corresponds to buffer dim seq_dim
+                    # Need to insert dimensions for all dims between 0 and seq_dim,
+                    # and all dims after seq_dim.
 
-            # use DTensor to shard the buffer on sequence dimension, retain the local tensor
+                    # Insert dimensions between batch (dim 0) and seq_dim
+                    for i in range(1, seq_dim):
+                        indices = indices.unsqueeze(i)
+
+                    # Insert dimensions after seq_dim
+                    for _ in range(seq_dim + 1, buffer.ndim):
+                        indices = indices.unsqueeze(-1)
+
+                    # Expand to match buffer's shape
+                    indices = indices.expand(buffer.shape)
+
+                    buffer = torch.gather(buffer, dim=seq_dim, index=indices)
+
+            # use DTensor to shard the buffer on sequence dimension,
+            # retain the local tensor
             sharded_buffer = distribute_tensor(
                 buffer, mesh, [Shard(seq_dim)], src_data_rank=None
             ).to_local()
@@ -1308,7 +1323,8 @@ class _ContextParallel(ParallelStyle):
             return module
         elif self.attention_type == self.AttentionType.SDPA:
             module.register_forward_pre_hook(
-                partial(self.sdpa_input_fn, mesh=mesh), with_kwargs=True
+                partial(self.sdpa_input_fn, mesh=mesh),
+                with_kwargs=True,
             )
             module.register_forward_hook(partial(self.sdpa_output_fn, mesh=mesh))
             return module
@@ -1318,18 +1334,18 @@ class _ContextParallel(ParallelStyle):
     def flex_input_fn(
         self, module: nn.Module | None, args: Any, kwargs: Any, mesh: DeviceMesh
     ) -> Any:
+        # We don't care about other args, and these argument order must be consistent
+        # with the signature of flex_attention.
+        expected_arg_names = ("query", "key", "value")
         args_list = list(args)
-        for idx, name in enumerate(
-            ("query", "key", "value", "score_mod", "block_mask")
-        ):
+        for idx, name in enumerate(expected_arg_names):
             if idx >= len(args):
                 args_list.append(kwargs.pop(name, None))
 
-        query, key, value, score_mod, block_mask = args_list[:5]
+        query, key, value = args_list[: len(expected_arg_names)]
         assert isinstance(query, torch.Tensor)
         assert isinstance(key, torch.Tensor)
         assert isinstance(value, torch.Tensor)
-        assert isinstance(block_mask, BlockMask | tuple)
 
         key = key.contiguous()
         value = value.contiguous()
@@ -1340,6 +1356,9 @@ class _ContextParallel(ParallelStyle):
         args_list[1] = global_key
         args_list[2] = global_value
 
+        for idx in range(len(args), len(expected_arg_names)):
+            kwargs[expected_arg_names[idx]] = args_list[idx]
+        args_list = args_list[: len(args)]
         return tuple(args_list), kwargs
 
     def sdpa_input_fn(
