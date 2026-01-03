@@ -202,10 +202,9 @@ def get_added_lines(filename: str) -> set[int]:
     """
     Get the line numbers of added lines in:
     1. Current uncommitted changes (git diff HEAD)
-    2. The most recent commit (git diff HEAD~1..HEAD)
+    2. All commits in the current PR (git diff merge-base..HEAD)
 
-    This ensures that even if someone commits locally before running the linter,
-    we still catch version macro issues in their recent changes.
+    This ensures that in CI we catch version macro issues across all PR commits.
 
     Returns:
         Set of line numbers (1-indexed) that are new additions.
@@ -244,10 +243,23 @@ def get_added_lines(filename: str) -> set[int]:
         if result.returncode == 0:
             added_lines.update(parse_diff(result.stdout))
 
-        # Also check the most recent commit (HEAD vs HEAD~1)
-        # This catches cases where someone commits before running the linter
+        # Get merge-base with origin/main to check all PR commits
         result = subprocess.run(
-            ["git", "diff", "HEAD~1..HEAD", filename],
+            ["git", "merge-base", "HEAD", "origin/main"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Failed to find merge-base with origin/main. "
+                f"Make sure origin/main exists (run 'git fetch origin main'). "
+                f"Error: {result.stderr.strip()}"
+            )
+
+        merge_base = result.stdout.strip()
+        result = subprocess.run(
+            ["git", "diff", f"{merge_base}..HEAD", filename],
             capture_output=True,
             text=True,
             timeout=5,
@@ -260,7 +272,6 @@ def get_added_lines(filename: str) -> set[int]:
             f"Failed to get git diff information for {filename}. Error: {e}"
         ) from e
 
-    print(f"Added lines in {filename}:\n{added_lines}")
     return added_lines
 
 
