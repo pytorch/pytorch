@@ -52,6 +52,7 @@ usage_log*
 test-reports/
 test/*.bak
 test/**/*.bak
+test/inductor/test_tlx_templates.py
 test/.coverage
 test/.hypothesis/
 test/cpp/api/mnist
