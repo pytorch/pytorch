@@ -155,6 +155,7 @@ register_opaque_type(AddModule, typ="reference")
 register_opaque_type(ValueConfig, typ="value")
 register_opaque_type(SizeStore, typ="value")
 register_opaque_type(NestedValueSize, typ="value")
+register_opaque_type(OpaqueMultiplier, typ="reference")
 
 
 class TestOpaqueObject(TestCase):
@@ -1002,7 +1003,6 @@ def forward(self, arg0_1):
 
     def test_opaque_obj_saved_for_backward(self):
         """Test that opaque objects are correctly saved and passed to backward."""
-        register_opaque_type(OpaqueMultiplier, typ="reference")
         opaque_type = get_opaque_type_name(OpaqueMultiplier)
 
         # Define the main op that uses the opaque object
@@ -1091,14 +1091,19 @@ def forward(self, arg0_1):
             expected_grad = torch.ones_like(x) * 5 * 5
             self.assertTrue(torch.allclose(x.grad, expected_grad))
 
+        def is_called_from_pytest():
+            import os
+
+            return "PYTEST_VERSION" in os.environ
+
         backend = InductorAndRecordGraphs()
         compile_and_run_with_backend(backend)
         self.assertTrue(len(backend.graphs) > 0)
         fw_graph = backend.graphs[0]
         self.assertExpectedInline(
             fw_graph.code.strip(),
-            """\
-def forward(self, L_x_ : torch.Tensor, L_scale_obj_ : test_opaque_obj_v2_OpaqueMultiplier):
+            f"""\
+def forward(self, L_x_ : torch.Tensor, L_scale_obj_ : {"test_opaque_obj_v2" if is_called_from_pytest() else "__main__"}_OpaqueMultiplier):
     l_x_ = L_x_
     l_scale_obj_ = L_scale_obj_
     result = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
