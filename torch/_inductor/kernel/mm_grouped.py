@@ -171,9 +171,7 @@ def gluon_grouped_mm_configs(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=Non
 def get_gluon_grouped_mm_source():
     from pathlib import Path
 
-    template_path = (
-        Path(__file__).parent / "templates" / "gluon_mm_grouped.py.jinja"
-    )
+    template_path = Path(__file__).parent / "templates" / "gluon_mm_grouped.py.jinja"
     return template_path.read_text()
 
 
