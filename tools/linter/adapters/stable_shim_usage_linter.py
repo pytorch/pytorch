@@ -18,136 +18,14 @@ from pathlib import Path
 from typing import NamedTuple
 
 
+# Add repo root to sys.path so we can import from tools
+REPO_ROOT = Path(__file__).resolve().parents[3]
+sys.path.insert(0, str(REPO_ROOT))
+
+from tools.linter.adapters.stable_shim_version_linter import PreprocessorTracker
+
+
 LINTER_CODE = "STABLE_SHIM_USAGE"
-
-
-class PreprocessorTracker:
-    """
-    Helper class to track preprocessor directives and version blocks.
-
-    This class maintains state as it processes C/C++ preprocessor directives
-    (#if, #elif, #else, #endif) and tracks which code is inside version blocks.
-    """
-
-    def __init__(self):
-        """Initialize the preprocessor tracker."""
-        # Stack of (is_version_block, version_tuple) tuples
-        # is_version_block: True if this is a TORCH_FEATURE_VERSION >= TORCH_VERSION_X_Y_0 block
-        # version_tuple: (major, minor) if is_version_block is True, else None
-        self.preprocessor_stack: list[tuple[bool, tuple[int, int] | None]] = []
-
-        # Current version requirement (if inside a version block)
-        self.current_version: tuple[int, int] | None = None
-
-        # Track if we're inside a block comment
-        self.in_block_comment: bool = False
-
-        # Regex to match version conditions in #if or #elif
-        self.version_pattern = re.compile(
-            r"#(?:if|elif)\s+TORCH_FEATURE_VERSION\s*>=\s*TORCH_VERSION_(\d+)_(\d+)_\d+"
-        )
-
-    def process_line(self, line: str) -> bool:
-        """
-        Process a line and update the preprocessor state.
-
-        Args:
-            line: The line to process
-
-        Returns:
-            True if the line was processed (is a preprocessor directive or comment),
-            False if it's a regular code line that should be further analyzed.
-        """
-        stripped = line.strip()
-
-        # Handle block comments (/* ... */)
-        # Check if we're entering a block comment
-        if "/*" in line:
-            self.in_block_comment = True
-
-        # If we're in a block comment, check if we're exiting
-        if self.in_block_comment:
-            if "*/" in line:
-                self.in_block_comment = False
-            return True  # Skip the line if we're in a block comment
-
-        # Skip line comments - they're not active code
-        if stripped.startswith("//"):
-            return True
-
-        # Track #if directives
-        if stripped.startswith("#if"):
-            version_match = self.version_pattern.match(stripped)
-            if version_match:
-                major = int(version_match.group(1))
-                minor = int(version_match.group(2))
-                version_tuple = (major, minor)
-                self.preprocessor_stack.append((True, version_tuple))
-                self.current_version = version_tuple
-            else:
-                # Regular #if (not a version block)
-                self.preprocessor_stack.append((False, None))
-            return True
-
-        # Track #ifdef and #ifndef directives (not version blocks)
-        if stripped.startswith(("#ifdef", "#ifndef")):
-            self.preprocessor_stack.append((False, None))
-            return True
-
-        # Track #endif directives
-        if stripped.startswith("#endif"):
-            if self.preprocessor_stack:
-                is_version_block, _ = self.preprocessor_stack.pop()
-                if is_version_block:
-                    # Restore previous version block if any
-                    self.current_version = None
-                    for i in range(len(self.preprocessor_stack) - 1, -1, -1):
-                        if self.preprocessor_stack[i][0]:
-                            self.current_version = self.preprocessor_stack[i][1]
-                            break
-            return True
-
-        # Track #else directives
-        # #else replaces the previous #if or #elif, so we pop and push
-        if stripped.startswith("#else"):
-            if self.preprocessor_stack:
-                self.preprocessor_stack.pop()
-            # #else is never versioned, so push (False, None)
-            self.preprocessor_stack.append((False, None))
-            self.current_version = None
-            return True
-
-        # Track #elif directives
-        # #elif replaces the previous #if or #elif, so we pop and push
-        if stripped.startswith("#elif"):
-            if self.preprocessor_stack:
-                self.preprocessor_stack.pop()
-
-            self.current_version = None
-
-            # Check if this #elif has a version condition
-            version_match_elif = self.version_pattern.match(stripped)
-            if version_match_elif:
-                major = int(version_match_elif.group(1))
-                minor = int(version_match_elif.group(2))
-                version_tuple = (major, minor)
-                self.preprocessor_stack.append((True, version_tuple))
-                self.current_version = version_tuple
-            else:
-                # Not a version elif, treat as regular conditional
-                self.preprocessor_stack.append((False, None))
-            return True
-
-        # Not a preprocessor directive or comment
-        return False
-
-    def is_in_version_block(self) -> bool:
-        """Check if currently inside any version block."""
-        return self.current_version is not None
-
-    def get_current_version(self) -> tuple[int, int] | None:
-        """Get the current version requirement, or None if not in a version block."""
-        return self.current_version
 
 
 class LintSeverity(str, Enum):
@@ -170,61 +48,91 @@ class LintMessage(NamedTuple):
 
 
 def get_shim_functions(
-    shim_file: Path | str | None = None,
+    shim_files: list[Path | str] | None = None,
 ) -> dict[str, tuple[int, int]]:
     """
-    Extract function names from shim.h and their required version.
+    Extract function names from shim header files and their required version.
     Returns a dict mapping function name to (major, minor) version tuple.
 
-    Functions defined inside TORCH_FEATURE_VERSION blocks require that version.
+    Only functions defined inside TORCH_FEATURE_VERSION blocks are extracted.
+    Functions without version guards are ignored.
 
     Args:
-        shim_file: Path to the shim.h file. If None, will compute the default path
-                   to torch/csrc/stable/c/shim.h based on the repository root.
+        shim_files: List of paths to shim header files. If None, will use the default
+                    paths to torch/csrc/stable/c/shim.h and
+                    torch/csrc/inductor/aoti_torch/c/shim.h based on the repository root.
     """
-    if shim_file is None:
+    if shim_files is None:
         repo_root = Path(__file__).resolve().parents[3]
-        shim_file = repo_root / "torch/csrc/stable/c/shim.h"
+        shim_files_to_check = [
+            repo_root / "torch/csrc/stable/c/shim.h",
+            repo_root / "torch/csrc/inductor/aoti_torch/c/shim.h",
+        ]
     else:
-        shim_file = Path(shim_file)
+        shim_files_to_check = [Path(f) for f in shim_files]
 
-    if not shim_file.exists():
+    # Assert that all shim files exist
+    missing_files = [f for f in shim_files_to_check if not f.exists()]
+    if missing_files:
         raise RuntimeError(
-            f"Could not find shim.h at {shim_file}. "
-            f"This linter requires torch/csrc/stable/c/shim.h to exist in the repository."
+            f"The following shim files do not exist: {missing_files}. "
+            "Ensure all shim header files exist in the repository."
         )
 
     functions: dict[str, tuple[int, int]] = {}
-
-    with open(shim_file) as f:
-        lines = f.readlines()
-
-    tracker = PreprocessorTracker()
 
     # Match function declarations like: AOTI_TORCH_EXPORT ... function_name(
     function_pattern = re.compile(r"AOTI_TORCH_EXPORT\s+\w+\s+(\w+)\s*\(")
     # Also match typedef function pointers
     typedef_pattern = re.compile(r"typedef\s+.*\(\*(\w+)\)")
+    # Match using declarations like: using TypeName = ...
+    using_pattern = re.compile(r"using\s+(\w+)\s*=")
+    # Match struct/class declarations like: struct StructName or class ClassName
+    struct_class_pattern = re.compile(r"(?:struct|class)\s+(\w+)")
 
-    for line in lines:
-        is_directive_or_comment = tracker.process_line(line)
+    for shim_file in shim_files_to_check:
+        with open(shim_file) as f:
+            lines = f.readlines()
 
-        # Only look for function declarations if not a comment/directive and inside a version block
-        if not is_directive_or_comment:
-            current_version = tracker.get_current_version()
-            if current_version:
-                stripped = line.strip()
-                func_match = function_pattern.search(stripped)
-                if func_match:
-                    func_name = func_match.group(1)
-                    functions[func_name] = current_version
-                    continue
+        tracker = PreprocessorTracker()
 
-                typedef_match = typedef_pattern.search(stripped)
-                if typedef_match:
-                    func_name = typedef_match.group(1)
-                    functions[func_name] = current_version
-                    continue
+        for line in lines:
+            is_directive_or_comment = tracker.process_line(line)
+
+            # Only look for function declarations if not a comment/directive and inside a version block
+            if not is_directive_or_comment:
+                current_version = tracker.get_current_version()
+                if current_version:
+                    stripped = line.strip()
+                    func_match = function_pattern.search(stripped)
+                    if func_match:
+                        func_name = func_match.group(1)
+                        functions[func_name] = current_version
+                        continue
+
+                    typedef_match = typedef_pattern.search(stripped)
+                    if typedef_match:
+                        func_name = typedef_match.group(1)
+                        functions[func_name] = current_version
+                        continue
+
+                    using_match = using_pattern.search(stripped)
+                    if using_match:
+                        type_name = using_match.group(1)
+                        functions[type_name] = current_version
+                        continue
+
+                    struct_class_match = struct_class_pattern.search(stripped)
+                    if struct_class_match:
+                        type_name = struct_class_match.group(1)
+                        functions[type_name] = current_version
+                        continue
+
+    if not functions:
+        raise RuntimeError(
+            "Could not find any versioned shim functions. "
+            "Ensure at least one of the shim files exists and contains versioned functions."
+        )
 
     return functions
 
@@ -259,6 +167,9 @@ def write_shim_function_versions(
         f.write(
             "# This file is automatically updated by the stable_shim_usage_linter.\n"
         )
+        f.write(
+            "# If a function is not in this file, it was available before 2.10.0.\n"
+        )
         f.write("# DO NOT EDIT MANUALLY.\n\n")
 
         for func_name, (major, minor) in sorted_functions:
@@ -269,8 +180,11 @@ def check_file(
     filename: str, shim_functions: dict[str, tuple[int, int]]
 ) -> list[LintMessage]:
     """
-    Check if the file is in torch/csrc/stable and lint it for proper
-    usage of versioned shim functions.
+    Check the input file for proper usage of versioned shim functions.
+
+    Args:
+        filename: File in torch/csrc/stable that calls functions from shim.
+        shim_functions: Dictionary mapping function name to (major, minor) version tuple.
     """
     lint_messages: list[LintMessage] = []
 
@@ -365,11 +279,7 @@ if __name__ == "__main__":
 
     logging.basicConfig(
         format="<%(threadName)s:%(levelname)s> %(message)s",
-        level=logging.NOTSET
-        if args.verbose
-        else logging.DEBUG
-        if len(args.filenames) < 1000
-        else logging.INFO,
+        level=logging.NOTSET if args.verbose else logging.DEBUG,
         stream=sys.stderr,
     )
 

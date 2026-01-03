@@ -3,11 +3,12 @@ import concurrent
 import dataclasses
 import logging
 import threading
+from collections.abc import Callable
 from concurrent.futures import Future, ProcessPoolExecutor
 from dataclasses import dataclass
 from multiprocessing.context import BaseContext
 from time import time
-from typing import Any, Callable, Optional, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 # _thread_safe_fork is needed because the subprocesses in the pool can read

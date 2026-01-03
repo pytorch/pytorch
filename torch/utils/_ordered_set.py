@@ -8,7 +8,7 @@ from collections.abc import (
     Reversible,
     Set as AbstractSet,
 )
-from typing import Any, cast, Optional, TypeVar
+from typing import Any, cast, TypeVar
 
 
 T = TypeVar("T", bound=Hashable)
@@ -24,7 +24,7 @@ class OrderedSet(MutableSet[T], Reversible[T]):
 
     __slots__ = ("_dict",)
 
-    def __init__(self, iterable: Optional[Iterable[T]] = None):
+    def __init__(self, iterable: Iterable[T] | None = None) -> None:
         self._dict = dict.fromkeys(iterable, None) if iterable is not None else {}
 
     @staticmethod

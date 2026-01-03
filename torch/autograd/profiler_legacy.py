@@ -296,9 +296,9 @@ def _parse_legacy_records(thread_records):
                         f"Expected CPU and CUDA memory allocation handles to match, "
                         f"but got {num_open_handles_cpu} CPU and {num_open_handles_cuda} CUDA"
                     )
-                for handle in cpu_memory_allocs.keys():
+                for handle in cpu_memory_allocs:
                     cpu_memory_allocs[handle] += record.cpu_memory_usage()
-                for handle in cuda_memory_allocs.keys():
+                for handle in cuda_memory_allocs:
                     cuda_memory_allocs[handle] += record.cuda_memory_usage()
                 if num_open_handles_cpu == 0:
                     # output event as a top-level memory event

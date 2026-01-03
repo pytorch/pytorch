@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestAcLogging(TestCase):
     def setUp(self) -> None:
+        super().setUp()
         self.graph: MagicMock = MagicMock(spec=Graph)
         self.node1: MagicMock = MagicMock(spec=Node)
         self.node2: MagicMock = MagicMock(spec=Node)

@@ -877,7 +877,7 @@ std::ostream& operator<<(
     std::ostream& stream,
     const SparseBitVector<ElementSize>& vec) {
   bool first = true;
-  stream << "{";
+  stream << '{';
   for (auto el : vec) {
     if (first) {
       first = false;
@@ -886,7 +886,7 @@ std::ostream& operator<<(
     }
     stream << el;
   }
-  stream << "}";
+  stream << '}';
   return stream;
 }
 

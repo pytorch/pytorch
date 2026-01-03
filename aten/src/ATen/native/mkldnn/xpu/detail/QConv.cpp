@@ -133,7 +133,7 @@ at::Tensor quantized_convolution(
   // supported in conv.
   mask_weight = weight_zero_points.numel() > 1 ? 1 : 0;
   if (groups > 1 && weight_zero_points.numel() > 1)
-    mask_weight = (2 ^ 0) | (2 ^ 1); // 2^0 (group) | 2^1 (output channel)
+    mask_weight = (1 << 0) | (1 << 1); // 2^0 (group) | 2^1 (output channel)
   dnnl::primitive_attr pattr;
 
   bool src_need_zp = (act_zero_point != 0);

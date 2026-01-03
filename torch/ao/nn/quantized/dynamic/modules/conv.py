@@ -2,7 +2,7 @@
 r"""Dynamically quantized convolution modules."""
 
 import warnings
-from typing import ClassVar, Literal, Optional
+from typing import ClassVar, Literal
 
 import torch
 import torch.ao.nn.quantized as nnq
@@ -49,8 +49,8 @@ class Conv1d(nnq.Conv1d):
     """
 
     _FLOAT_MODULE: ClassVar[type[nn.Conv1d]] = nn.Conv1d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = None
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _NNIQAT_CONV_BN_MODULE: ClassVar[type[nn.Module] | None] = None
+    _NNI_CONV_RELU_MODULE: ClassVar[type[nn.Module] | None] = None
 
     def __init__(
         self,
@@ -137,8 +137,8 @@ class Conv2d(nnq.Conv2d):
     """
 
     _FLOAT_MODULE: ClassVar[type[nn.Conv2d]] = nn.Conv2d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = None
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _NNIQAT_CONV_BN_MODULE: ClassVar[type[nn.Module] | None] = None
+    _NNI_CONV_RELU_MODULE: ClassVar[type[nn.Module] | None] = None
 
     def __init__(
         self,
@@ -223,8 +223,8 @@ class Conv3d(nnq.Conv3d):
     """
 
     _FLOAT_MODULE: ClassVar[type[nn.Conv3d]] = nn.Conv3d
-    _NNIQAT_CONV_BN_MODULE: ClassVar[Optional[type[nn.Module]]] = None
-    _NNI_CONV_RELU_MODULE: ClassVar[Optional[type[nn.Module]]] = None
+    _NNIQAT_CONV_BN_MODULE: ClassVar[type[nn.Module] | None] = None
+    _NNI_CONV_RELU_MODULE: ClassVar[type[nn.Module] | None] = None
 
     def __init__(
         self,
@@ -244,7 +244,8 @@ class Conv3d(nnq.Conv3d):
             f"The current implementation of the {self._get_name()} module has poor numerical accuracy and its use is not recommended",  # noqa: B950
             stacklevel=2,
         )
-        assert padding_mode != "reflect", "Conv3d does not support reflection padding"
+        if padding_mode == "reflect":
+            raise AssertionError("Conv3d does not support reflection padding")
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _triple(kernel_size)
         stride = _triple(stride)

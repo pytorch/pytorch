@@ -66,6 +66,31 @@ typedef void (*legacy_callback)(int);
 typedef int (*modern_callback)(int, void*);
 #endif
 
+// Using declarations (type aliases)
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+struct OpaqueHandle {
+  void* data;
+  size_t size;
+};
+using HandleType = OpaqueHandle*;
+#endif
+
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+struct NewOpaqueStruct {
+  int32_t type;
+  void* buffer;
+  size_t capacity;
+};
+
+class NewOpaqueClass {
+ public:
+  virtual ~NewOpaqueClass() = default;
+  virtual void process() = 0;
+};
+
+using NewHandleType = NewOpaqueStruct*;
+#endif
+
 // Function after #elif should not be versioned
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 AOTI_TORCH_EXPORT int primary_path(int arg);

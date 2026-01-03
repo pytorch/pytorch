@@ -14,6 +14,11 @@ Utils
 
     sdpa_kernel
     SDPBackend
+    register_flash_attention_impl
+    activate_flash_attention_impl
+    list_flash_attention_impls
+    current_flash_attention_impl
+    restore_flash_attention_impl
 
 Submodules
 ----------

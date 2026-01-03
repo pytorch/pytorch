@@ -35,7 +35,7 @@ ucc_status_t oob_allgather(
     *req = coll_info;
   } catch (std::exception& ex) {
     LOG(ERROR) << "(oob_allgather) Caught exception in Store Operation .. "
-               << "[" << ex.what() << "]";
+               << '[' << ex.what() << ']';
     return UCC_ERR_NO_MESSAGE;
   }
   return UCC_OK;
@@ -61,7 +61,7 @@ ucc_status_t oob_allgather_test(void* req) {
     }
   } catch (std::exception& ex) {
     LOG(ERROR) << "(oob_allgather) Caught exception in Store Operation .. "
-               << "[" << ex.what() << "]";
+               << '[' << ex.what() << ']';
     return UCC_ERR_NO_MESSAGE;
   }
   return UCC_OK;
@@ -91,7 +91,7 @@ ucc_status_t oob_allgather_free(void* req) {
         info->getKey(kAllGatherFree + std::to_string(info->rank)));
   } catch (std::exception& ex) {
     LOG(ERROR) << "(oob_allgather) Caught exception in Store Operation .. "
-               << "[" << ex.what() << "]";
+               << '[' << ex.what() << ']';
     return UCC_ERR_NO_MESSAGE;
   }
   return UCC_OK;

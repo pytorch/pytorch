@@ -101,7 +101,7 @@ def _construct_tensor_for_quantization_test(
     """Helper function to generate weights and test inputs in a deterministic way.
 
     Due to difference in implementation details between PyTorch and ONNXRuntime, randomly generated
-    test data for quantization tests can be flaky. To help stablize the test, this helper function is
+    test data for quantization tests can be flaky. To help stabilize the test, this helper function is
     used to generate weights and test inputs in a deterministic way.
 
     Args:
@@ -6697,7 +6697,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_empty(self):
-        class Emtpy(torch.nn.Module):
+        class Empty(torch.nn.Module):
             def forward(self, x):
                 return (
                     x.new_empty(x.shape[0]).fill_(0),
@@ -6705,8 +6705,8 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
                 )
 
         x = torch.randn(2, 3, 4)
-        self.run_test(Emtpy(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
-        self.run_test(Emtpy(), x, remained_onnx_input_idx=[])
+        self.run_test(Empty(), x, input_names=["x"], dynamic_axes={"x": [0, 1, 2]})
+        self.run_test(Empty(), x, remained_onnx_input_idx=[])
 
     @skipIfUnsupportedMinOpsetVersion(9)
     def test_new_full(self):
@@ -9935,7 +9935,7 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
 
         self.run_test(MyModule(), x)
 
-    @skipScriptTest()  # Scripting fails for add lists for opsets < 11. Chek test_derive_index_scripting
+    @skipScriptTest()  # Scripting fails for add lists for opsets < 11. Check test_derive_index_scripting
     def test_derive_index(self):
         class MyModule(torch.nn.Module):
             def forward(self, x: Tensor):

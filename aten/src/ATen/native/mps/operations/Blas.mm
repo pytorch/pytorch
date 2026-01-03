@@ -141,6 +141,9 @@ static Tensor& addmv_out_mps_impl(const Tensor& self,
   };
 
   MPSStream* stream = at::mps::getCurrentMPSStream();
+  if (result.numel() == 0) {
+    return result;
+  }
   Tensor matMulVec = at::mm(mat, vec.unsqueeze(1)).squeeze(1);
 
   @autoreleasepool {

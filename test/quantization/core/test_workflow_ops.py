@@ -368,8 +368,8 @@ class TestFakeQuantizeOps(TestCase):
         float_types = (torch.float32, torch.float16, torch.float64, torch.bfloat16)
         torch_types = (torch.qint8, torch.quint8)
         Xs = (torch.randn(4, 8, device=device), torch.randn(4, 16, device=device)[:, ::2])
-        tensor_qparam = (True, False)
-        for float_type, torch_type, X, tensor_qparams in itertools.product(float_types, torch_types, Xs, tensor_qparam):
+        tensor_qparams = (True, False)
+        for float_type, torch_type, X, tensor_qparam in itertools.product(float_types, torch_types, Xs, tensor_qparams):
             # pick the scale + zp so that some values get clipped
             X = X.to(float_type)
             obs = torch.ao.quantization.MinMaxObserver(torch_type)

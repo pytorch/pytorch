@@ -106,8 +106,8 @@ class GetBacktraceImpl {
           /*length*/ &length,
           /*status*/ &status);
 
-      os << " frame #" << idx++ << "\t"
-         << ((demangled != NULL && status == 0) ? demangled : symbol) << "["
+      os << " frame #" << idx++ << '\t'
+         << ((demangled != NULL && status == 0) ? demangled : symbol) << '['
          << addr << "]\t" << std::endl;
     }
     free(demangled);
@@ -274,7 +274,7 @@ class GetBacktraceImpl {
       } else {
         // In the edge-case where we couldn't parse the frame string, we can
         // just use it directly (it may have a different format).
-        stream << symbols[frame_number] << "\n";
+        stream << symbols[frame_number] << '\n';
       }
     }
 
@@ -413,8 +413,8 @@ class GetBacktraceImpl {
              << back_trace_[i_frame] << std::dec;
       if (with_symbol) {
         stream << std::setfill('0') << std::setw(16) << std::uppercase
-               << std::hex << p_symbol->Address << std::dec << " " << module
-               << "!" << p_symbol->Name;
+               << std::hex << p_symbol->Address << std::dec << ' ' << module
+               << '!' << p_symbol->Name;
       } else {
         stream << " <unknown symbol address> " << module << "!<unknown symbol>";
       }
@@ -424,7 +424,7 @@ class GetBacktraceImpl {
       } else {
         stream << "<unknown file> @ <unknown line number>";
       }
-      stream << "]" << std::endl;
+      stream << ']' << std::endl;
     }
 
     return stream.str();

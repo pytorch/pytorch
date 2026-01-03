@@ -55,7 +55,7 @@ class Directory:
         lineage = filename.split("/", maxsplit=1)
         child = lineage[0]
         grandchildren = lineage[1] if len(lineage) > 1 else None
-        if child in self.children.keys():
+        if child in self.children:
             if grandchildren is None:
                 return True
             else:

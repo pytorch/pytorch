@@ -134,6 +134,23 @@ Quantization to work with this as well.
     ObservationType
 ```
 
+## torch.ao.quantization.backend_config.utils
+```{eval-rst}
+.. currentmodule:: torch.ao.quantization.backend_config.utils
+```
+
+```{eval-rst}
+.. autosummary::
+    :toctree: generated
+    :nosignatures:
+    :template: classtemplate.rst
+
+    entry_to_pretty_str
+    pattern_to_human_readable
+    remove_boolean_dispatch_from_name
+
+```
+
 ## torch.ao.quantization.fx.custom_config
 
 This module contains a few CustomConfig classes that's used in both eager mode and FX graph mode quantization
@@ -154,23 +171,10 @@ This module contains a few CustomConfig classes that's used in both eager mode a
     StandaloneModuleConfigEntry
 ```
 
-## torch.ao.quantization.quantizer
+## torch.ao.quantization.fx.utils
 
 ```{eval-rst}
-.. automodule:: torch.ao.quantization.quantizer
-```
-
-## torch.ao.quantization.pt2e (quantization in pytorch 2.0 export implementation)
-
-```{eval-rst}
-.. automodule:: torch.ao.quantization.pt2e
-.. automodule:: torch.ao.quantization.pt2e.representation
-```
-
-## torch.ao.quantization.pt2e.export_utils
-
-```{eval-rst}
-.. automodule:: torch.ao.quantization.pt2e.export_utils
+.. currentmodule:: torch.ao.quantization.fx.utils
 ```
 
 ```{eval-rst}
@@ -179,46 +183,16 @@ This module contains a few CustomConfig classes that's used in both eager mode a
     :nosignatures:
     :template: classtemplate.rst
 
-    model_is_exported
-```
-
-```{eval-rst}
-.. currentmodule:: torch.ao.quantization
-```
-
-## torch.ao.quantization.pt2e.lowering
-
-```{eval-rst}
-.. currentmodule:: torch.ao.quantization.pt2e.lowering
-```
-
-```{eval-rst}
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    lower_pt2e_quantized_to_x86
-```
-
-```{eval-rst}
-.. currentmodule:: torch.ao.quantization
-```
-
-## PT2 Export (pt2e) Numeric Debugger
-
-```{eval-rst}
-.. autosummary::
-    :toctree: generated
-    :nosignatures:
-    :template: classtemplate.rst
-
-    generate_numeric_debug_handle
-    CUSTOM_KEY
-    NUMERIC_DEBUG_HANDLE_KEY
-    prepare_for_propagation_comparison
-    extract_results_from_loggers
-    compare_results
+    all_node_args_except_first
+    all_node_args_have_no_tensors
+    collect_producer_nodes
+    create_getattr_from_value
+    create_node_from_old_node_preserve_meta
+    graph_module_from_producer_nodes
+    maybe_get_next_module
+    node_arg_is_bias
+    node_arg_is_weight
+    return_arg_list
 ```
 
 ## torch (quantization related functions)
@@ -253,7 +227,6 @@ regular full-precision tensor.
 .. autosummary::
     :toctree: generated
     :nosignatures:
-    :template: classtemplate.rst
 
     view
     as_strided
@@ -802,4 +775,11 @@ the `custom operator mechanism <https://pytorch.org/tutorials/advanced/torch_scr
 .. automodule:: torch.nn.quantized.dynamic.modules
 .. automodule:: torch.quantization
 .. automodule:: torch.nn.intrinsic.modules
+```
+
+```{eval-rst}
+.. toctree::
+    :hidden:
+
+    quantization-support.aliases.md
 ```

@@ -89,3 +89,40 @@ void more_unversioned() {
   old_function_1(1); // ERROR: requires 2.9, no guard
   old_function_2(nullptr); // ERROR: requires 2.9, no guard
 }
+
+// Case 11: Using type alias usage
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+void correct_handle_usage() {
+  HandleType handle = nullptr; // OK: requires 2.10, have 2.10
+}
+#endif
+
+// Case 12: ERROR - Using type alias with insufficient version
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_9_0
+void insufficient_handle_usage() {
+  HandleType handle = nullptr; // ERROR: requires 2.10, have 2.9
+}
+#endif
+
+// Case 13: ERROR - Struct/class usage without version guard
+void unversioned_struct_usage() {
+  OpaqueHandle* ptr = nullptr; // ERROR: requires 2.10, no guard
+  NewOpaqueStruct* new_ptr = nullptr; // ERROR: requires 2.11, no guard
+}
+
+// Case 14: Correct struct/class usage with proper version
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_11_0
+void correct_new_struct_usage() {
+  NewOpaqueStruct* ptr = nullptr; // OK: requires 2.11, have 2.11
+  NewOpaqueClass* cls = nullptr; // OK: requires 2.11, have 2.11
+  NewHandleType handle = nullptr; // OK: requires 2.11, have 2.11
+}
+#endif
+
+// Case 15: ERROR - Struct usage with insufficient version
+#if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+void insufficient_new_struct_usage() {
+  NewOpaqueStruct* ptr = nullptr; // ERROR: requires 2.11, have 2.10
+  NewOpaqueClass* cls = nullptr; // ERROR: requires 2.11, have 2.10
+}
+#endif

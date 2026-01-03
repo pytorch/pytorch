@@ -1,6 +1,11 @@
+import sys
 import tempfile
 import unittest
 from pathlib import Path
+
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
+sys.path.append(str(REPO_ROOT))
 
 from tools.linter.adapters.stable_shim_usage_linter import (
     check_file,
@@ -33,7 +38,7 @@ class TestStableShimUsageLinter(unittest.TestCase):
             f"Sample shim file not found at {sample_shim}",
         )
 
-        result = get_shim_functions(sample_shim)
+        result = get_shim_functions([sample_shim])
 
         expected = {
             # Simple versioned function (2.10)
@@ -56,6 +61,13 @@ class TestStableShimUsageLinter(unittest.TestCase):
             # Multiple typedefs
             "legacy_callback": (2, 9),
             "modern_callback": (2, 10),
+            # Using declarations and struct/class (2.10)
+            "OpaqueHandle": (2, 10),
+            "HandleType": (2, 10),
+            # Using declarations and struct/class (2.11)
+            "NewOpaqueStruct": (2, 11),
+            "NewOpaqueClass": (2, 11),
+            "NewHandleType": (2, 11),
             # Primary path (2.10) and secondary path (2.9) from #if/#elif
             "primary_path": (2, 10),
             "secondary_path": (2, 9),
@@ -117,7 +129,7 @@ class TestStableShimUsageLinter(unittest.TestCase):
             sample_usage.exists(), f"Sample usage not found at {sample_usage}"
         )
 
-        shim_functions = get_shim_functions(sample_shim)
+        shim_functions = get_shim_functions([sample_shim])
         lint_messages = check_file(str(sample_usage), shim_functions)
 
         # Expected errors based on sample_usage.h:
@@ -129,6 +141,11 @@ class TestStableShimUsageLinter(unittest.TestCase):
         # Line 83: insufficient version (2.10) for always_available_func (needs 2.11)
         # Line 89: unversioned call to old_function_1
         # Line 90: unversioned call to old_function_2
+        # Line 103: insufficient version (2.9) for HandleType (needs 2.10)
+        # Line 109: unversioned call to OpaqueHandle (needs 2.10)
+        # Line 110: unversioned call to NewOpaqueStruct (needs 2.11)
+        # Line 125: insufficient version (2.10) for NewOpaqueStruct (needs 2.11)
+        # Line 126: insufficient version (2.10) for NewOpaqueClass (needs 2.11)
 
         expected_errors = [
             (15, "unversioned-shim-call", "simple_versioned_func"),
@@ -139,6 +156,11 @@ class TestStableShimUsageLinter(unittest.TestCase):
             (83, "insufficient-version-for-shim-call", "always_available_func"),
             (89, "unversioned-shim-call", "old_function_1"),
             (90, "unversioned-shim-call", "old_function_2"),
+            (103, "insufficient-version-for-shim-call", "HandleType"),
+            (109, "unversioned-shim-call", "OpaqueHandle"),
+            (110, "unversioned-shim-call", "NewOpaqueStruct"),
+            (125, "insufficient-version-for-shim-call", "NewOpaqueStruct"),
+            (126, "insufficient-version-for-shim-call", "NewOpaqueClass"),
         ]
 
         self.assertEqual(

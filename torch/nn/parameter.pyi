@@ -25,7 +25,7 @@ class Buffer(Tensor):
         data: Tensor = ...,
         requires_grad: bool = ...,
         persistent: bool = ...,
-    ): ...
+    ) -> None: ...
 
 class UninitializedBuffer(Tensor):
     persistent: bool
@@ -34,7 +34,7 @@ class UninitializedBuffer(Tensor):
         data: Tensor = ...,
         requires_grad: bool = ...,
         persistent: bool = ...,
-    ): ...
+    ) -> None: ...
     def materialize(
         self,
         shape: tuple[int, ...],

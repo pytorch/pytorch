@@ -15,7 +15,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from itertools import product
 from typing import Optional, TypeVar, Union
-from unittest import expectedFailure, skip, skipUnless
+from unittest import expectedFailure, mock, skip, skipUnless
 from unittest.mock import patch
 
 import torch
@@ -28,6 +28,7 @@ from torch._inductor.utils import run_and_get_code
 from torch.nn.attention import SDPBackend
 from torch.nn.attention.experimental._paged_attention import PagedAttention
 from torch.nn.attention.flex_attention import (
+    _apply_kernel_options,
     _create_empty_block_mask,
     _DEFAULT_SPARSE_BLOCK_SIZE,
     _identity,
@@ -1304,6 +1305,9 @@ class TestFlexAttention(InductorTestCase):
         )
 
     @supported_platform
+    @skipCPUIf(
+        not torch.cpu._is_avx2_supported(), "CPU flex attention requires AVX2 support"
+    )
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
@@ -1476,7 +1480,6 @@ class TestFlexAttention(InductorTestCase):
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
     @common_utils.parametrize("score_mod", test_score_mods)
     @skip_on_rocm  # TODO: NaNs on ROCM
-    @skip_on_xpu  # TODO: NaNs on XPU like ROCM, need another PR to fix.
     def test_GQA(self, device, dtype: torch.dtype, score_mod: Callable):
         inputs = (
             score_mod,
@@ -1862,7 +1865,7 @@ class TestFlexAttention(InductorTestCase):
             (2, 2, 128, 4),
             device=device,
             dtype=torch.float64,
-            requires_grad=True,
+            requires_grad=False,
         )
         query, key, value = make_tensor(), make_tensor(), make_tensor()
         # floor_div is not decomposed in decomposition_table is empty
@@ -2276,6 +2279,51 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         # Test divisible and non-divisible shapes
         test_shapes = [256, 255, 383, 384]
         _ = [test_shape(S, backend) for S in test_shapes]
+
+    @supported_platform
+    @skip_on_cpu
+    def test_mask_mod_handles_symint_addition(self, device):
+        dtype = torch.float16
+
+        def run(q, k, v):
+            ql = q.size(-2)
+            kl = k.size(-2)
+            frame = 32
+
+            def _opaque_mask(b, h, q_idx, kv_idx):
+                ref = ql // frame
+                mot = kl // frame  # codespell:ignore
+                limit = (ref + mot) * frame  # codespell:ignore
+                return q_idx < limit
+
+            block_mask = create_block_mask(
+                _opaque_mask,
+                B=q.size(0),
+                H=q.size(1),
+                Q_LEN=ql,
+                KV_LEN=kl,
+                device=device,
+            )
+            return flex_attention(q, k, v, block_mask=block_mask)
+
+        compiled_run = torch.compile(run, fullgraph=True, dynamic=True)
+
+        q = torch.randn(1, 2, 192, 32, device=device, dtype=dtype)
+        k = torch.randn(1, 2, 128, 32, device=device, dtype=dtype)
+        v = torch.randn(1, 2, 128, 32, device=device, dtype=dtype)
+
+        eager_out = run(q, k, v)
+        compiled_out = compiled_run(q, k, v)
+        torch.testing.assert_close(eager_out, compiled_out, atol=1e-3, rtol=1e-3)
+
+        # Exercise different dynamic shapes to ensure SymInt sums remain well-formed.
+        q2 = torch.randn(1, 2, 160, 32, device=device, dtype=dtype)
+        k2 = torch.randn(1, 2, 96, 32, device=device, dtype=dtype)
+        v2 = torch.randn(1, 2, 96, 32, device=device, dtype=dtype)
+
+        eager_out2 = run(q2, k2, v2)
+        compiled_out2 = compiled_run(q2, k2, v2)
+        torch.testing.assert_close(eager_out2, compiled_out2, atol=1e-3, rtol=1e-3)
 
     @supported_platform
     def test_multiple_score_mod_calls(self, device):
@@ -3249,7 +3297,14 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         V_sliced = V[:, :, :-128]
 
         out_eager = flex_attention(Q, K_sliced, V_sliced)
-        out_compiled = func(Q, K_sliced, V_sliced)
+
+        out_compiled, code = run_and_get_code(func, Q, K_sliced, V_sliced)
+
+        # Make sure flex attention kernels have flex_attention in name
+        FileCheck().check_regex("triton_tem_fused_flex_attention.*").run(code[0])
+        FileCheck().check_regex("triton_tem_fused_flex_attention_backward.*").run(
+            code[1]
+        )
 
         grad = torch.rand_like(out_eager)
 
@@ -3514,6 +3569,184 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             kernel_options={"BLOCK_M": 16},
         )
         FileCheck().check("BLOCK_M : tl.constexpr = 16").run(code[0])
+
+    @supported_platform
+    @skip_on_cpu
+    def test_backend_auto_matches_triton_large(self, device):
+        """BACKEND='AUTO' should follow Triton heuristics on large shapes."""
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 256, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        def compile_and_run(kernel_options):
+            return run_and_get_code(
+                torch.compile(flex_attention, fullgraph=True),
+                q,
+                k,
+                v,
+                kernel_options=kernel_options,
+            )
+
+        default_out, default_code = compile_and_run({"BACKEND": "AUTO"})
+        triton_out, triton_code = compile_and_run({"BACKEND": "TRITON"})
+
+        torch.testing.assert_close(default_out, triton_out, atol=0.0, rtol=0.0)
+
+        default_src = "\n".join(default_code)
+        FileCheck().check("flex_attention").check_not("flex_decoding").run(default_src)
+
+        triton_src = "\n".join(triton_code)
+        FileCheck().check("flex_attention").check_not("flex_decoding").run(triton_src)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_backend_triton_decode_matches_auto(self, device):
+        """BACKEND='TRITON_DECODE' should match heuristics on decode-friendly shapes."""
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 2, 64, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        def compile_and_run(kernel_options):
+            return run_and_get_code(
+                torch.compile(flex_attention, fullgraph=True),
+                q,
+                k,
+                v,
+                kernel_options=kernel_options,
+            )
+
+        from torch._inductor.kernel.flex import flex_attention as flex_kernel_mod
+
+        with mock.patch.object(
+            flex_kernel_mod,
+            "create_flex_decoding_kernel",
+            wraps=flex_kernel_mod.create_flex_decoding_kernel,
+        ) as decode_kernel:
+            default_out, _ = compile_and_run({"BACKEND": "AUTO"})
+            self.assertTrue(
+                decode_kernel.called,
+                "Expected heuristics to dispatch to flex decoding kernel.",
+            )
+
+        with mock.patch.object(
+            flex_kernel_mod,
+            "create_flex_decoding_kernel",
+            wraps=flex_kernel_mod.create_flex_decoding_kernel,
+        ) as decode_kernel:
+            decode_out, _ = compile_and_run({"BACKEND": "TRITON_DECODE"})
+            self.assertTrue(
+                decode_kernel.called,
+                "Expected explicit BACKEND='TRITON_DECODE' to use flex decoding kernel.",
+            )
+
+        self.assertEqual(decode_out.shape, (1, 2, 64, 64))
+        torch.testing.assert_close(default_out, decode_out, atol=3e-3, rtol=3e-3)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_backend_triton_decode_errors_when_not_supported(self, device):
+        """Requesting decode on unsupported shapes should raise a helpful error."""
+        make_tensor = functools.partial(
+            torch.randn,
+            (1, 2, 256, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        flex_compiled = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"BACKEND='TRITON_DECODE' was specified but flex_decoding cannot be used",
+        ):
+            flex_compiled(q, k, v, kernel_options={"BACKEND": "TRITON_DECODE"})
+
+    @supported_platform
+    @skip_on_cpu
+    def test_backend_triton_decode_errors_with_non_power_of_two_gqa(self, device):
+        """BACKEND='TRITON_DECODE' should fail when GQA ratio is not a power of two."""
+        q = torch.randn(
+            1, 3, 64, 64, device=device, dtype=torch.float16, requires_grad=False
+        )
+        k = torch.randn(
+            1, 1, 64, 64, device=device, dtype=torch.float16, requires_grad=False
+        )
+        v = torch.randn(
+            1, 1, 64, 64, device=device, dtype=torch.float16, requires_grad=False
+        )
+
+        flex_compiled = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"BACKEND='TRITON_DECODE' was specified but flex_decoding cannot be used",
+        ):
+            flex_compiled(
+                q,
+                k,
+                v,
+                enable_gqa=True,
+                kernel_options={"BACKEND": "TRITON_DECODE"},
+            )
+
+    @supported_platform
+    @skip_on_cpu
+    def test_backend_rejects_legacy_force_use_flag(self, device):
+        """Combining BACKEND with FORCE_USE_FLEX_ATTENTION should raise an error."""
+        make_tensor = functools.partial(
+            torch.randn,
+            (2, 2, 128, 64),
+            device=device,
+            dtype=torch.float16,
+            requires_grad=False,
+        )
+        q, k, v = make_tensor(), make_tensor(), make_tensor()
+
+        flex_compiled = torch.compile(flex_attention, fullgraph=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            r"BACKEND cannot be combined with legacy FORCE_USE_FLEX_ATTENTION",
+        ):
+            flex_compiled(
+                q,
+                k,
+                v,
+                kernel_options={
+                    "BACKEND": "TRITON",
+                    "FORCE_USE_FLEX_ATTENTION": True,
+                },
+            )
+
+    @supported_platform
+    def test_backend_defaults_and_rejects_invalid(self, device):
+        device = torch.device(device)
+        query = torch.randn(1, 1, 4, 8, device=device, dtype=torch.float32)
+        key = torch.randn(1, 1, 4, 8, device=device, dtype=torch.float32)
+        value = torch.randn(1, 1, 4, 8, device=device, dtype=torch.float32)
+
+        kernel_options = _apply_kernel_options(
+            query, key, value, return_lse=True, kernel_options={}
+        )
+        self.assertEqual(kernel_options["BACKEND"], "AUTO")
+
+        with self.assertRaisesRegex(ValueError, r"Invalid BACKEND value 'INVALID'"):
+            _apply_kernel_options(
+                query,
+                key,
+                value,
+                return_lse=True,
+                kernel_options={"BACKEND": "INVALID"},
+            )
 
     @supported_platform
     def test_block_mask_non_divisible(self, device):
@@ -4147,7 +4380,7 @@ class GraphModule(torch.nn.Module):
 
         score_mod_0 = self.score_mod_0
         mask_fn_0 = self.mask_fn_0
-        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
+        flex_attention = torch.ops.higher_order.flex_attention(l_query_, l_key_, l_value_, score_mod_0, (128, 128, l_block_mask_kv_num_blocks, l_block_mask_kv_indices, l_block_mask_full_kv_num_blocks, l_block_mask_full_kv_indices, l_block_mask_q_num_blocks, l_block_mask_q_indices, l_block_mask_full_q_num_blocks, l_block_mask_full_q_indices, 128, 128, mask_fn_0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  l_query_ = l_key_ = l_value_ = score_mod_0 = l_block_mask_kv_num_blocks = l_block_mask_kv_indices = l_block_mask_full_kv_num_blocks = l_block_mask_full_kv_indices = l_block_mask_q_num_blocks = l_block_mask_q_indices = l_block_mask_full_q_num_blocks = l_block_mask_full_q_indices = mask_fn_0 = None
         out: "f64[2, 2, 128, 4]" = flex_attention[0];  flex_attention = None
         return (out,)
 
@@ -4187,7 +4420,7 @@ class GraphModule(torch.nn.Module):
         fw_graph0 = self.fw_graph0
         joint_graph0 = self.joint_graph0
         mask_graph0 = self.mask_graph0
-        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
+        flex_attention_backward = torch.ops.higher_order.flex_attention_backward(primals_1, primals_2, primals_3, getitem_2, getitem_3, tangents_1, full_default_4, fw_graph0, joint_graph0, (1, 1, full, full_default, None, None, convert_element_type, convert_element_type_1, None, None, 1073741824, 1073741824, mask_graph0), 0.5, {'BACKEND': 'AUTO', 'PRESCALE_QK': False, 'ROWS_GUARANTEED_SAFE': False, 'BLOCKS_ARE_CONTIGUOUS': False, 'WRITE_DQ': True, 'OUTPUT_LOGSUMEXP': True, 'OUTPUT_MAX': False}, (), ());  primals_1 = primals_2 = primals_3 = getitem_2 = getitem_3 = tangents_1 = full_default_4 = fw_graph0 = joint_graph0 = full = full_default = convert_element_type = convert_element_type_1 = mask_graph0 = None
         getitem_5: "f64[2, 2, 128, 4]" = flex_attention_backward[0]
         getitem_6: "f64[2, 2, 128, 4]" = flex_attention_backward[1]
         getitem_7: "f64[2, 2, 128, 4]" = flex_attention_backward[2];  flex_attention_backward = None
@@ -4791,11 +5024,11 @@ class GraphModule(torch.nn.Module):
         query, key, value = make_tensor(), make_tensor(), make_tensor()
 
         kernel_options_1 = {
-            "BLOCK_M": 128,
-            "BLOCK_N": 128,
+            "BLOCK_M": 32,
+            "BLOCK_N": 32,
             "USE_TMA": False,
         }
-        kernel_options_2 = {"BLOCK_M": 128, "BLOCK_N": 128, "USE_TMA": True}
+        kernel_options_2 = {"BLOCK_M": 32, "BLOCK_N": 32, "USE_TMA": True}
 
         flex_compile = torch.compile(flex_attention, fullgraph=True, dynamic=True)
         out_compiled = flex_compile(query, key, value, kernel_options=kernel_options_1)
@@ -4881,6 +5114,31 @@ class GraphModule(torch.nn.Module):
         finally:
             fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
             fa._WARNINGS_SHOWN = original_warnings_shown
+
+    @supported_platform
+    def test_mask_mod_functools_partial(self, device):
+        """Test that functools.partial wrapped mask_mod works with flex_attention.
+
+        Regression test for https://github.com/pytorch/pytorch/issues/170489
+        """
+        B, H, S, D = 1, 8, 64, 64
+
+        def causal_mask_with_offset(b, h, q_idx, kv_idx, offset):
+            return (q_idx + offset) >= kv_idx
+
+        offset = 31
+        mask_mod = functools.partial(causal_mask_with_offset, offset=offset)
+
+        query = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+        key = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+        value = torch.randn(B, H, S, D, device=device, dtype=torch.float16)
+
+        block_mask = create_block_mask(mask_mod, B, H, S, S, device=device)
+
+        flex_compiled = torch.compile(flex_attention)
+        out = flex_compiled(query, key, value, block_mask=block_mask)
+
+        self.assertEqual(out.shape, (B, H, S, D))
 
 
 class TestBlockMask(InductorTestCase):
@@ -5807,11 +6065,11 @@ BlockMask(shape=(1,s1,s2048,s2048),ssparsity=46.88%,s
 
         from torch.utils._pytree import GetAttrKey
 
-        for key, tensor in tensors_with_keys:
+        for key, _tensor in tensors_with_keys:
             self.assertIsInstance(key, GetAttrKey)
             self.assertIsNotNone(key)
 
-        for key, value in context_with_keys:
+        for key, _value in context_with_keys:
             self.assertIsInstance(key, GetAttrKey)
             self.assertIsNotNone(key)
 

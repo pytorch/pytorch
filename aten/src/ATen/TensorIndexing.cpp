@@ -9,7 +9,7 @@ namespace indexing {
 const EllipsisIndexType Ellipsis = EllipsisIndexType();
 
 std::ostream& operator<<(std::ostream& stream, const Slice& slice) {
-  stream << slice.start() << ":" << slice.stop() << ":" << slice.step();
+  stream << slice.start() << ':' << slice.stop() << ':' << slice.step();
   return stream;
 }
 
@@ -31,12 +31,12 @@ std::ostream& operator<<(std::ostream& stream, const TensorIndex& tensor_index) 
 }
 
 std::ostream& operator<<(std::ostream& stream, const std::vector<TensorIndex>& tensor_indices) {
-  stream << "(";
+  stream << '(';
   for (const auto i : c10::irange(tensor_indices.size())) {
     stream << tensor_indices[i];
     if (i < tensor_indices.size() - 1) stream << ", ";
   }
-  stream << ")";
+  stream << ')';
   return stream;
 }
 

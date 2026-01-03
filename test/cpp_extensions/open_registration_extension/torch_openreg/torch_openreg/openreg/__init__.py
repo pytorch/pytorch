@@ -7,6 +7,7 @@ from .amp import get_amp_supported_dtype  # noqa: F401
 
 
 _initialized = False
+_is_in_bad_fork = getattr(torch_openreg._C, "_isInBadFork", lambda: False)
 
 
 class device:
@@ -41,8 +42,13 @@ def current_device():
     return torch_openreg._C._get_device()
 
 
+# LITERALINCLUDE START: PYTHON SET DEVICE FUNCTION
 def set_device(device) -> None:
-    return torch_openreg._C._set_device(device)
+    if device >= 0:
+        torch_openreg._C._set_device(device)
+
+
+# LITERALINCLUDE END: PYTHON SET DEVICE FUNCTION
 
 
 def init():
@@ -50,13 +56,18 @@ def init():
 
 
 def is_initialized():
-    return _initialized
+    return _initialized and not _is_in_bad_fork()
 
 
 def _lazy_init():
     global _initialized
     if is_initialized():
         return
+    if _is_in_bad_fork():
+        raise RuntimeError(
+            "Cannot re-initialize OpenReg in forked subprocess. To use OpenReg with "
+            "multiprocessing, you must use the 'spawn' start method"
+        )
     torch_openreg._C._init()
     _initialized = True
 

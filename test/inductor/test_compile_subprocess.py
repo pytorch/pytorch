@@ -62,6 +62,8 @@ test_failures = {
     "test_remove_noop_slice_scatter": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_default": TestFailure(("xpu"), is_skip=True),
     "test_remove_noop_view_dtype": TestFailure(("xpu"), is_skip=True),
+    # can not pickle ParametrizedConv2d
+    "test_weight_norm_conv2d": TestFailure(("cpu", "cuda"), is_skip=True),
 }
 
 
@@ -70,7 +72,7 @@ class TestSubprocess(TestCase):
         torch._dynamo.reset()
         FxCompile._reset_stats()
 
-        TestCase.setUp(self)
+        super().setUp()
 
         self._stack = contextlib.ExitStack()
         self._stack.enter_context(

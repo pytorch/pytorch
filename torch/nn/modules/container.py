@@ -4,7 +4,7 @@ from __future__ import annotations
 import operator
 from collections import abc as container_abcs, OrderedDict
 from itertools import chain, islice
-from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated, Self
 
 import torch
@@ -131,7 +131,7 @@ class Sequential(Module):
         return next(islice(iterator, idx, None))
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[slice, int]) -> Union[Sequential, Module]:
+    def __getitem__(self, idx: slice | int) -> Sequential | Module:
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
@@ -141,7 +141,7 @@ class Sequential(Module):
         key: str = self._get_item_by_idx(self._modules.keys(), idx)
         return setattr(self, key, module)
 
-    def __delitem__(self, idx: Union[slice, int]) -> None:
+    def __delitem__(self, idx: slice | int) -> None:
         if isinstance(idx, slice):
             for key in list(self._modules.keys())[idx]:
                 delattr(self, key)
@@ -172,7 +172,7 @@ class Sequential(Module):
                 f"of Sequential class, but {str(type(other))} is given."
             )
 
-    def pop(self, key: Union[int, slice]) -> Module:
+    def pop(self, key: int | slice) -> Module:
         """
         Pop ``key`` from self.
         """
@@ -358,7 +358,7 @@ class ModuleList(Module):
 
     _modules: dict[str, Module]  # type: ignore[assignment]
 
-    def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
+    def __init__(self, modules: Iterable[Module] | None = None) -> None:
         super().__init__()
         if modules is not None:
             self += modules
@@ -379,7 +379,7 @@ class ModuleList(Module):
     def __getitem__(self, idx: int) -> Module: ...
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[int, slice]) -> Union[Module, ModuleList]:
+    def __getitem__(self, idx: int | slice) -> Module | ModuleList:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:
@@ -389,7 +389,7 @@ class ModuleList(Module):
         idx = self._get_abs_string_index(idx)
         return setattr(self, str(idx), module)
 
-    def __delitem__(self, idx: Union[int, slice]) -> None:
+    def __delitem__(self, idx: int | slice) -> None:
         if isinstance(idx, slice):
             for k in range(len(self._modules))[idx]:
                 delattr(self, str(k))
@@ -478,7 +478,7 @@ class ModuleList(Module):
         self.add_module(str(len(self)), module)
         return self
 
-    def pop(self, key: Union[int, slice]) -> Module:
+    def pop(self, key: int | slice) -> Module:
         v = self[key]
         del self[key]
         return v
@@ -514,13 +514,12 @@ class ModuleDict(Module):
     * the order of insertion, and
 
     * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged
-      ``OrderedDict``, ``dict`` (started from Python 3.6) or another
+      ``OrderedDict``, ``dict`` or another
       :class:`~torch.nn.ModuleDict` (the argument to
       :meth:`~torch.nn.ModuleDict.update`).
 
     Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
-    types (e.g., Python's plain ``dict`` before Python version 3.6) does not
-    preserve the order of the merged mapping.
+    types does not preserve the order of the merged mapping.
 
     Args:
         modules (iterable, optional): a mapping (dictionary) of (string: module)
@@ -546,7 +545,7 @@ class ModuleDict(Module):
 
     _modules: dict[str, Module]  # type: ignore[assignment]
 
-    def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
+    def __init__(self, modules: Mapping[str, Module] | None = None) -> None:
         super().__init__()
         if modules is not None:
             self.update(modules)
@@ -674,7 +673,7 @@ class ParameterList(Module):
                 return x
     """
 
-    def __init__(self, values: Optional[Iterable[Any]] = None) -> None:
+    def __init__(self, values: Iterable[Any] | None = None) -> None:
         super().__init__()
         self._size = 0
         if values is not None:
@@ -889,7 +888,7 @@ class ParameterDict(Module):
     def __contains__(self, key: str) -> bool:
         return key in self._keys
 
-    def setdefault(self, key: str, default: Optional[Any] = None) -> Any:
+    def setdefault(self, key: str, default: Any | None = None) -> Any:
         """Set the default for a key in the Parameterdict.
 
         If key is in the ParameterDict, return its value.
@@ -928,7 +927,7 @@ class ParameterDict(Module):
         del self[k]
         return k, val
 
-    def get(self, key: str, default: Optional[Any] = None) -> Any:
+    def get(self, key: str, default: Any | None = None) -> Any:
         r"""Return the parameter associated with key if present. Otherwise return default if provided, None if not.
 
         Args:
@@ -938,7 +937,7 @@ class ParameterDict(Module):
         return self[key] if key in self else default  # noqa: SIM401
 
     def fromkeys(
-        self, keys: Iterable[str], default: Optional[Any] = None
+        self, keys: Iterable[str], default: Any | None = None
     ) -> ParameterDict:
         r"""Return a new ParameterDict with the keys provided.
 
@@ -960,7 +959,7 @@ class ParameterDict(Module):
         r"""Return an iterable of the ParameterDict values."""
         return (self[k] for k in self._keys)
 
-    def update(self, parameters: Union[Mapping[str, Any], ParameterDict]) -> None:
+    def update(self, parameters: Mapping[str, Any] | ParameterDict) -> None:
         r"""Update the :class:`~torch.nn.ParameterDict` with key-value pairs from ``parameters``, overwriting existing keys.
 
         .. note::

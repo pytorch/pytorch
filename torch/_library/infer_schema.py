@@ -9,7 +9,7 @@ import torch
 from torch import device, dtype, Tensor, types
 from torch.utils._exposed_in import exposed_in
 
-from .opaque_object import _OPAQUE_TYPES, is_opaque_type, OpaqueType, OpaqueTypeStr
+from .opaque_object import _OPAQUE_TYPES, is_opaque_type
 
 
 # This is used as a negative test for
@@ -128,7 +128,7 @@ def infer_schema(
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if is_opaque_type(annotation_type):
-                schema_type = _OPAQUE_TYPES[annotation_type]
+                schema_type = _OPAQUE_TYPES[annotation_type].class_name
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
@@ -142,7 +142,7 @@ def infer_schema(
                 list_type = tuple_to_list(annotation_type)
                 example_type_str = "\n\n"
                 # Only suggest the list type if this type is supported.
-                if list_type in SUPPORTED_PARAM_TYPES.keys():
+                if list_type in SUPPORTED_PARAM_TYPES:
                     example_type_str = f"For example, {list_type}.\n\n"
                 error_fn(
                     f"Parameter {name} has unsupported type {param.annotation}. "
@@ -263,8 +263,13 @@ def get_supported_param_types():
         (types.Number, "Scalar", True, False, False),
         (dtype, "ScalarType", False, False, False),
         (device, "Device", False, False, False),
-        (OpaqueType, OpaqueTypeStr, False, False, False),
     ]
+
+    if torch.distributed.is_available():
+        from torch.distributed.distributed_c10d import GroupName
+
+        data.append((typing.cast(type, GroupName), "str", False, False, False))
+
     result = []
     for line in data:
         result.extend(derived_types(*line))
@@ -291,7 +296,7 @@ def parse_return(annotation, error_fn):
 
     origin = typing.get_origin(annotation)
     if origin is not tuple:
-        if annotation not in SUPPORTED_RETURN_TYPES.keys():
+        if annotation not in SUPPORTED_RETURN_TYPES:
             error_fn(
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."

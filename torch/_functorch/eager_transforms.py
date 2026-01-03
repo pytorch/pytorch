@@ -337,7 +337,7 @@ def _vjp_with_argnums(
 ):
     # This is the same function as vjp but also accepts an argnums argument
     # All args are the same as vjp except for the added argument
-    # argnums (Optional[int or tuple[int]]): Optional, specifies the argument(s) to compute gradients with respect to.
+    # argnums (Optional[int or tuple[int,...]]): Optional, specifies the argument(s) to compute gradients with respect to.
     #         If None, computes the gradients with respect to all inputs (used for vjp). Default: None
     #
     # WARN: Users should NOT call this function directly and should just be calling vjp.
@@ -430,7 +430,7 @@ def error_if_complex(func_name, args, is_input):
 @exposed_in("torch.func")
 def jacrev(
     func: Callable,
-    argnums: Union[int, tuple[int]] = 0,
+    argnums: Union[int, tuple[int, ...]] = 0,
     *,
     has_aux=False,
     chunk_size: Optional[int] = None,
@@ -448,7 +448,7 @@ def jacrev(
     Args:
         func (function): A Python function that takes one or more arguments,
             one of which must be a Tensor, and returns one or more Tensors
-        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+        argnums (int or tuple[int, ...]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
             Default: 0.
         has_aux (bool): Flag indicating that ``func`` returns a
@@ -1056,7 +1056,7 @@ def _jvp_with_argnums(
 ):
     # This is the same function as jvp but also accepts an argnums argument
     # Most args are the same as jvp except for the added argument
-    # argnums (Optional[int or tuple[int]]): Optional, specifies the argument(s) to compute gradients with respect to.
+    # argnums (int or tuple[int, ...]): Optional, specifies the argument(s) to compute gradients with respect to.
     #         If None, computes the gradients with respect to all inputs (used for jvp). Default: None
     # Because of this, tangents must be of length argnums and matches up to the corresponding primal whose index is
     # given by argnums
@@ -1152,7 +1152,7 @@ def jacfwd(
     Args:
         func (function): A Python function that takes one or more arguments,
             one of which must be a Tensor, and returns one or more Tensors
-        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+        argnums (int or tuple[int, ...]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
             Default: 0.
         has_aux (bool): Flag indicating that ``func`` returns a
@@ -1322,7 +1322,7 @@ def hessian(func, argnums=0):
     Args:
         func (function): A Python function that takes one or more arguments,
             one of which must be a Tensor, and returns one or more Tensors
-        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+        argnums (int or tuple[int, ...]): Optional, integer or tuple of integers,
             saying which arguments to get the Hessian with respect to.
             Default: 0.
 
