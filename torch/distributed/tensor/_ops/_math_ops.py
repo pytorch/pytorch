@@ -38,6 +38,7 @@ from torch.distributed.tensor.placement_types import (
 
 
 aten = torch.ops.aten
+prims = torch.ops.prims
 
 
 class Reduction(Enum):
@@ -359,13 +360,16 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.all.dim: "product",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
+    prims.sum.default: "sum",
     aten.any.default: "sum",
     aten.any.dim: "sum",
+    aten.any.dims: "sum",
     aten.any.out: "sum",
     # These are only valid when there is no padding
     aten.prod.default: "product",
     aten.prod.dim_int: "product",
     aten.prod.int_out: "product",
+    prims.prod.default: "product",
     # avg is only linear when there is no padding
     aten.mean.default: "avg",
     aten.mean.dim: "avg",
@@ -433,6 +437,9 @@ def cumsum_strategy(op_schema: OpSchema) -> OpStrategy:
         aten.std.correction_out,
         aten.var.correction,
         aten.var.correction_out,
+        aten.var_mean.correction,
+        aten.var_mean.correction_out,
+        prims.var.default,
     ],
     schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
 )
@@ -454,7 +461,8 @@ def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
-    [aten.linalg_vector_norm.default], schema_info=RuntimeSchemaInfo(1)
+    [aten.linalg_vector_norm.default, aten.norm.Scalar],
+    schema_info=RuntimeSchemaInfo(1),
 )
 def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
