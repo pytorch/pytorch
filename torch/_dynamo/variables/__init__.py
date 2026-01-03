@@ -49,6 +49,7 @@ from .dicts import (
     FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedSetVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
@@ -118,6 +119,7 @@ from .misc import (
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
+    TracebackVariable,
     TypingVariable,
     UnknownVariable,
     WeakRefVariable,

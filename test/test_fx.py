@@ -1914,7 +1914,7 @@ class TestFX(JitTestCase):
             # NB: the implementation of conv may not preserve the memory format,
             # unfortunately. The best we can do is just check that the placeholder
             # node is channels-last
-            if node.op in {"placeholder"}:
+            if node.op == "placeholder":
                 self.assertEqual(
                     node.meta["tensor_meta"].memory_format, torch.channels_last
                 )
@@ -1975,7 +1975,7 @@ class TestFX(JitTestCase):
             # NB: the implementation of conv may not preserve the memory format,
             # unfortunately. The best we can do is just check that the placeholder
             # node is channels-last
-            if node.op in {"placeholder"}:
+            if node.op == "placeholder":
                 self.assertEqual(
                     node.meta["tensor_meta"].memory_format, torch.channels_last_3d
                 )
@@ -4626,7 +4626,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         if origin in {tuple, tuple}:
             return f"Tuple{contained_type_str}"
-        if origin in {typing.Union}:
+        if origin == typing.Union:
             # Annoying hack to detect Optional
             if len(contained) == 2 and (contained[0] is type(None)) ^ (
                 contained[1] is type(None)
@@ -5175,7 +5175,7 @@ class TestVisionTracing(JitTestCase):
             test_name = "test_torchvision_models_" + k
             x = (
                 torch.rand(1, 3, 299, 299)
-                if k in ["inception_v3"]
+                if k == "inception_v3"
                 else torch.rand(1, 3, 224, 224)
             )
             kwargs = dict(num_classes=50)
