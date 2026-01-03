@@ -34,8 +34,8 @@ class PartitionArgs:
     c_desc: tma.tensor_descriptor
     offs_ptr: gl.tensor
     c_ptr: gl.tensor
-    c_stride_0: gl.constexpr
-    c_stride_1: gl.constexpr
+    c_stride_m: gl.constexpr
+    c_stride_n: gl.constexpr
     c_layout: gl.constexpr
     a_smem_bufs: gl.shared_memory_descriptor
     b_smem_bufs: gl.shared_memory_descriptor
@@ -63,8 +63,8 @@ class PartitionArgs:
         c_desc,
         offs_ptr,
         c_ptr,
-        c_stride_0,
-        c_stride_1,
+        c_stride_m,
+        c_stride_n,
         c_layout,
         a_smem_bufs,
         b_smem_bufs,
@@ -89,8 +89,8 @@ class PartitionArgs:
         self.c_desc = c_desc
         self.offs_ptr = offs_ptr
         self.c_ptr = c_ptr
-        self.c_stride_0 = gl.constexpr(c_stride_0)
-        self.c_stride_1 = gl.constexpr(c_stride_1)
+        self.c_stride_m = gl.constexpr(c_stride_m)
+        self.c_stride_n = gl.constexpr(c_stride_n)
         self.c_layout = gl.constexpr(c_layout)
         self.a_smem_bufs = a_smem_bufs
         self.b_smem_bufs = b_smem_bufs
@@ -486,13 +486,13 @@ def store_partition(pargs: PartitionArgs):
     N: gl.constexpr = {{size("b_ptr", -1)}}
     K: gl.constexpr = {{size("a_ptr", -1)}}
     G: gl.constexpr = {{size("b_ptr", 0)}}
-    a_stride_0: gl.constexpr = {{stride("a_ptr", -2)}}
-    a_stride_1: gl.constexpr = {{stride("a_ptr", -1)}}
-    b_stride_0: gl.constexpr = {{stride("b_ptr", 0)}}
-    b_stride_1: gl.constexpr = {{stride("b_ptr", -1)}}
-    b_stride_2: gl.constexpr = {{stride("b_ptr", -2)}}
-    c_stride_0: gl.constexpr = {{output_stride(-2)}}
-    c_stride_1: gl.constexpr = {{output_stride(-1)}}
+    a_stride_m: gl.constexpr = {{stride("a_ptr", -2)}}
+    a_stride_k: gl.constexpr = {{stride("a_ptr", -1)}}
+    b_stride_g: gl.constexpr = {{stride("b_ptr", 0)}}
+    b_stride_n: gl.constexpr = {{stride("b_ptr", -1)}}
+    b_stride_k: gl.constexpr = {{stride("b_ptr", -2)}}
+    c_stride_m: gl.constexpr = {{output_stride(-2)}}
+    c_stride_n: gl.constexpr = {{output_stride(-1)}}
     NUM_BLOCKS: gl.constexpr = {{NUM_SMS}}
     dtype: gl.constexpr = {{DTYPE}}
 
@@ -500,7 +500,7 @@ def store_partition(pargs: PartitionArgs):
     a_desc = tma.make_tensor_descriptor(
         a_ptr,
         shape=[M, K],
-        strides=[a_stride_0, a_stride_1],
+        strides=[a_stride_m, a_stride_k],
         block_shape=[BLOCK_M, BLOCK_K],
         layout=a_layout,
     )
@@ -508,7 +508,7 @@ def store_partition(pargs: PartitionArgs):
     b_desc = tma.make_tensor_descriptor(
         b_ptr,
         shape=[G, N, K],
-        strides=[b_stride_0, b_stride_1, b_stride_2],
+        strides=[b_stride_g, b_stride_n, b_stride_k],
         block_shape=[1, BLOCK_N, BLOCK_K],
         layout=b_layout,
     )
@@ -517,7 +517,7 @@ def store_partition(pargs: PartitionArgs):
     c_desc = tma.make_tensor_descriptor(
         c_ptr,
         shape=[M, N],
-        strides=[c_stride_0, c_stride_1],
+        strides=[c_stride_m, c_stride_n],
         block_shape=[BLOCK_M, BLOCK_N],
         layout=c_layout,
     )
@@ -525,7 +525,7 @@ def store_partition(pargs: PartitionArgs):
     c_desc = create_ragged_descriptor_device_2d(
         c_ptr,
         dim0=M, dim1=N,
-        stride0=c_stride_0, stride1=c_stride_1,
+        stride0=c_stride_m, stride1=c_stride_n,
         block0=BLOCK_M, block1=BLOCK_N,
         layout=c_layout_ragged,
         ragged_dim=0,
@@ -574,8 +574,8 @@ def store_partition(pargs: PartitionArgs):
         c_desc,
         offs_ptr,
         c_ptr,
-        c_stride_0,
-        c_stride_1,
+        c_stride_m,
+        c_stride_n,
         c_layout,
         a_smem_bufs,
         b_smem_bufs,
