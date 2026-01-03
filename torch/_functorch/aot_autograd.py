@@ -1344,6 +1344,7 @@ def aot_compile_joint_with_descriptors(
         )
         cache_ctx = torch._functorch.config.patch(
             {
+                "strict_autograd_cache": True,
                 "bundled_autograd_cache": True,
                 "force_non_lazy_backward_lowering": True,
                 "bypass_autograd_cache_key": True,
