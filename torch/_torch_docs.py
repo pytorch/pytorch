@@ -8541,7 +8541,7 @@ Returns a view of the original tensor :attr:`input` with its dimensions permuted
 
 Args:
     {input}
-    dims (tuple of int): The desired ordering of dimensions
+    dims (torch.Size, tuple of int or list of int): the desired ordering of dimensions.
 
 Example:
     >>> x = torch.randn(2, 3, 5)

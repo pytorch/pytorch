@@ -113,7 +113,7 @@ runs:
         echo "GPU_FLAG=--device=/dev/mem --device=/dev/kfd $DEVICE_FLAG --group-add video --group-add $render_gid --group-add daemon --group-add bin --cap-add=SYS_PTRACE --security-opt seccomp=unconfined --network=host" >> "${GITHUB_ENV}"
 
     - name: Login to ECR
-      uses: ./.github/actions/ecr-login
+      uses: pytorch/pytorch/.github/actions/ecr-login@main
 
     - name: Preserve github env variables for use in docker
       shell: bash

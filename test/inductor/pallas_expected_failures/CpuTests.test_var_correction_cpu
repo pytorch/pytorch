@@ -1,5 +1,0 @@
-ERROR
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/dev/pytorch/torch/_inductor/codegen/pallas.py", line 1373, in reduction
-    raise Unsupported(
-torch._inductor.exc.InductorError: Unsupported: Reduction type 'welford_reduce' not yet supported in Pallas backend. Supported types: ['sum', 'prod', 'max', 'min', 'any', 'argmax', 'argmin'], xor_sum
