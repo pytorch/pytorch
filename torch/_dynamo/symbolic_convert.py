@@ -3720,26 +3720,28 @@ class InstructionTranslatorBase(
         cls_type = self.pop().realize()
         subject = self.pop().realize()
 
-        isinstance_var = BuiltinVariable(isinstance)
-
         try:
-            match_result = self.call_function(isinstance_var, [subject, cls_type], {})
+            match_result = self.call_function(
+                BuiltinVariable(isinstance), [subject, cls_type], {}
+            )
         except AssertionError:
             match_result = ConstantVariable.create(False)
         except Exception:
             raise
 
-        if match_result is None:
-            unimplemented(
-                gb_type="MATCH_CLASS_isinstance_none",
-                context="isinstance check",
-                explanation="MATCH_CLASS: isinstance returned None",
-                hints=[],
-            )
-            return
-
         if isinstance(match_result, ConstantVariable):
-            is_match = match_result.value
+            if match_result.value:
+                getattr_var = BuiltinVariable(getattr)
+                extracted_vars = []
+                for name in names.as_python_constant():
+                    # type: ignore[arg-type]
+                    val = getattr_var.call_function(
+                        self, [subject, ConstantVariable.create(name)], {}
+                    )
+                    extracted_vars.append(val)
+                self.push(TupleVariable(extracted_vars))
+            else:
+                self.push(ConstantVariable.create(None))
         else:
             unimplemented(
                 gb_type="MATCH_CLASS_dynamic_isinstance",
@@ -3747,22 +3749,6 @@ class InstructionTranslatorBase(
                 explanation="MATCH_CLASS: cannot statically resolve isinstance",
                 hints=[],
             )
-            return
-
-        if is_match:
-            attr_names = names.as_python_constant()
-            getattr_var = BuiltinVariable(getattr)
-
-            extracted_vars = []
-            for name in attr_names:
-                name_var = ConstantVariable.create(name)
-                # type: ignore[arg-type]
-                val = getattr_var.call_function(self, [subject, name_var], {})
-                extracted_vars.append(val)
-
-            self.push(TupleVariable(extracted_vars))
-        else:
-            self.push(ConstantVariable.create(None))
 
     def MATCH_SEQUENCE(self, inst: Instruction) -> None:
         tos = self.stack[-1]
