@@ -6238,11 +6238,21 @@ def meta__flash_attention_forward(
     # Cuda Path
     attention = torch.empty_like(query)
     if cum_seq_q is None:
-        logsumexp = torch.empty(
-            (batch_size, num_heads, max_seqlen_batch_q),
-            dtype=torch.float,
-            device=query.device,
-        )
+        # ROCm flash attention returns logsumexp transposed compared to CUDA
+        if torch.version.hip:
+            # ROCm returns logsumexp as (batch, seq, heads)
+            logsumexp = torch.empty(
+                (batch_size, max_seqlen_batch_q, num_heads),
+                dtype=torch.float,
+                device=query.device,
+            )
+        else:
+            # CUDA returns logsumexp as (batch, heads, seq)
+            logsumexp = torch.empty(
+                (batch_size, num_heads, max_seqlen_batch_q),
+                dtype=torch.float,
+                device=query.device,
+            )
     else:
         total_q = query.size(0)
         logsumexp = torch.empty(
