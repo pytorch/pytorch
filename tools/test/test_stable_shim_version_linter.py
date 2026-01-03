@@ -186,3 +186,6 @@ AOTI_TORCH_EXPORT int function_without_version();
                         "TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0"
                         in unversioned_msg.description
                     )
+
+if __name__ == "__main__":
+    unittest.main()
