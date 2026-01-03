@@ -463,6 +463,9 @@ class AutogradCompilerInstance:
 
         psymints = [self.to_proxy(e) for e in ctx._get_compiled_autograd_symints()]
 
+        # Get opaque objects from ctx (empty list if not present for backward compatibility)
+        ctx_opaque_objects = getattr(ctx, "opaque_objects", [])
+
         # NOTE: we should only close over constants
         CompiledFunction = ctx._forward_cls
         bw_module = extract_bw_module(CompiledFunction)
@@ -482,11 +485,13 @@ class AutogradCompilerInstance:
         def call_aot_bwd_prologue(
             ctx_saved_tensors: Sequence[torch.Tensor],
             ctx_symints: Sequence[IntLikeType],
+            ctx_opaque_objs: Sequence[Any],
             *flat_args: Sequence[Any],
         ) -> Any:
             out = torch._functorch._aot_autograd.runtime_wrappers._backward_prologue_functional(
                 ctx_saved_tensors,
                 ctx_symints,
+                ctx_opaque_objs,
                 metadata,
                 maybe_subclass_metadata,
                 *flat_args,
@@ -499,6 +504,7 @@ class AutogradCompilerInstance:
             args=(
                 psaved_tensors,
                 psymints,
+                ctx_opaque_objects,
                 *pinputs,
             ),
             kwargs={},
