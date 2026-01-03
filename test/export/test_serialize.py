@@ -1915,6 +1915,28 @@ class TestSaveLoad(TestCase):
         self.assertIsInstance(result, dict)
         self.assertTrue(torch.equal(result["key"], torch.tensor([1, 2, 3])))
 
+    def test_deserialize_torch_artifact_rejects_unknown_classes(self):
+        """
+        Test that deserialize_torch_artifact rejects unknown/untrusted classes
+        to prevent arbitrary code execution (security fix for issue #153410).
+        """
+        import pickle
+
+        class UntrustedClass:
+            """A class that should NOT be allowed to deserialize."""
+            def __init__(self):
+                self.data = "malicious"
+
+        # Create serialized data containing an untrusted class
+        data = {"untrusted": UntrustedClass()}
+        buf = io.BytesIO()
+        torch.save(data, buf)
+        serialized = buf.getvalue()
+
+        # Should raise pickle.UnpicklingError for unknown classes
+        with self.assertRaises(pickle.UnpicklingError):
+            deserialize_torch_artifact(serialized)
+
     @unittest.skipIf(IS_WINDOWS, "Cannot modify file in windows")
     def test_save_file(self):
         class Foo(torch.nn.Module):

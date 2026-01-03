@@ -3,6 +3,7 @@ import io
 import json
 import logging
 import os
+import pickle
 import tempfile
 import zipfile
 from dataclasses import dataclass
@@ -14,6 +15,8 @@ from torch._export.serde import schema
 from torch._export.serde.serialize import (
     _dataclass_to_dict,
     _dict_to_dataclass,
+    _is_safe_fallback_error,
+    _SAFE_FALLBACK_PATTERNS,
     deserialize_device,
     deserialize_scalar_type,
     deserialize_size,
@@ -866,9 +869,16 @@ def _load_state_dict(
                 weight_bytes = archive_reader.read_bytes(
                     os.path.join(WEIGHTS_DIR, payload_meta.path_name)
                 )
-                state_dict[weight_fqn] = torch.load(
-                    io.BytesIO(weight_bytes), weights_only=False
-                )
+                buffer = io.BytesIO(weight_bytes)
+                try:
+                    state_dict[weight_fqn] = torch.load(buffer, weights_only=True)
+                except pickle.UnpicklingError as e:
+                    error_msg = str(e)
+                    if _is_safe_fallback_error(error_msg):
+                        buffer.seek(0)
+                        state_dict[weight_fqn] = torch.load(buffer, weights_only=False)
+                    else:
+                        raise
             else:
                 tensor_meta = payload_meta.tensor_meta
                 assert tensor_meta is not None
@@ -922,9 +932,16 @@ def _load_constants(
                     constant_bytes = archive_reader.read_bytes(
                         os.path.join(CONSTANTS_DIR, path_name)
                     )
-                    constants[constant_fqn] = torch.load(
-                        io.BytesIO(constant_bytes), weights_only=False
-                    )
+                    buffer = io.BytesIO(constant_bytes)
+                    try:
+                        constants[constant_fqn] = torch.load(buffer, weights_only=True)
+                    except pickle.UnpicklingError as e:
+                        error_msg = str(e)
+                        if _is_safe_fallback_error(error_msg):
+                            buffer.seek(0)
+                            constants[constant_fqn] = torch.load(buffer, weights_only=False)
+                        else:
+                            raise
                 else:
                     tensor_meta = payload_meta.tensor_meta
                     assert tensor_meta is not None
@@ -1132,7 +1149,16 @@ def load_pt2(
                     len(WEIGHTS_DIR) :
                 ]  # remove data/weights/ prefix
                 weight_bytes = archive_reader.read_bytes(file)
-                loaded_weight = torch.load(io.BytesIO(weight_bytes))
+                buffer = io.BytesIO(weight_bytes)
+                try:
+                    loaded_weight = torch.load(buffer, weights_only=True)
+                except pickle.UnpicklingError as e:
+                    error_msg = str(e)
+                    if _is_safe_fallback_error(error_msg):
+                        buffer.seek(0)
+                        loaded_weight = torch.load(buffer, weights_only=False)
+                    else:
+                        raise
                 weights[weight_file_name] = loaded_weight
 
     if isinstance(f, (io.IOBase, IO)):
