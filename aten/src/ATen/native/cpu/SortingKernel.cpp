@@ -89,24 +89,6 @@ struct KeyValueCompDesc {
   }
 };
 
-template <typename T>
-struct UnsignedType{};
-
-#define TO_TYPE(from_t, to_t)   \
-  template <>                   \
-  struct UnsignedType<from_t> { \
-    using signed_type = to_t;   \
-  };
-
-TO_TYPE(uint8_t, int8_t)
-TO_TYPE(uint16_t, int16_t)
-TO_TYPE(uint32_t, int32_t)
-TO_TYPE(uint64_t, int64_t)
-TO_TYPE(int8_t, int8_t)
-TO_TYPE(int16_t, int16_t)
-TO_TYPE(int32_t, int32_t)
-TO_TYPE(int64_t, int64_t)
-
 bool can_use_radix_sort(const TensorBase& values, const bool descending) {
 #ifdef USE_FBGEMM
   // radix_sort can be used only for 1D data
@@ -207,7 +189,7 @@ void sort_kernel(
 
   AT_DISPATCH_V2(indices.scalar_type(), "sort_kernel", AT_WRAP([&] {
     if (can_use_radix_sort(values, descending)) {
-      using signed_t = UnsignedType<scalar_t>::signed_type; //FBGEMM explicit template instantiations don't contain unsigned type.
+      using signed_t = std::make_signed_t<scalar_t>; // FBGEMM explicit template instantiations don't contain unsigned type.
       auto* const indices_ptr = reinterpret_cast<signed_t *>(indices.data_ptr<scalar_t>());
       parallel_sort1d_kernel<signed_t>(values, indices_ptr);
       return;
