@@ -46,7 +46,6 @@ class LazyCache:
             )(self.value)
 
         if self.name_hint is not None:
-            # pyrefly: ignore [missing-attribute]
             self.vt.set_name_hint(self.name_hint)
 
         del self.value
