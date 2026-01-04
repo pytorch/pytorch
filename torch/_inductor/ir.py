@@ -80,6 +80,7 @@ from .dependencies import (
     extract_free_symbols,
     extract_input_node_reduction_ranges,
     extract_read_writes,
+    MemoryDep,
     var_builder,
 )
 from .loop_body import LoopBody
@@ -5105,6 +5106,40 @@ class TemplateBuffer(OperationBuffer):
             None,
         )
 
+    def can_fuse_multi_output(self, node2) -> bool:
+        return False
+
+    def supports_multi_outputs(self) -> bool:
+        return False
+
+    def get_multi_output_write_dep(
+        self, output_name: str, template_writes: OrderedSet[Dep]
+    ) -> MemoryDep:
+        """Get the write dependency for fusing an epilogue with this output.
+
+        Multi-output templates can override this to return per-output dependencies.
+        """
+        assert len(template_writes) == 1
+        write = next(iter(template_writes))
+        assert isinstance(write, MemoryDep)
+        return write
+
+    def multi_output_should_allocate(self) -> bool:
+        """Return True if MultiOutput nodes wrapping this template should allocate.
+
+        When True, each MultiOutput gets its own buffer instead of just indexing
+        into the template's return value.
+        """
+        return False
+
+    def multi_output_prevents_buffer_reuse(self) -> bool:
+        """Return True if MultiOutput results should not be reused for other buffers.
+
+        When True, signals that MultiOutput buffers alias this template and
+        should not be added to the buffer reuse pool.
+        """
+        return False
+
 
 class TritonTemplateBuffer(TemplateBuffer):
     def __init__(
@@ -5394,6 +5429,9 @@ class CppTemplateBuffer(TemplateBuffer):
             return layout
         else:
             return super().get_layout()
+
+    def supports_multi_outputs(self) -> bool:
+        return isinstance(self.layout, MultiOutputLayout)
 
 
 class CuteDSLTemplateBuffer(TemplateBuffer):
@@ -8399,17 +8437,28 @@ class MultiOutput(ExternKernel):
         return input_node.get_free_symbol_uses(unbacked_only)
 
     def should_allocate(self) -> bool:
-        return len(self.inputs) == 1 and (
-            isinstance(self.inputs[0], CppTemplateBuffer)  # Grouped GEMM
-        )
+        if len(self.inputs) == 1:
+            inp = self.inputs[0]
+            if isinstance(inp, CppTemplateBuffer):  # Grouped GEMM
+                return True
+            if isinstance(inp, TemplateBuffer) and inp.multi_output_should_allocate():
+                return True
+        return False
 
     def get_inputs_that_alias_output(self) -> Sequence[str]:
-        return [
-            inp.get_name()
-            for inp in self.inputs
-            if isinstance(inp, FallbackKernel)
-            and len(inp.get_inputs_that_alias_output()) > 0
-        ]
+        result = []
+        for inp in self.inputs:
+            if (
+                isinstance(inp, FallbackKernel)
+                and len(inp.get_inputs_that_alias_output()) > 0
+            ):
+                result.append(inp.get_name())
+            elif (
+                isinstance(inp, TemplateBuffer)
+                and inp.multi_output_prevents_buffer_reuse()
+            ):
+                result.append(inp.get_name())
+        return result
 
 
 # We just use a normal dataclass for MutableBox/TensorBox/StorageBox since
