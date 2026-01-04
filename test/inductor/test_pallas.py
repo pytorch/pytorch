@@ -1048,6 +1048,43 @@ class PallasTestsMixin:
         result = compiled_model(x)
         self.assertEqual(result, expected)
 
+    def test_embedding_with_positional(self):
+        """Test token + positional embeddings pattern (GPT-style).
+
+        This test verifies that embedding lookups with different indexing patterns
+        work correctly when fused together. Token embeddings use input indices while
+        positional embeddings use torch.arange-generated indices. The resulting tensors
+        (batch, seq, dim) and (seq, dim) must broadcast correctly.
+        """
+        if self.DEVICE == "cuda":
+            self.skipTest(
+                "Embedding with positional not supported in Pallas GPU (Mosaic) backend"
+            )
+
+        class EmbeddingWithPositions(torch.nn.Module):
+            def __init__(self, vocab_size, max_seq_len, dim):
+                super().__init__()
+                self.tok_emb = torch.nn.Embedding(vocab_size, dim)
+                self.pos_emb = torch.nn.Embedding(max_seq_len, dim)
+
+            def forward(self, tokens):
+                batch, seq_len = tokens.shape
+                tok = self.tok_emb(tokens)  # (batch, seq_len, dim)
+                pos_indices = torch.arange(seq_len, device=tokens.device)
+                pos = self.pos_emb(pos_indices)  # (seq_len, dim)
+                return tok + pos
+
+        model = EmbeddingWithPositions(vocab_size=256, max_seq_len=64, dim=64)
+        model.eval()
+        if self.DEVICE != "cpu":
+            model = model.to(self.DEVICE)
+
+        tokens = torch.randint(0, 256, (4, 16), device=self.DEVICE)
+        expected = model(tokens)
+        compiled_model = self._compile(model)
+        result = compiled_model(tokens)
+        self.assertEqual(result, expected)
+
     def test_torch_nn_LayerNorm(self):
         """Test nn.LayerNorm with Pallas backend.
 

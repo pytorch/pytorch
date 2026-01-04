@@ -1048,8 +1048,10 @@ class PallasKernel(SIMDKernel):
         For expressions like `2 * x3 + 32 * x2 + 256 * x1 + 1024 * x0`, we generate
         code that computes the flattened index array using broadcasting.
 
-        The iteration variables (x0, x1, x2, x3) are already defined as jnp.arange arrays
-        in the kernel. We just need to convert the sympy expression to JAX code.
+        Instead of using global iteration variables (which may have shapes for the
+        output tensor), we generate fresh arange expressions with shapes appropriate
+        for this specific index expression. Variables with larger coefficients get
+        earlier axes (shape like (N, 1)) and smaller coefficients get later axes.
         """
         free_symbols = index.free_symbols
         iter_vars = self._get_iter_vars()
@@ -1061,11 +1063,43 @@ class PallasKernel(SIMDKernel):
                 f"Pallas backend does not yet support mixed index pattern: {index}"
             )
 
-        # Convert sympy expression to Python/JAX code string
-        # The iteration variables are already defined as jnp.arange arrays
-        index_str = self.kexpr(index)
+        # Sort iteration variables by their coefficient (stride) in descending order
+        # Larger coefficients = earlier/outer dimensions
+        def get_coefficient(var):
+            coeff = index.coeff(var)
+            if coeff == 0:
+                coeff = sympy.diff(index, var)
+            try:
+                return int(coeff)
+            except (TypeError, ValueError):
+                return float("inf")
 
-        # Mark this as requiring flatten access
+        sorted_vars = sorted(used_vars, key=get_coefficient, reverse=True)
+        n_dims = len(sorted_vars)
+
+        # Build index expression with fresh arange expressions
+        # Each variable gets a shape with 1s except at its position
+        index_str = self.kexpr(self.rename_indexing(index))
+        for i, var in enumerate(sorted_vars):
+            var_name = str(var)
+            if var in self.range_tree_nodes:
+                range_entry = self.range_tree_nodes[var]
+                renamed_size = self.rename_indexing(range_entry.length)
+                size_str = self.kexpr(renamed_size)
+
+                if n_dims == 1:
+                    # Single var - just use arange
+                    arange_expr = f"jnp.arange({size_str})"
+                else:
+                    # Multiple vars - reshape for broadcasting
+                    # Position i in sorted order (0 = outermost)
+                    shape_parts = ["1"] * n_dims
+                    shape_parts[i] = size_str
+                    shape_str = ", ".join(shape_parts)
+                    arange_expr = f"jnp.arange({size_str}).reshape({shape_str})"
+
+                index_str = index_str.replace(var_name, arange_expr)
+
         return index_str
 
     def _generate_index_array(self, index: sympy.Expr) -> str:
