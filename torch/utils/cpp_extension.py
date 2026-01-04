@@ -501,8 +501,8 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
             compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
         match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode(*SUBPROCESS_DECODE_ARGS).strip())
         version = ['0', '0', '0'] if match is None else list(match.groups())
-    except (subprocess.CalledProcessError, OSError) as error:
-        logger.warning('Error checking compiler version for %s: %s', compiler, error)
+    except (subprocess.CalledProcessError, OSError):
+        logger.warning('Error checking compiler version for %s', compiler, exc_info=True)
         return (False, TorchVersion('0.0.0'))
 
     # convert alphanumeric string to numeric string
