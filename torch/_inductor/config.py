@@ -858,6 +858,9 @@ combo_kernel_foreach_dynamic_shapes = True
 # Maximum number of arguments (read/write buffers) allowed in a combo kernel
 combo_kernel_max_num_args = 250
 
+# Enable per-sub-kernel block dimensions in combo kernels.
+combo_kernel_per_subkernel_blocks = True
+
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 
