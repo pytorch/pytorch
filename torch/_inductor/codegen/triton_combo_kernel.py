@@ -45,100 +45,6 @@ LARGE_NUMELS = 512e5
 BLOCK_UTILIZATION = 0.8
 
 
-def _partition_by_ynumel_ratio(
-    nodes: list[BaseSchedulerNode],
-    node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
-    max_ratio: float,
-) -> list[list[BaseSchedulerNode]]:
-    """Partition nodes so that ynumel ratio within each group is <= max_ratio.
-
-    This prevents combining kernels with vastly different Y dimensions, which
-    would cause most Y-blocks to do nothing for smaller sub-kernels.
-    """
-    if len(nodes) <= 1:
-        return [nodes] if nodes else []
-
-    # Get ynumel for each node
-    def get_ynumel(node: BaseSchedulerNode) -> int:
-        tiled_groups = node_info_map[node][1]
-        if "y" in tiled_groups:
-            y_elem = tiled_groups["y"]
-            if V.graph.sizevars.shape_env.has_hint(y_elem):
-                return V.graph.sizevars.size_hint(y_elem)
-        return 1
-
-    # Sort by ynumel to group similar sizes together
-    ynumel_cache = {node: get_ynumel(node) for node in nodes}
-    sorted_nodes = sorted(nodes, key=lambda n: ynumel_cache[n])
-
-    partitions: list[list[BaseSchedulerNode]] = []
-    current_partition: list[BaseSchedulerNode] = [sorted_nodes[0]]
-    current_min = ynumel_cache[sorted_nodes[0]]
-
-    for node in sorted_nodes[1:]:
-        node_ynumel = ynumel_cache[node]
-        if node_ynumel / max(current_min, 1) > max_ratio:
-            partitions.append(current_partition)
-            current_partition = [node]
-            current_min = node_ynumel
-        else:
-            current_partition.append(node)
-
-    if current_partition:
-        partitions.append(current_partition)
-
-    if len(partitions) > 1:
-        log.debug(
-            "ComboKernels: Partitioned %d nodes into %d groups by ynumel ratio (max_ratio=%.1f)",
-            len(nodes),
-            len(partitions),
-            max_ratio,
-        )
-
-    return partitions
-
-
-def _partition_by_xnumel_ratio(
-    nodes: list[BaseSchedulerNode],
-    node_info_map: dict[BaseSchedulerNode, tuple[Any, Any, Any, Any]],
-    max_ratio: float,
-) -> list[list[BaseSchedulerNode]]:
-    """
-    Partition nodes so that xnumel ratio within each group <= max_ratio.
-    Prevents fusing kernels with vastly different X dimensions / total work.
-    """
-    if len(nodes) <= 1 or max_ratio <= 0:
-        return [nodes] if nodes else []
-
-    def get_xnumel(node: BaseSchedulerNode) -> int:
-        _, tiled_groups, _, _ = node_info_map[node]
-        if "x" in tiled_groups:
-            x_elem = tiled_groups["x"]
-            if V.graph.sizevars.shape_env.has_hint(x_elem):
-                return V.graph.sizevars.size_hint(x_elem)
-        return 1
-
-    sorted_nodes = sorted(nodes, key=get_xnumel)
-
-    partitions: list[list[BaseSchedulerNode]] = []
-    current_partition: list[BaseSchedulerNode] = [sorted_nodes[0]]
-    current_min = get_xnumel(sorted_nodes[0])
-
-    for node in sorted_nodes[1:]:
-        node_xnumel = get_xnumel(node)
-        if node_xnumel / max(current_min, 1) > max_ratio:
-            partitions.append(current_partition)
-            current_partition = [node]
-            current_min = node_xnumel
-        else:
-            current_partition.append(node)
-
-    if current_partition:
-        partitions.append(current_partition)
-
-    return partitions
-
-
 def _default_custom_combo_kernel_horizontal_partition(
     nodes: list[BaseSchedulerNode],
     triton_scheduling: SIMDScheduling,
@@ -196,23 +102,6 @@ def _default_custom_combo_kernel_horizontal_partition(
                 "ComboKernels: %d long reduction nodes are separated",
                 len(long_reduction),
             )
-
-        threshold = config.combo_kernel_reduction_saturation_threshold
-        if threshold > 0 and reduction:
-            large_grid_reduction = [
-                n
-                for n in reduction
-                if V.graph.sizevars.size_hint(kernel_map[n].numels.get("x", 1)) // 64
-                > threshold
-            ]
-            if large_grid_reduction:
-                log.debug(
-                    "ComboKernels: %d reduction nodes excluded (grid > %d)",
-                    len(large_grid_reduction),
-                    threshold,
-                )
-                reduction = [n for n in reduction if n not in large_grid_reduction]
-                nodes_per_ndim.extend([node] for node in large_grid_reduction)
         large_pointwise = [
             n
             for n in not_reduction
@@ -230,38 +119,9 @@ def _default_custom_combo_kernel_horizontal_partition(
             not_reduction = [n for n in not_reduction if n not in large_pointwise]
             nodes_per_ndim.extend([node] for node in large_pointwise)
 
-        # Partition not_reduction by ynumel and xnumel ratio
-        if not_reduction:
-            partitions = [not_reduction]
-
-            if config.combo_kernel_max_ynumel_ratio > 0:
-                new_partitions = []
-                for partition in partitions:
-                    new_partitions.extend(
-                        _partition_by_ynumel_ratio(
-                            partition,
-                            node_info_map,
-                            config.combo_kernel_max_ynumel_ratio,
-                        )
-                    )
-                partitions = new_partitions
-
-            if config.combo_kernel_max_xnumel_ratio > 0:
-                new_partitions = []
-                for partition in partitions:
-                    new_partitions.extend(
-                        _partition_by_xnumel_ratio(
-                            partition,
-                            node_info_map,
-                            config.combo_kernel_max_xnumel_ratio,
-                        )
-                    )
-                partitions = new_partitions
-
-            nodes_per_ndim.extend(partitions)
-
-        # Add reduction partitions as before
-        nodes_per_ndim.extend(g for g in (short_reduction, long_reduction) if g)
+        nodes_per_ndim.extend(
+            g for g in (not_reduction, short_reduction, long_reduction) if g
+        )
 
     assert sum(len(p) for p in nodes_per_ndim) == len(nodes)
     return nodes_per_ndim
@@ -460,8 +320,17 @@ class ComboKernel(Kernel):
                     )
                     else (kernel.min_x_blocks_list[i], True)
                 )
+
+                # NEW: Use per-sub-kernel XBLOCK
+                if config.combo_kernel_per_subkernel_blocks:
+                    xblock_var = f"XBLOCK_{i}"
+                else:
+                    xblock_var = "XBLOCK"
+
                 xblock_str = (
-                    f"tl.cdiv({xnumels}, XBLOCK)" if not no_x_dim else f"{xnumels}"
+                    f"tl.cdiv({xnumels}, {xblock_var})"
+                    if not no_x_dim
+                    else f"{xnumels}"
                 )
                 if i == 0:
                     code.splice(f"num_xblocks_{i} = {xblock_str}")
@@ -599,6 +468,22 @@ class ComboKernel(Kernel):
             if tree.prefix == "x" and sub_kernel.no_x_dim:
                 code.writeline(f"XBLOCK_{num}: tl.constexpr = 1")
                 uniquify_block_sizes.append("XBLOCK")
+
+            if config.combo_kernel_per_subkernel_blocks:
+                if tree.prefix == "x" and not sub_kernel.no_x_dim:
+                    code.writeline(f"XBLOCK = XBLOCK_{num}")
+                    uniquify_block_sizes.append("XBLOCK")
+                elif tree.prefix == "y":
+                    code.writeline(f"YBLOCK = YBLOCK_{num}")
+                    uniquify_block_sizes.append("YBLOCK")
+                elif tree.is_reduction and sub_kernel.inside_reduction:
+                    # Handle reduction blocks: r0_, r1_, etc.
+                    if sub_kernel.persistent_reduction:
+                        continue  # R0_BLOCK_{num} already defined above
+                    prefix_upper = tree.prefix.upper()  # r0_ -> R0_
+                    code.writeline(f"{prefix_upper}BLOCK = {prefix_upper}BLOCK_{num}")
+                    uniquify_block_sizes.append(f"{prefix_upper}BLOCK")
+
         self.grids.append(grid)
         return uniquify_block_sizes
 
@@ -721,22 +606,7 @@ class ComboKernel(Kernel):
     def select_dispatch_strategy(self) -> None:
         if self.dispatch_class is not None:
             return
-        # mixed_sizes is used for optimize_mask, so it only allows sequential dispatch
-        # Not mixed sizes on y dim technically is ok to use round robin as wells.
-        if not self.mixed_sizes or any(isinstance(e, str) for e in self.x_numels_list):
-            # str in x_numels_list means a dynamic shape
-            self.dispatch_class = ComboKernel.SequentialDispatch
-            return
-        # A negative x_blocks_list element means the kernel is not tunable,
-        # i.e., no_x_dim = True
-        x_numels_list = [abs(cast(int, e)) for e in self.x_numels_list]
-        total = max(x_numels_list) * len(x_numels_list)
-        needed = sum(x_numels_list)
-        if needed / total > BLOCK_UTILIZATION:
-            # Introduced overhead (masked blocks) is less than 20%
-            self.dispatch_class = ComboKernel.RoundRobinDispatch
-        else:
-            self.dispatch_class = ComboKernel.SequentialDispatch
+        self.dispatch_class = ComboKernel.SequentialDispatch
 
     def jit_line(
         self,
@@ -838,21 +708,45 @@ class ComboKernel(Kernel):
         **Update self.block_args**
         Return the block args
         """
-        block_names = {}
-        for sub_kernel in self.sub_kernels:
-            # TODO: we assume all sub_kernels have the same block size
-            for tree in sub_kernel.range_trees:
-                # pyrefly: ignore [missing-argument]
-                if tree.is_reduction and (
-                    not sub_kernel.inside_reduction or sub_kernel.persistent_reduction
-                ):
-                    continue
-                if tree.prefix == "x" and sub_kernel.no_x_dim:
-                    continue
-                block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
-        self.block_args = list(block_names.keys())
-
-        return [ConstexprArg(x) for x in block_names]
+        if config.combo_kernel_per_subkernel_blocks:
+            # Per-sub-kernel: XBLOCK_0, YBLOCK_0, XBLOCK_1, YBLOCK_1, ...
+            block_names = {}
+            for i, sub_kernel in enumerate(self.sub_kernels):
+                for tree in sub_kernel.range_trees:
+                    # pyrefly: ignore [missing-argument]
+                    if tree.is_reduction and (
+                        not sub_kernel.inside_reduction
+                        or sub_kernel.persistent_reduction
+                    ):
+                        continue
+                    if tree.prefix == "x" and sub_kernel.no_x_dim:
+                        continue
+                    # Use indexed block names: XBLOCK_0, YBLOCK_0, XBLOCK_1, ...
+                    # Handle reduction blocks (r0_, r1_, etc.)
+                    # pyrefly: ignore [missing-argument]
+                    if tree.is_reduction:
+                        # Reduction blocks: R0_BLOCK_0, R1_BLOCK_0, etc.
+                        block_names[f"{tree.prefix.upper()}BLOCK_{i}"] = tree.prefix
+                    else:
+                        # Non-reduction blocks: XBLOCK_0, YBLOCK_0, etc.
+                        block_names[f"{tree.prefix.upper()}BLOCK_{i}"] = tree.prefix
+            self.block_args = list(block_names.keys())
+        else:
+            # Existing: shared XBLOCK, YBLOCK
+            block_names = {}
+            for sub_kernel in self.sub_kernels:
+                for tree in sub_kernel.range_trees:
+                    # pyrefly: ignore [missing-argument]
+                    if tree.is_reduction and (
+                        not sub_kernel.inside_reduction
+                        or sub_kernel.persistent_reduction
+                    ):
+                        continue
+                    if tree.prefix == "x" and sub_kernel.no_x_dim:
+                        continue
+                    block_names[f"{tree.prefix.upper()}BLOCK"] = tree.prefix
+            self.block_args = list(block_names.keys())
+        return [ConstexprArg(x) for x in self.block_args]
 
     def add_numel_to_args(
         self, argdefs: list[ArgName], signature: list[Any]
@@ -1169,10 +1063,20 @@ class ComboKernel(Kernel):
             "num_kernels": num_kernels,
             "min_blocks": min_blocks,
             "default_config": default_config,
+            "per_subkernel_blocks": config.combo_kernel_per_subkernel_blocks,
         }
 
         for num, sub_kernel in enumerate(self.sub_kernels):
             meta[f"no_x_dim_{num}"] = sub_kernel.no_x_dim
+
+            if config.combo_kernel_per_subkernel_blocks:
+                if sub_kernel.persistent_reduction:
+                    meta[f"heuristic_{num}"] = "persistent_reduction"
+                elif sub_kernel.inside_reduction:
+                    meta[f"heuristic_{num}"] = "reduction"
+                else:
+                    meta[f"heuristic_{num}"] = "pointwise"
+
             for tree in sub_kernel.range_trees:
                 # pyrefly: ignore [missing-argument]
                 if not tree.is_reduction:
@@ -1181,5 +1085,13 @@ class ComboKernel(Kernel):
                         meta[numel_name] = None
                     else:
                         meta[numel_name] = int(V.graph.sizevars.simplify(tree.numel))
-
+                else:
+                    if config.combo_kernel_per_subkernel_blocks:
+                        numel_name = f"{tree.prefix}numel_{num}"
+                        if numel_name in self.dynamic_shape_args:
+                            meta[numel_name] = None
+                        else:
+                            meta[numel_name] = int(
+                                V.graph.sizevars.simplify(tree.numel)
+                            )
         return meta

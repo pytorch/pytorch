@@ -210,86 +210,87 @@ class ComboKernelTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
     @requires_gpu_and_triton
-    @torch._inductor.config.patch("combo_kernel_max_ynumel_ratio", 16)
-    def test_combo_kernel_max_ynumel_ratio(self):
-        def fn(t0, t1, t2, t3, t4, t5, t6, t7):
-            o0 = t0.contiguous(
-                memory_format=torch.channels_last
-            )  # ynumel=12,    xnumel=50176
-            o1 = t1.contiguous(
-                memory_format=torch.channels_last
-            )  # ynumel=192,   xnumel=9
-            o2 = t2.contiguous(
-                memory_format=torch.channels_last
-            )  # ynumel=4096,  xnumel=9
-            o3 = t3.contiguous(
-                memory_format=torch.channels_last
-            )  # ynumel=8192,  xnumel=9
-            o4 = t4.contiguous(
-                memory_format=torch.channels_last
-            )  # ynumel=16384, xnumel=9
-            o5 = t5.contiguous(
-                memory_format=torch.channels_last
-            )  # ynumel=32768, xnumel=9
-            o6 = t6.contiguous(
-                memory_format=torch.channels_last
-            )  # ynumel=65536, xnumel=9
-            o7 = t7.contiguous(
-                memory_format=torch.channels_last
-            )  # ynumel=65536, xnumel=9
-            return o0, o1, o2, o3, o4, o5, o6, o7
+    @torch._inductor.config.patch(combo_kernel_per_subkernel_blocks=True)
+    def test_combo_kernel_per_config_subkernel_pointwise(self):
+        def fn(t1, t2):
+            o1 = t1.contiguous(memory_format=torch.channels_last)
+            o2 = t2.contiguous(memory_format=torch.channels_last)
+            return o1, o2
 
         inps = [
-            torch.randn(4, 3, 224, 224, device="cuda"),
-            torch.randn(64, 3, 3, 3, device="cuda"),
-            torch.randn(64, 64, 3, 3, device="cuda"),
-            torch.randn(128, 64, 3, 3, device="cuda"),
-            torch.randn(128, 128, 3, 3, device="cuda"),
-            torch.randn(256, 128, 3, 3, device="cuda"),
-            torch.randn(256, 256, 3, 3, device="cuda"),
-            torch.randn(256, 256, 3, 3, device="cuda"),
+            torch.randn(4, 3, 224, 224, device=GPU_TYPE),
+            torch.randn(256, 256, 3, 3, device=GPU_TYPE),
         ]
+
         out_eager = fn(*inps)
         fn_c = torch.compile(fn)
         out_compiled, code = run_and_get_code(fn_c, *inps)
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        FileCheck().check("YBLOCK_0 : tl.constexpr, XBLOCK_0 : tl.constexpr").check(
+            "YBLOCK_1 : tl.constexpr, XBLOCK_1 : tl.constexpr"
+        ).run(code[0])
 
     @requires_gpu_and_triton
-    @torch._inductor.config.patch("combo_kernel_max_xnumel_ratio", 64)
-    def test_combo_kernel_max_xnumel_ratio(self):
-        def fn(small, large):
-            t1 = small * 2 + 1
-            t2 = large * 2 + 1
-            return t1, t2
-
-        inps = [
-            torch.randn(1024, device="cuda"),
-            torch.randn(1024, 5000, device="cuda"),
-        ]
-        out_eager = fn(*inps)
-        fn_c = torch.compile(fn)
-        out_compiled, code = run_and_get_code(fn_c, *inps)
-        self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
-
-    @requires_gpu_and_triton
-    @torch._inductor.config.patch("combo_kernel_reduction_saturation_threshold", 64)
-    def test_combo_kernel_reduction_saturation(self):
+    @torch._inductor.config.patch(combo_kernel_per_subkernel_blocks=True)
+    def test_combo_kernel_per_config_subkernel_per_reduction(self):
         def fn(a, b):
-            r1 = a.sum(dim=2)
-            r2 = b.sum(dim=2)
+            return a.sum(dim=-1), b.sum(dim=-1)
+
+        inps = [
+            torch.randn(768, 256, device=GPU_TYPE),
+            torch.randn(512, 512, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        FileCheck().check("R0_BLOCK_0: tl.constexpr = 256").check(
+            "R0_BLOCK_1: tl.constexpr = 512"
+        ).run(code[0])
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(combo_kernel_per_subkernel_blocks=True)
+    def test_combo_kernel_per_config_subkernel_reduction(self):
+        def fn(a, b):
+            r1 = a.max(dim=-1)
+            r2 = b.min(dim=-1)
             return r1, r2
 
         inps = [
-            torch.randn(96, 1024, 128, device="cuda", dtype=torch.float16),
-            torch.randn(96, 1024, 128, device="cuda", dtype=torch.float16),
+            torch.randn(8192, 2048, device=GPU_TYPE),
+            torch.randn(512, 2048, device=GPU_TYPE),
         ]
         out_eager = fn(*inps)
         fn_c = torch.compile(fn)
         out_compiled, code = run_and_get_code(fn_c, *inps)
         self.assertEqual(out_eager, out_compiled)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        FileCheck().check(
+            "XBLOCK_0 : tl.constexpr, R0_BLOCK_0 : tl.constexpr, XBLOCK_1 : tl.constexpr, R0_BLOCK_1 : tl.constexpr"
+        ).run(code[0])
+
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(combo_kernel_per_subkernel_blocks=True)
+    def test_combo_kernel_per_config_subkernel_mixed_reduction(self):
+        def fn(a, b):
+            r1 = a.sum(dim=-1)  # persistent_reduction
+            r2 = b.sum(dim=-1)  # reduction
+            return r1, r2
+
+        inps = [
+            torch.randn(768, 1024, device=GPU_TYPE),
+            torch.randn(512, 2048, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        FileCheck().check(
+            "XBLOCK_0 : tl.constexpr, XBLOCK_1 : tl.constexpr, R0_BLOCK_1 : tl.constexpr"
+        ).run(code[0])
 
 
 @instantiate_parametrized_tests
