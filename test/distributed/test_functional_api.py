@@ -817,6 +817,203 @@ class TestFunctionalAutogradWithDistributedBackend(DistributedTestBase):
         self.assertEqual(t.grad, torch.full_like(t, 2.0))
 
 
+class TestAsyncCollectiveTensorWithFunctorch(TestCase):
+    # these tests verify that AsyncCollectiveTensor works correctly with torch.func
+    # transforms (jvp, grad) which wrap tensors in TensorWrapper
+
+    def test_jvp_with_async_collective_tensor(self):
+        class F(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input * 2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output * 2
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def jvp(ctx, input_tangent):
+                return ft_c._maybe_wrap_tensor(input_tangent * 2)
+
+        inp = torch.randn(3)
+        tangent = torch.ones(3)
+        result, jvp_result = torch.func.jvp(F.apply, (inp,), (tangent,))
+
+        self.assertEqual(result, inp * 2)
+        self.assertEqual(jvp_result.shape, tangent.shape)
+
+    def test_nested_jvp_with_async_collective_tensor(self):
+        class F(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def jvp(ctx, input_tangent):
+                return ft_c._maybe_wrap_tensor(input_tangent)
+
+        def outer_fn(x):
+            def inner_fn(y):
+                return F.apply(y).sum()
+
+            _, inner_jvp = torch.func.jvp(inner_fn, (x,), (torch.ones_like(x),))
+            return inner_jvp
+
+        inp = torch.randn(3)
+        tangent = torch.ones(3)
+
+        result, jvp_result = torch.func.jvp(outer_fn, (inp,), (tangent,))
+        self.assertIsInstance(result, torch.Tensor)
+        self.assertIsInstance(jvp_result, torch.Tensor)
+
+    def test_grad_of_jvp_with_async_collective_tensor(self):
+        class F(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input**2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def jvp(ctx, input_tangent):
+                return ft_c._maybe_wrap_tensor(input_tangent)
+
+        def fn(x):
+            tangent = torch.ones_like(x)
+            _, jvp_out = torch.func.jvp(F.apply, (x,), (tangent,))
+            return jvp_out.sum()
+
+        inp = torch.randn(3, requires_grad=True)
+        grad_fn = torch.func.grad(fn)
+        result = grad_fn(inp)
+
+        self.assertIsInstance(result, torch.Tensor)
+        self.assertEqual(result.shape, inp.shape)
+
+    def test_jvp_of_grad_with_async_collective_tensor(self):
+        class F(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input**2
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def jvp(ctx, input_tangent):
+                return ft_c._maybe_wrap_tensor(input_tangent * 2)
+
+        def fn(x):
+            return F.apply(x).sum()
+
+        def outer_fn(x):
+            grad_fn = torch.func.grad(fn)
+            return grad_fn(x).sum()
+
+        inp = torch.randn(3)
+        tangent = torch.ones(3)
+
+        result, jvp_result = torch.func.jvp(outer_fn, (inp,), (tangent,))
+        self.assertIsInstance(result, torch.Tensor)
+        self.assertIsInstance(jvp_result, torch.Tensor)
+
+    def test_multidimensional_jvp_with_async_collective_tensor(self):
+        class F(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def jvp(ctx, input_tangent):
+                return ft_c._maybe_wrap_tensor(input_tangent)
+
+        inp = torch.randn(2, 3, 4)
+        tangent = torch.ones(2, 3, 4)
+
+        result, jvp_result = torch.func.jvp(F.apply, (inp,), (tangent,))
+
+        self.assertEqual(result.shape, inp.shape)
+        self.assertEqual(jvp_result.shape, tangent.shape)
+
+    def test_wait_tensor_no_crash_with_jvp(self):
+        def f(x):
+            waited = ft_c.wait_tensor(x)
+            return waited.sum()
+
+        inp = torch.randn(3)
+        tangent = torch.ones(3)
+
+        result, jvp_result = torch.func.jvp(f, (inp,), (tangent,))
+
+        self.assertIsInstance(result, torch.Tensor)
+        self.assertEqual(result, inp.sum())
+
+    def test_trigger_wait_with_multiple_levels(self):
+        class F(torch.autograd.Function):
+            @staticmethod
+            def forward(input):
+                return input
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                return grad_output
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                pass
+
+            @staticmethod
+            def jvp(ctx, input_tangent):
+                wrapped = ft_c._maybe_wrap_tensor(input_tangent)
+                return wrapped.trigger_wait()
+
+        def nested_fn(x):
+            def inner(y):
+                return F.apply(y).sum()
+
+            _, jvp_out = torch.func.jvp(inner, (x,), (torch.ones_like(x),))
+            return jvp_out
+
+        inp = torch.randn(3)
+        tangent = torch.ones(3)
+
+        result, jvp_result = torch.func.jvp(nested_fn, (inp,), (tangent,))
+
+        self.assertIsInstance(result, torch.Tensor)
+        self.assertIsInstance(jvp_result, torch.Tensor)
+
+
 # Update the supported devices in DEVICE
 instantiate_device_type_tests(
     TestCollectivesWithDistributedBackend, globals(), only_for=DEVICE, allow_xpu=True

@@ -137,6 +137,12 @@ def wait_tensor(tensor):
     return torch.ops._c10d_functional.wait_tensor(tensor)  # type: ignore[attr-defined]
 
 
+def _recursive_unwrap_functorch(tensor: "torch.Tensor") -> "torch.Tensor":
+    if torch._C._functorch.is_functorch_wrapped_tensor(tensor):
+        return _recursive_unwrap_functorch(torch._C._functorch.get_unwrapped(tensor))
+    return tensor
+
+
 def broadcast(self: torch.Tensor, src: int, group: RANK_TYPES, tag: str = ""):
     """
     Broadcasts the tensor to all processes in the given process group.
@@ -1056,7 +1062,8 @@ class AsyncCollectiveTensor(torch.Tensor):
             # Fast handle aten.view as a lot of view related op goes to aten.view
             # eventually, this avoids pytree slowdown
 
-            res = func(args[0].elem, args[1])
+            elem = _recursive_unwrap_functorch(args[0].elem)
+            res = func(elem, args[1])
             wrapper_res = AsyncCollectiveTensor(res)
             return wrapper_res
 
@@ -1065,8 +1072,10 @@ class AsyncCollectiveTensor(torch.Tensor):
         def unwrap(e: AsyncCollectiveTensor):
             # wait_tensor is idepotent and will do stream sync only once
             if not is_view_op:
-                return e.trigger_wait()
-            return e.elem
+                result = e.trigger_wait()
+            else:
+                result = e.elem
+            return _recursive_unwrap_functorch(result)
 
         def wrap(e: torch.Tensor):
             # wait_tensor is idepotent and will do stream sync only once
