@@ -1552,7 +1552,6 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in dict_methods:
                 if isinstance(args[0], variables.UserDefinedDictVariable):
-                    # pyrefly: ignore [missing-attribute]
                     return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.ConstDictVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1561,7 +1560,6 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in set_methods:
                 if isinstance(args[0], variables.UserDefinedSetVariable):
-                    # pyrefly: ignore [missing-attribute]
                     return args[0]._set_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.SetVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -2198,7 +2196,7 @@ class BuiltinVariable(VariableTracker):
                 "2 args",
                 f"{len(args)} args",
             )
-        # pyrefly: ignore [bad-unpacking]
+
         arg, value = args
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
@@ -2207,7 +2205,6 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, dict):
             arg_list = [ConstantVariable.create(k) for k in arg]
             return DictVariableType(
-                # pyrefly: ignore [bad-argument-type]
                 dict.fromkeys(arg_list, value),
                 user_cls,
                 mutation_type=ValueMutationNew(),
@@ -2216,7 +2213,6 @@ class BuiltinVariable(VariableTracker):
             keys = arg.force_unpack_var_sequence(tx)
             if all(is_hashable(v) for v in keys):
                 return DictVariableType(
-                    # pyrefly: ignore [bad-argument-type]
                     dict.fromkeys(keys, value),
                     user_cls,
                     mutation_type=ValueMutationNew(),
