@@ -29,10 +29,19 @@ LinearImpl::LinearImpl(const LinearOptions& options_) : options(options_) {
 }
 
 void LinearImpl::reset() {
+  // Build tensor options from device/dtype if specified
+  auto tensor_opts = torch::TensorOptions();
+  if (options.device().has_value()) {
+    tensor_opts = tensor_opts.device(options.device().value());
+  }
+  if (options.dtype().has_value()) {
+    tensor_opts = tensor_opts.dtype(options.dtype().value());
+  }
+
   weight = register_parameter(
-      "weight", torch::empty({options.out_features(), options.in_features()}));
+      "weight", torch::empty({options.out_features(), options.in_features()}, tensor_opts));
   if (options.bias()) {
-    bias = register_parameter("bias", torch::empty(options.out_features()));
+    bias = register_parameter("bias", torch::empty(options.out_features(), tensor_opts));
   } else {
     bias = register_parameter("bias", {}, /*requires_grad=*/false);
   }
