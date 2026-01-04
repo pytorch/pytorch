@@ -1085,6 +1085,42 @@ class PallasTestsMixin:
         result = compiled_model(tokens)
         self.assertEqual(result, expected)
 
+    def test_mlp_block_with_residual(self):
+        """Test MLP block with LayerNorm and residual connection.
+
+        This test verifies that the common transformer MLP block pattern works
+        correctly, combining LayerNorm, linear layers, GELU activation, and
+        residual connections. This exercises both the view/reshape fix for
+        residual broadcasting and the LayerNorm partial reduction handling.
+        """
+        if self.DEVICE == "cuda":
+            self.skipTest(
+                "MLP block with residual not supported in Pallas GPU (Mosaic) backend"
+            )
+
+        class MLPBlock(torch.nn.Module):
+            def __init__(self, dim, hidden_dim):
+                super().__init__()
+                self.norm = torch.nn.LayerNorm(dim)
+                self.w1 = torch.nn.Linear(dim, hidden_dim)
+                self.w2 = torch.nn.Linear(hidden_dim, dim)
+
+            def forward(self, x):
+                h = self.norm(x)
+                h = self.w2(torch.nn.functional.gelu(self.w1(h)))
+                return x + h
+
+        model = MLPBlock(dim=8, hidden_dim=32)
+        model.eval()
+        if self.DEVICE != "cpu":
+            model = model.to(self.DEVICE)
+
+        x = torch.randn(2, 4, 8, device=self.DEVICE)
+        expected = model(x)
+        compiled_model = self._compile(model)
+        result = compiled_model(x)
+        self.assertEqual(result, expected)
+
     def test_torch_nn_LayerNorm(self):
         """Test nn.LayerNorm with Pallas backend.
 
