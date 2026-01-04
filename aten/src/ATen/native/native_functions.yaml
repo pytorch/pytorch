@@ -8974,6 +8974,7 @@
 
 - func: inductor_reserve_rng_state(Generator? generator, int increment) -> (Tensor, Tensor, Tensor)
   variants: function
+  tags: nondeterministic_seeded
   device_guard: false
   dispatch:
     CUDA: inductor_reserve_rng_state
