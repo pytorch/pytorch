@@ -1017,6 +1017,37 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
+    def test_residual_connection(self):
+        """Test residual connection pattern: x + relu(linear(x)).
+
+        This test verifies that view/reshape operations fused into kernels work
+        correctly when input buffers have different shapes (e.g., matmul output
+        shape (8, 8) vs input shape (2, 4, 8) that need element-wise addition).
+        """
+        if self.DEVICE == "cuda":
+            self.skipTest(
+                "Residual connection not supported in Pallas GPU (Mosaic) backend"
+            )
+
+        class ResidualBlock(torch.nn.Module):
+            def __init__(self, dim):
+                super().__init__()
+                self.linear = torch.nn.Linear(dim, dim)
+
+            def forward(self, x):
+                return x + torch.relu(self.linear(x))
+
+        model = ResidualBlock(8)
+        model.eval()
+        if self.DEVICE != "cpu":
+            model = model.to(self.DEVICE)
+
+        x = torch.randn(2, 4, 8, device=self.DEVICE)
+        expected = model(x)
+        compiled_model = self._compile(model)
+        result = compiled_model(x)
+        self.assertEqual(result, expected)
+
     def test_torch_nn_LayerNorm(self):
         """Test nn.LayerNorm with Pallas backend.
 

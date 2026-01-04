@@ -1740,6 +1740,55 @@ class PallasKernel(SIMDKernel):
         reshape_dims[axis_pos] = -1
         return f"{load_expr}.reshape({', '.join(map(str, reshape_dims))})"
 
+    def _maybe_reshape_view_buffer(
+        self, name: str, index: sympy.Expr, load_expr: str
+    ) -> str:
+        """
+        Reshape buffer to target shape when input buffers have mismatched shapes.
+
+        Handles view/reshape cases where buffers have different shapes but same numel.
+        """
+        # Get this buffer's shape and numel
+        buf_obj = V.graph.get_buffer(name)
+        if buf_obj is None:
+            return load_expr
+
+        buf_size = buf_obj.get_size()
+        buf_shape = tuple(self._safe_int(s) for s in buf_size)
+        if None in buf_shape:
+            return load_expr
+
+        buf_numel = 1
+        for s in buf_shape:
+            buf_numel *= s
+
+        # Find if any other buffer has same numel but different shape
+        target_shape = None
+        for other_name in self.features.buf_accesses():
+            if other_name == name:
+                continue
+            other_buf = V.graph.get_buffer(other_name)
+            if other_buf is None:
+                continue
+            other_size = other_buf.get_size()
+            other_shape = tuple(self._safe_int(s) for s in other_size)
+            if None in other_shape:
+                continue
+            other_numel = 1
+            for s in other_shape:
+                other_numel *= s
+
+            if other_numel == buf_numel and other_shape != buf_shape:
+                # Found mismatch - use shape with more dimensions
+                target_shape = other_shape if len(other_shape) > len(buf_shape) else buf_shape
+                break
+
+        if target_shape is None or target_shape == buf_shape:
+            return load_expr
+
+        shape_str = ", ".join(str(s) for s in target_shape)
+        return f"{load_expr}.reshape({shape_str})"
+
     def _check_im2col_pattern(
         self, index: sympy.Expr, index_str: str, needs_flatten: bool
     ) -> tuple[str, bool]:
@@ -2113,6 +2162,8 @@ class PallasKernel(SIMDKernel):
             load_expr = self._maybe_squeeze_intermediate_buffer(name, load_expr)
             # Handle 1D buffer broadcasting for higher-dimensional kernels
             load_expr = self._maybe_broadcast_1d_buffer(name, index, load_expr)
+            # Handle view/reshape case where buffer shape differs from expected shape
+            load_expr = self._maybe_reshape_view_buffer(name, index, load_expr)
 
         return self.cse.generate(
             self.compute,
