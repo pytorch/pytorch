@@ -2765,7 +2765,7 @@ def pointwise(
                     ]
                 )
     if len(size_hints) == 3:
-        if not inductor_meta.get("max_autotune_pointwise"):
+        if not (inductor_meta.get("max_autotune_pointwise") or torch.xpu.is_available()):
             configs = [triton_config_with_settings(size_hints, 16, 16, 16)]
         else:
             configs = [
