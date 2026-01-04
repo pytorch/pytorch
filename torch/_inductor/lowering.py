@@ -6378,7 +6378,10 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
 
 
 def use_two_step_variance(x, axis, keepdim, threshold=1024):
-    # Instead of unrolling welford, just unroll the simpler two-step var
+    # two-step algorithm can get better performance in small reductions size
+    # while it can accumulate more numerical error than Welford algorithm.
+    # 1024 is a default value to pass all the UTs about accuracy.
+    # A larger threshold can still get performance benefits.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
