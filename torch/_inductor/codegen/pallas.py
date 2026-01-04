@@ -2627,8 +2627,43 @@ class PallasKernel(SIMDKernel):
                 # Use a helper to find reduction axes by product matching
                 reduction_expr = f"_pallas_partial_reduce({reduction_op}, {value}, {pointwise_numel}, {reduction_numel})"
             elif is_symbolic_partial:
-                # Symbolic sizes: use axis-based reduction (axis=0 for outer reduction)
-                reduction_expr = f"{reduction_ops[reduction_type]}({value}, axis=0)"
+                # Symbolic sizes: determine axis from load index analysis
+                # Default to last axis (most common for reductions like LayerNorm)
+                reduction_axis = -1
+                if self.load_index_exprs:
+                    # Get the first load index expression
+                    load_index = next(iter(self.load_index_exprs.values()))
+                    # Find the reduction variable
+                    reduction_vars = [
+                        var
+                        for var, entry in self.range_tree_nodes.items()
+                        if entry.is_reduction  # pyrefly: ignore [missing-argument]
+                    ]
+                    if reduction_vars:
+                        r_var = reduction_vars[0]
+                        r_coeff = load_index.coeff(r_var)
+                        r_stride = self._safe_int(r_coeff) if r_coeff != 0 else 1
+                        if r_stride is None:
+                            r_stride = 1
+                        pw_vars = [
+                            var
+                            for var, entry in self.range_tree_nodes.items()
+                            if not entry.is_reduction  # pyrefly: ignore [missing-argument]
+                        ]
+                        if pw_vars:
+                            pw_var = pw_vars[0]
+                            pw_coeff = load_index.coeff(pw_var)
+                            pw_stride = self._safe_int(pw_coeff) if pw_coeff != 0 else 1
+                            if pw_stride is None:
+                                pw_stride = 1
+                            # Higher stride = outer axis (lower axis number)
+                            # For LayerNorm on (batch, seq, dim): reduce over dim (last axis)
+                            # r_stride=1 (inner), pw_stride=dim (outer) -> axis=-1
+                            reduction_axis = 0 if r_stride > pw_stride else -1
+                # Use keepdims=True to preserve dimensionality for proper broadcasting
+                # This is critical for operations like LayerNorm where the reduced
+                # values need to broadcast back to the original shape
+                reduction_expr = f"{reduction_ops[reduction_type]}({value}, axis={reduction_axis}, keepdims=True)"
             else:
                 # Full reduction to scalar
                 reduction_expr = f"{reduction_ops[reduction_type]}({value})"
@@ -2890,15 +2925,13 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                     length_str = self.kexpr(renamed_length)
                     length_val = self._safe_int(length)
 
-                    # For symbolic lengths, only reshape if we have a valid target shape
-                    # Without a target, we can't determine correct dimensions
+                    # For symbolic lengths, reshape for proper broadcasting when
+                    # there are multiple broadcast dimensions
                     if length_val is None:
-                        if (
-                            reshape_target_shape
-                            and num_broadcast_dims > 1
-                            and idx != total_var_idx
-                        ):
-                            # Symbolic var in multi-broadcast case needs reshape
+                        # Check if we need to reshape for broadcasting
+                        # This is needed when we have mixed pointwise/reduction vars
+                        if num_broadcast_dims > 1 and idx != total_var_idx:
+                            # Find position of this var among broadcast vars
                             broadcast_idx = next(
                                 (
                                     i
@@ -2908,7 +2941,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                                 None,
                             )
                             if broadcast_idx is not None:
-                                # Same logic as concrete case
+                                # Determine axis placement based on var types
                                 has_reduction_vars = any(
                                     str(v).startswith("r")
                                     for _, v, _, _ in broadcast_vars
@@ -2919,8 +2952,10 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                                 )
                                 is_mixed = has_reduction_vars and has_pointwise_vars
                                 if is_mixed:
+                                    # Mixed kernel: pointwise vars first, reduction vars last
                                     axis_idx = broadcast_idx
                                 else:
+                                    # Same-type: reverse order (first var -> innermost)
                                     axis_idx = num_broadcast_dims - 1 - broadcast_idx
                                 shape_parts = ["1"] * num_broadcast_dims
                                 shape_parts[axis_idx] = length_str
