@@ -2644,11 +2644,72 @@ def pointwise(
     filename=None,
     min_elem_per_thread=0,
     inductor_meta=None,
+    return_configs=False,
 ):
     """
     Construct @triton.heuristics() based on size_hints.
     """
     inductor_meta = {} if inductor_meta is None else inductor_meta
+
+    if inductor_meta.get("combo_grid_meta", {}).get("per_subkernel_blocks"):
+        combo_meta = inductor_meta["combo_grid_meta"]
+        num_kernels = combo_meta["num_kernels"]
+
+        combined_kwargs = {}
+        max_num_warps = 1
+        max_num_stages = 1
+
+        for i in range(num_kernels):
+            # Build size_hints_i from combo_grid_meta
+            size_hints_i = {}
+            xnumel = combo_meta.get(f"xnumel_{i}")
+            ynumel = combo_meta.get(f"ynumel_{i}")
+            if xnumel is not None:
+                size_hints_i["x"] = next_power_of_2(xnumel)
+            if ynumel is not None:
+                size_hints_i["y"] = next_power_of_2(ynumel)
+            if not size_hints_i:
+                size_hints_i = {"x": 1}
+
+            inductor_meta_i = {
+                k: v for k, v in inductor_meta.items() if k != "combo_grid_meta"
+            }
+            configs_i = pointwise(
+                size_hints_i,
+                triton_meta,
+                tile_hint=tile_hint,
+                filename=filename,
+                min_elem_per_thread=min_elem_per_thread,
+                inductor_meta=inductor_meta_i,
+                return_configs=True,
+            )
+
+            cfg = configs_i[0]
+
+            # Rename: XBLOCK -> XBLOCK_i, YBLOCK -> YBLOCK_i
+            for key, value in cfg.kwargs.items():
+                combined_kwargs[f"{key}_{i}"] = value
+
+            max_num_warps = max(max_num_warps, cfg.num_warps)
+            max_num_stages = max(max_num_stages, cfg.num_stages)
+
+        configs = [
+            triton.Config(
+                combined_kwargs, num_warps=max_num_warps, num_stages=max_num_stages
+            )
+        ]
+
+        if return_configs:
+            return configs
+        return cached_autotune(
+            None,
+            configs,
+            triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
+            heuristic_type=HeuristicType.POINTWISE,
+            filename=filename,
+        )
+
     assert not inductor_meta.get("no_x_dim")
 
     numel = functools.reduce(operator.mul, size_hints.values())
@@ -2770,6 +2831,8 @@ def pointwise(
         raise NotImplementedError(f"size_hints: {size_hints}")
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
+    if return_configs:
+        return configs
 
     return cached_autotune(
         size_hints,
@@ -3241,13 +3304,93 @@ def reduction(
     triton_meta=None,
     filename=None,
     inductor_meta=None,
+    return_configs=False,
 ):
-    """args to @triton.heuristics()"""
+    """
+    Construct @triton.heuristics() decorator for reduction kernels based on size_hints.
+    """
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
 
+    combo_meta = inductor_meta.get("combo_grid_meta")
+    if combo_meta is not None and combo_meta.get("per_subkernel_blocks"):
+        num_kernels = combo_meta["num_kernels"]
+
+        combined_kwargs = {}
+        max_num_warps = 1
+        max_num_stages = 1
+
+        for i in range(num_kernels):
+            heuristic_type = combo_meta.get(f"heuristic_{i}", "reduction")
+            size_hints_i = {}
+
+            xnumel = combo_meta.get(f"xnumel_{i}")
+            if xnumel is not None:
+                size_hints_i["x"] = next_power_of_2(xnumel)
+            else:
+                size_hints_i["x"] = size_hints.get("x", 1)
+
+            r0_numel = combo_meta.get(f"r0_numel_{i}")
+            if r0_numel is not None:
+                size_hints_i["r0_"] = next_power_of_2(r0_numel)
+            elif "r0_" in size_hints:
+                size_hints_i["r0_"] = size_hints["r0_"]
+
+            inductor_meta_i = {
+                k: v for k, v in inductor_meta.items() if k != "combo_grid_meta"
+            }
+
+            if heuristic_type == "reduction":
+                configs_i = reduction(
+                    size_hints_i,
+                    reduction_hint=reduction_hint,
+                    triton_meta=triton_meta,
+                    filename=filename,
+                    inductor_meta=inductor_meta_i,
+                    return_configs=True,
+                )
+            elif heuristic_type == "persistent_reduction":
+                configs_i = persistent_reduction(
+                    size_hints_i,
+                    reduction_hint=reduction_hint,
+                    triton_meta=triton_meta,
+                    filename=filename,
+                    inductor_meta=inductor_meta_i,
+                    return_configs=True,
+                )
+
+            cfg = configs_i[0]
+
+            for key, value in cfg.kwargs.items():
+                if (
+                    heuristic_type == "persistent_reduction"
+                    and key.startswith("R")
+                    and "BLOCK" in key
+                ):
+                    continue
+                combined_kwargs[f"{key}_{i}"] = value
+
+            max_num_warps = max(max_num_warps, cfg.num_warps)
+            max_num_stages = max(max_num_stages, cfg.num_stages)
+
+        configs = [
+            triton.Config(
+                combined_kwargs, num_warps=max_num_warps, num_stages=max_num_stages
+            )
+        ]
+
+        if return_configs:
+            return configs
+        return cached_autotune(
+            size_hints,
+            configs,
+            triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
+            heuristic_type=HeuristicType.REDUCTION,
+            filename=filename,
+        )
     assert triton_meta is not None
 
     num_dynamic = 0
@@ -3264,6 +3407,9 @@ def reduction(
 
     configs = _maybe_filter_configs_for_tma_restrictions(inductor_meta, configs)
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+
+    if return_configs:
+        return configs
 
     return cached_autotune(
         size_hints,
@@ -3464,12 +3610,76 @@ def persistent_reduction(
     triton_meta=None,
     filename=None,
     inductor_meta=None,
+    return_configs=False,
 ):
     """Generate persistent reductions + mix-order if available"""
     inductor_meta = {} if inductor_meta is None else inductor_meta
     inductor_meta["reduction_hint"] = reduction_hint
     if inductor_meta.get("no_x_dim"):
         size_hints["x"] = 1
+
+    if inductor_meta.get("combo_grid_meta", {}).get("per_subkernel_blocks"):
+        combo_meta = inductor_meta["combo_grid_meta"]
+        num_kernels = combo_meta["num_kernels"]
+
+        combined_kwargs = {}
+        max_num_warps = 1
+        max_num_stages = 1
+
+        for i in range(num_kernels):
+            size_hints_i = {}
+
+            xnumel = combo_meta.get(f"xnumel_{i}")
+            if xnumel is not None:
+                size_hints_i["x"] = next_power_of_2(xnumel)
+            else:
+                size_hints_i["x"] = size_hints.get("x", 1)
+
+            r0_numel = combo_meta.get(f"r0_numel_{i}")
+            if r0_numel is not None:
+                size_hints_i["r0_"] = next_power_of_2(r0_numel)
+            elif "r0_" in size_hints:
+                size_hints_i["r0_"] = size_hints["r0_"]
+
+            inductor_meta_i = {
+                k: v for k, v in inductor_meta.items() if k != "combo_grid_meta"
+            }
+
+            configs_i = persistent_reduction(
+                size_hints_i,
+                reduction_hint=reduction_hint,
+                triton_meta=triton_meta,
+                filename=filename,
+                inductor_meta=inductor_meta_i,
+                return_configs=True,
+            )
+            cfg = configs_i[0]
+
+            for key, value in cfg.kwargs.items():
+                if key.startswith("R") and "BLOCK" in key:
+                    continue
+                combined_kwargs[f"{key}_{i}"] = value
+
+            max_num_warps = max(max_num_warps, cfg.num_warps)
+            max_num_stages = max(max_num_stages, cfg.num_stages)
+
+        configs = [
+            triton.Config(
+                combined_kwargs, num_warps=max_num_warps, num_stages=max_num_stages
+            )
+        ]
+
+        if return_configs:
+            return configs
+
+        return cached_autotune(
+            size_hints,
+            configs,
+            triton_meta=triton_meta,
+            inductor_meta=inductor_meta,
+            heuristic_type=HeuristicType.PERSISTENT_REDUCTION,
+            filename=filename,
+        )
 
     configs = _persistent_reduction_configs(
         size_hints, reduction_hint, inductor_meta, triton_meta
@@ -3531,6 +3741,9 @@ def persistent_reduction(
         configs = unique_configs(new_configs)
 
     configs = filter_reduction_configs_for_determinism(inductor_meta, configs)
+    if return_configs:
+        return configs
+
     return cached_autotune(
         size_hints,
         configs,
@@ -3916,9 +4129,26 @@ class ComboKernelGrid(GridExpr):
         if combo_meta["min_blocks"]:
             self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
         if ynumels:
-            self.y_grid = self.ceildiv(self.maximum(ynumels), meta.get("YBLOCK"))
+            if combo_meta.get("per_subkernel_blocks"):
+                # Each sub-kernel has its own YBLOCK_i
+                self.y_grid = self.maximum(
+                    [
+                        self.ceildiv(ynumels[i], meta.get(f"YBLOCK_{i}"))
+                        for i in range(len(ynumels))
+                    ]
+                )
+            else:
+                self.y_grid = self.ceildiv(self.maximum(ynumels), meta.get("YBLOCK"))
         if znumels:
-            self.z_grid = self.ceildiv(self.maximum(znumels), meta.get("ZBLOCK"))
+            if combo_meta.get("per_subkernel_blocks"):
+                self.z_grid = self.maximum(
+                    [
+                        self.ceildiv(znumels[i], meta.get(f"ZBLOCK_{i}"))
+                        for i in range(len(znumels))
+                    ]
+                )
+            else:
+                self.z_grid = self.ceildiv(self.maximum(znumels), meta.get("ZBLOCK"))
 
     def combo_x_grid(
         self,
@@ -3930,19 +4160,24 @@ class ComboKernelGrid(GridExpr):
 
 
 class SequentialComboKernelGrid(ComboKernelGrid):
-    def combo_x_grid(
-        self,
-        xnumels: list[int | str],
-        no_x_dims: list[bool],
-        meta: dict[str, int],
-    ) -> str | int:
-        assert len(xnumels) == len(no_x_dims)
-        return self.summation(
-            [
-                self.ceildiv(x, 1 if no_x_dim else meta.get("XBLOCK"))
-                for x, no_x_dim in zip(xnumels, no_x_dims)
-            ]
-        )
+    def combo_x_grid(self, xnumels, no_x_dims, meta):
+        combo_meta = self.inductor_meta["combo_grid_meta"]
+        per_subkernel_blocks = combo_meta.get("per_subkernel_blocks", False)
+
+        if per_subkernel_blocks:
+            return self.summation(
+                [
+                    self.ceildiv(x, 1 if no_x_dim else meta.get(f"XBLOCK_{i}"))
+                    for i, (x, no_x_dim) in enumerate(zip(xnumels, no_x_dims))
+                ]
+            )
+        else:
+            return self.summation(
+                [
+                    self.ceildiv(x, 1 if no_x_dim else meta.get("XBLOCK"))
+                    for x, no_x_dim in zip(xnumels, no_x_dims)
+                ]
+            )
 
 
 class RoundRobinComboKernelGrid(ComboKernelGrid):
