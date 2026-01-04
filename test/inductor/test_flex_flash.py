@@ -25,7 +25,7 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_utils import parametrize, subtest
+from torch.testing._internal.common_utils import decorateIf, parametrize
 
 
 def _times_two(score, _b, _h, _m, _n):
@@ -643,93 +643,69 @@ MASK_MOD_CASES = [
 ]
 
 GQA_MQA_BLOCK_MASK_CASES = [
-    subtest(
-        MaskModCase(
-            "gqa_block_mask_causal",
-            lambda _dtype, _device: _causal_mask,
-            num_heads=8,
-            num_heads_kv=2,
-            block_mask_num_heads=1,
-        ),
-        decorators=[unittest.expectedFailure],
+    MaskModCase(
+        "gqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=1,
     ),
-    subtest(
-        MaskModCase(
-            "gqa_block_mask_causal_per_head",
-            lambda _dtype, _device: _causal_mask,
-            num_heads=8,
-            num_heads_kv=2,
-            block_mask_num_heads=8,
-        ),
-        decorators=[unittest.expectedFailure],
+    MaskModCase(
+        "gqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=8,
     ),
-    subtest(
-        MaskModCase(
-            "backward_gqa_block_mask_causal",
-            lambda _dtype, _device: _causal_mask,
-            num_heads=8,
-            num_heads_kv=2,
-            block_mask_num_heads=1,
-            seq_len=257,
-            requires_grad=True,
-        ),
-        decorators=[unittest.expectedFailure],
+    MaskModCase(
+        "backward_gqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=1,
+        seq_len=257,
+        requires_grad=True,
     ),
-    subtest(
-        MaskModCase(
-            "backward_gqa_block_mask_causal_per_head",
-            lambda _dtype, _device: _causal_mask,
-            num_heads=8,
-            num_heads_kv=2,
-            block_mask_num_heads=8,
-            seq_len=257,
-            requires_grad=True,
-        ),
-        decorators=[unittest.expectedFailure],
+    MaskModCase(
+        "backward_gqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=8,
+        seq_len=257,
+        requires_grad=True,
     ),
-    subtest(
-        MaskModCase(
-            "mqa_block_mask_causal",
-            lambda _dtype, _device: _causal_mask,
-            num_heads=8,
-            num_heads_kv=1,
-            block_mask_num_heads=1,
-        ),
-        decorators=[unittest.expectedFailure],
+    MaskModCase(
+        "mqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=1,
     ),
-    subtest(
-        MaskModCase(
-            "mqa_block_mask_causal_per_head",
-            lambda _dtype, _device: _causal_mask,
-            num_heads=8,
-            num_heads_kv=1,
-            block_mask_num_heads=8,
-        ),
-        decorators=[unittest.expectedFailure],
+    MaskModCase(
+        "mqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=8,
     ),
-    subtest(
-        MaskModCase(
-            "backward_mqa_block_mask_causal",
-            lambda _dtype, _device: _causal_mask,
-            num_heads=8,
-            num_heads_kv=1,
-            block_mask_num_heads=1,
-            seq_len=257,
-            requires_grad=True,
-        ),
-        decorators=[unittest.expectedFailure],
+    MaskModCase(
+        "backward_mqa_block_mask_causal",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=1,
+        seq_len=257,
+        requires_grad=True,
     ),
-    subtest(
-        MaskModCase(
-            "backward_mqa_block_mask_causal_per_head",
-            lambda _dtype, _device: _causal_mask,
-            num_heads=8,
-            num_heads_kv=1,
-            block_mask_num_heads=8,
-            seq_len=257,
-            requires_grad=True,
-        ),
-        decorators=[unittest.expectedFailure],
+    MaskModCase(
+        "backward_mqa_block_mask_causal_per_head",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=8,
+        seq_len=257,
+        requires_grad=True,
     ),
 ]
 
@@ -795,6 +771,10 @@ class TestFlexFlash(InductorTestCase):
             ),
         )
 
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: torch.cuda.get_device_capability()[0] == 9,
+    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
     def test_flash_attention_gqa_mqa_block_mask_cases(self, device, dtype, case):
