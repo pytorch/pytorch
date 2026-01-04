@@ -2701,7 +2701,7 @@ def _get_num_workers(verbose: bool) -> int | None:
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
         from setuptools import distutils  # type: ignore[attr-defined]
-        # pyrefly: ignore [missing-attribute]
+
         return distutils._msvccompiler._get_vc_env(vc_arch)
     except AttributeError:
         try:
