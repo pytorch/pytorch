@@ -19,7 +19,7 @@ import torch.multiprocessing as mp
 import torch.testing._internal.common_utils as common
 import torch.utils.cpp_extension
 from torch.testing._internal.common_cuda import TEST_CUDA, TEST_CUDNN
-from torch.testing._internal.common_utils import gradcheck, TEST_XPU
+from torch.testing._internal.common_utils import gradcheck, TEST_XPU, win_safe_rmtree
 from torch.utils.cpp_extension import (
     _get_cuda_arch_flags,
     _TORCH_PATH,
@@ -155,9 +155,7 @@ class TestCppExtensionJIT(common.TestCase):
             self.assertEqual(z, torch.ones_like(z))
         finally:
             if IS_WINDOWS:
-                # rmtree returns permission error: [WinError 5] Access is denied
-                # on Windows, this is a workaround
-                subprocess.run(["rd", "/s", "/q", temp_dir], stdout=subprocess.PIPE)
+                win_safe_rmtree(temp_dir)
             else:
                 shutil.rmtree(temp_dir)
 
@@ -303,9 +301,7 @@ class TestCppExtensionJIT(common.TestCase):
                 _check_cuobjdump_output(expected[1], is_ptx=True)
         finally:
             if IS_WINDOWS:
-                # rmtree returns permission error: [WinError 5] Access is denied
-                # on Windows, this is a word-around
-                subprocess.run(["rm", "-rf", temp_dir], stdout=subprocess.PIPE)
+                win_safe_rmtree(temp_dir)
             else:
                 shutil.rmtree(temp_dir)
 

@@ -29,6 +29,7 @@ import re
 import shutil
 import signal
 import socket
+import stat
 import subprocess
 import sys
 import tempfile
@@ -5763,6 +5764,57 @@ def check_leaked_tensors(limit=1, matched_type=torch.Tensor):
     finally:
         gc.set_debug(0)
 
+def win_safe_rmtree(path):
+    """
+    Robustly removes a directory tree on Windows.
+    Handles read-only file attributes and reports process-level locks via logging.
+    """
+    if not os.path.exists(path):
+        return
+
+    def handle_error(func, path, exc_info):
+        """
+        Custom error handler for shutil.rmtree to manage Windows-specific failures.
+        """
+        # exc_info is a tuple: (type, value, traceback)
+        exc_type, exc_value, exc_traceback = exc_info
+        
+        # 1. Attempt to fix permission issues (e.g., read-only files)
+        try:
+            # S_IWRITE ensures the file is writable, bypassing WinError 5 for attributes
+            os.chmod(path, stat.S_IWRITE)
+            # Retry the operation that failed (os.unlink or os.rmdir)
+            func(path)
+            return
+        except Exception:
+            # If chmod doesn't solve it, move to lock detection
+            pass
+
+        # 2. Identify Windows System Error Codes
+        # WinError 32: The file is being used by another process (Sharing Violation)
+        # WinError 5: Access is denied (Common when a DLL/.pyd is loaded in memory)
+        winerror = getattr(exc_value, 'winerror', None)
+        
+        if winerror in (5, 32):
+            log.warning(
+                "Cleanup skipped: Build artifact is locked. "
+                "Path: %s. "
+                "Reason: Windows Error %s. A process (e.g., Python, Ninja, or Linker) "
+                "is still holding a handle to this file.",
+                path, winerror
+            )
+        else:
+            # Log unexpected errors that might indicate disk or OS issues
+            log.error(
+                "Unexpected cleanup error at %s: %s (WinError: %s)",
+                path, str(exc_value), winerror
+            )
+
+    # Execute rmtree using the logic above
+    try:
+        shutil.rmtree(path, onerror=handle_error)
+    except Exception as e:
+        log.error("Fatal exception during directory traversal for %s: %s", path, e)
 
 def remove_cpp_extensions_build_root():
     """
@@ -5771,9 +5823,7 @@ def remove_cpp_extensions_build_root():
     default_build_root = cpp_extension.get_default_build_root()
     if os.path.exists(default_build_root):
         if IS_WINDOWS:
-            # rmtree returns permission error: [WinError 5] Access is denied
-            # on Windows, this is a workaround
-            subprocess.run(["rm", "-rf", default_build_root], stdout=subprocess.PIPE)
+            win_safe_rmtree(default_build_root)
         else:
             shutil.rmtree(default_build_root, ignore_errors=True)
 
