@@ -417,4 +417,40 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     :param Tensor out_splits_offsets: Tensor containing the splits and offsets of data received from each peer. Must be symmetric. Must be of size (2, group_size * ne). The rows are (in order): output splits and output offsets.
     :param str group_name: Name of the group to perform all-to-all on.
 
+
+.. py:function:: tile_reduce(in_tile: Tensor, out_tile: Tensor, root: int, group_name: str, [reduce_op: str = 'sum']) -> None
+
+    Reduces a 2D tile from all ranks to a specified root rank within a process group.
+
+    :param Tensor in_tile: Input 2D tensor to be reduced. Must be symmetrically allocated.
+    :param Tensor out_tile: Output 2D tensor to contain the result of the reduction. Must be symmetric and have the same shape, dtype, and device as `in_tile`.
+    :param int root: The rank of the process in the specified group that will receive the reduced result.
+    :param str group_name: The name of the symmetric memory process group to perform the reduction in.
+    :param str reduce_op: The reduction operation to perform. Currently, only ``"sum"`` is supported. Defaults to ``"sum"``.
+
+    This function reduces `in_tile` tensors from all members of the group, writing the result to `out_tile` at the root rank. All ranks must participate and provide the same `group_name` and tensor shapes.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> full_inp = symm_mem.empty(full_size, full_size)
+        >>> full_out = symm_mem.empty(full_size, full_size)
+        >>> # Operate on the bottom-right quadrant of the tensor
+        >>> tile_size = full_size // 2
+        >>> s = slice(tile_size, 2 * tile_size)
+        >>> in_tile = full_inp[s, s]
+        >>> out_tile = full_out[s, s]
+        >>> torch.ops.symm_mem.tile_reduce(in_tile, out_tile, root=0, group_name)
+
+
+.. py:function:: multi_root_tile_reduce(in_tiles: list[Tensor], out_tile: Tensor, roots: list[int], group_name: str, [reduce_op: str = 'sum']) -> None
+
+    Perform multiple tile reductions concurrently, with each tile reduced to a separate root.
+
+    : param list[Tensor] in_tiles: A list of input tensors.
+    : param Tensor out_tile: Output tensor to contain the reduced tile.
+    : param list[int] roots: A list of root ranks each corresponding to an input tile in `in_tiles`, in the same order. A rank cannot be a root more than once.
+    : param str group_name: Name of the group to use for the collective operation.
+    : param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
+
 ```
