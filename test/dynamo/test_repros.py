@@ -76,6 +76,7 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfWindows,
     TEST_WITH_ROCM,
+    xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
@@ -7488,6 +7489,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             msg,
         )
 
+    @xfailIfS390X
     @unittest.skipIf(
         sys.version_info < (3, 12) or sys.version_info >= (3, 14),
         "only 3.12, 3.13 affected by c recursion limit",
