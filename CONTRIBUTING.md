@@ -1183,27 +1183,28 @@ Note: There's a [compilation issue](https://github.com/uxlfoundation/oneDNN/issu
 
 ## Pre-commit tidy/linting hook
 
-We use clang-tidy to perform additional
-formatting and semantic checking of code. We provide a pre-commit git hook for
-performing these checks, before a commit is created:
+Please see [The Wiki Pre-Commit Guide](https://github.com/pytorch/pytorch/wiki/Pre-Commit-Checks) for up to date guides on steps to take before committing.
 
-  ```bash
-  ln -s ../../tools/git-pre-commit .git/hooks/pre-commit
-  ```
+See the [Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type) page for information on setting up linters in your local development environment.
 
-If you have already committed files and
-CI reports `flake8` errors, you can run the check locally in your PR branch with:
+Given you have a working installation of lintrunner, you can set up a pre-commit hook to check for linting errors on any files by creating or adding the following to your .git/hooks/pre-commit file.
 
-  ```bash
-  flake8 $(git diff --name-only $(git merge-base --fork-point main))
-  ```
+```
+#!/usr/bin/sh
+# Get staged files
+STAGED_FILES=$(git diff --cached --name-only --diff-filter=ACMR)
 
-You'll need to install an appropriately configured flake8; see
-[Lint as you type](https://github.com/pytorch/pytorch/wiki/Lint-as-you-type)
-for documentation on how to do this.
+if [ -n "$STAGED_FILES" ]; then
+    $(lintrunner --paths-cmd='git diff --cached --name-only --diff-filter=ACMR')
+    echo "$STAGED_FILES" | xargs lintrunner
+    if [ $? -ne 0 ]; then
+        echo "Linting failed. Please fix the issues and try again."
+        exit 1
+    fi
+fi
+```
 
-Fix the code so that no errors are reported when you re-run the above check again,
-and then commit the fix.
+Note: It is possible to skip the pre-commit hooks check with the git commit `--no-verify` flag in the case there are lint errors in unrelated sections which may muddy your PR.
 
 ## Building PyTorch with ASAN
 
