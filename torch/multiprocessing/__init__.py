@@ -49,6 +49,16 @@ from .spawn import (
     start_processes,
 )
 
+__all__ += [
+    "spawn",
+    "start_processes",
+    "ProcessContext",
+    "SpawnContext",
+    "ProcessExitedException",
+    "ProcessRaisedException",
+    "ENV_VAR_PARALLEL_START",
+]
+
 
 if sys.platform == "darwin" or sys.platform == "win32":
     _sharing_strategy = "file_system"
