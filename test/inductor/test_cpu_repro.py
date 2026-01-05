@@ -2828,7 +2828,15 @@ class CPUReproTests(TestCase):
                 return self.layernorm(x)
 
         mod = L().eval()
-        for mean, std in [(0, 1e10), (1e10, 10), (1e10, 1e10), (0, 1)]:
+        for mean, std in [
+            (0, 1e10),
+            (1e10, 10),
+            (1e10, 1e10),
+            (0, 1),
+            (0, 0.5),
+            (0.5, 1),
+            (0, 2),
+        ]:
             x = torch.randn(M, N)
             row_means = x.mean(dim=1, keepdim=True)
             row_stds = x.std(dim=1, keepdim=True, unbiased=True)
