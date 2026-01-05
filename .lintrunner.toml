@@ -1813,3 +1813,15 @@ command = [
     '--',
     '@{{PATHSFILE}}'
 ]
+
+[[linter]]
+code = 'STABLE_SHIM_USAGE'
+include_patterns = [
+    'torch/csrc/stable/**/*.h',
+]
+command = [
+    'python3',
+    'tools/linter/adapters/stable_shim_usage_linter.py',
+    '--',
+    '@{{PATHSFILE}}'
+]
