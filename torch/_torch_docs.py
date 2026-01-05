@@ -628,7 +628,7 @@ Example::
             [1.-1.j, 3.-3.j]])
     >>> (A.adjoint() == A.mH).all()
     tensor(True)
-""",
+""".format(**multi_dim_common),
 )
 
 add_docstr(
