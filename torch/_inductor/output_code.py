@@ -946,14 +946,14 @@ class RegionalOutputCode(OutputCode):
     )
 
     # Optional filter for ops during serialization
-    _ops_filter: Optional[Callable[[str], bool]] = dataclasses.field(
+    _ops_filter: Callable[[str], bool] | None = dataclasses.field(
         default=None, init=False
     )
 
     def __init__(
         self,
         graph_module: torch.fx.GraphModule,
-        ops_filter: Optional[Callable[[str], bool]] = None,
+        ops_filter: Callable[[str], bool] | None = None,
     ):
         """
         Args:
@@ -1022,13 +1022,6 @@ class RegionalOutputCode(OutputCode):
         """
         if self._graph_module is not None:
             from torch.fx._graph_pickler import GraphPickler, Options
-
-            # These often times contain stacks with pointers to unserializable
-            # objects, so we clear them out.
-            for node in self._graph_module.graph.nodes:
-                node.meta.pop("source_fn_stack", None)
-                node.meta.pop("nn_module_stack", None)
-                node.meta.pop("fwd_source_fn_stack", None)
 
             # Only pass Options if user specified a custom ops_filter,
             # otherwise let GraphPickler use its default safe filter

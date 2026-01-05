@@ -1931,7 +1931,7 @@ class MetaConverter(Generic[_TensorT]):
         # when source is not None.  Because we refakify after Dynamo is done,
         # we don't want to dump info again from AOTAutograd, it is redundant.
         trace: bool = True,
-        fake_mode: Optional[FakeTensorMode] = None,
+        fake_mode: FakeTensorMode | None = None,
     ) -> _TensorT:
         callback_: _MetaTensorCallback[_TensorT]
         if callback is None:

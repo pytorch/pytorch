@@ -2,11 +2,11 @@
 
 import contextlib
 import itertools
-import random
 import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
+from hashlib import sha256
 from typing import Any, Optional
 from unittest.mock import patch
 
@@ -1338,7 +1338,7 @@ def aot_compile_joint_with_descriptors(
     cache_ctx = nullcontext()
     if torch._dynamo.config.enable_aot_compile:
         jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
-            str(random.random()),
+            sha256(str(jd).encode("utf-8")).hexdigest(),
             time.time_ns(),
             forward_symints=[],
         )

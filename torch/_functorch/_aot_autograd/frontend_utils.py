@@ -64,7 +64,7 @@ def process_inputs(
                 return x
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
-                if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
+                if any(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
                     for attr in attrs:
                         attr_val = getattr(x, attr)
                         if attr_val.fake_mode is not fake_mode:
