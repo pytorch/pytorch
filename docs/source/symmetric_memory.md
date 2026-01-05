@@ -227,6 +227,42 @@ kernel, the decorator will search your system paths for the NVSHMEM device
 library. If it is available, Triton will include the necessary device assembly
 to use the NVSHMEM functions.
 
+## Using Memory Pool
+
+Memory pool allows PyTorch SymmMem to cache memory allocations that have been
+rendezvoused, saving time when creating new tensors.  For convenience, PyTorch
+SymmMem has added a `get_mem_pool` API to return a symmetric memory pool. Users
+can use the returned MemPool with the `torch.cuda.use_mem_pool` context manager.
+In the example below, tensor `x` will be created from symmetric memory:
+
+```python
+    import torch.distributed._symmetric_memory as symm_mem
+
+    mempool = symm_mem.get_mem_pool(device)
+
+    with torch.cuda.use_mem_pool(mempool):
+        x = torch.arange(128, device=device)
+
+    torch.ops.symm_mem.one_shot_all_reduce(x, "sum", group_name)
+```
+
+Similarly, you can put a compute operation under the MemPool context, and the
+result tensor will be created from symmetric memory too.
+
+```python
+    dim = 1024
+    w = torch.ones(dim, dim, device=device)
+    x = torch.ones(1, dim, device=device)
+
+    mempool = symm_mem.get_mem_pool(device)
+    with torch.cuda.use_mem_pool(mempool):
+        # y will be in symmetric memory
+        y = torch.mm(x, w)
+```
+
+As of torch 2.11, the `CUDA` and `NVSHMEM` backends support MemPool. MemPool
+support of the `NCCL` backend is in progress.
+
 ## API Reference
 
 ```{eval-rst}
@@ -251,6 +287,10 @@ to use the NVSHMEM functions.
 
 ```{eval-rst}
 .. autofunction:: get_backend
+```
+
+```{eval-rst}
+.. autofunction:: get_mem_pool
 ```
 
 ## Op Reference
