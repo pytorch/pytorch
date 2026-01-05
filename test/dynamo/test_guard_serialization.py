@@ -8,6 +8,7 @@ import types
 import unittest
 import weakref
 from collections.abc import Iterator
+from typing import NamedTuple
 from unittest.mock import patch
 
 import torch
@@ -21,6 +22,7 @@ from torch._dynamo.bytecode_transformation import transform_code_object
 from torch._dynamo.exc import PackageError
 from torch._dynamo.guards import CheckFunctionManager, CompileId
 from torch._dynamo.package import CompilePackage
+from torch._dynamo.source import LocalSource
 from torch._dynamo.symbolic_convert import (
     ExceptionStack,
     InstructionTranslator,
@@ -299,8 +301,16 @@ class CustomConstantType:
         # custom hash ignores b
         return hash(self.a)
 
+    def __repr__(self):
+        return f"CustomConstantType(a={self.a!r}, b={self.b!r})"
 
-pytree.register_constant(CustomConstantType)
+    def __fx_repr__(self):
+        return f"CustomConstantType(a={self.a!r}, b={self.b!r})", {
+            "CustomConstantType": CustomConstantType
+        }
+
+
+torch._library.opaque_object.register_opaque_type(CustomConstantType, typ="value")
 
 
 class TestGuardSerializationBase(torch._inductor.test_case.TestCase):
@@ -547,6 +557,33 @@ class TestGuardSerialization(TestGuardSerializationBase):
         self._test_check_fn(ref, loaded, {"m": m}, True)
         self._test_check_fn(ref, loaded, {"m": GlobalModule()}, True)
         self._test_check_fn(ref, loaded, {"m": torch.nn.Module()}, False)
+
+        # Check verbose_code_parts from leaf guards (they include hints)
+        def check_leaf_guards(mgr):
+            for guard in mgr.get_leaf_guards():
+                verbose_parts = guard.verbose_code_parts()
+                verbose_str = " ".join(verbose_parts)
+                if "___check_type_id" in verbose_str and "L['m']" in verbose_str:
+                    self.assertIn(
+                        "HINT: type",
+                        verbose_str,
+                        (
+                            "TYPE_MATCH guard should include 'HINT: type' "
+                            f"annotation.\nGuard: {verbose_str}"
+                        ),
+                    )
+                    self.assertIn(
+                        "GlobalModule",
+                        verbose_str,
+                        (
+                            "TYPE_MATCH guard should include type name "
+                            f"'GlobalModule'.\nGuard: {verbose_str}"
+                        ),
+                    )
+            for child_mgr in mgr.get_child_managers():
+                check_leaf_guards(child_mgr)
+
+        check_leaf_guards(ref.root)
 
     def test_tensor_subclass_metadata_match(self):
         class LocalSubclass(torch.Tensor):
@@ -1749,6 +1786,19 @@ class TestGuardSerialization(TestGuardSerializationBase):
         with torch.compiler.set_stance("fail_on_recompile"):
             self.assertEqual(compiled_fn(x), foo(x))
 
+    def test_nested_named_tuple(self):
+        class NestedTuple(NamedTuple):
+            a: int
+            b: int
+            c: torch.Tensor
+
+        def fn(x: NestedTuple):
+            return x.a + x.b + x.c
+
+        x = NestedTuple(1, 2, torch.randn(3, 2))
+
+        ref, loaded = self._test_serialization("TENSOR_MATCH", fn, x)
+
     def test_sdp_backend_serialization(self):
         def fn(x, backend):
             # Use the backend enum in a guard-producing way
@@ -1790,6 +1840,17 @@ class TestGuardSerialization(TestGuardSerializationBase):
             {"x": x, "backend": torch.nn.attention.SDPBackend.CUDNN_ATTENTION},
             False,
         )
+
+    def test_source_serialization(self):
+        # Test that "equal" sources with different hashes serialize to the same result
+        src1 = LocalSource("x")
+        src2 = LocalSource("x")
+
+        # Force different cached hashes to test that serialization excludes _hash
+        object.__setattr__(src1, "_hash", 12345)
+        object.__setattr__(src2, "_hash", 67890)
+
+        self.assertEqual(pickle.dumps(src1), pickle.dumps(src2))
 
 
 class SimpleModule(torch.nn.Module):

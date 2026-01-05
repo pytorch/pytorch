@@ -102,7 +102,7 @@ def tf32_on_and_off(tf32_precision=1e-5):
                 cond = cond and (torch.device(kwargs["device"]).type == "xpu")
             if "dtype" in kwargs:
                 cond = cond and (
-                    kwargs["dtype"] in {torch.float32}
+                    kwargs["dtype"] == torch.float32
                 )  # TODO: add complex64
             if cond:
                 with_tf32_disabled(kwargs["self"], lambda: f(**kwargs))
@@ -1494,6 +1494,106 @@ def forward(self, x_1, w_1):
 
         mean_err = ((res - ref).abs() / ref).mean()
         self.assertTrue(mean_err < 0.05)
+
+    @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("M", [1, 32, 64])
+    @parametrize("N", [1, 32, 64])
+    @parametrize("K", [1, 32, 64])
+    @parametrize("batch_size", [None, 1, 16])
+    def test_mm_bmm_dtype_overload(self, input_dtype, M, N, K, batch_size):
+        device = "xpu"
+        dtype = input_dtype
+
+        def create_inputs(B=None):
+            if B is None:
+                a = torch.randn(M, K, device=device, dtype=dtype)
+                b = torch.randn(K, N, device=device, dtype=dtype)
+            else:
+                a = torch.randn(B, M, K, device=device, dtype=dtype)
+                b = torch.randn(B, K, N, device=device, dtype=dtype)
+            return a, b
+
+        a, b = create_inputs(batch_size)
+
+        a_fp32, b_fp32 = a.to(torch.float32), b.to(torch.float32)
+
+        output_dtypes = [torch.float32]
+
+        if input_dtype != torch.float32:
+            output_dtypes.append(input_dtype)
+
+        for output_dtype in output_dtypes:
+            # Catch edge case of incompat with bfloat16 and major version < 8
+            if batch_size:
+                out = torch.bmm(a, b, out_dtype=output_dtype)
+                baseline = (
+                    torch.bmm(a_fp32, b_fp32)
+                    if output_dtype == torch.float32
+                    else torch.bmm(a, b)
+                )
+            else:
+                out = torch.mm(a, b, out_dtype=output_dtype)
+                baseline = (
+                    torch.mm(a_fp32, b_fp32)
+                    if output_dtype == torch.float32
+                    else torch.mm(a, b)
+                )
+
+            self.assertEqual(out.dtype, output_dtype)
+            torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
+
+    @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
+    @parametrize("M", [1, 32, 64])
+    @parametrize("N", [1, 32, 64])
+    @parametrize("K", [1, 32, 64])
+    @parametrize("batch_size", [None, 1, 32])
+    def test_addmm_baddmm_dtype_overload(self, input_dtype, M, N, K, batch_size):
+        device = "xpu"
+        dtype = input_dtype
+
+        def create_inputs(B=None):
+            if B is None:
+                a = torch.randn(M, K, device=device, dtype=dtype)
+                b = torch.randn(K, N, device=device, dtype=dtype)
+                c = torch.randn(M, N, device=device, dtype=dtype)
+            else:
+                a = torch.randn(B, M, K, device=device, dtype=dtype)
+                b = torch.randn(B, K, N, device=device, dtype=dtype)
+                c = torch.randn(B, M, N, device=device, dtype=dtype)
+
+            return a, b, c
+
+        a, b, c = create_inputs(batch_size)
+
+        a_fp32, b_fp32, c_fp32 = (
+            a.to(torch.float32),
+            b.to(torch.float32),
+            c.to(torch.float32),
+        )
+
+        output_dtypes = [torch.float32]
+
+        if input_dtype != torch.float32:
+            output_dtypes.append(input_dtype)
+
+        for output_dtype in output_dtypes:
+            if batch_size:
+                out = torch.baddbmm(c, a, b, out_dtype=output_dtype)
+                baseline = (
+                    torch.baddbmm(c_fp32, a_fp32, b_fp32)
+                    if output_dtype == torch.float32
+                    else torch.baddbmm(c, a, b)
+                )
+            else:
+                out = torch.addmm(c, a, b, out_dtype=output_dtype)
+                baseline = (
+                    torch.addmm(c_fp32, a_fp32, b_fp32)
+                    if output_dtype == torch.float32
+                    else torch.addmm(c, a, b)
+                )
+
+            self.assertEqual(out.dtype, output_dtype)
+            torch.testing.assert_close(out, baseline, atol=1e-3, rtol=1e-3)
 
 
 instantiate_device_type_tests(TestBasicGEMM, globals(), only_for="xpu", allow_xpu=True)
