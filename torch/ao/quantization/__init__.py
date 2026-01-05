@@ -11,8 +11,6 @@ from .fake_quantize import *  # noqa: F403
 from .fuse_modules import fuse_modules, fuse_modules_qat  # noqa: F403
 from .fuser_method_mappings import *  # noqa: F403
 from .observer import *  # noqa: F403
-
-# pyrefly: ignore [deprecated]
 from .qconfig import *  # noqa: F403
 from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403
