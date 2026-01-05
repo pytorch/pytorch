@@ -189,10 +189,17 @@ Tensor trace_backward_symint(const Tensor& grad, c10::SymIntArrayRef sizes) {
 
   c10::SymInt diag_len = sizes[0] < sizes[1] ? sizes[0] : sizes[1];
 
-  auto indices = at::arange(
+  auto arange = at::arange(
       diag_len,
       grad.options().dtype(at::kLong)
-  ) * (sizes[1] + 1);
+  );
+
+  auto stride = at::scalar_tensor(
+      sizes[1] + 1,
+      grad.options().dtype(at::kLong)
+  );
+
+  auto indices = arange * stride;
 
   if (isTensorSubclassLike(grad)) {
     grad_input = grad_input.index_fill(0, indices, grad);
