@@ -764,6 +764,7 @@ pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", N
 
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
+    # Disable by default on free-threaded builds since they always do a full collection, which can be slow
     default=sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",

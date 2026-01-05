@@ -3293,13 +3293,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
             b = x.sin()
-            assert x[0] == 2, f"Error {x}: {x.size()}"
+            assert x[0] == 2, x
             return x.cos() + b
 
         torch._dynamo.utils.counters.clear()
         args = torch.Tensor([3, 4, 5])
         opt_f = torch.compile(f, backend="eager")
-        with self.assertRaisesRegex(AssertionError, "torch.Size"):
+        with self.assertRaisesRegex(AssertionError, "tensor"):
             opt_f(args)
         for gb, cnt in torch._dynamo.utils.counters["graph_break"].items():
             if "assert with non-string message" in gb:
@@ -7705,6 +7705,50 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     functools.partial(policy, set_type([torch.ops.aten.mm.default])),
                 ),
             )
+
+    # https://github.com/pytorch/pytorch/issues/151296
+    def test_select_scatter_mixed_dtype(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                src = torch.tensor([0])
+                out = torch.select_scatter(x, src, 1, 0)
+                return out
+
+        model = Model()
+        x = torch.randn(1, 10)
+        inputs = [x]
+
+        compiled_model = torch.compile(model, backend="eager")
+
+        self.assertEqual(model(*inputs), compiled_model(*inputs))
+
+    # https://github.com/pytorch/pytorch/issues/151670
+    @requires_cuda
+    def test_diagonal_scatter_single_elem_cpu_with_cuda_tensor(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = torch.ones(x.size(0))
+                x = torch.diagonal_scatter(x, y)
+                return x
+
+        model = Model()
+
+        x = torch.rand(1, 2)
+        inputs = [x]
+
+        device = "cuda"
+        model = model.to(device)
+        inputs = [x.to(device) for x in inputs]
+
+        compiled_model = torch.compile(model, backend="eager")
+
+        self.assertEqual(model(*inputs), compiled_model(*inputs))
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
