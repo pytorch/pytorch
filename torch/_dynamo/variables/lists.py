@@ -954,20 +954,23 @@ class ListVariable(CommonListMethodsVariable):
                     hints=["Use something else as the key."],
                 )
 
-            tx.output.side_effects.mutation(self)
-            sorted_items_with_keys = sorted(
-                (
+            try:
+                tx.output.side_effects.mutation(self)
+                sorted_items_with_keys = sorted(
                     (
-                        x,
-                        k.as_python_constant(),
-                        -i if reverse else i,  # extra key to ensure stable sort
-                    )
-                    for i, (k, x) in enumerate(zip(keys, self.items))
-                ),
-                key=operator.itemgetter(1, 2),
-                reverse=reverse,
-            )
-            self.items[:] = [x for x, *_ in sorted_items_with_keys]
+                        (
+                            x,
+                            k.as_python_constant(),
+                            -i if reverse else i,  # extra key to ensure stable sort
+                        )
+                        for i, (k, x) in enumerate(zip(keys, self.items))
+                    ),
+                    key=operator.itemgetter(1, 2),
+                    reverse=reverse,
+                )
+                self.items[:] = [x for x, *_ in sorted_items_with_keys]
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
@@ -1580,7 +1583,6 @@ class NamedTupleVariable(TupleVariable):
                     variables.UserDefinedClassVariable(self.tuple_cls),
                 )
             elif isinstance(method, staticmethod):
-                # pyrefly: ignore[bad-argument-type]
                 return UserFunctionVariable(method.__func__)
             elif inspect.isfunction(method):
                 return UserMethodVariable(method, self)
