@@ -201,6 +201,10 @@ cpp_cache_precompile_headers: bool = not is_fbcode()
 
 online_softmax = os.environ.get("TORCHINDUCTOR_ONLINE_SOFTMAX", "1") == "1"
 
+apply_gumbel_max_trick = (
+    os.environ.get("TORCHINDUCTOR_APPLY_GUMBEL_MAX_TRICK", "1") == "1"
+)
+
 # dead code elimination
 dce = False
 
@@ -462,6 +466,11 @@ distributed_max_autotune_gemm = (
     os.environ.get("TORCHINDUCTOR_DISTRIBUTED_MAX_AUTOTUNE_GEMM") == "1"
 )
 
+# Pipeline autotuning for max-autotune-gemm. Overlap lowering and benchmarking on GPU
+pipeline_max_autotune_gemm = (
+    os.environ.get("TORCHINDUCTOR_PIPELINE_GEMM_AUTOTUNING") == "1"
+)
+
 # enable slow autotuning passes to select algorithms
 max_autotune = os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE") == "1"
 
@@ -478,8 +487,20 @@ inductor_default_autotune_rep = int(
     os.getenv("TORCHINDUCTOR_DEFAULT_AUTOTUNE_REP", 100)
 )
 
+
 # Modifies the number of autotuning choices displayed, set to None for all
-autotune_num_choices_displayed: Optional[int] = 10
+def _autotune_num_choices_displayed_default() -> Optional[int]:
+    env_val = os.environ.get("TORCHINDUCTOR_AUTOTUNE_NUM_CHOICES_DISPLAYED")
+    if env_val is None:
+        return 10
+    if env_val.lower() in ("none", "all"):
+        return None
+    return int(env_val)
+
+
+autotune_num_choices_displayed: Optional[int] = (
+    _autotune_num_choices_displayed_default()
+)
 
 # Report the autotune choices and their benchmark results. Default is True.
 max_autotune_report_choices_stats = (
@@ -989,6 +1010,14 @@ class aten_distributed_optimizations:
     max_coll_distance: Optional[int] = None
     log_final_collectives_estimations: bool = False
 
+    # Bucket exposed collectives first
+    bucket_exposed_first: bool = True
+
+    # Enable fusion region detection for overlap scheduling cost estimation.
+    # When enabled, groups of fusible ops (pointwise, reduction, etc.) are treated
+    # as atomic units with memory-bound runtime estimates.
+    enable_fusion_regions: Optional[bool] = None
+
 
 def parallel_compile_enabled_internally() -> bool:
     """
@@ -1059,6 +1088,11 @@ quiesce_async_compile_time: int = Config(
 # compiled by triton (instead of using triton's own launcher)
 use_static_cuda_launcher: bool = static_cuda_launcher_default()
 
+# Alias of use_static_cuda_launcher, used by both CUDA/XPU.
+use_static_triton_launcher: bool = Config(
+    alias="torch._inductor.config.use_static_cuda_launcher"
+)
+
 # Attempt to statically launch user defined triton kernels
 # Requires use_static_cuda_launcher
 static_launch_user_defined_triton_kernels: bool = Config(
@@ -1070,6 +1104,11 @@ static_launch_user_defined_triton_kernels: bool = Config(
 # Raise error if we bypass the launcher
 strict_static_cuda_launcher: bool = (
     os.environ.get("TORCHINDUCTOR_STRICT_STATIC_CUDA_LAUNCHER", "0") == "1"
+)
+
+# Alias of strict_static_cuda_launcher, used by both CUDA/XPU.
+strict_static_triton_launcher: bool = Config(
+    alias="torch._inductor.config.strict_static_cuda_launcher"
 )
 
 # gemm autotuning global cache dir
@@ -1269,6 +1308,22 @@ torchinductor_worker_logpath: str = Config(
     env_name_force="TORCHINDUCTOR_WORKER_LOGPATH",
     default="",
 )
+
+
+class auto_chunker:
+    enable: bool = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
+
+    # Don't chunk from a node if the output size is not large enough
+    output_size_threshold: int = 1024 * 1024
+
+    # Don't chunk from a node if it does not 'amplify' the inputs a lot
+    amplify_ratio_threshold: int = 8
+
+    num_chunk: int | None = (
+        int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS"))  # type: ignore[arg-type]
+        if os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS") is not None
+        else None
+    )  # If not None, use this to force number of chunks
 
 
 # config specific to codegen/cpp.py
@@ -1612,7 +1667,7 @@ class triton:
     # So far we see a fixed 8 spilled registers for kernels using sin/cos.
     # Raise the threshold to 16 to be safe.
     # We should revisit this once we understand more of the source of register spills.
-    spill_threshold: int = 16
+    spill_threshold: int = 32 if torch.version.hip else 16
 
     # Generate code containing the newer tl.make_block_ptr() API for loads/store
     use_block_ptr = False
@@ -1651,8 +1706,6 @@ class triton:
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
-    # Use epilogue subtiling. We allow disabling it due to limited B200 testing.
-    enable_epilogue_subtiling = os.environ.get("ENABLE_EPILOGUE_SUBTILING", "1") == "1"
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -1663,8 +1716,11 @@ class triton:
     disallow_failing_autotune_kernels_TESTING_ONLY = False
 
     # specify number of splits to autotune on for decompose_k. 0 disables decompose_k
+    # Disabled on ROCm by default pending performance validation.
     num_decompose_k_splits = int(
-        os.environ.get("TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "10")
+        os.environ.get(
+            "TORCHINDUCTOR_NUM_DECOMPOSE_K_SPLITS", "0" if torch.version.hip else "10"
+        )
     )
 
     # specify minimum ratio of K to M AND N in order to autotune on decompose_k. 0 enables
@@ -1688,6 +1744,10 @@ class triton:
     mix_order_reduction_autotune_split_size = (
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
         == "1"
+    )
+
+    enable_tlx_templates: bool = (
+        os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
     )
 
 
@@ -1920,6 +1980,10 @@ class cuda:
     # By default it's None, so that all CUTLASS configs are tuned.
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
+
+    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
+    # By default it's 5, to keep compile time to a reasonable level.
+    nvgemm_max_profiling_configs: Optional[int] = 5
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]

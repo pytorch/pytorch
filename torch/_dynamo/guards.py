@@ -38,7 +38,7 @@ import weakref
 from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
-from typing import Any, NoReturn, Optional, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, NoReturn, Optional, TYPE_CHECKING, Union
 
 
 try:
@@ -647,7 +647,7 @@ class GuardManagerWrapper:
                 if isinstance(guard, RelationalGuard):
                     if guard not in self.printed_relational_guards:
                         self.printed_relational_guards.add(guard)
-                        # pyrefly: ignore [bad-argument-type]
+
                         body.writelines(self.get_guard_lines(guard))
                     else:
                         body.writelines(
@@ -708,7 +708,6 @@ class GuardManagerWrapper:
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, RelationalGuard):
                     if guard not in relational_guards_seen:
-                        # pyrefly: ignore [bad-argument-type]
                         self.code_parts.extend(get_code_parts(guard))
                         relational_guards_seen.add(guard)
                 else:
@@ -998,6 +997,8 @@ class GuardBuilder(GuardBuilderBase):
         check_fn_manager: CheckFunctionManager,
         save_guards: bool = False,
         runtime_global_scope: Optional[dict[str, object]] = None,
+        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+        | None = None,
         source_get_cache: Optional[dict[str, Any]] = None,
     ) -> None:
         self.f_code = f_code
@@ -1040,6 +1041,7 @@ class GuardBuilder(GuardBuilderBase):
 
         self.guard_tree_values: dict[int, Any] = {}
         self.save_guards = save_guards
+        self.guard_filter_fn = guard_filter_fn
 
         # Collect the ids of dicts which need key order guarding. source_name is
         # not sufficient because for nn modules, we can have different sources
@@ -3440,6 +3442,13 @@ class GuardsStatePickler(pickle.Pickler):
         assert _.__closure__ is not None
         return _.__closure__[0]
 
+    @classmethod
+    def _unpickle_named_tuple_type(
+        cls, name: str, fields: tuple[str, ...]
+    ) -> type[NamedTuple]:
+        # pyrefly: ignore [bad-return]
+        return collections.namedtuple(name, fields)
+
     # pyrefly: ignore [bad-override]
     def reducer_override(
         self, obj: Any
@@ -3521,6 +3530,14 @@ class GuardsStatePickler(pickle.Pickler):
             assert hasattr(obj, "_torch_unpickler")
             return obj._torch_unpickler, (obj._torch_handler_name,)
 
+        elif (
+            inspect.isclass(obj)
+            and issubclass(obj, tuple)
+            and hasattr(obj, "_fields")
+            and obj.__qualname__ != obj.__name__
+        ):
+            return type(self)._unpickle_named_tuple_type, (obj.__name__, obj._fields)
+
         elif isinstance(obj, torch.SymInt):
             raise RuntimeError(f"Cannot serialize SymInt {obj} (node: {obj.node})")
 
@@ -3575,7 +3592,7 @@ class GuardsStatePickler(pickle.Pickler):
         if isinstance(obj, torch.nn.attention.SDPBackend):
             return type(self)._unpickle_sdp_backend, (obj.name,)
 
-        if type(obj).__qualname__ != type(obj).__name__:
+        if type(obj).__qualname__ != type(obj).__name__ and not isinstance(obj, tuple):
             raise torch._dynamo.exc.PackageError(
                 f"Type {type(obj)} for object {obj} cannot be saved "
                 + "into torch.compile() package since it's defined in local scope. "
@@ -3599,7 +3616,11 @@ class GuardsStatePickler(pickle.Pickler):
         return NotImplemented
 
 
-def pickle_guards_state(state: GuardsState, guard_tree_values: dict[int, Any]) -> bytes:
+def pickle_guards_state(
+    state: GuardsState,
+    guard_tree_values: dict[int, Any],
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]] | None,
+) -> bytes:
     buf = io.BytesIO()
     empty_values = {}
     missing_values = {}
@@ -3619,6 +3640,15 @@ def pickle_guards_state(state: GuardsState, guard_tree_values: dict[int, Any]) -
             # Prune more objects in pytree hierarchy.
             missing_values[id(leaf)] = leaf
     pickler = GuardsStatePickler(guard_tree_values, empty_values, missing_values, buf)
+
+    if guard_filter_fn is torch.compiler.keep_portable_guards_unsafe:
+        # Prune more values in AOT precompile when complex pickling structure is not needed.
+        state.output_graph.global_scope.clear()
+        # state.output_graph.local_scope.clear()
+        if state.source_get_cache:
+            state.source_get_cache.clear()
+        state.output_graph.guard_on_key_order.clear()
+
     try:
         pickler.dump(state)
     except AttributeError as e:
@@ -3638,9 +3668,8 @@ class CheckFunctionManager:
         output_graph: OutputGraphCommon,
         cache_entry: Optional[CacheEntry] = None,
         guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
-        guard_filter_fn: Optional[
-            Callable[[list[GuardFilterEntry]], list[bool]]
-        ] = None,
+        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+        | None = None,
         shape_code_parts: Optional[ShapeCodeParts] = None,
         runtime_global_scope: Optional[dict[str, Any]] = None,
         save_guards: bool = False,
@@ -3678,7 +3707,7 @@ class CheckFunctionManager:
         if torch._dynamo.config.caching_precompile:
             _guard_filter_fn = guard_filter_fn or (lambda gs: [True for g in gs])
 
-            def guard_filter_fn(guards: list[GuardFilterEntry]) -> list[bool]:
+            def guard_filter_fn(guards: Sequence[GuardFilterEntry]) -> Sequence[bool]:
                 ret = []
                 for keep, g in zip(_guard_filter_fn(guards), guards):
                     if not keep:
@@ -3764,6 +3793,7 @@ class CheckFunctionManager:
             f_code,
             output_graph,
             save_guards,
+            guard_filter_fn=guard_filter_fn,
             source_get_cache=source_get_cache,
         )
 
@@ -3995,7 +4025,9 @@ class CheckFunctionManager:
             source_get_cache=builder.source_get_cache,
         )
 
-        return pickle_guards_state(guards_state, builder.guard_tree_values)
+        return pickle_guards_state(
+            guards_state, builder.guard_tree_values, builder.guard_filter_fn
+        )
 
     def build_guards(
         self,
@@ -4004,6 +4036,8 @@ class CheckFunctionManager:
         f_code: types.CodeType,
         output_graph: OutputGraphGuardsState,
         save_guards: bool,
+        guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+        | None = None,
         source_get_cache: Optional[dict[str, Any]] = None,
     ) -> tuple[GuardBuilder, GuardManagerWrapper]:
         guard_manager = GuardManagerWrapper()
@@ -4032,6 +4066,7 @@ class CheckFunctionManager:
             self,
             save_guards,
             runtime_global_scope=self.runtime_global_scope,
+            guard_filter_fn=guard_filter_fn,
             source_get_cache=source_get_cache,
         )
 
@@ -4664,7 +4699,7 @@ def unique(seq: Sequence[T]) -> Generator[T, None, None]:
 
 
 def make_dupe_guard(
-    obj_source: Source, dupe_source: Source
+    obj_source: Source, dupe_source: Source | None
 ) -> Optional[functools.partial[Any]]:
     # Note - we may end up in a situation where we invoke something like
     # def fn(x, y)

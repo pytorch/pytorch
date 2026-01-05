@@ -237,13 +237,13 @@ class TestOpaqueObject(TestCase):
         self.lib.define(
             f"queue_pop({get_opaque_type_name(OpaqueQueue)} a) -> Tensor",
         )
-        
+
         def pop_impl(queue: OpaqueQueue) -> torch.Tensor:
             assert isinstance(queue, OpaqueQueue)
             return queue.pop()
 
         self.lib.impl("queue_pop", pop_impl, "CompositeExplicitAutograd")
-        
+
         def pop_impl_fake(q: OpaqueQueue) -> torch.Tensor:
             # This is not accurate since the queue could have tensors that are
             # not rank 1
@@ -252,7 +252,7 @@ class TestOpaqueObject(TestCase):
             return torch.empty(u0)
 
         self.lib._register_fake("queue_pop", pop_impl_fake)
-        
+
         torch.library._register_effectful_op(
             "_TestOpaqueObject::queue_pop", EffectType.ORDERED
         )
@@ -329,7 +329,7 @@ class TestOpaqueObject(TestCase):
             elif config.mode == "double":
                 return x + x
             else:
-                return x
+                return x.clone()
 
         @torch.library.register_fake(
             "_TestOpaqueObject::process_with_config", lib=self.lib
@@ -360,7 +360,7 @@ class TestOpaqueObject(TestCase):
             elif config.config.mode == "double":
                 return x + x
             else:
-                return x
+                return x.clone()
 
         @torch.library.register_fake(
             "_TestOpaqueObject::process_nested_config", lib=self.lib
@@ -388,9 +388,10 @@ class TestOpaqueObject(TestCase):
             if config is None:
                 return x.clone()
             else:
+                x_res = x.clone()
                 for size in config:
-                    x += size.size
-                return x
+                    x_res += size.size
+                return x_res
 
         @torch.library.register_fake(
             "_TestOpaqueObject::process_multiple_sizes", lib=self.lib
@@ -694,7 +695,10 @@ def forward(self, arg0_1, arg1_1):
             pop2 = nested_queue.pop_q()
             return pop1 + pop2
 
-        inp = (NestedQueue(OpaqueQueue([], torch.empty(0).fill_(-1))), torch.randn(2, 3))
+        inp = (
+            NestedQueue(OpaqueQueue([], torch.empty(0).fill_(-1))),
+            torch.randn(2, 3),
+        )
         backend = AotEagerAndRecordGraphs()
         res = torch.compile(foo, fullgraph=True, backend=backend)(*inp)
         self.assertEqual(res, foo(*inp))
@@ -753,7 +757,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_4 = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
     return (getitem_6, add_4)""",  # noqa: B950
         )
-
 
     def test_compile_global(self):
         counter = Counter(0, 10)
