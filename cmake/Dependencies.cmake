@@ -700,6 +700,8 @@ if(USE_FBGEMM)
     endif()
     target_compile_options_if_supported(asmjit -Wno-unused-but-set-variable)
     target_compile_options_if_supported(asmjit -Wno-unused-variable)
+    # Suppress unknown-pragmas error when OpenMP is not available
+    target_compile_options_if_supported(fbgemm -Wno-error=unknown-pragmas)
   endif()
   if(USE_FBGEMM)
     list(APPEND Caffe2_DEPENDENCY_LIBS fbgemm)
