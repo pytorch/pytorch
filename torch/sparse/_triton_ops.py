@@ -1358,7 +1358,7 @@ def bsr_dense_addmm(
             BLOCKSIZE_INNER=BK,
             # pyrefly: ignore [bad-keyword-argument]
             BLOCKSIZE_COL=BN,
-            # pyrefly: ignore [bad-keyword-argument]
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             allow_tf32=dot_out_dtype == tl.float32,
             # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             acc_dtype=dot_out_dtype,
