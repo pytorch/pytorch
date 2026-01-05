@@ -28,7 +28,7 @@ from torch.testing._internal.common_utils import \
      make_fullrank_matrices_with_distinct_singular_values,
      freeze_rng_state, IS_ARM64, IS_SANDCASTLE, TEST_OPT_EINSUM, isRocmArchAnyOf, parametrize, skipIfTorchDynamo,
      skipIfRocmArch, setBlasBackendsToDefaultFinally, setLinalgBackendsToDefaultFinally, serialTest,
-     runOnRocmArch, MI200_ARCH, MI300_ARCH, NAVI_ARCH, TEST_CUDA)
+     runOnRocmArch, MI200_ARCH, MI300_ARCH, MI350_ARCH, NAVI_ARCH, TEST_CUDA)
 from torch.testing._internal.common_device_type import \
     (instantiate_device_type_tests, dtypes, has_cusolver, has_hipsolver,
      onlyCPU, skipIf, skipCUDAIfNoMagma, skipCPUIfNoLapack, precisionOverride,
@@ -7140,7 +7140,7 @@ class TestLinalg(TestCase):
         ]:
             # skip tests that are known to fail with the basic LOBCG
             # method due to insufficient accuracy
-            if method == 'basic' and (m, n, k, density) in [(1000, 7, 3, 0.01)]:
+            if method == 'basic' and (m, n, k, density) == (1000, 7, 3, 0.01):
                 continue
             A = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
             B = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
@@ -7525,6 +7525,8 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @tf32_on_and_off(0.05)
     @reduced_f32_on_and_off(0.05)
     def test_addmm_relu_tunableop_rocm(self, device, dtype):
+        if torch.version.hip and isRocmArchAnyOf(MI350_ARCH) and dtype is torch.double:
+            self.skipTest("Currently failing on rocm mi350, hipblaslt mem fault")
         with self._tunableop_ctx():
             torch.cuda.tunable.set_rotating_buffer_size(0)
             torch.cuda.tunable.set_max_tuning_iterations(1)
