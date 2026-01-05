@@ -646,7 +646,7 @@ class GuardManagerWrapper:
                 if isinstance(guard, RelationalGuard):
                     if guard not in self.printed_relational_guards:
                         self.printed_relational_guards.add(guard)
-                        # pyrefly: ignore [bad-argument-type]
+
                         body.writelines(self.get_guard_lines(guard))
                     else:
                         body.writelines(
@@ -707,7 +707,6 @@ class GuardManagerWrapper:
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, RelationalGuard):
                     if guard not in relational_guards_seen:
-                        # pyrefly: ignore [bad-argument-type]
                         self.code_parts.extend(get_code_parts(guard))
                         relational_guards_seen.add(guard)
                 else:
@@ -3414,10 +3413,6 @@ class GuardsStatePickler(pickle.Pickler):
         return getattr(torch.ops._C, name)
 
     @classmethod
-    def _unpickle_op(cls, namespace: str, opname: str, overloadname: str) -> Any:
-        return getattr(getattr(getattr(torch.ops, namespace), opname), overloadname)
-
-    @classmethod
     def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
         return types.MethodType(func, base)
 
@@ -3494,15 +3489,6 @@ class GuardsStatePickler(pickle.Pickler):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
 
-            for attr in obj.__dict__.values():
-                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
-                    continue
-                if id(attr) in self.guard_tree_values:
-                    continue
-                if callable(attr):
-                    continue
-                self.missing_values[id(attr)] = attr
-
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
@@ -3552,13 +3538,6 @@ class GuardsStatePickler(pickle.Pickler):
             obj, torch._ops.OpOverloadPacket
         ) and obj._qualified_op_name.startswith("_C::"):
             return type(self)._unpickle_c_op, (obj.__name__,)
-
-        elif isinstance(obj, torch._ops.OpOverload):
-            return type(self)._unpickle_op, (
-                obj.namespace,
-                obj._opname,
-                obj._overloadname,
-            )
 
         elif (
             obj.__class__.__module__ == "builtins"

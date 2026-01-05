@@ -1919,7 +1919,7 @@ class _LocalPhiloxState:
 
         if len(set(offsets.values())) == 1:
             return next(iter(offsets.values()))
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+
         return SymInt(LocalIntNode(offsets))
 
     @offset.setter

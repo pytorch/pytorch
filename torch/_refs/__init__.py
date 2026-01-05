@@ -728,8 +728,10 @@ def exp2(a):
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.NO_OPMATH,
 )
 def fill(a: TensorLikeType, value: NumberType) -> TensorLikeType:
-    assert isinstance(a, TensorLike)
-    assert isinstance(value, Number)
+    if not isinstance(a, TensorLike):
+        raise AssertionError(f"a must be TensorLike, got {type(a)}")
+    if not isinstance(value, Number):
+        raise AssertionError(f"value must be Number, got {type(value)}")
 
     python_type = utils.dtype_to_type(a.dtype)
     if not utils.is_weakly_lesser_type(type(value), python_type):
@@ -770,7 +772,8 @@ def frac(x: TensorLikeType) -> TensorLikeType:
 
 # imag does not use _make_elementwise_unary_reference because it does not support out
 def imag(a: TensorLikeType) -> TensorLikeType:
-    assert isinstance(a, TensorLike)
+    if not isinstance(a, TensorLike):
+        raise AssertionError(f"a must be TensorLike, got {type(a)}")
     torch._check(
         utils.is_complex_dtype(a.dtype), lambda: "imag only supports complex tensors."
     )
@@ -922,7 +925,8 @@ def nan_to_num(
     posinf: Optional[NumberType] = None,
     neginf: Optional[NumberType] = None,
 ) -> TensorLikeType:
-    assert isinstance(a, TensorLike)
+    if not isinstance(a, TensorLike):
+        raise AssertionError(f"a must be TensorLike, got {type(a)}")
 
     if utils.is_boolean_dtype(a.dtype) or utils.is_integer_dtype(a.dtype):
         return a.clone()
@@ -963,7 +967,8 @@ def neg(a):
 # positive does not use _make_elementwise_unary_reference because it does not support out
 # CompositeImplicitAutograd - don't register decomp
 def positive(a: TensorLikeType) -> TensorLikeType:
-    assert isinstance(a, TensorLike)
+    if not isinstance(a, TensorLike):
+        raise AssertionError(f"a must be TensorLike, got {type(a)}")
     if a.dtype is torch.bool:
         msg = "positive does not support bool tensors."
         raise RuntimeError(msg)
@@ -972,7 +977,8 @@ def positive(a: TensorLikeType) -> TensorLikeType:
 
 # real does not use _make_elementwise_unary_reference because it does not support out
 def real(a: TensorLikeType) -> TensorLikeType:
-    assert isinstance(a, TensorLike)
+    if not isinstance(a, TensorLike):
+        raise AssertionError(f"a must be TensorLike, got {type(a)}")
     if utils.is_complex_dtype(a.dtype):
         return prims.real(a)
     return a
@@ -1316,7 +1322,8 @@ def pow(
     a: Union[TensorLikeType, NumberType],
     b: Union[TensorLikeType, NumberType],
 ) -> TensorLikeType:
-    assert isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)
+    if not (isinstance(a, TensorLikeType) or isinstance(b, TensorLikeType)):
+        raise AssertionError("at least one of a or b must be TensorLikeType")
 
     if isinstance(b, Number):
         if b == 1.0:
@@ -1350,7 +1357,8 @@ def float_power(
 
     # Handles type promotion
     dtype = utils.get_higher_dtype(a, b)
-    assert dtype is not None
+    if dtype is None:
+        raise AssertionError("dtype should not be None after get_higher_dtype")
     if utils.is_complex_dtype(dtype):
         dtype = torch.complex128
     else:
@@ -1423,7 +1431,8 @@ def floor_divide(
         else:
             b = prims.device_put(b, device=a.device)
 
-    assert isinstance(a, Tensor) and isinstance(b, Tensor)
+    if not (isinstance(a, Tensor) and isinstance(b, Tensor)):
+        raise AssertionError("a and b must both be Tensors at this point")
     dtype = a.dtype
     if utils.is_float_dtype(dtype):
         return _floor_divide_float(a, b)
@@ -1898,8 +1907,10 @@ def xlogy(a: Union[TensorLikeType, NumberType], b: Union[TensorLikeType, NumberT
         b = scalar_tensor(b, dtype=a.dtype, device=a.device)
 
     # mypy: expected "Tensor"
-    assert isinstance(a, TensorLike)
-    assert isinstance(b, TensorLike)
+    if not isinstance(a, TensorLike):
+        raise AssertionError(f"a must be TensorLike, got {type(a)}")
+    if not isinstance(b, TensorLike):
+        raise AssertionError(f"b must be TensorLike, got {type(b)}")
     rhs = torch.where(torch.eq(a, 0), 0, torch.mul(a, torch.log(b)))
     return torch.where(torch.isnan(b), float("nan"), rhs)
 
@@ -2235,7 +2246,8 @@ def to(a: TensorLikeType, *args, **kwargs) -> TensorLikeType:
 
     # TODO: is_pinned is not currently supported in refs or fake_tensor
     # https://github.com/pytorch/pytorch/issues/84925
-    assert "pin_memory" not in kwargs
+    if "pin_memory" in kwargs:
+        raise AssertionError("pin_memory is not supported in refs")
     _canonicalize_to_arguments(a, kwargs)
 
     if _to_will_alias(a, **kwargs):
@@ -2280,14 +2292,16 @@ def _reduction(
     output_dtype_kind: REDUCTION_OUTPUT_TYPE_KIND,
 ) -> TensorLikeType:  # it is usually SAME, but I want
     # ref writers to actually think about what to put here
-    assert isinstance(a, TensorLike)
+    if not isinstance(a, TensorLike):
+        raise AssertionError(f"a must be TensorLike, got {type(a)}")
     if a.ndim > 64:
         raise RuntimeError(
             f"Received a tensor with {a.ndim} dimensions, but only tensors with up to 64 dims are supported!"
         )
 
     if out is not None:
-        assert isinstance(out, TensorLike)
+        if not isinstance(out, TensorLike):
+            raise AssertionError(f"out must be TensorLike, got {type(out)}")
         if dtype is not None:
             # TODO - this is true for eager mode currently, but it's wrong behavior for complex norms
             if dtype != out.dtype:
@@ -2295,7 +2309,8 @@ def _reduction(
                     "dtype argument and out dtype must match in reduction"
                 )
     if not accepts_dim_tuple:
-        assert dims is None or isinstance(dims, Dim)
+        if not (dims is None or isinstance(dims, Dim)):
+            raise AssertionError(f"dims must be None or Dim, got {type(dims)}")
     if isinstance(dims, Dim):
         dims = (dims,)  # type: ignore[assignment]
     dims = utils.reduction_dims(a.shape, dims)
@@ -2319,7 +2334,8 @@ def _reduction(
         result = prims.broadcast_in_dim(result, output_shape, broadcast_dims)
 
     if out is not None:
-        assert result_dtype is not None
+        if result_dtype is None:
+            raise AssertionError("result_dtype should not be None when out is provided")
         if dtype is not None and result_dtype != out.dtype:
             raise RuntimeError(
                 "Expected the dtype of reduction result and out to match"
@@ -2586,7 +2602,8 @@ def std(
     a = _maybe_convert_to_dtype(a, opmath_dtype)
     a_var = torch.var(a, dim, correction=correction, keepdim=keepdim)
     a_std = torch.sqrt(a_var)
-    assert dtype is not None
+    if dtype is None:
+        raise AssertionError("dtype should not be None after reduction_dtypes")
     return _maybe_convert_to_dtype(a_std, dtype)
 
 
@@ -2630,7 +2647,8 @@ def mean(
     result_dtype = a.dtype if dtype is None else dtype
     result = _maybe_convert_to_dtype(result, result_dtype)  # type: ignore[method-assign]
     if out is not None:
-        assert isinstance(out, TensorLike)
+        if not isinstance(out, TensorLike):
+            raise AssertionError(f"out must be TensorLike, got {type(out)}")
         out = _maybe_resize_out(out, result.shape)
         return _safe_copy_out(copy_from=result, copy_to=out)  # type: ignore[arg-type]
     return result
@@ -2655,7 +2673,8 @@ def std_mean(
     a = _maybe_convert_to_dtype(a, opmath_dtype)
     a_var, a_mean = torch.var_mean(a, dim, correction=correction, keepdim=keepdim)
     a_std = torch.sqrt(a_var)
-    assert dtype is not None
+    if dtype is None:
+        raise AssertionError("dtype should not be None after reduction_dtypes")
     return (
         _maybe_convert_to_dtype(a_std, dtype),
         _maybe_convert_to_dtype(a_mean, original_dtype),
@@ -2750,7 +2769,8 @@ def atleast_1d(
     if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.abc.Sequence)
+        if isinstance(arg, collections.abc.Sequence):
+            raise AssertionError("arg should not be a Sequence when args is provided")
         args_ = (arg,) + args
     res = tuple(a if a.ndim >= 1 else unsqueeze(a, 0) for a in args_)
     return res if len(res) > 1 else res[0]
@@ -2762,7 +2782,8 @@ def _unsqueeze_atleast(
     at_least_fn: Callable, dim: int, arg: TensorLikeType
 ) -> TensorLikeType:
     arg_ = at_least_fn(arg)
-    assert isinstance(arg_, TensorLike)
+    if not isinstance(arg_, TensorLike):
+        raise AssertionError(f"at_least_fn must return TensorLike, got {type(arg_)}")
     return unsqueeze(arg_, dim)
 
 
@@ -2774,7 +2795,8 @@ def atleast_2d(
     if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.abc.Sequence)
+        if isinstance(arg, collections.abc.Sequence):
+            raise AssertionError("arg should not be a Sequence when args is provided")
         args_ = (arg,) + args
     unsqueeze_atleast_1d = partial(_unsqueeze_atleast, atleast_1d, 0)
     res = tuple(a if a.ndim >= 2 else unsqueeze_atleast_1d(a) for a in args_)
@@ -2789,7 +2811,8 @@ def atleast_3d(
     if not args and isinstance(arg, collections.abc.Sequence):
         args_ = arg
     else:
-        assert not isinstance(arg, collections.abc.Sequence)
+        if isinstance(arg, collections.abc.Sequence):
+            raise AssertionError("arg should not be a Sequence when args is provided")
         args_ = (arg,) + args
     unsqueeze_atleast_2d = partial(_unsqueeze_atleast, atleast_2d, -1)
     res = tuple(a if a.ndim >= 3 else unsqueeze_atleast_2d(a) for a in args_)
@@ -2856,7 +2879,8 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
             if format is not None and format != f:
                 return torch.contiguous_format
             format = f
-        assert format is not None
+        if format is None:
+            raise AssertionError("format should not be None if len(inputs) > 0")
         return format
 
     if len(tensors) == 0:
@@ -2864,7 +2888,8 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
         raise ValueError(msg)
 
     for tensor in tensors:
-        assert isinstance(tensor, TensorLike)
+        if not isinstance(tensor, TensorLike):
+            raise AssertionError(f"tensor must be TensorLike, got {type(tensor)}")
 
     utils.check_same_device(*tensors, allow_cpu_scalar_tensors=False)
 
@@ -2910,7 +2935,10 @@ def cat(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
     filtered = []
     for tensor_idx, tensor in enumerate(tensors):
         if len(shape) != len(tensor.shape):
-            assert tensor.ndim == 1  # we've already checked this above
+            if tensor.ndim != 1:
+                raise AssertionError(
+                    f"tensor.ndim should be 1 at this point, got {tensor.ndim}"
+                )
             # Don't suggest the legacy behavior in the error message
             torch._check(
                 # NB: it is not enough to simply assert that tensor.shape[0] == 0;
@@ -3285,7 +3313,8 @@ def _normalize(
     norm_dims = utils.canonicalize_dims(a.ndim, norm_dims)
     computation_dtype = utils.get_computation_dtype(a.dtype)
     a_acc = _maybe_convert_to_dtype(a, computation_dtype)
-    assert isinstance(a_acc, TensorLike)  # to avoid mypy error for var_mean
+    if not isinstance(a_acc, TensorLike):
+        raise AssertionError(f"a_acc must be TensorLike, got {type(a_acc)}")
     biased_var, mean = torch.var_mean(
         a_acc, dim=norm_dims, unbiased=False, keepdim=True
     )
@@ -3726,7 +3755,10 @@ def istft(
             input = input.narrow(dim=-1, start=0, length=n_fft // 2 + 1)
         input = torch.fft.irfft(input, dim=-1, norm=norm)
 
-    assert input.size(2) == n_fft
+    if input.size(2) != n_fft:
+        raise AssertionError(
+            f"Expected input.size(2) == n_fft, got {input.size(2)} != {n_fft}"
+        )
 
     y_tmp = input * window_.view([1, 1, n_fft])
     y = aten.unfold_backward(
@@ -3744,8 +3776,14 @@ def istft(
         step=hop_length_,
     )
 
-    assert expected_output_signal_len == y.size(1)
-    assert expected_output_signal_len == window_envelop.size(1)
+    if expected_output_signal_len != y.size(1):
+        raise AssertionError(
+            f"expected_output_signal_len ({expected_output_signal_len}) != y.size(1) ({y.size(1)})"
+        )
+    if expected_output_signal_len != window_envelop.size(1):
+        raise AssertionError(
+            f"expected_output_signal_len ({expected_output_signal_len}) != window_envelop.size(1) ({window_envelop.size(1)})"
+        )
 
     start = n_fft // 2 if center else 0
     if length is not None:
@@ -3885,7 +3923,10 @@ def _reshape_view_helper_core_alg(
     for length in shape:
         # Handles tail unsqueezes
         if idx >= a_.ndim:
-            assert length == 1
+            if length != 1:
+                raise AssertionError(
+                    f"Cannot unsqueeze dimension with length {length}, expected 1"
+                )
             last_dim = a_.ndim - 1
             # NOTE: using split_dim instead of unsqueeze may seem silly here,
             # but it's necessary to get the strides correct
@@ -3957,7 +3998,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     if a.ndim == 0:
         _a = a
         for length in shape:
-            assert length == 1
+            if length != 1:
+                raise AssertionError(
+                    f"Cannot reshape 0-dim tensor: shape dimension must be 1, got {length}"
+                )
             _a = unsqueeze(_a, -1)
         if _a is a:
             return prims.view_of(a)
@@ -3968,7 +4012,10 @@ def _reshape_view_helper(a: TensorLikeType, *shape, allow_copy: bool) -> TensorL
     if len(shape) == 0:
         _a = a
         for length in a.shape:
-            assert length == 1
+            if length != 1:
+                raise AssertionError(
+                    f"Cannot reshape to 0-dim tensor: shape dimension must be 1, got {length}"
+                )
             _a = squeeze(_a, -1)
         if _a is a:
             return prims.view_of(a)
@@ -4048,7 +4095,8 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLike
             raise RuntimeError(
                 f"shifts and dimensions must align. shifts: {len_shifts}, dims: {len_dims}"
             )
-        assert len_dims > 1
+        if len_dims <= 1:
+            raise AssertionError(f"Expected len_dims > 1, got {len_dims}")
         # pyrefly: ignore [bad-index]
         tail_shifts = shifts[1:]
         # pyrefly: ignore [bad-index, index-error]
@@ -4115,7 +4163,8 @@ def _check_stack_inputs(tensors: TensorSequenceType) -> None:
 @register_decomposition(aten.stack)
 @out_wrapper()
 def stack(tensors: TensorSequenceType, dim: int = 0) -> TensorLikeType:
-    assert len(tensors) > 0, "stack expects a non-empty TensorList"
+    if len(tensors) == 0:
+        raise AssertionError("stack expects a non-empty TensorList")
     wrapped_dim = utils.canonicalize_dim(tensors[0].ndim + 1, dim)
     # Refs need sparse support to check other condition
     if wrapped_dim < tensors[0].ndim:  # and not tensors[0].is_sparse:
@@ -4329,7 +4378,10 @@ def squeeze(a: TensorLikeType, dim: Optional[DimsType] = None) -> TensorLikeType
     dims = (dim,) if isinstance(dim, Dim) else dim
     # Short-circuits if the tensor has no dimensions
     if ndim == 0:
-        assert len(dims) == 0 or dims == (0,)
+        if not (len(dims) == 0 or dims == (0,)):
+            raise AssertionError(
+                f"Expected dims to be empty or (0,) for 0-dim tensor, got {dims}"
+            )
         return prims.view_of(a)
 
     # Note: squeeze does not modify tensors when the given dim is not a dimension of length 1
@@ -5235,9 +5287,12 @@ def arange(
     utils.check_pin_memory(pin_memory)
     device = torch.device(utils.device_or_default(device))
 
-    assert not isinstance(start, complex)
-    assert not isinstance(end, complex)
-    assert not isinstance(step, complex)
+    if isinstance(start, complex):
+        raise AssertionError("arange does not support complex start")
+    if isinstance(end, complex):
+        raise AssertionError("arange does not support complex end")
+    if isinstance(step, complex):
+        raise AssertionError("arange does not support complex step")
 
     # Case: torch.arange(5)
     if end is None:
@@ -5331,7 +5386,8 @@ def lerp(start: Tensor, end: Tensor, weight: Union[Tensor, NumberType]):
         weight = start.new_full((), weight)  # type: ignore[arg-type]
     else:
         inputs.append(weight)
-    assert isinstance(weight, Tensor)  # mypy
+    if not isinstance(weight, Tensor):
+        raise AssertionError(f"weight must be Tensor at this point, got {type(weight)}")
     # We implement it this way for numerical stability. We assume (in the stability optimisation)
     # that 0 <= weight <= 1. We take the abs to deal with complex numbers
     # We want to perform operations near zero, which is where floating points are most precise
@@ -5389,7 +5445,8 @@ def linspace(
             )
     else:
         dtype = dtype or torch.get_default_dtype()
-    assert isinstance(dtype, torch.dtype)
+    if not isinstance(dtype, torch.dtype):
+        raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
 
     # steps does not participate in the computation of the dtype
     torch._check_type(
@@ -5397,7 +5454,8 @@ def linspace(
         lambda: f"received an invalid combination of arguments - got \
 ({type(start).__name__}, {type(end).__name__}, {type(steps).__name__})",
     )
-    assert isinstance(steps, IntLike)  # for mypy
+    if not isinstance(steps, IntLike):
+        raise AssertionError(f"steps must be IntLike, got {type(steps)}")  # for mypy
     torch._check(steps >= 0, lambda: "number of steps must be non-negative")
 
     factory_kwargs = {
@@ -5486,7 +5544,8 @@ def logspace(
     else:
         _dtype = torch.float64
 
-    assert not isinstance(base, complex)  # for mypy
+    if isinstance(base, complex):
+        raise AssertionError(f"base must not be complex, got {type(base)}")  # for mypy
     if base < 0:
         raise NotImplementedError
     ret = torch.linspace(  # type: ignore[misc]
@@ -5522,7 +5581,10 @@ def meshgrid(
     # The `indexing` argument is currently optional for torch.meshgrid, but we
     # plan to make the argument required: https://github.com/pytorch/pytorch/issues/50276
     if isinstance(tensors[0], (list, tuple)):
-        assert len(tensors) == 1
+        if len(tensors) != 1:
+            raise AssertionError(
+                f"Expected exactly 1 tensor list/tuple, got {len(tensors)}"
+            )
         tensors = tuple(tensors[0])
 
     torch._check(
@@ -5558,7 +5620,8 @@ def meshgrid(
 
     result_shape: list[int] = []
     for t in tensors:
-        assert isinstance(t, TensorLike)  # mypy
+        if not isinstance(t, TensorLike):
+            raise AssertionError(f"expected TensorLike, got {type(t)}")  # mypy
         torch._check(
             t.ndim == 0 or t.ndim == 1,
             lambda: f"torch.meshgrid: Expected 0D or 1D tensor in the tensor list but got: {t}",
@@ -5567,7 +5630,8 @@ def meshgrid(
 
     grids: list[TensorLikeType] = []
     for i, t in enumerate(tensors):
-        assert isinstance(t, TensorLike)  # mypy
+        if not isinstance(t, TensorLike):
+            raise AssertionError(f"expected TensorLike, got {type(t)}")  # mypy
         if t.ndim == 0:
             t = t.view((1,))
         grids.append(prims.broadcast_in_dim(t, result_shape, (i,)))
@@ -5881,12 +5945,15 @@ def _uniform_helper(
 ) -> TensorLikeType:
     utils.validate_shape(shape)
 
-    assert isinstance(low, Number)
-    assert isinstance(high, Number)
+    if not isinstance(low, Number):
+        raise AssertionError(f"low must be Number, got {type(low)}")
+    if not isinstance(high, Number):
+        raise AssertionError(f"high must be Number, got {type(high)}")
     low = sym_float(low)
     high = sym_float(high)
 
-    assert isinstance(dtype, torch.dtype)
+    if not isinstance(dtype, torch.dtype):
+        raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
     device = utils.canonicalize_device(device)
 
     return prims._uniform_helper(shape, low=low, high=high, dtype=dtype, device=device)
@@ -6281,7 +6348,8 @@ def bucketize(
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def cauchy(self, median=0, sigma=1, generator=None):
-    assert generator is None
+    if generator is not None:
+        raise AssertionError("generator is not supported in refs")
     torch._check(
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_integer_dtype(self.dtype)
@@ -6303,7 +6371,8 @@ def cauchy(self, median=0, sigma=1, generator=None):
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def exponential(self, rate=1, generator=None):
-    assert generator is None
+    if generator is not None:
+        raise AssertionError("generator is not supported in refs")
     torch._check(
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_integer_dtype(self.dtype)
@@ -6336,7 +6405,8 @@ def exponential(self, rate=1, generator=None):
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def geometric(self, p, generator=None):
-    assert generator is None
+    if generator is not None:
+        raise AssertionError("generator is not supported in refs")
     # TODO: fix inductor rand_like for integer, bool dtypes
     torch._check(
         not utils.is_complex_dtype(self.dtype)
@@ -6357,7 +6427,8 @@ def geometric(self, p, generator=None):
     type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
 )
 def log_normal(self, mean=1, std=2, generator=None):
-    assert generator is None
+    if generator is not None:
+        raise AssertionError("generator is not supported in refs")
     torch._check(
         not utils.is_complex_dtype(self.dtype)
         and not utils.is_integer_dtype(self.dtype)
@@ -6393,7 +6464,8 @@ def normal(
     device=None,
     pin_memory=None,
 ):
-    assert layout is None or layout == torch.strided
+    if layout is not None and layout != torch.strided:
+        raise AssertionError(f"layout must be None or torch.strided, got {layout}")
 
     if not isinstance(std, TensorLike):
         torch._check(
