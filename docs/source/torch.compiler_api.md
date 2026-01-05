@@ -6,25 +6,6 @@
 (torch.compiler_api)=
 # torch.compiler API reference
 
-> ⚠️ **Warning**
->
-> `torch._dynamo.mark_dynamic()` must **NOT** be called inside a model’s
-> `forward()` method when using `torch.compile()`.
->
-> This function is a *tracing-time API*. Calling it inside compiled
-> functions will raise an error such as:
->
-> ```
-> AssertionError: Attempt to trace forbidden callable
-> ```
->
-> **Correct usage** is to call `mark_dynamic` on input tensors
-> **outside** the compiled model, or to use:
->
-> ```python
-> torch.compile(model, dynamic=True)
-> ```
-
 For a quick overview of `torch.compiler`, see {ref}`torch.compiler_overview`.
 
 ```{eval-rst}

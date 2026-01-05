@@ -170,6 +170,26 @@ dynamic shapes.
 
 #### `mark_dynamic(tensor, dim, min=min, max=max)`
 
+> ⚠️ **Warning**
+>
+> `torch._dynamo.mark_dynamic()` must not be called inside a model’s
+> `forward()` method when using `torch.compile()`.
+>
+> This function is a *tracing-time API*. Calling it inside compiled
+> function will raise an error such as:
+>
+> ```
+> AssertionError: Attempt to trace forbidden callable
+> ```
+>
+> **Correct usage** is to call `mark_dynamic` on input tensors
+> **outside** the compiled model, or to use:
+>
+> ```python
+> torch.compile(model, dynamic=True)
+> ```
+
+
 The {func}`torch._dynamo.mark_dynamic` function marks a tensor dimension as dynamic and will fail if it
 gets specialized. It does not work for integers. Use this function only if you know
 all graphs in the frame using this input converge to a single dynamic graph.
