@@ -1107,6 +1107,49 @@ class TestNoComm(MultiProcessTestCase):
         set_optimizer_state_dict(model, optim, osd)
         set_optimizer_state_dict(model, optim, optim.state_dict())
 
+    @skip_if_lt_x_gpu(1)
+    def test_get_optimizer_state_dict_does_not_modify_optimizer(self) -> None:
+        """
+        regression test for https://github.com/pytorch/pytorch/issues/164929
+        Calling get_optimizer_state_dict on a fresh optimizer should not affect
+        the optimizer's subsequent step behavior.
+        """
+
+        def run_one_step(mat, get_state_dict):
+            model = nn.Linear(5, 5, bias=False, device=device_type)
+            model.weight.data.copy_(mat)
+            opt = torch.optim.AdamW(model.parameters(), lr=0.1)
+            if get_state_dict:
+                get_optimizer_state_dict(
+                    model, opt, options=StateDictOptions(full_state_dict=True)
+                )
+                for param in opt.state.values():
+                    if "step" in param:
+                        step_val = (
+                            param["step"].item()
+                            if isinstance(param["step"], torch.Tensor)
+                            else param["step"]
+                        )
+                        self.assertEqual(step_val, 0)
+            model.weight.grad = mat.clone()
+            opt.step()
+
+            for param in opt.state.values():
+                if "step" in param:
+                    step_val = (
+                        param["step"].item()
+                        if isinstance(param["step"], torch.Tensor)
+                        else param["step"]
+                    )
+                    self.assertEqual(step_val, 1)
+            return model.weight
+
+        fake = torch.randn(5, 5, device=device_type)
+
+        result_with_get = run_one_step(fake, True)
+        result_without_get = run_one_step(fake, False)
+        torch.testing.assert_close(result_with_get, result_without_get)
+
 
 if __name__ == "__main__":
     run_tests()
