@@ -572,7 +572,8 @@ autograd.grad with compiled autograd
   Hint: Or move the autograd.grad() call outside the torch.compile region.
   Hint: Or restructure your code so autograd.grad() and compiled_autograd don't overlap.
 
-  Developer debug context: compiled_autograd is currently enabled""",  # noqa: B950
+  Developer debug context: compiled_autograd is currently enabled
+""",  # noqa: B950
                     )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
