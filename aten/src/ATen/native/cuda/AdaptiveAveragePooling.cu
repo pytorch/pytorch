@@ -570,7 +570,9 @@ namespace {
         if (output.numel() == 0) {
           return;
         }
-
+        
+        // Check if no integer overflow can happen during the output pointer calculation
+        TORCH_CHECK(grid_x * osizeH * osizeW <= std::numeric_limits<int32_t>::max(), "Adaptive Pooling does not support output sizes larger than INT32_MAX")
         AT_DISPATCH_FLOATING_TYPES_AND2(kHalf, kBFloat16,
             input_.scalar_type(), "adaptive_avg_pool2d_cuda", [&] {
               const scalar_t *input_data = input_.const_data_ptr<scalar_t>();
