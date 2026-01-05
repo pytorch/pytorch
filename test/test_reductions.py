@@ -818,7 +818,7 @@ class TestReductions(TestCase):
                         expected = numpy_op(tensor.cpu().numpy(), dim)
                     actual = pytorch_op(tensor, dim)
                     self._assert_matches_numpy(actual, expected)
-                    if not torch.accelerator.is_available():
+                    if torch.accelerator.is_available():
                         self._assert_matches_numpy(pytorch_op(tensor.to(device_type), dim).cpu(), expected)
         do_one(self._make_tensors((5, 400000), use_floating=use_floating,
                                   use_integral=use_integral, use_complex=use_complex), 1)
