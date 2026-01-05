@@ -2009,7 +2009,6 @@ class AOTInductorTestsTemplate:
         }
         self.check_model(Repro(), example_inputs, dynamic_shapes=spec)
 
-    @skipIfXpu(msg="_scaled_dot_product_flash_attention is not supported on XPU yet")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Some archs don't support flash SDPA"
     )
@@ -7932,8 +7931,6 @@ GPU_TEST_FAILURES = {
     "test_quantized_linear": fail_gpu(("cuda", "xpu")),
     "test_quanatized_int8_linear": fail_gpu(("cuda", "xpu")),
     "test_quantized_linear_bias_none": fail_gpu(("cuda", "xpu")),
-    # No scaled_dot_product_efficient_attention implementation for XPU yet.
-    "test_scaled_dot_product_efficient_attention": fail_gpu(("xpu",)),
 }
 
 MPS_TEST_FAILURES = {

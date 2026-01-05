@@ -7106,9 +7106,6 @@ Done""",
         ):
             a.data = c
 
-    @skipIfXpu(
-        msg="No torch.version, https://github.com/intel/torch-xpu-ops/issues/2486"
-    )
     @unittest.skipIf(IS_WINDOWS, "Skipping because doesn't work for windows")
     def test_thread_shutdown(self):
         code = """import torch

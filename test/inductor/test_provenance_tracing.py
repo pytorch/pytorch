@@ -29,10 +29,7 @@ from torch._inductor.utils import run_and_get_code, run_and_get_cpp_code
 from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import IS_MACOS
 from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import (
-    requires_cuda_and_triton,
-    requires_gpu_and_triton,
-)
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 try:
@@ -612,7 +609,7 @@ class TestProvenanceTracingStackTraces(TestCase):
     @torch._inductor.config.patch(
         {"trace.provenance_tracking_level": 2, "max_autotune_gemm_backends": "ATEN"}
     )
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_deferred_triton_kernels(self):
         def foo(m, inp):
             a = m(inp)
@@ -620,8 +617,8 @@ class TestProvenanceTracingStackTraces(TestCase):
 
         foo_c = torch.compile(mode="max-autotune-no-cudagraphs")(foo)
 
-        m = torch.nn.Linear(512, 512, bias=True).half().cuda()
-        inp = torch.rand([1, 512]).half().cuda()
+        m = torch.nn.Linear(512, 512, bias=True).half().to(GPU_TYPE)
+        inp = torch.rand([1, 512]).half().to(GPU_TYPE)
 
         with self._setup_provenance_capture() as payload_buffer:
             with torch.no_grad():

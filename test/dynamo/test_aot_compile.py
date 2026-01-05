@@ -66,6 +66,9 @@ class MooType:
         self.x = x
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 class CustomCompiledFunction(torch._dynamo.aot_compile.SerializableCallable):
     def __init__(self, gm: torch.fx.GraphModule, example_inputs: list[torch.Tensor]):
         self.gm = gm
@@ -1045,9 +1048,8 @@ from user code:
         actual = compiled_fn(*inputs)
         self.assertEqual(expected, actual)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_aot_compile_with_aoti(self):
-        with torch.device("cuda"):
+        with torch.device(device_type):
             from torch._dynamo.hooks import Hooks
 
             def fn(x, y):
