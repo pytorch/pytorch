@@ -1,0 +1,169 @@
+--- /tmp/test_patma_orig.py    2026-01-06 00:22:11
++++ test/dynamo/cpython/3_13/test_patma.py    2026-01-06 00:21:56
+@@ -1,11 +1,28 @@
++# ======= BEGIN Dynamo patch =======
++# Owner(s): ["module: dynamo"]
++# ruff: noqa
++# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.1/Lib/test/test_patma.py
++
++import sys
++import torch
++import torch._dynamo.test_case
++import unittest
++from torch._dynamo.test_case import CPythonTestCase
++from torch.testing._internal.common_utils import run_tests
++
++__TestCase = CPythonTestCase
++# ======= END DYNAMO PATCH =======
++
+ import array
+ import collections
+ import dataclasses
+ import dis
+ import enum
+ import inspect
+-import sys
+-import unittest
++from test import support
+ 
+ 
+ @dataclasses.dataclass
+@@ -14,7 +31,7 @@
+     y: int
+ 
+ 
+-class TestCompiler(unittest.TestCase):
++class TestCompiler(__TestCase):
+ 
+     def test_refleaks(self):
+         # Hunting for leaks using -R doesn't catch leaks in the compiler itself,
+@@ -24,7 +41,7 @@
+             compile(file.read(), __file__, "exec")
+ 
+ 
+-class TestInheritance(unittest.TestCase):
++class TestInheritance(__TestCase):
+ 
+     @staticmethod
+     def check_sequence_then_mapping(x):
+@@ -129,7 +146,7 @@
+         self.assertEqual(self.check_mapping_then_sequence(GrandchildPost()), "seq")
+ 
+ 
+-class TestPatma(unittest.TestCase):
++class TestPatma(__TestCase):
+ 
+     def test_patma_000(self):
+         match 0:
+@@ -2888,7 +2905,7 @@
+                 self.assertEqual(h, 1)
+ 
+ 
+-class TestSyntaxErrors(unittest.TestCase):
++class TestSyntaxErrors(__TestCase):
+ 
+     def assert_syntax_error(self, code: str):
+         with self.assertRaises(SyntaxError):
+@@ -3012,6 +3029,13 @@
+         self.assert_syntax_error("""
+         match ...:
+             case a as a:
++                pass
++        """)
++
++    def test_multiple_assignments_to_name_in_pattern_6(self):
++        self.assert_syntax_error("""
++        match ...:
++            case a as a + 1:  # NAME and expression with no ()
+                 pass
+         """)
+ 
+@@ -3222,7 +3246,7 @@
+                 pass
+         """)
+ 
+-class TestTypeErrors(unittest.TestCase):
++class TestTypeErrors(__TestCase):
+ 
+     def test_accepts_positional_subpatterns_0(self):
+         class Class:
+@@ -3363,7 +3387,7 @@
+         self.assertIsNone(w)
+ 
+ 
+-class TestValueErrors(unittest.TestCase):
++class TestValueErrors(__TestCase):
+ 
+     def test_mapping_pattern_checks_duplicate_key_1(self):
+         class Keys:
+@@ -3378,7 +3402,7 @@
+         self.assertIs(y, None)
+         self.assertIs(z, None)
+ 
+-class TestSourceLocations(unittest.TestCase):
++class TestSourceLocations(__TestCase):
+     def test_jump_threading(self):
+         # See gh-123048
+         def f():
+@@ -3397,7 +3421,7 @@
+             if inst.opcode in dis.hasjump:
+                 self.assertIsNotNone(inst.positions.lineno, "jump without location")
+ 
+-class TestTracing(unittest.TestCase):
++class TestTracing(__TestCase):
+ 
+     @staticmethod
+     def _trace(func, *args, **kwargs):
+@@ -3491,6 +3515,7 @@
+         self.assertListEqual(self._trace(f, 1), [1, 2, 3])
+         self.assertListEqual(self._trace(f, 0), [1, 2, 5, 6])
+ 
++    #@support.skip_wasi_stack_overflow()
+     def test_parser_deeply_nested_patterns(self):
+         # Deeply nested patterns can cause exponential backtracking when parsing.
+         # See gh-93671 for more information.
+@@ -3513,38 +3538,7 @@
+                 compile(code, "<string>", "exec")
+ 
+ 
+-if __name__ == "__main__":
+-    """
+-    # From inside environment using this Python, with pyperf installed:
+-    sudo $(which pyperf) system tune && \
+-         $(which python) -m test.test_patma --rigorous; \
+-    sudo $(which pyperf) system reset
+-    """
+-    import pyperf
++from torch.testing._internal.common_utils import run_tests
+ 
+-
+-    class PerfPatma(TestPatma):
+-
+-        def assertEqual(*_, **__):
+-            pass
+-
+-        def assertIs(*_, **__):
+-            pass
+-
+-        def assertRaises(*_, **__):
+-            assert False, "this test should be a method of a different class!"
+-
+-        def run_perf(self, count):
+-            tests = []
+-            for attr in vars(TestPatma):
+-                if attr.startswith("test_"):
+-                    tests.append(getattr(self, attr))
+-            tests *= count
+-            start = pyperf.perf_counter()
+-            for test in tests:
+-                test()
+-            return pyperf.perf_counter() - start
+-
+-
+-    runner = pyperf.Runner()
+-    runner.bench_time_func("patma", PerfPatma().run_perf)
++if __name__ == "__main__":
++    run_tests()

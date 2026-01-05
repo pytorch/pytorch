@@ -1,12 +1,27 @@
+# ======= BEGIN Dynamo patch =======
 # Owner(s): ["module: dynamo"]
+# ruff: noqa
+# flake8: noqa
+
+# Test copied from
+# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.1/Lib/test/test_patma.py
+
+import sys
+import torch
+import torch._dynamo.test_case
+import unittest
+from torch._dynamo.test_case import CPythonTestCase
+from torch.testing._internal.common_utils import run_tests
+
+__TestCase = CPythonTestCase
+# ======= END DYNAMO PATCH =======
+
 import array
 import collections
 import dataclasses
 import dis
 import enum
 import inspect
-import sys
-import unittest
 from test import support
 
 
@@ -16,7 +31,7 @@ class Point:
     y: int
 
 
-class TestCompiler(unittest.TestCase):
+class TestCompiler(__TestCase):
 
     def test_refleaks(self):
         # Hunting for leaks using -R doesn't catch leaks in the compiler itself,
@@ -26,7 +41,7 @@ class TestCompiler(unittest.TestCase):
             compile(file.read(), __file__, "exec")
 
 
-class TestInheritance(unittest.TestCase):
+class TestInheritance(__TestCase):
 
     @staticmethod
     def check_sequence_then_mapping(x):
@@ -131,7 +146,7 @@ class TestInheritance(unittest.TestCase):
         self.assertEqual(self.check_mapping_then_sequence(GrandchildPost()), "seq")
 
 
-class TestPatma(unittest.TestCase):
+class TestPatma(__TestCase):
 
     def test_patma_000(self):
         match 0:
@@ -2890,7 +2905,7 @@ class TestPatma(unittest.TestCase):
                 self.assertEqual(h, 1)
 
 
-class TestSyntaxErrors(unittest.TestCase):
+class TestSyntaxErrors(__TestCase):
 
     def assert_syntax_error(self, code: str):
         with self.assertRaises(SyntaxError):
@@ -3231,7 +3246,7 @@ class TestSyntaxErrors(unittest.TestCase):
                 pass
         """)
 
-class TestTypeErrors(unittest.TestCase):
+class TestTypeErrors(__TestCase):
 
     def test_accepts_positional_subpatterns_0(self):
         class Class:
@@ -3372,7 +3387,7 @@ class TestTypeErrors(unittest.TestCase):
         self.assertIsNone(w)
 
 
-class TestValueErrors(unittest.TestCase):
+class TestValueErrors(__TestCase):
 
     def test_mapping_pattern_checks_duplicate_key_1(self):
         class Keys:
@@ -3387,7 +3402,7 @@ class TestValueErrors(unittest.TestCase):
         self.assertIs(y, None)
         self.assertIs(z, None)
 
-class TestSourceLocations(unittest.TestCase):
+class TestSourceLocations(__TestCase):
     def test_jump_threading(self):
         # See gh-123048
         def f():
@@ -3406,7 +3421,7 @@ class TestSourceLocations(unittest.TestCase):
             if inst.opcode in dis.hasjump:
                 self.assertIsNotNone(inst.positions.lineno, "jump without location")
 
-class TestTracing(unittest.TestCase):
+class TestTracing(__TestCase):
 
     @staticmethod
     def _trace(func, *args, **kwargs):
