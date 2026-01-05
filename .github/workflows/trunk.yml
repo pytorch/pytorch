@@ -292,6 +292,29 @@ jobs:
       build-environment: win-vs2022-cuda12.8-py3
       cuda-version: "12.8"
       runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral"
+      test-matrix: |
+        { include: [
+          { config: "default", shard: 1, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 2, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 3, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "default", shard: 4, num_shards: 4, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+          { config: "openreg", shard: 1, num_shards: 1, runner: "${{ needs.get-label-type.outputs.label-type }}windows.4xlarge.nonephemeral" },
+        ]}
+    secrets: inherit
+
+  win-vs2022-cuda12_8-py3-test:
+    if: ${{ needs.job-filter.outputs.jobs == '' || contains(needs.job-filter.outputs.jobs, ' win-vs2022-cuda12_8-py3 ') }}
+    name: win-vs2022-cuda12_8-py3
+    uses: ./.github/workflows/_win-test.yml
+    needs:
+      - win-vs2022-cuda12_8-py3-build
+      - target-determination
+      - job-filter
+    with:
+      build-environment: ${{ needs.win-vs2022-cuda12_8-py3-build.outputs.build-environment }}
+      cuda-version: cpu
+      test-matrix: ${{ needs.win-vs2022-cuda12_8-py3-build.outputs.test-matrix }}
+      disable-monitor: false
     secrets: inherit
 
   linux-jammy-rocm-py3_10-build:
