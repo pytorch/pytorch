@@ -1315,6 +1315,7 @@ def aot_compile_joint_with_descriptors(
     partition_fn: Callable = default_partition,
     fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
     bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    serializable: bool = False,
 ) -> callable:
     """
     Companion function for aot_export_joint_with_descriptors which compiles the joint
@@ -1323,6 +1324,11 @@ def aot_compile_joint_with_descriptors(
 
     Note: We do NOT instantiate the module; this gives you the flexibility to subclass it and
     customize its behavior without having to worry about FQN rebinding.
+
+    Args:
+        serializable: If True, configures the compilation to produce a serializable
+            callable by leveraging AOTAutogradCache machinery. This sets up the
+            necessary cache_info and patches config options required for serialization.
 
     TODO: Consider if we should allow_in_graph the result by default.
     """
@@ -1336,7 +1342,7 @@ def aot_compile_joint_with_descriptors(
     fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
 
     cache_ctx = nullcontext()
-    if torch._dynamo.config.enable_aot_compile:
+    if serializable:
         jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
             sha256(str(jd).encode("utf-8")).hexdigest(),
             time.time_ns(),

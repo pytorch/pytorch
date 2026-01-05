@@ -1268,6 +1268,7 @@ from user code:
                         jd,
                         fw_compiler=fwd_compile,
                         bw_compiler=bwd_compile,
+                        serializable=True,
                     )
 
                 with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as f:
