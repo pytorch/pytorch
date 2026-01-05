@@ -167,8 +167,8 @@ template <>
 at::vec::Vectorized<uint8_t> inline convert_float_to_int8(
     at::vec::Vectorized<float> src) {
   // The type of *_val should be int32_t to ensure correct clamping behavior.
-  constexpr auto min_val = std::numeric_limits<int32_t>::min();
-  constexpr auto max_val = std::numeric_limits<int32_t>::max();
+  constexpr auto min_val = std::numeric_limits<uint8_t>::min();
+  constexpr auto max_val = std::numeric_limits<uint8_t>::max();
   __m512 float32_min_val = _mm512_set1_ps(float(min_val));
   __m512 float32_max_val = _mm512_set1_ps(float(max_val));
   __m512 float32_src = _mm512_max_ps(src, float32_min_val);
