@@ -205,7 +205,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 2)
 
             # for each linear layer, should be supported but not used
-            for linear_key in per_channel_info.keys():
+            for linear_key in per_channel_info:
                 module_entry = per_channel_info[linear_key]
 
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
@@ -277,7 +277,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info.keys():
+            for key in per_channel_info:
                 module_entry = per_channel_info[key]
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
 
@@ -327,7 +327,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info.keys():
+            for key in per_channel_info:
                 module_entry = per_channel_info[key]
 
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
@@ -371,7 +371,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info.keys():
+            for key in per_channel_info:
                 module_entry = per_channel_info[key]
 
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
@@ -415,7 +415,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 4)
 
             # for each layer, should be supported but not used
-            for key in per_channel_info.keys():
+            for key in per_channel_info:
                 module_entry = per_channel_info[key]
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
                 self.assertEqual(module_entry["per_channel_quantization_used"], True)
@@ -482,7 +482,7 @@ class TestFxModelReportDetector(QuantizationTestCase):
             self.assertEqual(len(per_channel_info), 1)
 
             # for the one conv, it should still give advice to use different qconfig
-            for key in per_channel_info.keys():
+            for key in per_channel_info:
                 module_entry = per_channel_info[key]
                 self.assertEqual(module_entry["per_channel_quantization_supported"], True)
                 self.assertEqual(module_entry["per_channel_quantization_used"], False)
@@ -499,7 +499,7 @@ Partition on Domain / Things to Test
 - Reset for each epoch is correctly resetting the values
 
 Partition on Output
-- the calcuation of the ratio is occurring correctly
+- the calculation of the ratio is occurring correctly
 
 """
 
@@ -525,7 +525,7 @@ class TestFxModelReportObserver(QuantizationTestCase):
     def run_model_and_common_checks(self, model, ex_input, num_epochs, batch_size):
         # split up data into batches
         split_up_data = torch.split(ex_input, batch_size)
-        for epoch in range(num_epochs):
+        for _epoch in range(num_epochs):
             # reset all model report obs
             model.apply(
                 lambda module: module.reset_batch_and_epoch_values()
@@ -918,7 +918,7 @@ class TestFxModelReportClass(QuantizationTestCase):
     @skipIfNoFBGEMM
     def test_prepare_model_callibration(self):
         """
-        Tests model_report.prepare_detailed_calibration that prepares the model for callibration
+        Tests model_report.prepare_detailed_calibration that prepares the model for calibration
         Specifically looks at:
         - Whether observers are properly inserted into regular nn.Module
         - Whether the target and the arguments of the observers are proper
@@ -952,7 +952,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             # see whether observers properly in regular nn.Module
             # there should be 4 observers present in this case
             modules_observer_cnt = 0
-            for fqn, module in prepared_for_callibrate_model.named_modules():
+            for module in prepared_for_callibrate_model.modules():
                 if isinstance(module, ModelReportObserver):
                     modules_observer_cnt += 1
 
@@ -974,7 +974,7 @@ class TestFxModelReportClass(QuantizationTestCase):
             # there should be two entries
             self.assertEqual(len(model_report.get_observers_of_interest()), 2)
             for detector in test_detector_set:
-                self.assertTrue(detector.get_detector_name() in model_report.get_observers_of_interest().keys())
+                self.assertTrue(detector.get_detector_name() in model_report.get_observers_of_interest())
 
                 # get number of entries for this detector
                 detector_obs_of_interest_fqns = model_report.get_observers_of_interest()[detector.get_detector_name()]
@@ -999,7 +999,7 @@ class TestFxModelReportClass(QuantizationTestCase):
         """
         # get the number of observers stored as modules
         modules_observer_cnt = 0
-        for fqn, module in callibrated_fx_module.named_modules():
+        for module in callibrated_fx_module.modules():
             if isinstance(module, ModelReportObserver):
                 modules_observer_cnt += 1
 
@@ -1058,7 +1058,7 @@ class TestFxModelReportClass(QuantizationTestCase):
 
             # now calibrate the two models
             num_iterations = 10
-            for i in range(num_iterations):
+            for _ in range(num_iterations):
                 example_input = torch.tensor(torch.randint(100, (1, 3, 3, 3)), dtype=torch.float)
                 prepared_for_callibrate_model_full(example_input)
                 prepared_for_callibrate_model_single(example_input)
@@ -1150,7 +1150,7 @@ class TestFxModelReportClass(QuantizationTestCase):
         """
         Tests for generation of qconfigs by ModelReport API
         - Tests that qconfigmapping is generated
-        - Tests that mappings include information for for relavent modules
+        - Tests that mappings include information for for relevant modules
         """
         with override_quantized_engine('fbgemm'):
             # set the backend for this test
@@ -1209,7 +1209,7 @@ class TestFxModelReportClass(QuantizationTestCase):
         """
         Tests for generation of qconfigs by ModelReport API
         - Tests that equalization config generated when input-weight equalization detector used
-        - Tests that mappings include information for for relavent modules
+        - Tests that mappings include information for for relevant modules
         """
         with override_quantized_engine('fbgemm'):
             # set the backend for this test
@@ -1305,7 +1305,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             return (torch.arange(27).reshape((1, 3, 3, 3)),)
 
     def _get_prepped_for_calibration_model(self, model, detector_set, fused=False):
-        r"""Returns a model that has been prepared for callibration and corresponding model_report"""
+        r"""Returns a model that has been prepared for calibration and corresponding model_report"""
 
         # pass in necessary inputs to helper
         example_input = model.get_example_inputs()[0]
@@ -1324,7 +1324,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
             fused = self._get_prepped_for_calibration_model(self.TwoBlockComplexNet(), detector_set, fused=True)
 
             # reporter should still give same counts even for fused model
-            for prepared_for_callibrate_model, mod_report in [non_fused, fused]:
+            for prepared_for_callibrate_model, _mod_report in [non_fused, fused]:
 
                 # supported modules to check
                 mods_to_check = {nn.Linear, nn.Conv2d}
@@ -1345,7 +1345,7 @@ class TestFxDetectInputWeightEqualization(QuantizationTestCase):
                 self.assertEqual(number_of_obs_found, correct_number_of_obs_inserted)
 
                 # assert that each of the desired modules have the observers inserted
-                for fqn, module in prepared_for_callibrate_model.named_modules():
+                for module in prepared_for_callibrate_model.modules():
                     # check if module is a supported module
                     is_in_include_list = sum(isinstance(module, x) for x in mods_to_check) > 0
 
@@ -1530,7 +1530,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
 
 
     def _get_prepped_for_calibration_model(self, model, detector_set, use_outlier_data=False):
-        r"""Returns a model that has been prepared for callibration and corresponding model_report"""
+        r"""Returns a model that has been prepared for calibration and corresponding model_report"""
         # call the general helper function to calibrate
         example_input = model.get_example_inputs()[0]
 
@@ -1569,7 +1569,7 @@ class TestFxDetectOutliers(QuantizationTestCase):
             self.assertEqual(number_of_obs_found, correct_number_of_obs_inserted)
 
             # assert that each of the desired modules have the observers inserted
-            for fqn, module in prepared_for_callibrate_model.named_modules():
+            for module in prepared_for_callibrate_model.modules():
                 # check if module is a supported module
                 is_in_include_list = isinstance(module, tuple(mods_to_check))
 
@@ -1762,7 +1762,7 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
 
     def _callibrate_and_generate_visualizer(self, model, prepared_for_callibrate_model, mod_report):
         r"""
-        Callibrates the passed in model, generates report, and returns the visualizer
+        Calibrates the passed in model, generates report, and returns the visualizer
         """
         # now we actually calibrate the model
         example_input = model.get_example_inputs()[0]
@@ -1937,7 +1937,7 @@ class TestFxModelReportVisualizer(QuantizationTestCase):
             self.assertEqual(channel_info_features, 1)
 
 def _get_prepped_for_calibration_model_helper(model, detector_set, example_input, fused: bool = False):
-    r"""Returns a model that has been prepared for callibration and corresponding model_report"""
+    r"""Returns a model that has been prepared for calibration and corresponding model_report"""
     # set the backend for this test
     torch.backends.quantized.engine = "fbgemm"
 

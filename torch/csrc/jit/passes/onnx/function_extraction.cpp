@@ -250,7 +250,7 @@ void FunctionExtractor::DebugPrintScopeContexts(
     GRAPH_UPDATE("Children scopes: ", [&]() {
       std::stringstream ss;
       for (const auto& child_scope : it.second->children_) {
-        ss << child_scope->name().toDisplayString() << " ";
+        ss << child_scope->name().toDisplayString() << ' ';
       }
       return ss.str();
     }());

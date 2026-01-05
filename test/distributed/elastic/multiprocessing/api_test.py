@@ -743,16 +743,19 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
                 self.assertTrue(tail_log.stopped())
 
         def test_binary_duplicate_log_filters(self):
+            envs = {0: {"RANK": "0"}, 1: {"RANK": "1"}}
+            logs_specs = DefaultLogsSpecs(
+                log_dir=self.log_dir(),
+                redirects={0: Std.ERR, 1: Std.NONE},
+                tee={0: Std.OUT, 1: Std.ERR},
+            )
+            logs_dest = logs_specs.reify(envs)
             pc = start_processes(
                 name="trainer",
                 entrypoint=bin("echo1.py"),
                 args={0: ("helloA,helloB",), 1: ("worldA,worldB",)},
-                envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                logs_specs=DefaultLogsSpecs(
-                    log_dir=self.log_dir(),
-                    redirects={0: Std.ERR, 1: Std.NONE},
-                    tee={0: Std.OUT, 1: Std.ERR},
-                ),
+                envs=envs,
+                logs_specs=logs_specs,
                 log_line_prefixes={0: "[rank0]:", 1: "[rank1]:"},
                 duplicate_stdout_filters=["helloA"],
                 duplicate_stderr_filters=["worldA", "B"],
@@ -762,12 +765,18 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS):
             result = pc.wait()
 
             self.assertFalse(result.is_failed())
-            self.assert_in_file(["[rank0]:helloA stdout from 0"], pc.filtered_stdout)
-            self.assert_not_in_file(
-                ["[rank0]:helloB stdout from 0"], pc.filtered_stdout
+            self.assert_in_file(
+                ["[rank0]:helloA stdout from 0"], logs_dest.filtered_stdout
             )
-            self.assert_in_file(["[rank1]:worldA stderr from 1"], pc.filtered_stderr)
-            self.assert_in_file(["[rank1]:worldB stderr from 1"], pc.filtered_stderr)
+            self.assert_not_in_file(
+                ["[rank0]:helloB stdout from 0"], logs_dest.filtered_stdout
+            )
+            self.assert_in_file(
+                ["[rank1]:worldA stderr from 1"], logs_dest.filtered_stderr
+            )
+            self.assert_in_file(
+                ["[rank1]:worldB stderr from 1"], logs_dest.filtered_stderr
+            )
             for tail_log in pc._tail_logs:
                 self.assertTrue(tail_log.stopped())
 
@@ -800,6 +809,7 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
                     stderr_redirects={0: stderr_redir},
                     ret_vals={0: queue},
                     queue_finished_reading_event=worker_finished_event_mock,
+                    numa_options=None,
                 )
                 self.assertEqual("hello_0", queue.get())
                 if stdout_redir:
@@ -837,16 +847,19 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
         def test_function_duplicate_log_filters(self):
             for start_method in self._start_methods:
                 with self.subTest(start_method=start_method):
+                    envs = {0: {"RANK": "0"}, 1: {"RANK": "1"}}
+                    logs_specs = DefaultLogsSpecs(
+                        log_dir=self.log_dir(),
+                        redirects={0: Std.ERR, 1: Std.NONE},
+                        tee={0: Std.OUT, 1: Std.ERR},
+                    )
+                    logs_dest = logs_specs.reify(envs)
                     pc = start_processes(
                         name="trainer",
                         entrypoint=echo1,
                         args={0: ("helloA,helloB",), 1: ("worldA,worldB",)},
-                        envs={0: {"RANK": "0"}, 1: {"RANK": "1"}},
-                        logs_specs=DefaultLogsSpecs(
-                            log_dir=self.log_dir(),
-                            redirects={0: Std.ERR, 1: Std.NONE},
-                            tee={0: Std.OUT, 1: Std.ERR},
-                        ),
+                        envs=envs,
+                        logs_specs=logs_specs,
                         duplicate_stdout_filters=["helloA"],
                         duplicate_stderr_filters=["worldA", "B"],
                         start_method="spawn",
@@ -856,16 +869,16 @@ if not (TEST_WITH_DEV_DBG_ASAN or IS_WINDOWS or IS_MACOS or IS_CI):
 
                     self.assertFalse(result.is_failed())
                     self.assert_in_file(
-                        ["[trainer0]:helloA stdout from 0"], pc.filtered_stdout
+                        ["[trainer0]:helloA stdout from 0"], logs_dest.filtered_stdout
                     )
                     self.assert_not_in_file(
-                        ["[trainer0]:helloB stdout from 0"], pc.filtered_stdout
+                        ["[trainer0]:helloB stdout from 0"], logs_dest.filtered_stdout
                     )
                     self.assert_in_file(
-                        ["[trainer1]:worldA stderr from 1"], pc.filtered_stderr
+                        ["[trainer1]:worldA stderr from 1"], logs_dest.filtered_stderr
                     )
                     self.assert_in_file(
-                        ["[trainer1]:worldB stderr from 1"], pc.filtered_stderr
+                        ["[trainer1]:worldB stderr from 1"], logs_dest.filtered_stderr
                     )
                     for tail_log in pc._tail_logs:
                         self.assertTrue(tail_log.stopped())

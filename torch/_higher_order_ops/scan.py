@@ -239,6 +239,7 @@ class ScanOp(HigherOrderOperator):
             else additional_inputs
         )
         validate_subgraph_args_types(additional_inputs)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(combine_fn, init, xs, additional_inputs)
 
     # pyrefly: ignore [bad-override]
@@ -312,7 +313,7 @@ def generic_scan(operator, init, xs, dim=0, additional_inputs=()):
         out_tensor_mask = get_tensor_mask(dummy_out)
         dummy_out_masked = mask_list(out_tensor_mask, dummy_out)
 
-        # Pre-alocate
+        # Pre-allocate
         # outs -> Output matrix
         # idxs -> Index matrix for scatter_
         # out: (num_elems, M, N, ...)

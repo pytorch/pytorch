@@ -67,7 +67,7 @@ class SignalTest {
       work = pg.allreduce(tensors);
       try {
         work->wait();
-      } catch (const std::exception& e) {
+      } catch (const std::exception&) {
         break;
       }
       sem_.post();

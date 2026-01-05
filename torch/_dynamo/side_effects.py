@@ -33,7 +33,7 @@ from typing import Any, Optional, TYPE_CHECKING
 import torch.nn
 from torch._dynamo.variables.misc import AutogradFunctionContextVariable
 
-from . import graph_break_hints, utils, variables
+from . import config, graph_break_hints, utils, variables
 from .bytecode_transformation import (
     bytecode_from_template,
     create_call_function,
@@ -41,8 +41,8 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import SideEffectsError, unimplemented_v2
-from .source import GlobalSource, LocalCellSource, LocalSource, Source
+from .exc import unimplemented
+from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
     AttributeMutation,
@@ -213,22 +213,18 @@ class SideEffects:
     def __getitem__(self, item: Any) -> VariableTracker:
         return self.id_to_variable[id(item)]
 
-    def should_allow_side_effects_under_checkpoint(self) -> bool:
-        output_graph = self.output_graph_weakref()
-        return bool(
-            output_graph
-            and output_graph.current_tx.output.current_tracer.under_activation_checkpoint
-            and (
-                output_graph.current_tx.output.current_tracer.allow_side_effects_under_checkpoint
-                or torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint
-            )
-        )
-
     def should_allow_externally_visible_side_effects_in_subtracer(self) -> bool:
         output_graph = self.output_graph_weakref()
         return bool(
             output_graph
             and output_graph.current_tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
+        )
+
+    def should_allow_side_effects_in_hop(self) -> bool:
+        output_graph = self.output_graph_weakref()
+        return bool(
+            output_graph
+            and output_graph.current_tx.output.current_tracer.allow_side_effects_in_hop
         )
 
     def is_reconstructing_generator(self) -> bool:
@@ -248,23 +244,34 @@ class SideEffects:
             return True
         if self.should_allow_externally_visible_side_effects_in_subtracer():
             return True
-        if self.should_allow_side_effects_under_checkpoint():
+        if self.should_allow_side_effects_in_hop():
             return True
         if self.is_reconstructing_generator():
             # This is missing the case where one mutates a tensor. See
             # test_generator.py::test_reconstruct_generator_tensor_mutation
-            raise SideEffectsError(
-                "Cannot reconstruct a generator with variable mutations. "
+            unimplemented(
+                gb_type="Generator reconstruction with mutations",
+                context=f"mutating object: {item}",
+                explanation="Cannot reconstruct a generator with variable mutations. "
                 "Dynamo needs to fully exhaust the generator, which may cause "
-                "unintended variable modifications."
+                "unintended variable modifications.",
+                hints=[
+                    "Remove mutations from the generator.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
             )
+        assert item.mutation_type is not None
         if not is_side_effect_safe(item.mutation_type):
-            # TODO plumb HOP information here
-            unimplemented_v2(
-                gb_type="HigherOrderOperator: Mutating a variable not in the current scope (SideEffects)",
-                context="",
-                explanation="This is not supported.",
-                hints=[],
+            unimplemented(
+                gb_type="HOP: Unsafe side effect",
+                context=f"Attempted to mutate {item}",
+                explanation="Mutating a variable from outside the scope of this HOP is not supported.",
+                hints=[
+                    "If the HOP is activation checkpointing (torch.utils.checkpoint.checkpoint), this points to a "
+                    "side effect in forward method. Eager activation checkpointing replays that side-effect while "
+                    "recomputing the forward in the backward. If you are ok with side-effect not replayed in the "
+                    "backward, try setting `torch._dynamo.config.skip_fwd_side_effects_in_bwd_under_checkpoint = True`",
+                ],
             )
         return False
 
@@ -288,7 +295,7 @@ class SideEffects:
             assert self.is_attribute_mutation(item)
         result = self.store_attr_mutations[item][name]
         if not deleted_ok and isinstance(result, variables.DeletedVariable):
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Attempted to read a deleted variable",
                 context=f"item: {item}, name: {name}",
                 explanation="",
@@ -298,7 +305,7 @@ class SideEffects:
 
     def store_cell(self, cellvar: VariableTracker, value: VariableTracker) -> None:
         if cellvar.is_immutable():
-            unimplemented_v2(
+            unimplemented(
                 gb_type="Write to immutable cell",
                 context=f"cellvar: {cellvar}, value: {value}",
                 explanation="Dynamo doesn't support writing to immutable/sourceless cell variables.",
@@ -314,7 +321,7 @@ class SideEffects:
             return self.load_attr(cellvar, "cell_contents", check=False)
         if cellvar.pre_existing_contents:
             return cellvar.pre_existing_contents
-        unimplemented_v2(
+        unimplemented(
             gb_type="Read uninitialized cell",
             context=str(cellvar),
             explanation="Attempted to read a cell variable that has not been populated yet.",
@@ -373,7 +380,7 @@ class SideEffects:
 
         if self.is_attribute_mutation(item):
             return item in self.store_attr_mutations
-
+        assert item.mutation_type is not None
         return item.mutation_type.is_modified  # type: ignore[attr-defined]
 
     def _track_obj(
@@ -404,6 +411,8 @@ class SideEffects:
         item: Any,
         variable: VariableTracker,
     ) -> VariableTracker:
+        # TODO: Modify this API so that we preserve type info of
+        # variable
         return self._track_obj(
             item,
             variable,
@@ -412,7 +421,7 @@ class SideEffects:
 
     def track_object_new(
         self,
-        cls_source: Source,
+        cls_source: Source | None,
         user_cls: Any,
         variable_cls: Any,
         options: dict[str, Any],
@@ -625,6 +634,12 @@ class SideEffects:
         cur_tx: Optional[InstructionTranslatorBase] = tx
         while cur_tx is not None:
             init_live_vars.extend([cur_tx.stack, cur_tx.symbolic_locals])
+            if cur_tx.parent is not None:
+                # for non-root tx'es, also keep the cells/freevars alive so they get codegen'd properly
+                # TODO see if we could prune dead cells - cell pruning information needs to be forwarded
+                # to the resume function creation as well.
+                assert cur_tx.post_prune_cell_and_freevars is not None
+                init_live_vars.append(cur_tx.post_prune_cell_and_freevars)
             cur_tx = cur_tx.parent
         VariableTracker.visit(
             visit,
@@ -697,11 +712,10 @@ class SideEffects:
                     )
                     cg.extend_output(create_call_function(0, False))
                     cg.add_cache(var)
-                    var.source = LocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
+                    var.source = TempLocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
                 elif var.source is None:
-                    # pyrefly: ignore [bad-assignment]
                     var.source = LocalCellSource(var.local_name)
-            elif isinstance(var, variables.TensorVariable):
+            elif var.is_tensor():
                 # NOTE: for historical reasons we never assigned local sources
                 # to newly constructed tensor object, so we keep it that way.
                 # They are always loaded from output of the fx graph, so one can
@@ -722,9 +736,9 @@ class SideEffects:
                     # `add_cache` generates STORE and consumes TOS, but we never
                     # cleared it. TODO move this call into `add_cache`
                     cg.clear_tos()
-                    var.source = LocalSource(cg.tempvars[var])
+                    var.source = TempLocalSource(cg.tempvars[var])
             elif isinstance(var, variables.AutogradFunctionContextVariable):
-                unimplemented_v2(
+                unimplemented(
                     gb_type="AutogradFunctionContextVariable escaped Dynamo-traced region",
                     context="",
                     explanation="We cannot reconstruct a torch.autograd.Function's context object.",
@@ -757,7 +771,7 @@ class SideEffects:
                 cg.extend_output(create_call_function(1 + len(var.init_args), False))  # type: ignore[attr-defined]
 
                 cg.add_cache(var)
-                var.source = LocalSource(cg.tempvars[var])
+                var.source = TempLocalSource(cg.tempvars[var])
 
         for ctx, args in self.save_for_backward:
             cg(ctx.source)
@@ -778,7 +792,7 @@ class SideEffects:
         handle: "variables.RemovableHandleVariable",
         name: str,
     ) -> None:
-        assert isinstance(tensor, variables.TensorVariable)
+        assert tensor.is_tensor()
         assert isinstance(hook, variables.VariableTracker)
         assert (
             isinstance(handle, variables.RemovableHandleVariable)
@@ -863,6 +877,11 @@ class SideEffects:
     def codegen_update_mutated(self, cg: PyCodegen) -> None:
         suffixes = []
         for var in self._get_modified_vars():
+            # When replay_side_effects=False, only update variables with TempLocalSource
+            if not config.replay_side_effects and not isinstance(
+                var.source, TempLocalSource
+            ):
+                continue
             if isinstance(var, variables.ListVariable):
                 # old[:] = new
                 cg(var, allow_cache=False)  # Don't codegen via source
@@ -878,11 +897,8 @@ class SideEffects:
             elif isinstance(var, variables.lists.DequeVariable):
                 # For limited maxlen, the order of operations matter for side
                 # effect, but we currently don't track the order, so no support.
-                if not (
-                    isinstance(var.maxlen, variables.ConstantVariable)
-                    and var.maxlen.value is None
-                ):
-                    unimplemented_v2(
+                if not var.maxlen.is_constant_none():
+                    unimplemented(
                         gb_type="Side effect on existing deque with limited maxlen",
                         context="",
                         explanation="This is not supported.",
@@ -985,7 +1001,6 @@ class SideEffects:
                 if isinstance(
                     var,
                     variables.UserDefinedDictVariable,
-                    # pyrefly: ignore [bad-argument-type]
                 ) and self.is_modified(var._dict_vt):
                     # Do dict related update manually here. The store_attr
                     # mutations will be applied later.
@@ -1018,7 +1033,6 @@ class SideEffects:
                         ]
                     )
 
-                    # pyrefly: ignore [bad-argument-type]
                     cg(var._dict_vt, allow_cache=False)  # Don't codegen via source
                     cg.extend_output(
                         [
@@ -1041,7 +1055,6 @@ class SideEffects:
                 elif isinstance(
                     var,
                     variables.UserDefinedListVariable,
-                    # pyrefly: ignore [bad-argument-type]
                 ) and self.is_modified(var._list_vt):
                     # Update the list to the updated items. Be careful in
                     # calling the list methods and not the overridden methods.
@@ -1058,7 +1071,6 @@ class SideEffects:
                         ]
                     )
 
-                    # pyrefly: ignore [bad-argument-type]
                     cg(var._list_vt, allow_cache=False)  # Don't codegen via source
                     cg.extend_output(
                         [
@@ -1193,16 +1205,20 @@ class SideEffects:
 
 
 @contextlib.contextmanager
-def allow_side_effects_under_checkpoint(
+def allow_side_effects_in_hop(
     tx: "InstructionTranslatorBase",
 ) -> Generator[None, None, None]:
-    assert tx.output.current_tracer.under_activation_checkpoint
-    orig_val = tx.output.current_tracer.allow_side_effects_under_checkpoint
+    """Context manager to temporarily allow side effects with extra outputs.
+
+    This is used for special cases (like FSDP functions) that need to perform
+    side effects even when the general policy is to disallow them.
+    """
+    orig_val = tx.output.current_tracer.allow_side_effects_in_hop
     try:
-        tx.output.current_tracer.allow_side_effects_under_checkpoint = True
+        tx.output.current_tracer.allow_side_effects_in_hop = True
         yield
     finally:
-        tx.output.current_tracer.allow_side_effects_under_checkpoint = orig_val
+        tx.output.current_tracer.allow_side_effects_in_hop = orig_val
 
 
 @contextlib.contextmanager
@@ -1212,6 +1228,7 @@ def allow_externally_visible_side_effects_in_subtracer(
     orig_val = tx.output.current_tracer.unsafe_allow_externally_visible_side_effects
     try:
         tx.output.current_tracer.unsafe_allow_externally_visible_side_effects = True
+        tx.output.current_tracer.traced_with_externally_visible_side_effects = True
         yield
     finally:
         tx.output.current_tracer.unsafe_allow_externally_visible_side_effects = orig_val

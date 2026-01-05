@@ -73,15 +73,25 @@ _like_tensor_constructors = ordered_set(
     aten.ones_like.default,
     aten.ones_like.out,
     aten.rand_like.default,
+    aten.rand_like.generator,
     aten.rand_like.out,
+    aten.rand_like.generator_out,
     aten.randn_like.default,
+    aten.randn_like.generator,
     aten.randn_like.out,
+    aten.randn_like.generator_out,
     aten.randint_like.default,
+    aten.randint_like.generator,
     aten.randint_like.Tensor,
+    aten.randint_like.Tensor_generator,
     aten.randint_like.Tensor_out,
+    aten.randint_like.Tensor_generator_out,
     aten.randint_like.out,
+    aten.randint_like.generator_out,
     aten.randint_like.low_dtype,
+    aten.randint_like.low_generator_dtype,
     aten.randint_like.low_dtype_out,
+    aten.randint_like.low_generator_dtype_out,
     aten.zeros_like.default,
     aten.zeros_like.out,
     aten.new_empty.default,
@@ -211,6 +221,34 @@ def non_kwarg_is_pinned(fake_mode, func, *args, **kwargs):
     with in_kernel_invocation_manager(fake_mode):
         r = func(inp)
     return r
+
+
+# Legacy profiler ops return Tensors but don't follow tensor constructor patterns
+# They take string arguments and should not have device/dtype parameters added
+@register_op_impl(torch.ops.profiler._record_function_enter.default)
+def _record_function_enter(fake_mode, func, name: str, args=None):
+    # Call the real implementation to get a real handle tensor
+    with in_kernel_invocation_manager(fake_mode):
+        real_handle = func(name, args)
+    # Create a meta tensor with the same properties as the real handle
+    meta_handle = torch.empty_like(real_handle, device="meta")
+    # Wrap it as a FakeTensor
+    return FakeTensor(fake_mode, meta_handle, torch.device("cpu"))
+
+
+@register_op_impl(torch.ops.profiler._record_function_exit.default)
+def _record_function_exit(fake_mode, func, handle):
+    # Exit doesn't return anything and doesn't need to do anything for fake tensors
+    # Just return None (the actual return type is void)
+    pass
+
+
+@register_op_impl(torch.ops.profiler._record_function_enter_new.default)
+def _record_function_enter_new(fake_mode, func, name: str, args=None):
+    # Call the real implementation - returns a custom class, not a tensor
+    # Just pass through without wrapping
+    with in_kernel_invocation_manager(fake_mode):
+        return func(name, args)
 
 
 @register_op_impl(aten.to.prim_Device)
@@ -1033,6 +1071,7 @@ def embedding_bag(fake_mode, func, *args, **kwargs):
 @register_op_impl(aten.copy.default)
 @register_op_impl(aten.copy_.default)
 @register_op_impl(aten.slice_scatter.default)
+@register_op_impl(aten.diagonal_scatter.default)
 def multi_device_op_default(fake_mode, func, *args, **kwargs):
     return run_and_return_new_tensor_of_input_device(fake_mode, func, args, kwargs)
 
@@ -1338,9 +1377,11 @@ def make_fast_binary_impl(
                 continue
             if common_device == cpu and op.device.type != "cpu":
                 common_device = op.device
-            # Slightly simplified here as target_dtype cannot vary
             if common_dtype is None:
-                common_dtype = op.dtype
+                if type_promotion_kind != ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT:
+                    has_different_input_dtypes = True
+                else:
+                    common_dtype = op.dtype
             elif common_dtype != op.dtype:
                 has_different_input_dtypes = True
 

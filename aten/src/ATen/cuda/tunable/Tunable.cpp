@@ -7,7 +7,6 @@
 // Adapting TunableOp into PyTorch
 // Copyright (c) Advanced Micro Devices, Inc.
 //
-#include <cuda_runtime.h>
 
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/tunable/Tunable.h>
@@ -16,12 +15,8 @@
 #include <c10/util/env.h>
 #include <torch/version.h>
 
-#ifndef _WIN32
-#include <cxxabi.h>
-#endif
 
 #include <fstream>
-#include <mutex>
 #include <sstream>
 #include <string>
 #include <unordered_map>
@@ -52,10 +47,10 @@ TuningContext* getTuningContext() {
 std::ostream& operator<<(std::ostream& stream, const ResultEntry& entry) {
   static const bool blaslog = c10::utils::get_env("PYTORCH_TUNABLEOP_BLAS_LOG") == "1";
   if (!blaslog) {
-    return stream << entry.key_ << "," << entry.time_;
+    return stream << entry.key_ << ',' << entry.time_;
   }
   else {
-    return stream << entry.key_ << "," << entry.time_ << ",BLAS_PARAMS: " << entry.blas_sig_;
+    return stream << entry.key_ << ',' << entry.time_ << ",BLAS_PARAMS: " << entry.blas_sig_;
   }
 }
 
@@ -156,10 +151,10 @@ void TuningResultsManager::RecordUntuned( std::ofstream& untuned_file, const std
     if (isNew) {
       static const bool blaslog = c10::utils::get_env("PYTORCH_TUNABLEOP_BLAS_LOG") == "1";
       if (!blaslog) {
-        untuned_file << op_signature << "," << params_signature << std::endl;
+        untuned_file << op_signature << ',' << params_signature << std::endl;
       }
       else {
-        untuned_file << op_signature << "," << params_signature << ",BLAS_PARAMS: " << blas_signature << std::endl;
+        untuned_file << op_signature << ',' << params_signature << ",BLAS_PARAMS: " << blas_signature << std::endl;
       }
       TUNABLE_LOG3("Untuned,", op_signature, ",", params_signature);
     }
@@ -201,7 +196,7 @@ void TuningResultsManager::InitRealtimeAppend(const std::string& filename, const
 
   if(!file_exists || file_empty) {
     for(const auto& [key, val] : validators) {
-      (*realtime_out_) << "Validator," << key << "," << val << std::endl;
+      (*realtime_out_) << "Validator," << key << ',' << val << std::endl;
       realtime_out_->flush();
     }
     validators_written_ = true;
@@ -219,7 +214,7 @@ void TuningResultsManager::AppendResultLine(const std::string& op_sig, const std
     return;
   }
 
-  (*realtime_out_) << op_sig << "," << param_sig << "," << result << std::endl;
+  (*realtime_out_) << op_sig << ',' << param_sig << ',' << result << std::endl;
   realtime_out_->flush(); //ensure immediate write to disk
 
   TUNABLE_LOG3("Realtime append: ", op_sig, "(", param_sig, ") -> ", result);

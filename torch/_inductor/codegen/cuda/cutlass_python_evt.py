@@ -168,7 +168,7 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
         self.removed_buffers: OrderedSet[str] = removed_buffers
         self.cur_node: Optional[ComputedBuffer] = None
         self.name_to_buffer = V.graph.name_to_buffer | V.graph.graph_inputs
-        for name in V.graph.constants.keys():
+        for name in V.graph.constants:
             self.name_to_buffer[name] = V.graph.add_tensor_constant(
                 V.graph.constants[name], name
             )

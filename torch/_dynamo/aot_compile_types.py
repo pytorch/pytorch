@@ -16,6 +16,10 @@ class SerializableCallable(abc.ABC):
     def deserialize_compile_artifacts(cls, data: bytes) -> Any:
         pass
 
+    @abc.abstractmethod
+    def __call__(self, *args: Any, **kwargs: Any) -> Any:
+        pass
+
 
 class BundledAOTAutogradSerializableCallable(SerializableCallable):
     """
@@ -48,7 +52,7 @@ class BundledAOTAutogradSerializableCallable(SerializableCallable):
 
     @classmethod
     def deserialize_compile_artifacts(cls, data: bytes) -> Any:
-        from torch._functorch._aot_autograd.autograd_cache import (
+        from torch._functorch._aot_autograd.aot_autograd_result import (
             deserialize_bundled_cache_entry,
         )
 

@@ -19,8 +19,8 @@
 /// Indicates the ABI version of LibTorch as a single uint64.
 /// [ byte ][ byte ][ byte ][ byte ][ byte ][ byte ][ byte ][ byte ]
 /// [ MAJ  ][ MIN  ][ PATCH][                              ABI TAG ]
-#define TORCH_ABI_VERSION \
-  (uint64_t)TORCH_VERSION_MAJOR << 56 | \
-  (uint64_t)TORCH_VERSION_MINOR << 48 | \
-  (uint64_t)TORCH_VERSION_PATCH << 40 | \
-  TORCH_VERSION_ABI_TAG << 0
+#define TORCH_ABI_VERSION ( \
+  ((0ULL + TORCH_VERSION_MAJOR) << 56) | \
+  ((0ULL + TORCH_VERSION_MINOR) << 48) | \
+  ((0ULL + TORCH_VERSION_PATCH) << 40) | \
+  ((0ULL + TORCH_VERSION_ABI_TAG) << 0))

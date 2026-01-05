@@ -1,5 +1,5 @@
 import logging
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 from torch._inductor.fx_passes.bucketing import (
@@ -48,7 +48,7 @@ def is_fsdp_reduce_scatter_wait(wait: torch.fx.Node) -> bool:
         return (
             is_graph_output(user)
             and user.op == "call_function"
-            and user.target == torch.ops.prims.convert_element_type.default
+            and user.target is torch.ops.prims.convert_element_type.default
         )
 
     return False

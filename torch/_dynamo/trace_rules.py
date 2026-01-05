@@ -32,7 +32,6 @@ import os
 import random
 import re
 import sys
-import traceback
 import types
 import unittest
 from collections import defaultdict
@@ -64,6 +63,8 @@ from .variables import (
     LocalGeneratorObjectVariable,
     NestedUserFunctionVariable,
     PolyfilledFunctionVariable,
+    PyTreeGetNodeTypeFunctionVariable,
+    PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
     SkipFunctionVariable,
     TorchInGraphFunctionVariable,
@@ -178,8 +179,11 @@ manual_torch_name_rule_map: dict[
     "torch.compiler.is_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_dynamo_compiling": TorchInGraphFunctionVariable,
     "torch.compiler.is_exporting": TorchInGraphFunctionVariable,
+    "torch._dynamo.eval_frame._is_in_optimized_module": TorchInGraphFunctionVariable,
     "torch._C._to_dlpack": SkipFunctionVariable,
+    "torch._C._group_tensors_by_device_and_dtype": TorchInGraphFunctionVariable,
     "torch.to_dlpack": SkipFunctionVariable,
+    "torch._check": TorchInGraphFunctionVariable,
     # We graph break on RNG state setters or getters like
     # `torch.get_rng_state` or `torch.set_rng_state`. These functions
     # are not aten operations and therefore they are completely ignored
@@ -370,6 +374,7 @@ manual_torch_name_rule_map: dict[
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
     "torch.xpu.get_rng_state": SkipFunctionVariable,
     "torch.xpu.set_rng_state": SkipFunctionVariable,
+    "torch.library.wrap_triton": TorchInGraphFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_fsdp.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
@@ -377,6 +382,8 @@ manual_torch_name_rule_map: dict[
     f"torch/testing/_internal/distributed/_tensor/common_dtensor.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
     "torch/testing/_internal/common_distributed.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_distributed.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
+    "torch.utils._pytree._get_node_type": PyTreeGetNodeTypeFunctionVariable,
+    "torch.utils._pytree.tree_is_leaf": PyTreeTreeIsLeafFunctionVariable,
 }
 
 
@@ -713,7 +720,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._get_version_calculator_flag",
         "torch._C._get_warnAlways",
         "torch._C._graph_pool_handle",
-        "torch._C._group_tensors_by_device_and_dtype",
         "torch._C._hack_do_not_use_clone_module_with_class",
         "torch._C._has_distributed",
         "torch._C._has_Standard_Deleter",
@@ -1059,7 +1065,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._C._nn._conv_depthwise2d",
         "torch._C._nn._pad_circular",
         "torch._C._nn._pad_enum",
-        "torch._C._nn._parse_to",
         "torch._C._nn._test_ambiguous_defaults",
         "torch._C._nn._test_optional_filled_intlist",
         "torch._C._nn._test_optional_floatlist",
@@ -1582,7 +1587,6 @@ torch_c_binding_in_graph_functions = dict.fromkeys(
         "torch._fw_primal_copy",
         "torch._grid_sampler_2d_cpu_fallback",
         "torch._grouped_mm",
-        "torch._has_compatible_shallow_copy_type",
         "torch._histogramdd_bin_edges",
         "torch._histogramdd_from_bin_cts",
         "torch._histogramdd_from_bin_tensors",
@@ -2319,6 +2323,8 @@ if sys.version_info >= (3, 11):
     torch_c_binding_in_graph_functions["math.exp2"] = TorchInGraphFunctionVariable
     torch_c_binding_in_graph_functions["math.cbrt"] = TorchInGraphFunctionVariable
 
+if sys.version_info >= (3, 13):
+    torch_c_binding_in_graph_functions["math.fma"] = TorchInGraphFunctionVariable
 
 # In graph functions (including constant folding) that are not C bindings
 # NOTE: [Cacheability of in-graph torch functions]
@@ -2343,7 +2349,6 @@ torch_non_c_binding_in_graph_functions = dict.fromkeys(
         "torch._check_type",
         "torch._check_value",
         "torch._check_with",
-        "torch._check",
         "torch._compile._disable_dynamo",
         "torch._functorch.apis.chunk_vmap",
         "torch._functorch.batch_norm_replacement.batch_norm_without_running_stats",
@@ -3302,7 +3307,6 @@ BUILTIN_SKIPLIST = (
     abc,
     copy,
     random,
-    traceback,
     linecache,
 )
 
@@ -3447,6 +3451,7 @@ MOD_INLINELIST = [
     "torch.utils._cxx_pytree",
     "torch.utils._device",
     "torch.utils._foreach_utils",
+    "torch.utils._ordered_set",
     "torch.utils._python_dispatch",
     "torch.utils._pytree",
     "torch.utils.hooks",

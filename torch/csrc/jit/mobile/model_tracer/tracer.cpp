@@ -60,7 +60,7 @@ static void printOpYAML(
     bool is_used_for_training,
     bool is_root_operator,
     bool include_all_overloads) {
-  out << std::string(indent, ' ') << op_name << ":" << '\n';
+  out << std::string(indent, ' ') << op_name << ':' << '\n';
   out << std::string(indent + 2, ' ')
       << "is_used_for_training: " << (is_used_for_training ? "true" : "false")
       << '\n';
@@ -88,7 +88,7 @@ static void printDTypeYAML(
     const std::string& kernel_tag_name,
     const std::set<std::string>& dtypes) {
   std::string indent_str = std::string(indent, ' ');
-  out << indent_str << kernel_tag_name << ":" << '\n';
+  out << indent_str << kernel_tag_name << ':' << '\n';
   for (auto& dtype : dtypes) {
     out << indent_str << "- " << dtype << '\n';
   }

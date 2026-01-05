@@ -13,7 +13,6 @@
 #include <ATen/ops/_empty_affine_quantized.h>
 #endif
 
-#include <algorithm>
 
 namespace at::native {
 

@@ -66,7 +66,7 @@ bool operator==(const ivalue::Tuple& lhs, const ivalue::Tuple& rhs) {
 }
 
 std::ostream& operator<<(std::ostream& out, const ivalue::EnumHolder& v) {
-  out << v.qualifiedClassName() << "." << v.name();
+  out << v.qualifiedClassName() << '.' << v.name();
   return out;
 }
 
@@ -526,7 +526,7 @@ std::ostream& printMaybeAnnotatedList(
       !elementTypeCanBeInferredFromMembers(list_elem_type)) {
     out << "annotate(" << the_list.type<c10::Type>()->annotation_str() << ", ";
     printList(out, the_list.toListRef(), "[", "]", formatter);
-    out << ")";
+    out << ')';
     return out;
   } else {
     return printList(out, the_list.toListRef(), "[", "]", formatter);
@@ -538,7 +538,7 @@ std::ostream& printDict(
     std::ostream& out,
     const Dict& v,
     const IValueFormatter& formatter) {
-  out << "{";
+  out << '{';
 
   bool first = true;
   for (const auto& pair : v) {
@@ -552,7 +552,7 @@ std::ostream& printDict(
     first = false;
   }
 
-  out << "}";
+  out << '}';
   return out;
 }
 }
@@ -565,8 +565,8 @@ static std::ostream& printMaybeAnnotatedDict(
   auto value_type = the_dict.type()->castRaw<DictType>()->getValueType();
   if (the_dict.toGenericDict().empty() ||
       !elementTypeCanBeInferredFromMembers(value_type)) {
-    out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ",";
-    printDict(out, the_dict.toGenericDict(), formatter) << ")";
+    out << "annotate(" << the_dict.type<c10::Type>()->annotation_str() << ',';
+    printDict(out, the_dict.toGenericDict(), formatter) << ')';
   } else {
     return printDict(out, the_dict.toGenericDict(), formatter);
   }
@@ -577,7 +577,7 @@ static std::ostream& printComplex(std::ostream & out, const IValue & v) {
   c10::complex<double> d = v.toComplexDouble();
   IValue real(d.real()), imag(std::abs(d.imag()));
   auto sign = d.imag() >= 0 ? '+' : '-';
-  return out << real << sign << imag << "j";
+  return out << real << sign << imag << 'j';
 }
 
 std::ostream& IValue::repr(
@@ -601,13 +601,13 @@ std::ostream& IValue::repr(
       double d = v.toDouble();
       int c = std::fpclassify(d);
       if ((c == FP_NORMAL || c == FP_ZERO ) && std::abs(d) < 1e10) {
-        int64_t i = int64_t(d);
-        if (double(i) == d) {
+        int64_t i = static_cast<int64_t>(d);
+        if (static_cast<double>(i) == d) {
           // -0.0 (signed zero) needs to be parsed as -0.
           if (i == 0 && std::signbit(d)) {
-            return out << "-" << i << ".";
+            return out << '-' << i << '.';
           }
-          return out << i << ".";
+          return out << i << '.';
         }
       }
       auto orig_prec = out.precision();
@@ -643,20 +643,20 @@ std::ostream& IValue::repr(
       device_stream << v.toDevice();
       out << "torch.device(";
       c10::printQuotedString(out, device_stream.str());
-      return out << ")";
+      return out << ')';
     }
     case IValue::Tag::Generator: {
       auto generator = v.toGenerator();
       out << "torch.Generator(device=";
       c10::printQuotedString(out, generator.device().str());
-      out << ", seed=" << generator.current_seed() << ")";
+      out << ", seed=" << generator.current_seed() << ')';
       return out;
     }
     case IValue::Tag::GenericDict:
       return printMaybeAnnotatedDict(out, v, formatter);
     case IValue::Tag::Enum: {
       auto enum_holder = v.toEnumHolder();
-      return out << enum_holder->qualifiedClassName() << "." <<
+      return out << enum_holder->qualifiedClassName() << '.' <<
           enum_holder->name();
     }
     case IValue::Tag::Object: {
@@ -799,9 +799,9 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       double d = v.toDouble();
       int c = std::fpclassify(d);
       if (c == FP_NORMAL || c == FP_ZERO) {
-        int64_t i = int64_t(d);
-        if (double(i) == d) {
-          return out << i << ".";
+        int64_t i = static_cast<int64_t>(d);
+        if (static_cast<double>(i) == d) {
+          return out << i << '.';
         }
       }
       auto orig_prec = out.precision();
@@ -852,7 +852,7 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       return printDict(out, v.toGenericDict(), formatter);
     case IValue::Tag::PyObject: {
       auto py_obj = v.toPyObject();
-      return out << "<PyObject at" << py_obj << ">";
+      return out << "<PyObject at" << py_obj << '>';
     }
     case IValue::Tag::Generator:
       return out << "Generator";
@@ -862,22 +862,22 @@ std::ostream& operator<<(std::ostream & out, const IValue & v) {
       // TODO we should attempt to call __str__ if the object defines it.
       auto obj = v.toObject();
       // print this out the way python would do it
-      return out << "<" << obj->name() << " object at " << obj.get() << ">";
+      return out << '<' << obj->name() << " object at " << obj.get() << '>';
     }
     case IValue::Tag::Enum: {
       auto enum_holder = v.toEnumHolder();
-      return out << "Enum<" << enum_holder->unqualifiedClassName() << "." <<
-          enum_holder->name() << ">";
+      return out << "Enum<" << enum_holder->unqualifiedClassName() << '.' <<
+          enum_holder->name() << '>';
     }
 
   }
-  return out << "<Invalid IValue tag=" << std::to_string(static_cast<uint32_t>(v.tag)) << ">";
+  return out << "<Invalid IValue tag=" << std::to_string(static_cast<uint32_t>(v.tag)) << '>';
 }
 
 #undef TORCH_FORALL_TAGS
 
 void IValue::dump() const {
-  std::cout << *this << "\n";
+  std::cout << *this << '\n';
 }
 
 std::shared_ptr<ClassType> ivalue::Object::type() const {
@@ -1050,7 +1050,7 @@ c10::intrusive_ptr<ivalue::Object> ivalue::Object::deepcopy(
       std::stringstream err;
       err << "Cannot serialize custom bound C++ class";
       if (auto qualname = type()->name()) {
-        err << " " << qualname->qualifiedName();
+        err << ' ' << qualname->qualifiedName();
       }
       err << ". Please define serialization methods via def_pickle() for "
             "this class.";

@@ -186,7 +186,7 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             def wrap(e):
                 return CompositeCompliantTensor(e, self) if isinstance(e, torch.Tensor) else e
 
-            if func == torch.ops.aten._local_scalar_dense.default:
+            if func is torch.ops.aten._local_scalar_dense.default:
                 raise RuntimeError(
                     ".item() is not allowed to be called inside of composite "
                     "functions in the PyTorch library because not all backends "

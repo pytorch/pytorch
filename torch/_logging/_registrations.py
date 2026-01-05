@@ -201,6 +201,12 @@ register_artifact(
 )
 
 register_artifact(
+    "auto_chunker",
+    "Logs related to the auto chunker",
+    off_by_default=True,
+)
+
+register_artifact(
     "overlap",
     "Detailed Inductor compute/comm overlap decisions",
     off_by_default=True,
@@ -223,6 +229,11 @@ register_artifact(
 register_artifact(
     "benchmarking",
     "Detailed Inductor benchmarking information.",
+    off_by_default=True,
+)
+register_artifact(
+    "node_runtime_estimation",
+    "Node runtime estimation for compile-time optimization decisions.",
     off_by_default=True,
 )
 register_artifact(
@@ -252,3 +263,8 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
+register_artifact(
+    "caching",
+    "Detailed Inductor caching information.",
+    off_by_default=True,
+)

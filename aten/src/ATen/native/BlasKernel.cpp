@@ -331,7 +331,7 @@ bool gemv_use_fast_path<double>(
     [[maybe_unused]] double beta,
     int64_t incy) {
   return gemv_use_fast_path<float>(
-      trans, m, n, (float)alpha, lda, incx, (float)beta, incy);
+      trans, m, n, static_cast<float>(alpha), lda, incx, static_cast<float>(beta), incy);
 }
 
 template <>
@@ -523,8 +523,8 @@ static inline void scal(int64_t n, scalar_t a, scalar_t *x, int64_t incx)
   if (n == 1) incx = 1;
 #if AT_BUILD_WITH_BLAS()
   if (blas_impl::scal_use_fast_path<scalar_t>(n, incx)) {
-    int i_n = (int)n;
-    int i_incx = (int)incx;
+    int i_n = static_cast<int>(n);
+    int i_incx = static_cast<int>(incx);
     blas_impl::scal_fast_path<scalar_t>(&i_n, &a, x, &i_incx);
     return;
   }
@@ -545,11 +545,11 @@ void gemv(char trans, int64_t m, int64_t n, scalar_t alpha, const scalar_t *a, i
 #if AT_BUILD_WITH_BLAS()
   if (blas_impl::gemv_use_fast_path<scalar_t>(trans, m, n, alpha, lda, incx, beta, incy)) {
     TORCH_CHECK(lda >= std::max<int64_t>(1L, m), "lda should be at least max(1,", m, "), but have ", lda);
-    int i_m = (int)m;
-    int i_n = (int)n;
-    int i_lda = (int)lda;
-    int i_incx = (int)incx;
-    int i_incy = (int)incy;
+    int i_m = static_cast<int>(m);
+    int i_n = static_cast<int>(n);
+    int i_lda = static_cast<int>(lda);
+    int i_incx = static_cast<int>(incx);
+    int i_incy = static_cast<int>(incy);
     blas_impl::gemv_fast_path<scalar_t>(&trans, &i_m, &i_n, &alpha, a, &i_lda, x, &i_incx, &beta, y, &i_incy);
     return;
   }

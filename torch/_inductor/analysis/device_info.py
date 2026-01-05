@@ -86,6 +86,28 @@ _device_mapping: dict[str, DeviceInfo] = {
     ),
     # Source:
     # @lint-ignore https://www.amd.com/content/dam/amd/en/documents\
+    # /instinct-tech-docs/product-briefs/amd-instinct-mi350x-gpu-brochure.pdf
+    "AMD MI350X": DeviceInfo(
+        tops={
+            torch.float64: 72.1,
+            torch.float32: 144.2,
+            # not specified, fall back to float32 numbers
+            "torch.tf32": 144.2,
+            torch.bfloat16: 2309.6,
+            torch.float16: 2309.6,
+            torch.float8_e8m0fnu: 4614.0,
+            torch.float8_e8m0fnu: 4614.0,
+            torch.float8_e4m3fnuz: 4614.0,
+            torch.float8_e5m2: 4614.0,
+            torch.float8_e5m2fnuz: 4614.0,
+            torch.float8_e8m0fnu: 4614.0,
+            torch.int8: 4614.0,
+        },
+        dram_bw_gbs=8000.0,
+        dram_gb=288.0,
+    ),
+    # Source:
+    # @lint-ignore https://www.amd.com/content/dam/amd/en/documents\
     # /instinct-tech-docs/data-sheets/amd-instinct-mi300a-data-sheet.pdf
     "AMD MI300A": DeviceInfo(
         tops={
@@ -151,6 +173,7 @@ _device_mapping: dict[str, DeviceInfo] = {
         dram_gb=64.0,
     ),
 }
+_device_mapping["AMD INSTINCT MI350X"] = _device_mapping["AMD MI350X"]
 _device_mapping["AMD INSTINCT MI300X"] = _device_mapping["AMD MI300X"]
 _device_mapping["AMD INSTINCT MI210X"] = _device_mapping["AMD MI210X"]
 

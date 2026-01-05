@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 import copy
-from typing import Any, Union
+from typing import Any
 
 import torch
 from torch.fx import GraphModule
@@ -18,7 +18,7 @@ __all__ = [
 class FusedGraphModule(GraphModule):
     def __init__(
         self,
-        root: Union[torch.nn.Module, dict[str, Any]],
+        root: torch.nn.Module | dict[str, Any],
         graph: Graph,
         preserved_attr_names: set[str],
     ):
@@ -48,7 +48,7 @@ class FusedGraphModule(GraphModule):
 class ObservedGraphModule(GraphModule):
     def __init__(
         self,
-        root: Union[torch.nn.Module, dict[str, Any]],
+        root: torch.nn.Module | dict[str, Any],
         graph: Graph,
         preserved_attr_names: set[str],
     ):
@@ -91,7 +91,7 @@ def _is_observed_module(module: Any) -> bool:
 
 
 def _get_observed_graph_module_attr(
-    model: Union[torch.nn.Module, GraphModule], attr_name: str
+    model: torch.nn.Module | GraphModule, attr_name: str
 ) -> Any:
     if hasattr(model, "meta") and "_observed_graph_module_attrs" in model.meta:  # type: ignore[operator, index]
         return getattr(model.meta["_observed_graph_module_attrs"], attr_name)  # type: ignore[index]
@@ -101,7 +101,7 @@ def _get_observed_graph_module_attr(
 class ObservedStandaloneGraphModule(ObservedGraphModule):
     def __init__(
         self,
-        root: Union[torch.nn.Module, dict[str, Any]],
+        root: torch.nn.Module | dict[str, Any],
         graph: Graph,
         preserved_attr_names: set[str],
     ):
@@ -148,7 +148,7 @@ class QuantizedGraphModule(GraphModule):
 
     def __init__(
         self,
-        root: Union[torch.nn.Module, dict[str, Any]],
+        root: torch.nn.Module | dict[str, Any],
         graph: Graph,
         preserved_attr_names: set[str],
     ):

@@ -40,7 +40,9 @@ import torch.utils._pytree as pytree
 from torch import SymBool, SymInt, Tensor
 from torch._dispatch.python import enable_python_dispatcher
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._logging import trace_structured
+from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_impls import fast_detach
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -63,6 +65,7 @@ from torch.utils._python_dispatch import (
     _disable_infra_mode,
     _push_mode,
     _unset_infra_mode,
+    autograd_would_have_decomposed,
     TorchDispatchMode,
 )
 from torch.utils._stats import count
@@ -81,13 +84,14 @@ if TYPE_CHECKING:
 
     from torch._ops import OpOverload
     from torch.fx._symbolic_trace import PHBase
-    from torch.types import IntLikeType
+    from torch.types import BoolLikeType, FloatLikeType, IntLikeType
 
 __all__ = [
     "PythonKeyTracer",
     "dispatch_trace",
     "make_fx",
     "DecompositionInterpreter",
+    "selective_decompose",
     "py_sym_types",
     "get_innermost_proxy_mode",
     "get_proxy_mode",
@@ -270,7 +274,10 @@ def set_proxy_slot(  # type: ignore[no-redef]
         # on a tensor, and it affects the metadata on the proxy.
         assert isinstance(proxy, _ProxyTensor)
         # see NOTE [Do not clobber inplace ops]
-        if not _is_proxy_tensor_update_tensor_tracker_disabled():
+        if (
+            obj not in tracer.tensor_tracker
+            or not _is_proxy_tensor_update_tensor_tracker_disabled()
+        ):
             tracer.tensor_tracker[obj] = proxy
     elif isinstance(obj, (_AnyScriptObject)):
         # We DO want to clobber proxies, with a similar rationale as for tensors.
@@ -310,7 +317,7 @@ def set_proxy_slot(  # type: ignore[no-redef]
 
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     assert isinstance(obj, (Tensor, SymNode)), type(obj)
-    # pyrefly: ignore [no-matching-overload]
+
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
 
 
@@ -408,6 +415,7 @@ def get_proxy_slot(
         tracker = tracer.symnode_tracker
 
     # pyrefly: ignore [index-error]
+    # pyrefly: ignore [no-matching-overload, bad-argument-type]
     value = tracker.get(obj)
 
     if value is None and isinstance(obj, py_sym_types):
@@ -453,7 +461,7 @@ def _sympy_handlers() -> dict[type[sympy.Expr], Callable[..., Any]]:
 
 def _build_proxy_for_sym_expr(
     tracer: _ProxyTracer, expr: sympy.Expr, out: PySymType | None = None
-) -> PySymType | None:
+) -> IntLikeType | FloatLikeType | BoolLikeType | None:
     """
     Decompose `expr` and look for the pieces as inputs. If `out` is provided
     then that will be the resulting SymNode (and `out.expr` must be the same as
@@ -526,6 +534,13 @@ def _build_proxy_for_sym_expr(
     if (value := tracer.sympy_expr_tracker.get(expr)) is not None:
         assert not out
         return value.value
+
+    if isinstance(expr, (int, float, bool)):
+        return expr
+    if expr.is_Integer:
+        return int(expr)
+    if expr.is_Float:
+        return float(expr)
 
     args = []
     for arg in expr.args:
@@ -832,6 +847,7 @@ def track_tensor_tree(
                     return None
                 else:
                     assert isinstance(c, (list, tuple))
+                    # pyrefly: ignore [bad-return]
                     return c[idx]
 
             for idx, ee in enumerate(e):
@@ -1030,11 +1046,16 @@ def proxy_call(
         return r
 
     # For pre-autograd tracing, we do not want to run CompositeImplicit decomps.
-    if not pre_dispatch and func not in [
-        torch.ops.aten.size.default,
-        torch.ops.aten.stride.default,
-        torch.ops.aten.storage_offset.default,
-    ]:
+    if (
+        not pre_dispatch
+        and func
+        not in [
+            torch.ops.aten.size.default,
+            torch.ops.aten.stride.default,
+            torch.ops.aten.storage_offset.default,
+        ]
+        and autograd_would_have_decomposed(func, flat_args_kwargs)
+    ):
         with proxy_mode:
             r = func.decompose(*args, **kwargs)
             if r is not NotImplemented:
@@ -1526,7 +1547,9 @@ ORIGINAL_ATEN: Optional[object] = None
 
 
 @contextmanager
-def set_original_aten_op(func: OpOverload) -> Generator[None, None, None]:
+def set_original_aten_op(
+    func: OpOverload | torch._ops.HigherOrderOperator,
+) -> Generator[None, None, None]:
     global ORIGINAL_ATEN
     if ORIGINAL_ATEN is None and fx_traceback.has_preserved_node_meta():
         ORIGINAL_ATEN = func
@@ -1587,11 +1610,11 @@ class PreDispatchTorchFunctionMode(TorchFunctionMode):
             # TODO(tmanlaibaatar): we should systematically couple it with export verifier,
             # instead of hardcoding it here.
             # T203648563
-            if func == torch.amp.autocast_mode._exit_autocast:
+            if func is torch.amp.autocast_mode._exit_autocast:
                 enter_node = self.enter_autocast_nodes.pop()
                 args = (enter_node,)
             node = self.tracer.create_node("call_function", func, args, {})  # type: ignore[arg-type]
-            if func == torch.amp.autocast_mode._enter_autocast:
+            if func is torch.amp.autocast_mode._enter_autocast:
                 self.enter_autocast_nodes.append(node)
             if func in [
                 torch._C._set_grad_enabled,
@@ -1717,7 +1740,7 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
     ) -> object:
         # Peephole optimize multiply by one
         # NB: be careful not to trigger guards here!
-        if func == operator.mul:
+        if func is operator.mul:
             if isinstance(args[1], int) and args[1] == 1:
                 return args[0]
             elif isinstance(args[0], int) and args[0] == 1:
@@ -1873,6 +1896,93 @@ class DecompositionInterpreter(fx.Interpreter):
             return super().run(*args, **kwargs)  # type: ignore[arg-type]
 
 
+class _SelectiveDecomposeInterpreter(fx.Interpreter):
+    def __init__(
+        self,
+        module: fx.GraphModule,
+        should_decompose: Callable[[fx.Node], bool],
+        decomposition_table: Mapping[OpOverload, Callable],
+        **kwargs: object,
+    ) -> None:
+        """
+        For all nodes in `module`, selectively decompose if is `should_decompose`,
+        following the given `decomposition_table`.
+        """
+        super().__init__(module, **kwargs)  # type: ignore[arg-type]
+        self.should_decompose = should_decompose
+        self.decomposition_table = decomposition_table
+
+    @staticmethod
+    def recursive_wrap(
+        gm: fx.GraphModule,
+        should_decompose: Callable[[fx.Node], bool],
+        decomposition_table: Mapping[OpOverload, Callable],
+        **kwargs: object,
+    ) -> _SelectiveDecomposeInterpreter:
+        """
+        Recursively wrap gm and its sub graph modules. Specifically, HOP takes
+        sub graph module as args. We may not want to decompose all nodes within
+        these sub graph modules. So we also need to wrap these sub graph modules.
+        As a result:
+        - if should_decompose(hop) is True, we decompose all nodes within the hop.
+        - if should_decompose(hop) is False, we check each node within the hop
+            and decide whether decompose or not.
+        """
+        for node in gm.graph.nodes:
+            if node.op == "call_function" and isinstance(
+                node.target, HigherOrderOperator
+            ):
+                new_args = []
+                for arg in node.args:
+                    if isinstance(arg, fx.GraphModule):
+                        new_arg = _SelectiveDecomposeInterpreter.recursive_wrap(
+                            arg, should_decompose, decomposition_table, **kwargs
+                        )
+                    else:
+                        new_arg = arg
+                    new_args.append(new_arg)
+                node.args = tuple(new_args)
+
+        return _SelectiveDecomposeInterpreter(
+            gm, should_decompose, decomposition_table, **kwargs
+        )
+
+    def run_node(self, n):
+        if self.should_decompose(n):
+            with decompose(self.decomposition_table):
+                result = super().run_node(n)
+        else:
+            result = super().run_node(n)
+        return result
+
+
+def selective_decompose(
+    joint_gm: fx.GraphModule,
+    *args,
+    decomposition,
+    should_decompose,
+    trace_joint_graph: bool,
+) -> fx.GraphModule:
+    """Retrace a joint graph module and selectively apply decomposition."""
+
+    if trace_joint_graph:
+        # the arg name, primals and tangents, are important.
+        # make_fx keeps the name in the traced graph and partitioner later relies
+        # on the name to partition joint graph correctly.
+        def wrap_fn(primals: list[Any], tangents: list[Any]):
+            return _SelectiveDecomposeInterpreter.recursive_wrap(
+                joint_gm, should_decompose, decomposition
+            ).run(*args)
+    else:
+
+        def wrap_fn(*args):
+            return _SelectiveDecomposeInterpreter.recursive_wrap(
+                joint_gm, should_decompose, decomposition
+            ).run(*args)
+
+    return make_fx(wrap_fn, decomposition_table={})(*args)
+
+
 def wrapper_and_args_for_make_fx(
     func: Callable[..., R], args: tuple[object, ...], kwargs: dict[str, object]
 ) -> tuple[Callable[[list[object]], R], list[object]]:
@@ -1968,6 +2078,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 # Warning: We blow away our own attributes here to mimic the base class
                 # - so don't expect `self.x` to do anything useful.
                 # pyrefly: ignore [no-matching-overload]
+
                 self.__class__ = type(
                     base.__class__.__name__,
                     (self.__class__, base.__class__),
@@ -1990,7 +2101,6 @@ class _ModuleStackTracer(PythonKeyTracer):
                 if not isinstance(attr_val, Module):
                     return attr_val
 
-                # pyrefly: ignore [index-error]
                 return AttrProxy(attr_val, tracer.proxy_paths[self] + "." + name)
 
             def get_base(self) -> Module:
@@ -2003,12 +2113,12 @@ class _ModuleStackTracer(PythonKeyTracer):
                         res = torch.nn.Sequential(
                             OrderedDict(list(self._modules.items())[idx])
                         )
-                        # pyrefly: ignore [index-error]
+
                         return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
                     elif isinstance(self, torch.nn.ModuleList):
                         # Copied from nn/modules/container.py
                         res = torch.nn.ModuleList(list(self._modules.values())[idx])
-                        # pyrefly: ignore [index-error]
+
                         return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
 
                 return super().__getitem__(idx)  # type: ignore[misc]
@@ -2018,6 +2128,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 assert "_modules" in self.__dict__
                 submodules = self.__dict__["_modules"]
                 assert isinstance(submodules, dict)
+                # pyrefly: ignore [bad-return]
                 return {
                     key: (
                         AttrProxy(value, tracer.proxy_paths[self] + "." + str(key))  # type: ignore[misc]
@@ -2105,6 +2216,7 @@ class _ModuleStackTracer(PythonKeyTracer):
             mod = obj
 
             # Get the parent module
+            # pyrefly: ignore [bad-assignment]
             for item in path:
                 if not hasattr(mod, item):
                     return False
@@ -2427,7 +2539,7 @@ class _MakefxTracer:
                         hint=x,
                         source=source,
                     )
-                elif isinstance(x, torch.ScriptObject):
+                elif isinstance(x, torch.ScriptObject) or is_opaque_type(type(x)):
                     return torch._library.fake_class_registry.maybe_to_fake_obj(
                         self.fake_tensor_mode, x
                     )
@@ -2525,6 +2637,24 @@ class _MakefxTracer:
         # Create a new tracer based on parent's config
         sub_tracer = _MakefxTracer(
             self.decomposition_table,
+            "real",
+            self._allow_non_fake_inputs,
+            self.pre_dispatch,
+            self.record_module_stack,
+            self._allow_fake_constant,
+            self._error_on_data_dependent_ops,
+            parent_tracer=self,
+        )
+        with sub_tracer._init_modes_from_parent(self):
+            return sub_tracer._trace_inner(f, *args)
+
+    def trace_subgraph_custom_decomp(
+        self, f: Callable, decomp_table: Mapping[OpOverload, Callable], *args
+    ) -> GraphModule:
+        assert isinstance(decomp_table, Mapping)
+        # Create a new tracer based on parent's config, but use a different decomposition table
+        sub_tracer = _MakefxTracer(
+            decomp_table,
             "real",
             self._allow_non_fake_inputs,
             self.pre_dispatch,

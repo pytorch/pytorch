@@ -72,7 +72,7 @@ def get_reversed_fusions() -> list[tuple[NSFusionType, int]]:
     all_quant_patterns = _get_pattern_to_quantize_handlers(get_native_backend_config())
 
     default_base_op_idx = 0
-    for quant_pattern in all_quant_patterns.keys():
+    for quant_pattern in all_quant_patterns:
         # TODO: this is a temporary hack to flatten the patterns from quantization so
         # that it works with the ns matcher function, maybe we should use `_is_match`
         # in torch.ao.quantization.fx.match_utils to match the patterns

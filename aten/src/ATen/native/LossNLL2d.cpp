@@ -129,7 +129,7 @@ void nll_loss2d_forward_out_frame(
       for (const auto b : c10::irange(start, end)) {
         for (const auto h : c10::irange(H)) {
           for (const auto w : c10::irange(W)) {
-            const int64_t cur_target = (int64_t)target_acc[b][h][w];
+            const int64_t cur_target = target_acc[b][h][w];
 
             if (cur_target == ignore_index) {
               output_acc[b][h][w] = static_cast<scalar_t>(0);
@@ -188,7 +188,7 @@ void nll_loss2d_forward_out_frame(
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   scalar_t loss_partial_sums[cascade_sum_num_levels] = {0};
   const int64_t level_power =
-      std::max(int64_t(4), utils::CeilLog2(numiter) / cascade_sum_num_levels);
+      std::max(static_cast<int64_t>(4), utils::CeilLog2(numiter) / cascade_sum_num_levels);
   const int64_t level_step = (1 << level_power);
   const int64_t level_mask = level_step - 1;
 

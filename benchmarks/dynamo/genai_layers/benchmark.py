@@ -56,6 +56,20 @@ def list_benchmarks():
     print(f"Available benchmarks: {list(BENCHMARK_REGISTRY.keys())}")
 
 
+def _run_benchmark(
+    benchmark_cls,
+    script_args,
+):
+    benchmark = benchmark_cls(script_args)
+    benchmark.benchmark()
+    benchmark.report_geomean_speedup()
+    if script_args.print_benchmark_result:
+        print(f"Benchmarking results {benchmark.name}:")
+        print(benchmark.profiling_results)
+    if script_args.visualize:
+        benchmark.visualize()
+
+
 def run_benchmark(
     benchmark_name: str,
     script_args,
@@ -71,10 +85,7 @@ def run_benchmark(
     print("=" * 60)
 
     benchmark_class = BENCHMARK_REGISTRY[benchmark_name]
-    benchmark = benchmark_class(script_args)
-    benchmark.benchmark()
-    if script_args.visualize:
-        benchmark.visualize()
+    _run_benchmark(benchmark_class, script_args)
 
     return True
 
@@ -87,10 +98,7 @@ def run_all_benchmarks(script_args):
 
     for name, cls in BENCHMARK_REGISTRY.items():
         print(f"\n{'=' * 20} {name.upper()} {'=' * 20}")
-        benchmark = cls(script_args)
-        benchmark.benchmark()
-        if script_args.visualize:
-            benchmark.visualize()
+        _run_benchmark(cls, script_args)
         print()
 
 
@@ -149,7 +157,42 @@ Examples:
         help="Whether to exit with an error message for accuracy failure",
     )
 
+    parser.add_argument(
+        "--print-benchmark-result",
+        action="store_true",
+        help="Whether to print the raw benchmarking result. Easier to quickly check the benchmark results on a server without GUI",
+    )
+
+    parser.add_argument(
+        "--custom-compile-name",
+        type=str,
+        default=None,
+        help="Name for the curve with customized compilation options",
+    )
+
+    parser.add_argument(
+        "--custom-compile-options",
+        type=str,
+        default=None,
+        help="Json string for the custom compile options.",
+    )
+
     args = parser.parse_args()
+
+    if args.custom_compile_options:
+        import json
+
+        try:
+            args.custom_compile_options = json.loads(args.custom_compile_options)
+        except json.decoder.JSONDecodeError as e:
+            raise RuntimeError(
+                f"Invalid json string for --custom-compile-options: {args.custom_compile_options}"
+            ) from e
+
+        if not args.custom_compile_options:
+            raise RuntimeError("Found no options for --custom-compile-options")
+        if not args.custom_compile_name:
+            raise RuntimeError("Missing label name for the custom compilation")
 
     # Handle list option
     if args.list:

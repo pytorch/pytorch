@@ -9,7 +9,7 @@ import time
 import zipfile
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, cast, Optional, TYPE_CHECKING
+from typing import Any, cast, TYPE_CHECKING
 
 import boto3  # type: ignore[import]
 import requests
@@ -49,7 +49,7 @@ def _get_artifact_urls(prefix: str, workflow_run_id: int) -> dict[Path, str]:
         headers=_get_request_headers(),
     )
     artifacts = response.json()["artifacts"]
-    while "next" in response.links.keys():
+    while "next" in response.links:
         response = requests.get(
             response.links["next"]["url"], headers=_get_request_headers()
         )
@@ -94,7 +94,7 @@ def download_s3_artifacts(
     prefix: str,
     workflow_run_id: int,
     workflow_run_attempt: int,
-    job_id: Optional[int] = None,
+    job_id: int | None = None,
 ) -> list[Path]:
     bucket = get_s3_resource().Bucket(GHA_ARTIFACTS_BUCKET)
     objs = bucket.objects.filter(
@@ -136,7 +136,7 @@ def upload_to_dynamodb(
     dynamodb_table: str,
     repo: str,
     docs: list[Any],
-    generate_partition_key: Optional[Callable[[str, dict[str, Any]], str]],
+    generate_partition_key: Callable[[str, dict[str, Any]], str] | None,
 ) -> None:
     print(f"Writing {len(docs)} documents to DynamoDB {dynamodb_table}")
     # https://boto3.amazonaws.com/v1/documentation/api/latest/guide/dynamodb.html#batch-writing
@@ -234,12 +234,14 @@ def upload_file_to_s3(
     )
 
 
-def unzip(p: Path) -> None:
+def unzip(p: Path) -> Path:
     """Unzip the provided zipfile to a similarly-named directory.
 
     Returns None if `p` is not a zipfile.
 
     Looks like: /tmp/test-reports.zip -> /tmp/unzipped-test-reports/
+
+    Returns the path to the unzipped directory.
     """
     assert p.is_file()
     unzipped_dir = p.with_name("unzipped-" + p.stem)
@@ -247,6 +249,8 @@ def unzip(p: Path) -> None:
 
     with zipfile.ZipFile(p, "r") as zip:
         zip.extractall(unzipped_dir)
+
+    return unzipped_dir
 
 
 def is_rerun_disabled_tests(

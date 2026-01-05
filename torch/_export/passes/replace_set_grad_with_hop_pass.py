@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from __future__ import annotations
 
-from typing import Optional, TYPE_CHECKING, Union
+from typing import TYPE_CHECKING
 
 import torch
 from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
@@ -18,17 +18,17 @@ if TYPE_CHECKING:
     from torch.export.graph_signature import ExportGraphSignature
 
 
-def _is_set_grad_enabled_node(node: torch.fx.Node) -> Union[torch.fx.Node, bool]:
+def _is_set_grad_enabled_node(node: torch.fx.Node) -> torch.fx.Node | bool:
     return (
         node
         and node.op == "call_function"
-        and node.target == torch._C._set_grad_enabled
+        and node.target is torch._C._set_grad_enabled
     )
 
 
 def _is_set_grad_enabled_sub_mod(
     node: torch.fx.Node, omit_if_same_with_ambient: bool = False
-) -> Union[bool, torch.Tensor]:
+) -> bool | torch.Tensor:
     if node.op == "call_module":
         assert isinstance(node.target, str)
         subgm = getattr(node.graph.owning_module, node.target)
@@ -38,7 +38,7 @@ def _is_set_grad_enabled_sub_mod(
         if (
             first_non_ph
             and first_non_ph.op == "call_function"
-            and first_non_ph.target == torch._C._set_grad_enabled
+            and first_non_ph.target is torch._C._set_grad_enabled
         ):
             return (
                 first_non_ph.args[0] != torch.is_grad_enabled()
@@ -80,8 +80,8 @@ def _remove_set_grad_and_inline(node: torch.fx.Node) -> None:
 
 
 def _sequential_split_and_maybe_inline_subgraphs(
-    gm: torch.fx.GraphModule, graph_signature: Optional[ExportGraphSignature]
-) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
+    gm: torch.fx.GraphModule, graph_signature: ExportGraphSignature | None
+) -> tuple[torch.fx.GraphModule, ExportGraphSignature | None]:
     """
     Helper function for replace_set_grad_with_hop_pass().
     Split the graph module into multiple subgraphs based on the set_grad_enabled nodes.
@@ -108,8 +108,8 @@ def _sequential_split_and_maybe_inline_subgraphs(
 
 
 def replace_set_grad_with_hop_pass(
-    gm: torch.fx.GraphModule, graph_signature: Optional[ExportGraphSignature]
-) -> tuple[torch.fx.GraphModule, Optional[ExportGraphSignature]]:
+    gm: torch.fx.GraphModule, graph_signature: ExportGraphSignature | None
+) -> tuple[torch.fx.GraphModule, ExportGraphSignature | None]:
     """
     Split gm into sub-graph-modules using `sequential_split_and_maybe_inline_subgraphs`, and
     then recursively call itself on each of the submodules.

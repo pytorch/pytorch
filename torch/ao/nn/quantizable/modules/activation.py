@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Optional
 
 import torch
 import torch.jit  # this is needed to avoid a circular import
@@ -67,8 +66,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         bias: bool = True,
         add_bias_kv: bool = False,
         add_zero_attn: bool = False,
-        kdim: Optional[int] = None,
-        vdim: Optional[int] = None,
+        kdim: int | None = None,
+        vdim: int | None = None,
         batch_first: bool = False,
         device=None,
         dtype=None,
@@ -96,6 +95,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             self.vdim, self.embed_dim, bias=bias, **factory_kwargs
         )
         # for the type: ignore, see https://github.com/pytorch/pytorch/issues/58969
+        # pyrefly: ignore [bad-assignment]
         self.out_proj = nn.Linear(
             self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs
         )  # type: ignore[assignment]
@@ -289,12 +289,12 @@ class MultiheadAttention(nn.MultiheadAttention):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        key_padding_mask: Optional[Tensor] = None,
+        key_padding_mask: Tensor | None = None,
         need_weights: bool = True,
-        attn_mask: Optional[Tensor] = None,
+        attn_mask: Tensor | None = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Tensor | None]:
         r"""
         Note::
             Please, refer to :func:`~torch.nn.MultiheadAttention.forward` for more
@@ -357,12 +357,12 @@ class MultiheadAttention(nn.MultiheadAttention):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        key_padding_mask: Optional[Tensor] = None,
+        key_padding_mask: Tensor | None = None,
         need_weights: bool = True,
-        attn_mask: Optional[Tensor] = None,
+        attn_mask: Tensor | None = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Tensor | None]:
         # This version will not deal with the static key/value pairs.
         # Keeping it here for future changes.
         #
@@ -472,7 +472,6 @@ class MultiheadAttention(nn.MultiheadAttention):
             assert static_v.size(2) == head_dim
             v = static_v
 
-        # pyrefly: ignore [missing-attribute]
         src_len = k.size(1)
 
         if key_padding_mask is not None:
@@ -481,35 +480,29 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         if self.add_zero_attn:
             src_len += 1
-            # pyrefly: ignore [missing-attribute]
+
             k_zeros = torch.zeros((k.size(0), 1) + k.size()[2:])
-            # pyrefly: ignore [missing-attribute]
+
             if k.is_quantized:
                 k_zeros = torch.quantize_per_tensor(
                     k_zeros,
-                    # pyrefly: ignore [missing-attribute]
                     k.q_scale(),
-                    # pyrefly: ignore [missing-attribute]
                     k.q_zero_point(),
-                    # pyrefly: ignore [missing-attribute]
                     k.dtype,
                 )
-            # pyrefly: ignore [no-matching-overload]
+
             k = torch.cat([k, k_zeros], dim=1)
-            # pyrefly: ignore [missing-attribute]
+
             v_zeros = torch.zeros((v.size(0), 1) + k.size()[2:])
-            # pyrefly: ignore [missing-attribute]
+
             if v.is_quantized:
                 v_zeros = torch.quantize_per_tensor(
                     v_zeros,
-                    # pyrefly: ignore [missing-attribute]
                     v.q_scale(),
-                    # pyrefly: ignore [missing-attribute]
                     v.q_zero_point(),
-                    # pyrefly: ignore [missing-attribute]
                     v.dtype,
                 )
-            # pyrefly: ignore [no-matching-overload]
+
             v = torch.cat([v, v_zeros], dim=1)
 
             if attn_mask is not None:

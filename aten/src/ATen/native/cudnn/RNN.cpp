@@ -115,8 +115,7 @@ Tensor _cudnn_init_dropout_state(
 
 #include <ATen/native/cudnn/RNNUtils.h>
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 // DropoutDescriptor
@@ -656,7 +655,8 @@ void add_projection_weights(
   TORCH_INTERNAL_ASSERT(
       nb_dims <= min_dim, "nb_dims = ", nb_dims, "; min_dim  = ", min_dim);
   auto elem_size = dataSize(getCudnnDataType(weight_buf));
-  auto offset_bytes = (char*)matrix_pointer - (char*)weight_buf.data_ptr();
+  auto offset_bytes = static_cast<const char*>(matrix_pointer) -
+      static_cast<const char*>(weight_buf.data_ptr());
   TORCH_INTERNAL_ASSERT(
       offset_bytes % elem_size == 0,
       "offset_bytes = ",
@@ -794,8 +794,8 @@ get_parameters(
             "; min_dim  = ",
             min_dim);
         auto elem_size = dataSize(getCudnnDataType(weight_buf));
-        auto offset_bytes =
-            (char*)matrix_pointer - (char*)weight_buf.data_ptr();
+        auto offset_bytes = static_cast<const char*>(matrix_pointer) -
+            static_cast<const char*>(weight_buf.data_ptr());
         TORCH_INTERNAL_ASSERT(
             offset_bytes % elem_size == 0,
             "offset_bytes = ",
@@ -1283,7 +1283,7 @@ int64_t _cudnn_rnn_flatten_weight_prologue(
 #endif
 }
 
-} // namespace native
+} // namespace at::native
 
 // Utilities exposed in RNNUtils.h
 namespace cudnn_rnn {
@@ -1678,7 +1678,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
         CUDNN_FWD_MODE_INFERENCE,
         x_descs_arr.desc(),
         &workspace_size,
-        NULL));
+        nullptr));
 #endif
     workspace = at::empty(workspace_size, input.options().dtype(kByte));
     reserve = at::empty({0}, input.options().dtype(kByte));
@@ -1898,7 +1898,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
       CUDNN_FWD_MODE_TRAINING,
       x_descs_arr.desc(),
       &workspace_size,
-      NULL));
+      nullptr));
 #endif
   // TODO: put this in the correct device???
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
@@ -2086,7 +2086,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
       CUDNN_FWD_MODE_TRAINING,
       x_descs_arr.desc(),
       &workspace_size,
-      NULL));
+      nullptr));
 #endif
   Tensor workspace = at::empty(workspace_size, input.options().dtype(kByte));
 #ifndef USE_CUDNN_RNN_V8_API
@@ -2818,7 +2818,6 @@ TORCH_LIBRARY_IMPL(aten, Meta, m) {
 
 } // namespace
 
-} // namespace at
-} // namespace at
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED()

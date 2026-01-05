@@ -2,7 +2,7 @@
 import functools
 from collections import namedtuple
 from collections.abc import Callable, Iterator, Sized
-from typing import Any, Optional, TypeVar, Union
+from typing import Any, TypeVar
 
 import torch
 from torch.utils.data._utils.collate import default_collate
@@ -118,7 +118,6 @@ class MapperIterDataPipe(IterDataPipe[_T_co]):
                 for idx in sorted(self.input_col[1:], reverse=True):
                     del data[idx]
             else:
-                # pyrefly: ignore [unsupported-operation]
                 data[self.input_col] = res
         else:
             if self.output_col == -1:
@@ -149,7 +148,7 @@ def _collate_helper(conversion, item):
     tuple_names: list = []
     tuple_values: list = []
 
-    for name in conversion.keys():
+    for name in conversion:
         if name not in columns_name:
             raise RuntimeError("Conversion keys mismatch")
 
@@ -226,10 +225,10 @@ class CollatorIterDataPipe(MapperIterDataPipe):
     def __init__(
         self,
         datapipe: IterDataPipe,
-        conversion: Union[
-            Callable[..., Any], dict[Union[str, Any], Union[Callable, Any]], None
-        ] = default_collate,
-        collate_fn: Optional[Callable] = None,
+        conversion: Callable[..., Any]
+        | dict[str | Any, Callable | Any]
+        | None = default_collate,
+        collate_fn: Callable | None = None,
     ) -> None:
         # TODO(VitalyFedyunin): Replace `Callable[..., Any]` with `Callable[[IColumn], Any]`
         # TODO(VitalyFedyunin): Replace with `Dict[Union[str, IColumn], Union[Callable, Enum]]`

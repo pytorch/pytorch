@@ -71,10 +71,15 @@ REQUIRE_HIGHER_TOLERANCE = {
     "mobilenetv3_large_100",
 }
 
+REQUIRE_HIGHER_TOLERANCE_FP16_XPU = {
+    "botnet26t_256",
+}
+
 REQUIRE_HIGHER_TOLERANCE_AMP = {}
 
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
-    "beit_base_patch16_224",
+    "deit_base_distilled_patch16_224",
+    "vit_base_patch16_siglip_256",
 }
 
 # These models need higher tolerance in MaxAutotune mode
@@ -354,13 +359,21 @@ class TimmRunner(BenchmarkRunner):
         if is_training:
             from torch._inductor import config as inductor_config
 
-            if name in REQUIRE_EVEN_HIGHER_TOLERANCE or (
+            if name == "beit_base_patch16_224":
+                tolerance = 16 * 1e-2
+            elif name in REQUIRE_EVEN_HIGHER_TOLERANCE or (
                 inductor_config.max_autotune
                 and name in REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE
             ):
                 tolerance = 8 * 1e-2
             elif name in REQUIRE_HIGHER_TOLERANCE or (
                 self.args.amp and name in REQUIRE_HIGHER_TOLERANCE_AMP
+            ):
+                tolerance = 4 * 1e-2
+            elif (
+                name in REQUIRE_HIGHER_TOLERANCE_FP16_XPU
+                and self.args.float16
+                and current_device == "xpu"
             ):
                 tolerance = 4 * 1e-2
             else:

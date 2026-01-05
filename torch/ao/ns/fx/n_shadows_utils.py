@@ -3,7 +3,7 @@ import collections
 import copy
 import operator
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.fx
@@ -225,7 +225,7 @@ def _get_logger_for_subgraph(
     subgraph_candidate_idx: int,
     qconfig_str: str,
     logger_cls: Callable,
-    fqn: Optional[str],
+    fqn: str | None,
 ) -> torch.nn.Module:
     """
     Given a model and a linear subgraph starting from `first_node` and
@@ -465,12 +465,12 @@ def create_one_transformed_and_logged_copy_of_subgraph(
     subgraph_candidate_idx: int,
     first_node: Node,
     last_node: Node,
-    fqn: Optional[str],
+    fqn: str | None,
     list_of_node_name_to_qconfig: list[dict[str, QConfigAny]],
     example_inputs: Any,
-    last_added_shadow_node_list: list[Optional[Node]],
-    custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Optional[dict[str, Any]] = None,
+    last_added_shadow_node_list: list[Node | None],
+    custom_prepare_fn: Callable | None = None,
+    custom_prepare_kwargs: dict[str, Any] | None = None,
 ) -> None:
     """
     Given a subgraph in `mt` and a subgraph candidate idx, inserts the
@@ -631,8 +631,8 @@ def create_n_transformed_and_logged_copies_of_subgraph(
     nodes_in_this_subgraph: list[Any],
     qconfig_mappings: list[QConfigMapping],
     list_of_node_name_to_qconfig: list[dict[str, QConfigAny]],
-    custom_prepare_fn: Optional[Callable] = None,
-    custom_prepare_kwargs: Optional[dict[str, Any]] = None,
+    custom_prepare_fn: Callable | None = None,
+    custom_prepare_kwargs: dict[str, Any] | None = None,
 ) -> None:
     """
     Given a model `mt` and a subgraph_idx, creates the needed copies
@@ -709,7 +709,7 @@ def create_n_transformed_and_logged_copies_of_subgraph(
     # order but the eventual results will be in reverse order.
     # So, we keep track of the last shadow logger we added and
     # always insert after it.
-    last_added_shadow_node_list: list[Optional[Node]] = [None]
+    last_added_shadow_node_list: list[Node | None] = [None]
     for subgraph_candidate_idx in range(len(qconfig_mappings) + 1):
         create_one_transformed_and_logged_copy_of_subgraph(
             mt,
@@ -819,7 +819,6 @@ def create_add_loggers_graph(
                 model,
                 cur_subgraph_idx,
                 match_name,
-                # pyrefly: ignore [bad-argument-type]
                 maybe_subgraph,
                 [qconfig_mapping],
                 [node_name_to_qconfig],
@@ -887,7 +886,7 @@ def create_add_loggers_graph(
                     new_args = cur_node_orig.args
                     new_kwargs = cur_node_orig.kwargs
                 else:
-                    first_arg_for_copy: Optional[Node] = cur_node_copy
+                    first_arg_for_copy: Node | None = cur_node_copy
                     new_args = (first_arg_for_copy, *cur_node_orig.args[1:])
                     new_kwargs = cur_node_orig.kwargs
                 # make a copy of cur_node_orig
@@ -1050,7 +1049,7 @@ def _get_weight_info_from_shadow_wrapper(shadow_wrapper: torch.nn.Module):
             raise AssertionError(f"Expected exactly 1, got {len(shadow_n.users)}")
         quant_node = next(iter(shadow_n.users.keys()))
         new_args: Any = None
-        if quant_node.target == torch.quantize_per_channel:
+        if quant_node.target is torch.quantize_per_channel:
             _weight, scale_node, zp_node, axis, dtype = quant_node.args
             scale_val = getattr_from_fqn(shadow_wrapper, scale_node.target)
             zp_val = getattr_from_fqn(shadow_wrapper, zp_node.target)

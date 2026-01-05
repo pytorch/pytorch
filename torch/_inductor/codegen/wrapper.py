@@ -12,8 +12,9 @@ import operator
 import random
 import re
 import tempfile
+from collections.abc import Callable
 from itertools import chain, count
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 from sympy import Expr
@@ -26,6 +27,7 @@ from torch._dynamo.utils import counters, dynamo_timed
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
+from torch._library.opaque_object import get_opaque_obj_repr, is_opaque_value_type
 from torch._logging import trace_structured
 from torch.fx.experimental.symbolic_shapes import (
     CallMethodKey,
@@ -68,6 +70,7 @@ from .common import (
     WorkspaceZeroMode,
 )
 from .cpp_utils import cexpr
+from .custom_extern_kernel_codegen import CUSTOM_EXTERN_KERNEL_CODEGEN
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 
@@ -77,6 +80,8 @@ if TYPE_CHECKING:
     import triton
 
     from ..graph import GraphLowering
+    from ..ir import ExternKernel
+    from ..scheduler import BaseSchedulerNode
     from .wrapper_fxir import FxConverter
 
 
@@ -133,6 +138,40 @@ def can_match_buffer_size(input_buf: BufferLike, output_buf: BufferLike):
         return True
 
     return False
+
+
+def codegen_reinterpret_view_helper(data):
+    """
+    Collapse a chain of ReinterpretView <- StorageBox
+    <- ReinterpretView <- StorageBox.... <- buffer wrappers if every layer
+    has the same offset as the innermost (base) buffer.
+
+    Returns:
+        (size, stride, offset, dtype, collapsible: bool)
+    """
+    if isinstance(data, ir.Buffer):
+        lay = data.get_layout()
+        return lay.size, lay.stride, lay.offset, lay.dtype, True
+
+    layouts: list[Any] = []
+    cur = data
+    while isinstance(cur, (ir.TensorBox, ir.StorageBox, ir.ReinterpretView)):
+        lay = cur.get_layout()
+        if lay is None:
+            return None, None, None, None, False
+        layouts.append(lay)
+        cur = cur.data  # unwrap
+
+    if not isinstance(cur, ir.Buffer):
+        return None, None, None, None, False
+
+    # All wrapper offsets must match base offset to be collapsible
+    for lay in layouts:
+        if lay.offset != cur.get_layout().offset:
+            return None, None, None, None, False
+
+    base_lay = cur.get_layout()
+    return base_lay.size, base_lay.stride, base_lay.offset, base_lay.dtype, True
 
 
 # TODO: Move to a well known place
@@ -287,11 +326,15 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
+                    # pyrefly: ignore [missing-attribute]
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif hasattr(triton, "constexpr_function") and isinstance(
-                    symbol, triton.runtime.jit.ConstexprFunction
+                    # pyrefly: ignore [missing-attribute]
+                    symbol,
+                    # pyrefly: ignore [missing-attribute]
+                    triton.runtime.jit.ConstexprFunction,
                 ):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.constexpr_function")
@@ -528,6 +571,7 @@ class ExternKernelOutLine(WrapperLine):
             node.output_view.codegen_reference() if node.output_view else None,
             args,
             device,
+            self.node.get_stack_traces(),
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -963,6 +1007,7 @@ class ScatterFallbackLine(WrapperLine):
         else:
             (x, index) = (t.codegen_reference() for t in node.inputs)
             src = node.constant_args[1]
+        device = d.type if (d := node.get_device()) else V.graph.device_type
         self.wrapper._generate_scatter_fallback(
             x,
             [x, node.constant_args[0], index, src],
@@ -971,6 +1016,7 @@ class ScatterFallbackLine(WrapperLine):
             node.src_is_tensor,
             node.kwargs["reduce"],
             node.codegen_kwargs(),
+            device,
         )
 
     def codegen_fx(self, converter: FxConverter) -> FxConversionFunc:
@@ -1275,7 +1321,7 @@ class PythonWrapperCodegen(CodeGen):
             if config.triton.autotune_at_compile_time:
                 self.kernel_autotune_calls.writeline(f"{var} = {meta}")
                 self._meta_vars.add(var)
-        # pyrefly: ignore [index-error]
+        # pyrefly: ignore [bad-index, index-error]
         return self._metas[meta]
 
     @cache_on_self
@@ -1503,6 +1549,13 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
+        # Check if this op has a custom codegen implementation
+        op_name = node.python_kernel_name
+        if op_name is not None and op_name in CUSTOM_EXTERN_KERNEL_CODEGEN:
+            custom_codegen = CUSTOM_EXTERN_KERNEL_CODEGEN[op_name].python
+            if custom_codegen is not None:
+                custom_codegen(node, self.writeline)
+                return
         self.writeline(ExternKernelAllocLine(self, node))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
@@ -1554,6 +1607,7 @@ class PythonWrapperCodegen(CodeGen):
         out_view: Optional[str],
         args: list[str],
         device: str,
+        stack_traces: Optional[OrderedSet[str]] = None,
     ) -> None:
         # add debug printer code for triton kernel calls at (jit) inductor level
         debug_printer_manager = V.graph.wrapper_code.debug_printer
@@ -1623,6 +1677,7 @@ class PythonWrapperCodegen(CodeGen):
         src_is_tensor,
         reduce,
         kwargs,
+        device,
     ):
         line = f"{python_kernel_name}({','.join(map(str, inputs))}"
         if python_kernel_name.startswith("aten.scatter_reduce"):
@@ -2010,25 +2065,58 @@ class PythonWrapperCodegen(CodeGen):
         writeline: Callable[..., None],
         dtype=None,
     ) -> str:
-        if (
-            size == data.layout.size
-            and stride == data.layout.stride
-            and offset == data.layout.offset
+        # Get the innermost buffer's layout info to help reinterpret view.
+        # Consider a chain of (ReinterpretView <- TensorBox| StorageBox)... <- buffer
+        # If we only use x.data to determine the reinterpret, we may get wrong layout.
+        # For example:
+        # x = ReinterpretView(
+        #       Storage(
+        #         ReinterpretView(
+        #           storage(
+        #             Buffer(name='buf0', layout=(size=(2, 5, 10), ...)
+        #           ),
+        #           layout=(10, 10),
+        #         ),
+        #       ),
+        #       layout=(10, 10),
+        #     )
+        # In this case, x.data.layout == x.layout is (10, 10), the reinterpret view will return buf0,
+        # but buf0 need to be viewed from (2, 5, 10) to (10, 10).
+        # So we need to dig into the chain to find the innermost buffer's layout.
+        d_size, d_stride, d_offset, d_dtype, collapsible = (
+            codegen_reinterpret_view_helper(data)
+        )
+
+        def apply_reinterpret(
+            name, tgt_size, tgt_stride, tgt_offset, cast_dtype, base_dtype
         ):
-            if dtype is not None and dtype != data.dtype:
-                return f"aten.view.dtype({data.get_name()}, {dtype})"
-            else:
-                return f"{data.get_name()}"
+            s = self.codegen_python_shape_tuple(tgt_size)
+            st = self.codegen_python_shape_tuple(tgt_stride)
+            off = self.codegen_sizevar(tgt_offset)
+            expr = f"reinterpret_tensor({name}, {s}, {st}, {off})"
+            if cast_dtype is not None and cast_dtype != base_dtype:
+                return f"aten.view.dtype({expr}, {cast_dtype})"
+            return expr
+
+        name = data.get_name()
+        collapsed = collapsible and offset == d_offset
+        if collapsed:
+            same_layout = size == d_size and stride == d_stride
+            base_dtype = d_dtype
         else:
-            size = self.codegen_python_shape_tuple(size)
-            stride = self.codegen_python_shape_tuple(stride)
-            offset = self.codegen_sizevar(offset)
-            if dtype is not None and dtype != data.dtype:
-                return f"aten.view.dtype(reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset}), {dtype})"
-            else:
-                return (
-                    f"reinterpret_tensor({data.get_name()}, {size}, {stride}, {offset})"
-                )
+            same_layout = (
+                size == data.layout.size
+                and stride == data.layout.stride
+                and offset == data.layout.offset
+            )
+            base_dtype = data.dtype
+
+        if same_layout:
+            if dtype is not None and dtype != base_dtype:
+                return f"aten.view.dtype({name}, {dtype})"
+            return f"{name}"
+
+        return apply_reinterpret(name, size, stride, offset, dtype, base_dtype)
 
     def codegen_device_copy(self, src, dst, non_blocking: Union[bool, str]):
         self.writeline(f"{dst}.copy_({src}, {non_blocking})")
@@ -2054,7 +2142,8 @@ class PythonWrapperCodegen(CodeGen):
             neg = self.codegen_sizevar(
                 sympy.Max(0, sympy.Min(x + node.size, node.size))
             )
-            return f"{pos} if {x} >= 0 else {neg}"
+            x_cond = self.codegen_sizevar(x)
+            return f"{pos} if {x_cond} >= 0 else {neg}"
 
         def codegen_with_step(start_var, end_var, step):
             if step == 1:
@@ -2109,6 +2198,10 @@ class PythonWrapperCodegen(CodeGen):
             output.writeline(f"{name} = {val}")
 
         def add_torchbind_input(name, value):
+            if value is None:
+                output.writeline(f"{name} = None")
+                return
+
             import pickle
 
             assert isinstance(value, torch.ScriptObject)
@@ -2246,7 +2339,7 @@ class PythonWrapperCodegen(CodeGen):
         gpu: bool = True,
         cpp_definition: Optional[str] = None,
     ):
-        if config.triton.autotune_at_compile_time:
+        if config.triton.autotune_at_compile_time and gpu:
             body = self._format_kernel_definition(
                 kernel_name, kernel_body, metadata=metadata
             )
@@ -3037,6 +3130,11 @@ class PythonWrapperCodegen(CodeGen):
             return repr(s)
         elif isinstance(s, ir.GeneratorState):
             return s.codegen_reference()
+        elif is_opaque_value_type(type(s)):
+            obj_repr, opaque_types = get_opaque_obj_repr(s)
+            for n, t in opaque_types.items():
+                V.graph.opaque_value_type_classes[n] = t
+            return obj_repr
         else:
             return repr(s)
 
@@ -3163,7 +3261,7 @@ class PythonWrapperCodegen(CodeGen):
         if (
             name in V.graph.removed_buffers
             or name in self.allocated
-            or isinstance(buffer, (ir.DonatedBuffer, ir.SubgraphBuffer))
+            or isinstance(buffer, (ir.DonatedBuffer, ir.SubgraphBuffer, ir.InputBuffer))
         ):
             return
         self.allocated.add(name)
@@ -3188,7 +3286,20 @@ class PythonWrapperCodegen(CodeGen):
             box = layout.view.data
             assert isinstance(box, ir.StorageBox), type(box)
             input_buffer = box.data
-            assert isinstance(input_buffer, ir.Buffer), type(box)
+            assert isinstance(input_buffer, (ir.Buffer, ir.ReinterpretView)), type(
+                input_buffer
+            )
+            if isinstance(input_buffer, ir.ReinterpretView):
+
+                def unwrap_views(target) -> ir.Buffer:
+                    if isinstance(target, ir.BaseView):
+                        return unwrap_views(target.unwrap_view())
+                    if isinstance(target, ir.MutableBox):
+                        return unwrap_views(target.data)
+                    assert isinstance(target, ir.Buffer), type(target)
+                    return target
+
+                input_buffer = unwrap_views(input_buffer)
             self.codegen_allocation(input_buffer)
             self.writeline(ReinterpretLine(self, input_buffer, buffer, layout))
             return
@@ -3686,6 +3797,29 @@ class PythonWrapperCodegen(CodeGen):
     def can_prove_buffer_has_static_shape(buffer):
         return PythonWrapperCodegen.static_shape_for_buffer_or_none(buffer) is not None
 
+    def write_kernel_context_guard(
+        self,
+        kernel_name: str,
+        node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    ):
+        return
+
+    def write_kernel_context_guard_begin(
+        self,
+    ):
+        """
+        Mark the beginning of kernel context guard
+        """
+        return
+
+    def write_kernel_context_guard_end(
+        self,
+    ):
+        """
+        Mark the end of kernel context guard
+        """
+        return
+
 
 class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
     """
@@ -3708,6 +3842,15 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         self.partition_signatures = partition_signatures
 
         super().__init__()
+
+        root = self.get_root_graph()
+        # Only generate auto-tuning block in the main graph
+        self.kernel_autotune_defs = root.kernel_autotune_defs
+        self.kernel_autotune_calls = root.kernel_autotune_calls
+        # Only store kernel src to name mapping in the main graph
+        self.src_to_kernel = root.src_to_kernel
+        # Same here, only define user-defined Triton kernels in the main graph
+        self.user_defined_kernel_cache = root.user_defined_kernel_cache
 
     def set_launcher_fn_name(self) -> None:
         # This sets up the name of the function containing the launcher code of
@@ -3801,3 +3944,16 @@ class SubgraphPythonWrapperCodegen(PythonWrapperCodegen):
         #         V.graph.device_ops.import_get_raw_stream_as("get_raw_stream")
         #     )
         self.parent_wrapper.write_get_raw_stream_header_once()
+
+    @cache_on_self
+    def get_root_graph(self) -> PythonWrapperCodegen:
+        root: PythonWrapperCodegen | SubgraphPythonWrapperCodegen = self
+        while isinstance(root, SubgraphPythonWrapperCodegen):
+            root = root.parent_wrapper
+
+        assert isinstance(root, PythonWrapperCodegen)
+        return root
+
+    def generate_and_run_autotune_block(self):
+        # Only execute auto-tuning block in the main graph
+        pass

@@ -409,9 +409,9 @@ struct ConvParams {
     if (!detail::getCUDAHooks().compiledWithCuDNN() || !input.is_cuda() || !cudnn_enabled) {
       return false;
     }
-    static long cudnn_version = detail::getCUDAHooks().versionCuDNN();
-    // broken on cuDNN 9.8
-    if (cudnn_version >= 90800) {
+    static long cudnn_version = detail::getCUDAHooks().versionRuntimeCuDNN();
+    // broken on cuDNN 9.8 - 9.14
+    if (cudnn_version >= 90800 && cudnn_version < 91500) {
       if (cudnn_conv_suggest_memory_format(input, weight) == at::MemoryFormat::Contiguous &&
           (input.scalar_type() == at::kBFloat16 || input.scalar_type() == at::kHalf) &&
           weight.dim() == 5) {
@@ -453,10 +453,10 @@ struct ConvParams {
     }
     // native kernel doesn't support 64-bit non-splittable case
     if (!(canUse32BitIndexMath(input) && canUse32BitIndexMath(weight))) {
-      static long cudnn_version = detail::getCUDAHooks().compiledWithCuDNN() ? detail::getCUDAHooks().versionCuDNN() : -1;
+      static long cudnn_version = detail::getCUDAHooks().compiledWithCuDNN() ? detail::getCUDAHooks().versionRuntimeCuDNN() : -1;
       // TODO(eqy): remove this once cuDNN fixes 64-bit depthwise support, first broken in 9.11x
       if (cudnn_conv_suggest_memory_format(input, weight) != at::MemoryFormat::Contiguous) {
-        if (cudnn_version < 0 || cudnn_version > 91000) {
+        if (cudnn_version < 0 || (cudnn_version > 91000 && cudnn_version < 91500)) {
           return false;
         }
       }
@@ -493,9 +493,8 @@ struct ConvParams {
   }
 
   bool use_miopen(const at::Tensor& input, const at::Tensor& weight, bool bias_defined) const  {
-    if (needs_64bit_indexing_no_split(input, weight)) {
-      return false;
-    }
+    // MIOpen supports 64-bit indexing via miopenSetTensorDescriptorV2 API
+    // Reference: https://github.com/ROCm/MIOpen/pull/2838
     return ((input.scalar_type() == at::kFloat) || (input.scalar_type() == at::kHalf) || (input.scalar_type() == at::kBFloat16))
            && cudnn_enabled
            && input.is_cuda()
@@ -639,7 +638,7 @@ static std::ostream& operator<<(std::ostream & out, const ConvParams<T>& params)
       << "  deterministic = " << params.deterministic
       << "  cudnn_enabled = " << params.cudnn_enabled
       << "  allow_tf32 = " << params.allow_tf32
-      << "}";
+      << '}';
   return out;
 }
 

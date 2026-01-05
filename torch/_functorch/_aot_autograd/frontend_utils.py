@@ -8,12 +8,14 @@ from typing import Any, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._guards import detect_fake_mode
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.fx.experimental.proxy_tensor import _pytree_subclasses_that_lose_info
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config
+from .descriptors import BufferAOTInput, DifferentiableAOTInput, ParamAOTInput
 from .schemas import AOTConfig, FakifiedFlatArgs
 
 
@@ -45,7 +47,7 @@ def process_inputs(
                         hint=x,
                         source=source,
                     )
-            if isinstance(x, torch.ScriptObject):
+            if isinstance(x, torch.ScriptObject) or is_opaque_type(type(x)):
                 return torch._library.fake_class_registry.maybe_to_fake_obj(
                     fake_mode, x
                 )
@@ -107,7 +109,10 @@ def construct_fake_mode(
 
 
 def _try_get_metadata_from_dynamo(
-    mod: torch.nn.Module, param_keys: KeysView[str], full_args_num: int
+    mod: torch.nn.Module,
+    param_keys: KeysView[str],
+    full_args_num: int,
+    full_args_descs: list[DifferentiableAOTInput],
 ) -> tuple[Optional[list[torch._guards.Source]], list[int]]:
     """
     Metadata is forwarded from Dynamo to AOTDispatch via special fields on GraphModule.
@@ -130,7 +135,12 @@ def _try_get_metadata_from_dynamo(
 
     if not hasattr(mod, "_param_name_to_source"):
         # is from export
-        return None, []
+        static_input_indices = [
+            i
+            for i, node in enumerate(full_args_descs)
+            if isinstance(node, (ParamAOTInput, BufferAOTInput))
+        ]
+        return None, static_input_indices
 
     # We now know this came from dynamo, and (1) we care about guards,
     # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
@@ -163,7 +173,7 @@ def _try_get_metadata_from_dynamo(
         assert source is None or source not in seen_sources, source
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
-        source_name = source.name() if source else str(source)
+        source_name = source.name if source else str(source)
 
         # input[i] in dynamo is now:
         # input[i + len(extra_params)] in AOT,

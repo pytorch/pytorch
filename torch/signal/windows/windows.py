@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 from collections.abc import Callable, Iterable
 from math import sqrt
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import torch
 from torch import Tensor
@@ -133,12 +133,12 @@ Examples::
 def exponential(
     M: int,
     *,
-    center: Optional[float] = None,
+    center: float | None = None,
     tau: float = 1.0,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -220,9 +220,9 @@ def cosine(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -294,9 +294,9 @@ def gaussian(
     *,
     std: float = 1.0,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -373,9 +373,9 @@ def kaiser(
     *,
     beta: float = 12.0,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -397,15 +397,15 @@ def kaiser(
         )
 
     # Avoid NaNs by casting `beta` to the appropriate dtype.
-    # pyrefly: ignore  # bad-assignment
+    # pyrefly: ignore [bad-assignment]
     beta = torch.tensor(beta, dtype=dtype, device=device)
 
     start = -beta
     constant = 2.0 * beta / (M if not sym else M - 1)
     end = torch.minimum(
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         beta,
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         start + (M - 1) * constant,
     )
 
@@ -420,7 +420,7 @@ def kaiser(
     )
 
     return torch.i0(torch.sqrt(beta * beta - torch.pow(k, 2))) / torch.i0(
-        # pyrefly: ignore  # bad-argument-type
+        # pyrefly: ignore [bad-argument-type]
         beta
     )
 
@@ -465,9 +465,9 @@ def hamming(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_hamming(
@@ -519,9 +519,9 @@ def hann(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_hamming(
@@ -573,9 +573,9 @@ def blackman(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -634,9 +634,9 @@ def bartlett(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -710,9 +710,9 @@ def general_cosine(
     *,
     a: Iterable,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     if dtype is None:
@@ -803,9 +803,9 @@ def general_hamming(
     *,
     alpha: float = 0.54,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_cosine(
@@ -867,9 +867,9 @@ def nuttall(
     M: int,
     *,
     sym: bool = True,
-    dtype: Optional[torch.dtype] = None,
+    dtype: torch.dtype | None = None,
     layout: torch.layout = torch.strided,
-    device: Optional[torch.device] = None,
+    device: torch.device | None = None,
     requires_grad: bool = False,
 ) -> Tensor:
     return general_cosine(

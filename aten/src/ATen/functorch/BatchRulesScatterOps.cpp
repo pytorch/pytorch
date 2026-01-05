@@ -8,7 +8,6 @@
 #include <ATen/Operators.h>
 #include <ATen/functorch/PlumbingHelper.h>
 #include <ATen/functorch/BatchedFallback.h>
-#include <ATen/native/TensorAdvancedIndexing.h>
 #include <ATen/native/IndexKernel.h>
 #include <ATen/native/IndexingUtils.h>
 #include <torch/library.h>
@@ -432,7 +431,7 @@ namespace {
     // Eg. Given `indexed_shape.size()` is 5 and
     // shape of `values` is (N, 2, 3), then following block
     // will reshape `values` to (N, 1, 1, 2, 3).
-    if ( (int64_t) indexed_shape.size() > values_.dim()) {
+    if ( static_cast<int64_t>(indexed_shape.size()) > values_.dim()) {
       auto values_sizes = values_.sym_sizes();
 
       // number of unit dims (for broadcasting value to indexed_shape)

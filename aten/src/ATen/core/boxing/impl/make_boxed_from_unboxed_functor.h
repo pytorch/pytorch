@@ -631,8 +631,8 @@ call_functor_with_args_from_stack_(
     Stack* stack,
     std::index_sequence<ivalue_arg_indices...> /*unused*/,
     guts::typelist::typelist<ArgTypes...>* /*unused*/) {
-  (void)(stack); // when sizeof...(ivalue_arg_indices) == 0, this argument would
-                 // be unused and we have to silence the compiler warning.
+  (void)stack; // when sizeof...(ivalue_arg_indices) == 0, this argument would
+               // be unused and we have to silence the compiler warning.
 
   // We're explicitly filtering out DispatchKeySet from the argument list.
   // Some kernels take a DispatchKeySet as their first argument in order to

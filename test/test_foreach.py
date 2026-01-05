@@ -318,13 +318,11 @@ class TestForeach(TestCase):
                 return arg
 
         scalar_self_arg_test_complete = False
-        for i, sample in enumerate(
-            op.sample_inputs(
-                device,
-                dtype,
-                noncontiguous=not is_fastpath,
-                allow_higher_dtype_scalars=True,
-            )
+        for sample in op.sample_inputs(
+            device,
+            dtype,
+            noncontiguous=not is_fastpath,
+            allow_higher_dtype_scalars=True,
         ):
             (rhs_arg,) = sample.args
             kwargs = {} or sample.kwargs

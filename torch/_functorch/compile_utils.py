@@ -99,7 +99,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
-            # This CSE pass currently doesn't handle re-propogation of unbacked
+            # This CSE pass currently doesn't handle re-propagation of unbacked
             # meta where it'll sometimes eliminate a _local_scalar_dense but not
             # replace the meta of downstream users. eg. one bug we've seen is:
             #

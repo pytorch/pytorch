@@ -15,6 +15,7 @@ from torch.testing._internal.common_utils import run_tests, TestCase
 
 class TestQuantizedHfStorage(TestCase):
     def setUp(self):
+        super().setUp()
         """Set up common test fixtures."""
         self.temp_dir = tempfile.TemporaryDirectory()
         self.path = self.temp_dir.name

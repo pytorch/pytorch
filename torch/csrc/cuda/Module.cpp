@@ -1017,7 +1017,7 @@ PyObject* THCPModule_cudaGetSyncDebugMode(PyObject* self, PyObject* noargs) {
 ////////////////////////////////////////////////////////////////////////////////
 
 static void registerCudaDeviceProperties(PyObject* module) {
-  // Add _cudaDevicePropertires class to torch._C
+  // Add _cudaDeviceProperties class to torch._C
   auto m = py::handle(module).cast<py::module>();
   // CUuuid is defined in either cuda.h or driver_types.h
   // hipified to hipUUID which is defined in hip_runtime_api.h
@@ -1042,9 +1042,11 @@ static void registerCudaDeviceProperties(PyObject* module) {
       .def_readonly(
           "max_threads_per_multi_processor",
           &cudaDeviceProp::maxThreadsPerMultiProcessor)
+      .def_readonly(
+          "max_threads_per_block", &cudaDeviceProp::maxThreadsPerBlock)
       .def_readonly("warp_size", &cudaDeviceProp::warpSize)
-#ifndef USE_ROCM
-      // NVIDIA-only properties
+      .def_readonly(
+          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
       .def_property_readonly(
           "clock_rate",
           [](const cudaDeviceProp&) {
@@ -1065,18 +1067,18 @@ static void registerCudaDeviceProperties(PyObject* module) {
           })
       .def_readonly("memory_bus_width", &cudaDeviceProp::memoryBusWidth)
       .def_readonly(
-          "shared_memory_per_block", &cudaDeviceProp::sharedMemPerBlock)
+          "shared_memory_per_multiprocessor",
+          &cudaDeviceProp::sharedMemPerMultiprocessor)
+
+#ifndef USE_ROCM
+      // NVIDIA-only properties
       .def_readonly(
           "shared_memory_per_block_optin",
           &cudaDeviceProp::sharedMemPerBlockOptin)
-      .def_readonly(
-          "shared_memory_per_multiprocessor",
-          &cudaDeviceProp::sharedMemPerMultiprocessor)
 #endif
-#if (defined(USE_ROCM) && ROCM_VERSION >= 60100) || !USE_ROCM
+
       .def_readonly(
           "regs_per_multiprocessor", &cudaDeviceProp::regsPerMultiprocessor)
-#endif
       // HIP-only property; reuse name attribute for CUDA builds
       .def_readonly(
           "gcnArchName",
@@ -1096,7 +1098,7 @@ static void registerCudaDeviceProperties(PyObject* module) {
         stream << "_CudaDeviceProperties(name='" << prop.name
                << "', major=" << prop.major << ", minor=" << prop.minor
 #if USE_ROCM
-               << ", gcnArchName='" << prop.gcnArchName << "'"
+               << ", gcnArchName='" << prop.gcnArchName << '\''
 #endif // USE_ROCM
                << ", total_memory=" << prop.totalGlobalMem / (1024ull * 1024)
                << "MB, multi_processor_count=" << prop.multiProcessorCount
@@ -1111,7 +1113,16 @@ static void registerCudaDeviceProperties(PyObject* module) {
 
   m.def(
       "_cuda_record_memory_history_legacy",
-      static_cast<void (*)(bool, bool, int64_t, bool, bool, bool, bool, bool)>(
+      static_cast<void (*)(
+          bool,
+          bool,
+          int64_t,
+          bool,
+          bool,
+          bool,
+          bool,
+          bool,
+          const std::vector<std::string>&)>(
           torch::cuda::_record_memory_history));
 
   m.def(
@@ -1123,7 +1134,9 @@ static void registerCudaDeviceProperties(PyObject* module) {
           size_t,
           bool,
           bool,
-          bool)>(torch::cuda::_record_memory_history));
+          bool,
+          const std::vector<std::string>&)>(
+          torch::cuda::_record_memory_history));
 
   m.def("_cuda_isHistoryEnabled", []() {
     return c10::cuda::CUDACachingAllocator::isHistoryEnabled();
@@ -1468,7 +1481,7 @@ static void registerCudaPluggableAllocator(PyObject* module) {
           if (!allocd_set.count(ptr)) {
             definite_freed_count += 1;
           }
-          freed_pointer_set.insert((ptr));
+          freed_pointer_set.insert(ptr);
         }
         // that block has already been freed,
         // so even those this will error, so too will the allocator

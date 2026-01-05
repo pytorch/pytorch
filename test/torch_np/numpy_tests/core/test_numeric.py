@@ -2382,7 +2382,7 @@ class TestLikeFuncs(TestCase):
         # Regression test for gh-19860
         a = np.arange(16).reshape(2, 8)
         b = a[:, ::2]  # Ensure b is not contiguous.
-        kwargs = {"fill_value": ""} if likefunc == np.full_like else {}
+        kwargs = {"fill_value": ""} if likefunc is np.full_like else {}
         result = likefunc(b, dtype=dtype, **kwargs)
         if dtype is str:
             assert result.strides == (16, 4)

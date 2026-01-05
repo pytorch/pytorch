@@ -739,8 +739,6 @@ class TestCommon(TestCase):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
-        if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
-            self.skipTest("Skipped on ROCm")
         if op.full_name == "_refs.div.floor_rounding" and dtype == torch.bfloat16:
             self.skipTest(
                 "Skipped _refs.div.floor_rounding with bfloat16"
@@ -753,12 +751,6 @@ class TestCommon(TestCase):
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
-        if (
-            TEST_WITH_ROCM
-            and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2")
-            and dtype == torch.float16
-        ):
-            self.skipTest("Skipped on ROCm")
         from copy import copy
 
         from torch._prims.executor import make_traced
@@ -2040,7 +2032,7 @@ class TestCompositeCompliance(TestCase):
 
             # Convert strided tensor inputs to COW tensors and make copies of
             # all inputs
-            for idx, arg in enumerate(args_raw):
+            for arg in args_raw:
                 if is_strided_tensor(arg):
                     args_copy.append(arg.detach().clone())
                     args.append(torch._lazy_clone(arg))
@@ -2992,12 +2984,50 @@ class TestFakeTensor(TestCase):
             self.assertEqual(strided_result.layout, torch.strided)
 
 
+class TestForwardADWithScalars(TestCase):
+    @ops(
+        [op for op in op_db if op.name in ["mul", "add", "div"]],
+        allowed_dtypes=(torch.float32,),
+    )
+    def test_0d_tensor_with_python_scalar(self, device, dtype, op):
+        """Test that forward AD preserves dtype when combining 0D tensors with Python scalars."""
+        if torch.float not in op.supported_backward_dtypes(device):
+            raise unittest.SkipTest("Does not support autograd")
+
+        # skip if operator doesn't support forward AD
+        if not op.supports_forward_ad:
+            raise unittest.SkipTest("Does not support forward_ad")
+
+        # create 0D tensors
+        primal0d = torch.ones((), device=device, dtype=dtype)
+        tangent0d = torch.ones((), device=device, dtype=dtype)
+
+        with torch.autograd.forward_ad.dual_level():
+            dual0d = torch.autograd.forward_ad.make_dual(primal0d, tangent0d)
+
+            # Test with scalar on RHS
+            if op.supports_rhs_python_scalar:
+                result = op(dual0d, 2.0)
+                p, t = torch.autograd.forward_ad.unpack_dual(result)
+                self.assertEqual(
+                    p.dtype, t.dtype, f"{op.name} and scalar on RHS - dtype mismatch"
+                )
+            # Test with scalar on LHS
+            if op.supports_one_python_scalar:
+                result = op(2.0, dual0d)
+                p, t = torch.autograd.forward_ad.unpack_dual(result)
+                self.assertEqual(
+                    p.dtype, t.dtype, f"{op.name} and scalar on LHS - dtype mismatch"
+                )
+
+
 instantiate_device_type_tests(TestCommon, globals(), allow_xpu=True)
 instantiate_device_type_tests(TestCompositeCompliance, globals())
 instantiate_device_type_tests(TestMathBits, globals())
 instantiate_device_type_tests(TestRefsOpsInfo, globals(), only_for="cpu")
 instantiate_device_type_tests(TestFakeTensor, globals())
 instantiate_device_type_tests(TestTags, globals())
+instantiate_device_type_tests(TestForwardADWithScalars, globals())
 
 if __name__ == "__main__":
     TestCase._default_dtype_check_enabled = True

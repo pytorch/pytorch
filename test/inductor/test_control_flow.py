@@ -20,9 +20,11 @@ from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_gpu
 
 
-def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1):
+def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1, device=None):
     result = []
-    device = inputs[0].device
+    if len(inputs) != 0:
+        device = inputs[0].device
+    assert device
     # iterate over the cartesian product of predicate values
     for values in itertools.product(*([possible_values] * num_to_prepend)):
         prepended = [torch.tensor(v, device=device) for v in values]
@@ -30,8 +32,8 @@ def _prepend_product_of_values(inputs, possible_values, num_to_prepend=1):
     return result
 
 
-def prepend_predicates(inputs, num_predicates=1):
-    return _prepend_product_of_values(inputs, [False, True], num_predicates)
+def prepend_predicates(inputs, num_predicates=1, device=None):
+    return _prepend_product_of_values(inputs, [False, True], num_predicates, device)
 
 
 def prepend_counters(inputs, num_counters=1, counter_values=(0, 1, 5)):
@@ -276,6 +278,16 @@ class CondModels:
 
             return torch.cond(x0.sum() > 0, fn, fn)
 
+    class StridePadding(torch.nn.Module):
+        def forward(self, p, x):
+            def true_fn(t):
+                return t.clone().contiguous()
+
+            def false_fn(t):
+                return t.clone().contiguous() + 1
+
+            return torch.cond(p, true_fn, false_fn, [x])
+
 
 class CondTests(TestCase):
     def _run_test(
@@ -308,7 +320,9 @@ class CondTests(TestCase):
                     torch._dynamo.mark_dynamic(inp, 0)
 
         for inputs in input_sets:
-            for inputs_with_predicates in prepend_predicates(inputs, num_predicates):
+            for inputs_with_predicates in prepend_predicates(
+                inputs, num_predicates, device=device
+            ):
                 cloned_inputs = [inp.clone() for inp in inputs_with_predicates]
                 result = model(*inputs_with_predicates)
                 result_compiled = compiled_model(*inputs_with_predicates)
@@ -331,6 +345,15 @@ class CondTests(TestCase):
             ),
             device=device,
             dynamic=dynamic,
+        )
+
+    @requires_gpu
+    def test_cond_subgraph_output_stride_padding(self):
+        self._run_test(
+            model=CondModels.StridePadding(),
+            # inner dim 19500 triggers stride padding
+            inputs=(torch.randn(15, 19500),),
+            device=GPU_TYPE,
         )
 
     @requires_gpu
@@ -766,6 +789,26 @@ class CondTests(TestCase):
             inputs=(torch.randn(10, 20), torch.tensor(0, dtype=torch.int64)),
             device=device,
             dynamic=dynamic,
+        )
+
+    @requires_gpu
+    def test_output_on_different_device(self):
+        class FactoryBranches(torch.nn.Module):
+            def forward(self, pred):
+                tensor = torch.cond(
+                    pred,
+                    lambda: torch.tensor([1, 2, 3, 4, 5], dtype=torch.float32).to(
+                        GPU_TYPE
+                    ),
+                    lambda: torch.zeros(5, dtype=torch.float32).to(GPU_TYPE),
+                )
+                return tensor + 1
+
+        self._run_test(
+            model=FactoryBranches(),
+            inputs=(),
+            device="cpu",  # device for predicate
+            dynamic=True,
         )
 
 
@@ -1404,7 +1447,7 @@ class WhileLoopTests(TestCase):
     def test_while_loop_infinite_loop_error(self):
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "while_loop doesn't work unless it is captured completely",
+            "torch.while_loop",
         ):
             self._run_test(
                 model=WhileLoopModels.InfiniteLoop(),

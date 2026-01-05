@@ -2,12 +2,14 @@
 from __future__ import annotations
 
 import dataclasses
+from collections.abc import Callable
 from enum import Enum
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._dynamo.utils import counters, get_metrics_context
 from torch._inductor.utils import GraphPartitionMap, InputType
+from torch._subclasses.fake_tensor import get_plain_tensors, is_fake
 from torch.utils._ordered_set import OrderedSet
 
 from .utils import is_using_cudagraph_partition
@@ -73,7 +75,7 @@ def get_mutating_use_stack_trace_from_node(
         return next(iter(placeholder_node.users)).meta.get("stack_trace", None)
 
     for use in placeholder_node.users:
-        if use.target == torch.ops.aten.copy_.default:
+        if use.target is torch.ops.aten.copy_.default:
             if stack_trace := use.meta.get("stack_trace", None):
                 return stack_trace
 
@@ -191,7 +193,7 @@ def check_multiple_devices_or_any_cpu_nodes(
     ):
         return None
 
-    keys_repr = (repr(key) for key in device_node_mapping.keys())
+    keys_repr = (repr(key) for key in device_node_mapping)
     return format_default_skip_message(f"multiple devices: {', '.join(keys_repr)}")
 
 
@@ -420,3 +422,21 @@ def get_partition_cudagraph_metadata(
         partition_stack_traces,
         partition_constants,
     )
+
+
+def collect_cuda_data_ptrs(obj: object) -> OrderedSet[int]:
+    """Debug helper that collects the data pointers of all CUDA tensors in the object."""
+    if not isinstance(obj, torch.Tensor):
+        return OrderedSet()
+
+    ptrs: OrderedSet[int] = OrderedSet()
+    for base in get_plain_tensors(obj, out=[]):
+        if type(base) is not torch.Tensor:
+            continue
+        if is_fake(base) or base.is_meta or base.device.type != "cuda":
+            continue
+        try:
+            ptrs.add(base.data_ptr())
+        except Exception:
+            pass
+    return ptrs

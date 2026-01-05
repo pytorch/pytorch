@@ -65,7 +65,11 @@ from torch.testing._internal.inductor_utils import (
     HAS_GPU,
     has_triton,
 )
-from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
+from torch.testing._internal.triton_utils import (
+    requires_cuda_and_triton,
+    requires_gpu,
+    requires_gpu_and_triton,
+)
 
 
 def get_inputs(optim):
@@ -320,7 +324,7 @@ def build_opt_kwarg_db():
                     continue
 
                 if has_tensor_lr:
-                    for scheduler_cls in LR_SCHEDULER_TO_KWARGS.keys():
+                    for scheduler_cls in LR_SCHEDULER_TO_KWARGS:
                         name_w_scheduler = name + f"_{scheduler_cls.__name__.lower()}"
                         compiled_opt_db.append(
                             (
@@ -946,7 +950,7 @@ class CompiledOptimizerTests(TestCase):
             kwargs = aot_graph_input_parser(forward)
             torch.compile(forward)(**kwargs)
 
-    @requires_cuda_and_triton
+    @requires_gpu_and_triton
     def test_foreach_map_adam(self):
         params = [
             torch.rand(

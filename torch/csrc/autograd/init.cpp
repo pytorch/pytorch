@@ -390,31 +390,25 @@ PyObject* THPAutograd_initExtension(PyObject* _unused, PyObject* unused) {
   m.def("_supported_activities", []() {
     std::set<torch::profiler::impl::ActivityType> activities{
         torch::profiler::impl::ActivityType::CPU};
-#if defined(USE_KINETO) && \
-    (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
-    if (at::hasMTIA()) {
-      activities.insert(torch::profiler::impl::ActivityType::MTIA);
-    }
-    if (at::hasHPU()) {
-      activities.insert(torch::profiler::impl::ActivityType::HPU);
-    }
+#if defined(USE_KINETO)
+#if (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
     if (at::getNumGPUs() > 0) {
       activities.insert(torch::profiler::impl::ActivityType::CUDA);
     }
-#elif defined(USE_KINETO)
+#endif // (!defined(LIBKINETO_NOCUPTI) || !defined(LIBKINETO_NOROCTRACER))
     if (at::hasXPU()) {
       activities.insert(torch::profiler::impl::ActivityType::XPU);
     }
-    if (at::hasHPU()) {
-      activities.insert(torch::profiler::impl::ActivityType::HPU);
-    }
     if (at::hasMTIA()) {
       activities.insert(torch::profiler::impl::ActivityType::MTIA);
+    }
+    if (at::hasHPU()) {
+      activities.insert(torch::profiler::impl::ActivityType::HPU);
     }
     if (c10::get_privateuse1_backend() != "privateuseone") {
       activities.insert(torch::profiler::impl::ActivityType::PrivateUse1);
     }
-#endif
+#endif // defined(USE_KINETO)
     return activities;
   });
 
@@ -1110,7 +1104,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
   PyObject* outs = PyTuple_GET_ITEM(args, 2);
   std::unordered_set<void*> s;
   visit_tensors<false>(inps, inps_kwargs, [&s](at::Tensor& t) {
-    if (!t.storage()) {
+    if (!t.has_storage()) {
       return false;
     }
     auto* cp = t.storage().unsafeGetStorageImpl();
@@ -1121,7 +1115,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
   });
   bool ret = false;
   visit_tensors<false>(outs, nullptr, [&s, &ret](at::Tensor& t) {
-    if (!t.storage()) {
+    if (!t.has_storage()) {
       return false;
     }
     auto* cp = t.storage().unsafeGetStorageImpl();
@@ -1214,6 +1208,33 @@ static PyObject* is_view_replay_enabled(PyObject* self, PyObject* args) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* set_graph_exec_group(PyObject* self, PyObject* obj) {
+  HANDLE_TH_ERRORS
+  if (obj == Py_None) {
+    c10::AutogradState::get_tls_state().set_graph_exec_group(std::nullopt);
+  } else {
+    Py_INCREF(obj);
+    c10::AutogradState::get_tls_state().set_graph_exec_group(
+        c10::SafePyObject(obj, getPyInterpreter()));
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* get_graph_exec_group(PyObject* self, PyObject* args) {
+  HANDLE_TH_ERRORS
+  const auto& group =
+      c10::AutogradState::get_tls_state().get_graph_exec_group();
+  if (group.has_value()) {
+    PyObject* obj = group->ptr(getPyInterpreter());
+    Py_INCREF(obj);
+    return obj;
+  } else {
+    Py_RETURN_NONE;
   }
   END_HANDLE_TH_ERRORS
 }
@@ -1388,6 +1409,10 @@ static PyObject* pop_torch_dispatch_stack(
   HANDLE_TH_ERRORS
   std::optional<c10::impl::TorchDispatchModeKey> mode_key;
   PyObject* r = nullptr;
+  // Keep the mode alive until after Py_INCREF to prevent use-after-free.
+  // When the shared_ptr is destroyed, ~SafePyObject will Py_DECREF, so we must
+  // Py_INCREF first to give the caller a valid reference.
+  std::shared_ptr<c10::impl::PyObject_TorchDispatchMode> mode;
   if (maybe_mode_key != Py_None) {
     mode_key = py::cast<c10::impl::TorchDispatchModeKey>(maybe_mode_key);
     auto maybe_mode =
@@ -1397,12 +1422,16 @@ static PyObject* pop_torch_dispatch_stack(
         "Attempted to unset ",
         c10::impl::to_string(mode_key.value()),
         ", but there wasn't one active.");
-    auto mode = maybe_mode.value();
-    r = mode->ptr(getPyInterpreter());
+    mode = maybe_mode.value();
   } else {
-    auto mode = c10::impl::TorchDispatchModeTLS::pop_stack();
-    r = mode->ptr(getPyInterpreter());
+    mode = c10::impl::TorchDispatchModeTLS::pop_stack();
   }
+  r = mode->ptr(getPyInterpreter());
+  // Increment refcount to give Python a reference. The SafePyObject destructor
+  // will decref when the shared_ptr is destroyed, so this balances out.
+  // Note: We cannot use release() here because the SafePyObject may be shared
+  // via ThreadLocalState copies, and release() would null out data_ causing
+  // other shared_ptr holders to see nullptr.
   Py_INCREF(r);
   return r;
   END_HANDLE_TH_ERRORS
@@ -1598,6 +1627,8 @@ static PyMethodDef methods[] = {
      castPyCFunctionWithKeywords(set_view_replay_enabled),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
+    {"_set_graph_exec_group", set_graph_exec_group, METH_O, nullptr},
+    {"_get_graph_exec_group", get_graph_exec_group, METH_NOARGS, nullptr},
     {"_enter_dual_level", python_enter_dual_level, METH_NOARGS, nullptr},
     {"_exit_dual_level",
      castPyCFunctionWithKeywords(python_exit_dual_level),

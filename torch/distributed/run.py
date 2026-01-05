@@ -375,7 +375,6 @@ import uuid
 from argparse import ArgumentParser, REMAINDER
 from collections.abc import Callable
 from importlib import metadata
-from typing import Optional, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -688,6 +687,15 @@ def get_args_parser() -> ArgumentParser:
         "Common additional signals: SIGUSR1,SIGUSR2 (used in SLURM environments).",
     )
 
+    parser.add_argument(
+        "--virtual-local-rank",
+        "--virtual_local_rank",
+        action=check_env,
+        help="Enable virtual local rank mode for workers. When enabled, LOCAL_RANK is set to 0 "
+        "for all workers and CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its "
+        "assigned GPU at device index 0.",
+    )
+
     #
     # Positional arguments.
     #
@@ -789,7 +797,7 @@ def get_use_env(args) -> bool:
     return args.use_env
 
 
-def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
+def _get_logs_specs_class(logs_specs_name: str | None) -> type[LogsSpecs]:
     """
     Attempts to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
     Provides plugin mechanism to provide custom implementation of LogsSpecs.
@@ -802,6 +810,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
         eps = metadata.entry_points()
         group = eps.select(group="torchrun.logs_specs")
         if group.select(name=logs_specs_name):
+            # pyrefly: ignore [bad-index]
             logs_specs_cls = group[logs_specs_name].load()
 
         if logs_specs_cls is None:
@@ -818,11 +827,15 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
     return logs_specs_cls
 
 
-def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str]]:
+def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
     # If ``args`` not passed, defaults to ``sys.argv[:1]``
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
-    assert 0 < min_nodes <= max_nodes
-    assert args.max_restarts >= 0
+    if not (0 < min_nodes <= max_nodes):
+        raise AssertionError(
+            f"min_nodes must be > 0 and <= max_nodes, got min_nodes={min_nodes}, max_nodes={max_nodes}"
+        )
+    if args.max_restarts < 0:
+        raise AssertionError("max_restarts must be >= 0")
 
     if (
         hasattr(args, "master_addr")
@@ -858,18 +871,19 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
 
     rdzv_endpoint = get_rdzv_endpoint(args)
 
-    ranks: Optional[set[int]] = None
+    ranks: set[int] | None = None
     if args.local_ranks_filter:
         try:
             ranks = set(map(int, args.local_ranks_filter.split(",")))
-            assert ranks
+            if not ranks:
+                raise AssertionError("ranks set cannot be empty")
         except Exception as e:
             raise ValueError(
                 "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
             ) from e
 
     logs_specs_cls: type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
-    # pyrefly: ignore [bad-instantiation]
+
     logs_specs = logs_specs_cls(
         log_dir=args.log_dir,
         redirects=Std.from_str(args.redirects),
@@ -902,10 +916,11 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         signals_to_handle=args.signals_to_handle,
         duplicate_stdout_filters=args.duplicate_stdout_filters,
         duplicate_stderr_filters=args.duplicate_stderr_filters,
+        virtual_local_rank=args.virtual_local_rank,
     )
 
     with_python = not args.no_python
-    cmd: Union[Callable, str]
+    cmd: Callable | str
     cmd_args = []
     use_env = get_use_env(args)
     if args.run_path:

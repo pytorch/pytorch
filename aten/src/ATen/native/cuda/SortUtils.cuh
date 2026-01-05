@@ -9,7 +9,14 @@
 #include <ATen/native/cuda/Sort.h>
 #include <ATen/native/StridedRandomAccessor.h>
 
+#if defined(USE_ROCM)
+// ROCm: WarpMergeSort available and tested on ROCm 7.0+
+// ROCM_VERSION encoding: MAJOR*10000 + MINOR*100 + PATCH
+#define HAS_WARP_MERGE_SORT() (ROCM_VERSION >= 70000)
+#else
+// CUDA: WarpMergeSort available since CUDA 11.6
 #define HAS_WARP_MERGE_SORT() (CUDA_VERSION >= 110600)
+#endif
 
 
 namespace at::native {
@@ -160,7 +167,13 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
 
 template <int KeyDims, int ValueDims, int sort_size, int max_block_dim_y,
           typename K, typename V, typename Comparator, typename IndexType>
+#if !defined(USE_ROCM)
+// On CUDA, use explicit launch bounds for better occupancy
 C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE * max_block_dim_y)
+#endif
+// Note: ROCm doesn't use launch bounds here because C10_WARP_SIZE is not
+// a true compile-time constant in device code (it's a constexpr function).
+// The compiler infers good launch bounds from the kernel code automatically.
 __global__ void
 warpMergeSortKVInPlace(
     at::cuda::detail::TensorInfo<K, IndexType> keys,

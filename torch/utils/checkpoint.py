@@ -14,6 +14,7 @@ import torch.fx.traceback as fx_traceback
 from torch.utils._pytree import tree_map
 from torch.testing._internal.logging_tensor import capture_logs, LoggingTensorMode
 from torch.utils._python_dispatch import TorchDispatchMode
+from typing import NoReturn
 
 __all__ = [
     "checkpoint",
@@ -32,6 +33,7 @@ __all__ = [
     "SelectiveCheckpointContext",
     "create_selective_checkpoint_contexts",
     "SAC_IGNORED_OPS",
+    "GraphExecGroup",
 ]
 
 _DEFAULT_DETERMINISM_MODE = "default"
@@ -104,10 +106,10 @@ class DefaultDeviceType:
     to save and restore for recomputation.
     """
 
-    _default_device_type = "cuda"
+    _default_device_type: Optional[str] = None
 
     @staticmethod
-    def set_device_type(device: str = "cuda"):
+    def set_device_type(device: str = "cuda") -> None:
         """
         Set the default device type for checkpointing.
 
@@ -124,13 +126,16 @@ class DefaultDeviceType:
         Returns:
             str: The current default device type.
         """
+        if not DefaultDeviceType._default_device_type:
+            DefaultDeviceType._default_device_type = acc.type if (acc := torch.accelerator.current_accelerator(True)) else "cpu"
+
         return DefaultDeviceType._default_device_type
 
 
 def _infer_device_type(*args):
     device_types = []
 
-    def add_device_types(arg):
+    def add_device_types(arg) -> None:
         nonlocal device_types
         if isinstance(arg, torch.Tensor) and arg.device.type != "cpu":
             device_types.append(arg.device.type)
@@ -166,7 +171,7 @@ def get_device_states(*args) -> Tuple[List[int], List[torch.Tensor]]:
     # the conditionals short-circuit.
     fwd_device_ids = []
 
-    def add_device_ids(arg):
+    def add_device_ids(arg) -> None:
         nonlocal fwd_device_ids
         if isinstance(arg, torch.Tensor) and arg.device.type not in {"cpu", "meta"}:
             fwd_device_ids.append(arg.get_device())
@@ -196,7 +201,7 @@ def set_device_states(devices, states, *, device_type=None) -> None:
     if device_type == "meta":
         return
     device_module = _get_device_module(device_type)
-    for device, state in zip(devices, states):
+    for device, state in zip(devices, states, strict=False):
         with device_module.device(device):
             device_module.set_rng_state(state)
 
@@ -354,11 +359,14 @@ def checkpoint(
     r"""Checkpoint a model or part of the model.
 
     Activation checkpointing is a technique that trades compute for memory.
-    Instead of keeping tensors needed for backward alive until they are used in
-    gradient computation during backward, forward computation in checkpointed
-    regions omits saving tensors for backward and recomputes them during the
-    backward pass. Activation checkpointing can be applied to any part of a
-    model.
+    By default, tensors computed during the forward pass are kept alive until
+    they are used in gradient computations in the backward pass. To reduce this
+    memory usage, tensors produced in the passed :attr:`function` are not kept
+    alive until the backward pass. Instead, any passed tensors in :attr:`args`
+    are kept alive, and the unsaved tensors are recomputed by re-invoking
+    :attr:`function` in the backward pass as needed for gradient computation.
+    Activation checkpointing can be applied to any part of a model -- this is
+    sometimes described as "checkpointing" that part of the model.
 
     There are currently two checkpointing implementations available, determined
     by the :attr:`use_reentrant` parameter. It is recommended that you use
@@ -601,7 +609,7 @@ def checkpoint_sequential(functions, segments, input, use_reentrant=None, **kwar
     return run_function(end + 1, len(functions) - 1, functions)(input)
 
 
-def _internal_assert(cond):
+def _internal_assert(cond) -> None:
     if not cond:
         raise AssertionError(
             "Something went unexpectedly wrong in activation checkpoint. "
@@ -779,7 +787,7 @@ class _Handle:
 
 
 class _Holder:
-    def __init__(self):
+    def __init__(self) -> None:
         self.handles: Dict[int, Optional[_Handle]] = {}
 
 
@@ -794,7 +802,7 @@ class _NoopSaveInputs(torch.autograd.Function):
         # Only tensors can be saved with ctx.save_for_backward, everything else
         # is captured by get_args, which is saved directly on ctx
         tensor_indices, tensors = zip(
-            *[(i, o) for i, o in enumerate(inputs) if isinstance(o, torch.Tensor)]
+            *[(i, o) for i, o in enumerate(inputs) if isinstance(o, torch.Tensor)], strict=False
         )
         idx2saved_idx = {b: a for a, b in enumerate(tensor_indices)}
         # args but with tensors replaced with None as placeholders
@@ -817,12 +825,12 @@ class _NoopSaveInputs(torch.autograd.Function):
         ctx.save_for_backward(*tensors)
 
     @staticmethod
-    def backward(ctx, *grad_outputs):
+    def backward(ctx, *grad_outputs) -> NoReturn:
         raise AssertionError("Did not expect to backward on this graph")
 
 
 class _CheckpointFrame:
-    def __init__(self, recompute_fn, early_stop, unpack_error_cb, metadata_fn):
+    def __init__(self, recompute_fn, early_stop, unpack_error_cb, metadata_fn) -> None:
         self.recompute_fn = recompute_fn
         self.input_saver = None
         self.weak_holders: List[ReferenceType] = []
@@ -847,7 +855,7 @@ class _CheckpointFrame:
         self.forward_completed = False
         self.ignore_saved_mismatch = False
 
-    def check_recomputed_tensors_match(self, gid):
+    def check_recomputed_tensors_match(self, gid) -> None:
         if self.ignore_saved_mismatch:
             # TODO: we can probably make this check stricter by checking that
             #       the metadata of the first tensors still match.
@@ -999,7 +1007,7 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
     cpp_tb = platform.machine() == 'x86_64' and platform.system() == 'Linux'
 
     class CaptureLogs:
-        def __init__(self):
+        def __init__(self) -> None:
             self.logs = None
             self.tbs = None
 
@@ -1016,11 +1024,11 @@ def _get_debug_context_and_cb() -> Tuple[Callable[[], Any], Callable[[Checkpoint
     capture_logs_fwd = CaptureLogs()
     capture_logs_recompute = CaptureLogs()
 
-    def unpack_error_cb(e: CheckpointError):
+    def unpack_error_cb(e: CheckpointError) -> NoReturn:
         def get_str_tb(label, capture_logs):
             out = ""
             total_len = len(capture_logs.logs)
-            for i, (log, tb) in enumerate(zip(capture_logs.logs, capture_logs.tbs)):
+            for i, (log, tb) in enumerate(zip(capture_logs.logs, capture_logs.tbs, strict=False)):
                 out += f"{log}   ({i + 1} of {total_len} in {label})\n\n"
                 found_torch_dispatch = False
                 for line in tb:
@@ -1071,7 +1079,7 @@ class _StopRecomputationError(Exception):
 
 
 class _recomputation_hook(torch.autograd.graph.saved_tensors_hooks):
-    def __init__(self, target_frame_ref: ReferenceType, gid: int):
+    def __init__(self, target_frame_ref: ReferenceType, gid: Union["GraphExecGroup", int]) -> None:
         def pack_hook(x):
             x = x.detach() if x.requires_grad else x
             target_frame = target_frame_ref()
@@ -1132,7 +1140,7 @@ def _run_fn_with_dynamo_disabled(fn, *args, **kwargs):
 
 
 class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
-    def __init__(self, frame):
+    def __init__(self, frame) -> None:
         def pack_hook(x):
             # See Rule 4 above
             holder = _Holder()
@@ -1144,10 +1152,14 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             return holder
 
         def unpack_hook(holder):
-            gid = torch._C._current_graph_task_id()
-            if gid == -1:
-                # generate a temporary id if we trigger unpack outside of a backward call
-                gid = int(uuid.uuid4())
+            # First check if we're inside a GraphExecGroup context
+            gid: Union[GraphExecGroup, None, int] = GraphExecGroup._get_current_group()
+            if gid is None:
+                # Fallback to using the current graph task id
+                gid = torch._C._current_graph_task_id()
+                if gid == -1:
+                    # generate a temporary id if we trigger unpack outside of a backward call
+                    gid = int(uuid.uuid4())
 
             if not frame.is_recomputed[gid]:
                 ctx = frame.input_saver.grad_fn
@@ -1167,10 +1179,17 @@ class _checkpoint_hook(torch.autograd.graph.saved_tensors_hooks):
             _internal_assert(gid in holder.handles)
 
             if holder.handles[gid] is None:
+                extra = ""
+                if torch._C._get_graph_exec_group() is not None:
+                    extra = (
+                        "Performing two backward calls that overlap (i.e. require the same "
+                        "saved activation in order to compute gradients) is not allowed while "
+                        "under the torch.utils.checkpoint.GraphExecGroup context. "
+                    )
                 raise CheckpointError(
                     "torch.utils.checkpoint: Unpack is being triggered for a tensor that was already "
-                    "unpacked once. If you are calling ctx.saved_tensors in backward, make sure to do "
-                    "so only once. Otherwise please open an issue with details on your use case."
+                    f"unpacked once. {extra}If you are calling ctx.saved_tensors in backward, make sure "
+                    "to do so only once. Otherwise please open an issue with details on your use case."
                 )
             _internal_assert(holder.handles[gid] in frame.recomputed[gid])
             ret = frame.recomputed[gid][holder.handles[gid]]
@@ -1196,7 +1215,7 @@ def _is_compiling(func, args, kwargs):
 
 class _VersionWrapper:
     # Check that cached tensors are not mutated.
-    def __init__(self, val):
+    def __init__(self, val) -> None:
         self.val: Union[torch.Tensor, Any] = val
         self.version: Optional[int] = val._version if isinstance(val, torch.Tensor) else None
 
@@ -1251,7 +1270,7 @@ class SelectiveCheckpointContext:
         >>>     context_fn=context_fn,
         >>> )
     """
-    def __init__(self, *, is_recompute):
+    def __init__(self, *, is_recompute) -> None:
         self.is_recompute = is_recompute
 
 
@@ -1300,8 +1319,12 @@ SAC_IGNORED_OPS = {
 
 
 class _CachingTorchDispatchMode(TorchDispatchMode):
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
     # Used together with _CachedTorchDispatchMode to implement SAC.
-    def __init__(self, policy_fn, storage):
+    def __init__(self, policy_fn, storage) -> None:
         self.policy_fn = policy_fn
         self.storage = storage
 
@@ -1336,8 +1359,12 @@ class _CachingTorchDispatchMode(TorchDispatchMode):
         return out
 
 class _CachedTorchDispatchMode(TorchDispatchMode):
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
     # Used together with _CachedTorchDispatchMode to implement SAC.
-    def __init__(self, policy_fn, storage, allow_cache_entry_mutation):
+    def __init__(self, policy_fn, storage, allow_cache_entry_mutation) -> None:
         self.policy_fn = policy_fn
         self.storage = storage
         self.allow_cache_entry_mutation = allow_cache_entry_mutation
@@ -1501,7 +1528,7 @@ def _checkpoint_without_reentrant_generator(
     unpack_error_cb = None
 
     if _checkpoint_debug_enabled if _checkpoint_debug_enabled is not None else debug:
-        if context_fn != noop_context_fn:
+        if context_fn is not noop_context_fn:
             raise ValueError(
                 "debug=True is incompatible with non-default context_fn"
             )
@@ -1518,7 +1545,7 @@ def _checkpoint_without_reentrant_generator(
     device_type = _infer_device_type(*args)
     device_module = _get_device_module(device_type)
     forward_context, recompute_context = context_fn()
-    if _is_compiling(fn, args, kwargs) and context_fn != noop_context_fn:
+    if _is_compiling(fn, args, kwargs) and context_fn is not noop_context_fn:
         if (
             not isinstance(forward_context, TorchDispatchMode)
             or not isinstance(recompute_context, TorchDispatchMode)
@@ -1542,7 +1569,7 @@ def _checkpoint_without_reentrant_generator(
             had_device_in_fwd = True
             fwd_devices, fwd_device_states = get_device_states(*args)
 
-    def recompute_fn(*inputs):
+    def recompute_fn(*inputs) -> None:
         kwargs, *args = inputs
         # This will be called later during recomputation. This wrapping enables
         # the necessary global state to be captured.
@@ -1592,6 +1619,40 @@ def _checkpoint_without_reentrant_generator(
         )
 
     return
+
+
+class GraphExecGroup:
+    """Any checkpointed regions encountered by backward under the same instance
+    of this context manager will trigger recompute at most once, even if
+    there are multiple calls to backward.
+
+    Backward calls under the same instance of this context manager must execute
+    over non-overlapping regions of the backward graph even if retain_graph=True.
+    In particular, any two backward call cannot use the same saved activation for
+    gradient computation.
+
+    .. note::
+        This context manager only affects checkpoint with use_reentrant=False, and
+        is a no-op otherwise.
+    """
+
+    def __enter__(self) -> "GraphExecGroup":
+        if torch._C._get_graph_exec_group() is not None:
+            raise RuntimeError(
+                "GraphExecGroup contexts cannot be nested. "
+                f"Already inside group {torch._C._get_graph_exec_group()}"
+            )
+        torch._C._set_graph_exec_group(self)
+        return self
+
+    def __exit__(self, *args: object) -> None:
+        torch._C._set_graph_exec_group(None)
+
+    @classmethod
+    def _get_current_group(cls) -> Optional["GraphExecGroup"]:
+        # Private API to be used by utils like AC
+        return torch._C._get_graph_exec_group()
+
 
 # Note: [compiled autograd and checkpoint unpack hook]
 # When tracing via compiled autograd, this hook will be visible to the

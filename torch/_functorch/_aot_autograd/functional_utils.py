@@ -225,7 +225,7 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    target_view_meta_sequence: Optional[ViewMetaSequence] = None,
+    target_view_meta_sequence: ViewMetaSequence | None = None,
     *,
     replay_views: bool,
 ):
@@ -337,8 +337,8 @@ class MetadataKey:
     layout: torch.layout
     is_sparse: bool
     # these are empty when is_sparse
-    stride: Optional[tuple[SymIntEqByExpr, ...]]
-    storage_offset: Optional[SymIntEqByExpr]
+    stride: tuple[SymIntEqByExpr, ...] | None
+    storage_offset: SymIntEqByExpr | None
     is_conj: bool
     is_neg: bool
 
@@ -450,7 +450,7 @@ def was_tensor_metadata_updated(arg, new_arg):
 
 
 # Returns the number of detected copy_
-def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
+def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[Optional[str], int]:
     allowed_mutation_ops = [
         torch.ops.aten.copy_.default,
         torch.ops.aten.set_.source_Tensor,
@@ -463,6 +463,7 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
     # NB: It would also be nice to verify that the mutations all happen at the
     # end, but we also do some administrative views after mutations so this
     # isn't actually true.  (TODO: Could this cause problems for Inductor?)
+    error = None
     for n in fx_g.nodes:
         if n.op == "placeholder":
             placeholders.add(n)
@@ -472,14 +473,18 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    assert n.args[0] in placeholders, (
-                        f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
-                    )
+                    if n.args[0] not in placeholders:
+                        error = f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                 mutation_count += 1
             else:
-                assert not n.target._schema.is_mutable, (
-                    f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
-                )
+                if n.target._schema.is_mutable:
+                    error = f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
+    return error, mutation_count
+
+
+def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
+    error, mutation_count = _is_functional_graph(fx_g)
+    assert error is None, error
     return mutation_count
 
 

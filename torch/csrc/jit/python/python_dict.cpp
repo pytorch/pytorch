@@ -1,5 +1,4 @@
 #include <ATen/core/ivalue.h>
-#include <pybind11/cast.h>
 #include <pybind11/detail/common.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
@@ -106,7 +105,7 @@ void initScriptDictBindings(PyObject* module) {
             try {
               return toPyObject(self->contains(
                   toIValue(std::move(key), self->type()->getKeyType())));
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::key_error();
             }
           })
@@ -118,7 +117,7 @@ void initScriptDictBindings(PyObject* module) {
             // Convert key to IValue.
             try {
               value = toIValue(std::move(key), self->type()->getKeyType());
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               // It would be nice to throw py::type_error here but py::key_error
               // needs to be thrown for parity with eager mode.
               throw py::key_error();
@@ -127,7 +126,7 @@ void initScriptDictBindings(PyObject* module) {
             // Call getItem on self.
             try {
               value = self->getItem(value);
-            } catch (const std::out_of_range& e) { // Key doesn't exist.
+            } catch (const std::out_of_range&) { // Key doesn't exist.
               throw py::key_error();
             }
 
@@ -146,7 +145,7 @@ void initScriptDictBindings(PyObject* module) {
             // Try to convert the key to an IValue.
             try {
               key_ivalue = toIValue(std::move(key), self->type()->getKeyType());
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::type_error();
             }
 
@@ -154,7 +153,7 @@ void initScriptDictBindings(PyObject* module) {
             try {
               value_ivalue =
                   toIValue(std::move(value), self->type()->getValueType());
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::type_error();
             }
 
@@ -168,7 +167,7 @@ void initScriptDictBindings(PyObject* module) {
             // Try to convert the key to an IValue.
             try {
               key_ivalue = toIValue(std::move(key), self->type()->getKeyType());
-            } catch (const py::cast_error& e) {
+            } catch (const py::cast_error&) {
               throw py::type_error();
             }
 

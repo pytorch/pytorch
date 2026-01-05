@@ -11,14 +11,14 @@ from typing import Any, IO
 __all__ = ["FakeObject", "FakeClass", "DumpUnpickler", "main"]
 
 class FakeObject:
-    def __init__(self, module, name, args):
+    def __init__(self, module, name, args) -> None:
         self.module = module
         self.name = name
         self.args = args
         # NOTE: We don't distinguish between state never set and state set to None.
         self.state = None
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         state_str = "" if self.state is None else f"(state={self.state!r})"
         return f"{self.module}.{self.name}{self.args!r}{state_str}"
 
@@ -26,7 +26,7 @@ class FakeObject:
         self.state = state
 
     @staticmethod
-    def pp_format(printer, obj, stream, indent, allowance, context, level):
+    def pp_format(printer, obj, stream, indent, allowance, context, level) -> None:
         if not obj.args and obj.state is None:
             stream.write(repr(obj))
             return
@@ -45,12 +45,12 @@ class FakeObject:
 
 
 class FakeClass:
-    def __init__(self, module, name):
+    def __init__(self, module, name) -> None:
         self.module = module
         self.name = name
         self.__new__ = self.fake_new  # type: ignore[assignment]
 
-    def __repr__(self):
+    def __repr__(self) -> str:
         return f"{self.module}.{self.name}"
 
     def __call__(self, *args):
@@ -66,7 +66,7 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
             file,
             *,
             catch_invalid_utf8=False,
-            **kwargs):
+            **kwargs) -> None:
         super().__init__(file, **kwargs)
         self.catch_invalid_utf8 = catch_invalid_utf8
 
@@ -82,7 +82,7 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
     # from their pickle (__getstate__) functions.  Install a custom loader
     # for strings that catches the decode exception and replaces it with
     # a sentinel object.
-    def load_binunicode(self):
+    def load_binunicode(self) -> None:
         strlen, = struct.unpack("<I", self.read(4))  # type: ignore[attr-defined]
         if strlen > sys.maxsize:
             raise Exception("String too long.")  # noqa: TRY002
@@ -104,7 +104,7 @@ class DumpUnpickler(pickle._Unpickler):  # type: ignore[name-defined]
         return value
 
 
-def main(argv, output_stream=None):
+def main(argv, output_stream=None) -> int | None:
     if len(argv) != 2:
         # Don't spam stderr if not using stdout.
         if output_stream is not None:

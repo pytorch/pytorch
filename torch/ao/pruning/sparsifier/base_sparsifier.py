@@ -2,7 +2,7 @@
 import abc
 import copy
 from collections import defaultdict
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch import nn
@@ -52,7 +52,7 @@ class BaseSparsifier(abc.ABC):
         >>> sparsifier = BaseSparsifier(config, defaults)
     """
 
-    def __init__(self, defaults: Optional[dict[str, Any]] = None):
+    def __init__(self, defaults: dict[str, Any] | None = None):
         super().__init__()
         self.defaults: dict[str, Any] = defaults or {}
 
@@ -149,7 +149,8 @@ class BaseSparsifier(abc.ABC):
             for _name, child in module.named_children():
                 if type(child) in SUPPORTED_MODULES:
                     module_fqn = module_to_fqn(model, child)
-                    assert isinstance(module_fqn, str)  # for mypy
+                    if not isinstance(module_fqn, str):
+                        raise AssertionError("module_fqn must be a string")
                     self.config.append({"tensor_fqn": module_fqn + ".weight"})
                 else:
                     stack.append(child)
@@ -170,40 +171,44 @@ class BaseSparsifier(abc.ABC):
             self.make_config_from_model(model)
 
         # TODO: Remove the configuration by reference ('module')
-        # pyrefly: ignore [not-iterable]
-        for module_config in self.config:
-            assert isinstance(module_config, dict), (
-                "config elements should be dicts not modules i.e.:"
-                "[{`tensor_fqn`: `foo.bar.weight`}, {`tensor_fqn`: ... }, ...]"
-            )
 
-            assert isinstance(self.defaults, dict)  # for mypy
+        for module_config in self.config:
+            if not isinstance(module_config, dict):
+                raise AssertionError(
+                    "config elements should be dicts not modules i.e.:"
+                    "[{`tensor_fqn`: `foo.bar.weight`}, {`tensor_fqn`: ... }, ...]"
+                )
+
+            if not isinstance(self.defaults, dict):
+                raise AssertionError("defaults must be a dict")
             local_args = copy.deepcopy(self.defaults)
             local_args.update(module_config)
 
             tensor_fqn = local_args.get("tensor_fqn", None)
-            assert tensor_fqn is not None, (
-                "tensor_fqn is a required argument in the sparsity config which"
-                "replaces previous `module` and [module]`fqn` arguments"
-            )
+            if tensor_fqn is None:
+                raise AssertionError(
+                    "tensor_fqn is a required argument in the sparsity config which"
+                    "replaces previous `module` and [module]`fqn` arguments"
+                )
 
             # populate all information from tensor_fqn
             info_from_tensor_fqn = get_arg_info_from_tensor_fqn(model, tensor_fqn)
 
             # check that whatever was put into local_args agrees with what was obtained
             # from tensor_fqn
-            for key in info_from_tensor_fqn.keys():
+            for key in info_from_tensor_fqn:
                 if key in local_args:
-                    assert (
+                    if not (
                         info_from_tensor_fqn[key] == local_args[key]
                         or (
                             key == "tensor_fqn"
                             and "." + info_from_tensor_fqn[key] == local_args[key]
                         )
                         # info_from_tensor_fqn will chop leading '.' from tensor_fqn so ignore that
-                    ), (
-                        f"Given both `{key}` and `tensor_fqn` in the config, it is expected them to agree!"
-                    )
+                    ):
+                        raise AssertionError(
+                            f"Given both `{key}` and `tensor_fqn` in the config, it is expected them to agree!"
+                        )
             local_args.update(info_from_tensor_fqn)
             self.groups.append(local_args)
         self._prepare()
@@ -222,8 +227,8 @@ class BaseSparsifier(abc.ABC):
 
     def squash_mask(
         self,
-        params_to_keep: Optional[tuple[str, ...]] = None,
-        params_to_keep_per_layer: Optional[dict[str, tuple[str, ...]]] = None,
+        params_to_keep: tuple[str, ...] | None = None,
+        params_to_keep_per_layer: dict[str, tuple[str, ...]] | None = None,
         *args,
         **kwargs,
     ):
@@ -301,7 +306,7 @@ class BaseSparsifier(abc.ABC):
     def convert(
         self,
         module: nn.Module,
-        mapping: Optional[dict[type[nn.Module], type[nn.Module]]] = None,
+        mapping: dict[type[nn.Module], type[nn.Module]] | None = None,
         inplace: bool = False,
         parameterization: type[nn.Module] = FakeSparsity,
     ):

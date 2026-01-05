@@ -318,7 +318,7 @@ static std::vector<Tensor>& histogramdd_bin_edges_out(const Tensor& self, IntArr
 
     const int64_t N = self.size(-1);
     const int64_t M = std::accumulate(self.sizes().begin(), self.sizes().end() - 1,
-            (int64_t)1, std::multiplies<int64_t>());
+            static_cast<int64_t>(1), std::multiplies<int64_t>());
     Tensor reshaped_self = self.reshape({ M, N });
 
     auto outer_bin_edges = select_outer_bin_edges(reshaped_self, range);

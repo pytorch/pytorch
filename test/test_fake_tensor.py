@@ -62,7 +62,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfCrossRef,
-    skipIfRocm,
     skipIfTorchDynamo,
     skipIfWindows,
     TemporaryFileName,
@@ -246,6 +245,39 @@ class FakeTensorTest(TestCase):
             RuntimeError, "Unhandled FakeTensor Device Propagation for.*"
         ) as exc:
             torch.nextafter(fake_x, fake_y)
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_diagonal_scatter_one_dim_single_elem_cpu_with_cuda_tensor(self):
+        with FakeTensorMode():
+            base = torch.zeros((1, 2), device="cuda")
+            src = torch.tensor([1.0])
+            out = torch.diagonal_scatter(base, src, dim1=0, dim2=1)
+            self.assertEqual(out.shape, (1, 2))
+            self.assertEqual(out.device, base.device)
+            self.assertTrue(isinstance(out, FakeTensor))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_diagonal_scatter_two_dim_cpu_with_cuda_tensor(self):
+        with FakeTensorMode():
+            base = torch.zeros((3, 3, 3))
+            src = torch.ones((3, 3), device="cuda")
+            out = torch.diagonal_scatter(base, src)
+            self.assertEqual(out.shape, (3, 3, 3))
+            self.assertEqual(out.device, base.device)
+            self.assertTrue(isinstance(out, FakeTensor))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_add_one_dim_single_elem_cpu_with_cuda_tensor(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+        with FakeTensorMode():
+            x = torch.randn([1])
+            y = torch.randn(10, device="cuda")
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Unhandled FakeTensor Device Propagation for.*"
+            ) as exc:
+                x + y
 
     def test_nan_to_num(self):
         with FakeTensorMode():
@@ -512,7 +544,7 @@ class FakeTensorTest(TestCase):
     def test_upsample_bilinear_small_channels(self):
         out = []
         mode = FakeTensorMode()
-        for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
+        for context in [contextlib.nullcontext, lambda: mode]:
             with context():
                 arg0_1 = torch.empty_strided(
                     (3, 427, 640), (1, 1920, 3), dtype=torch.float32, device="cuda"
@@ -596,7 +628,6 @@ class FakeTensorTest(TestCase):
     @unittest.skipIf(
         TEST_WITH_TORCHDYNAMO, "isinstance check for FakeTensor won't work with compile"
     )
-    @skipIfRocm
     @parametrize(
         "allow_fallback_kernels",
         [False, True],
@@ -644,24 +675,45 @@ class FakeTensorTest(TestCase):
                 b14,
                 b15,
             ]
-            return torch.ops.aten._cudnn_rnn(
-                a0,
-                a1,
-                4,
-                a3,
-                a4,
-                a5,
-                2,
-                2048,
-                0,
-                2,
-                False,
-                0.0,
-                False,
-                True,
-                [],
-                None,
-            )
+
+            if torch.version.cuda:
+                return torch.ops.aten._cudnn_rnn(
+                    a0,
+                    a1,
+                    4,
+                    a3,
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    0,
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
+            else:
+                return torch.ops.aten.miopen_rnn(
+                    a0,
+                    a1,
+                    4,
+                    # weight_buf is cudnn only
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    # proj_size is cudnn only
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
 
         mode = FakeTensorMode(allow_fallback_kernels=allow_fallback_kernels)
         for i, context in enumerate([contextlib.nullcontext, lambda: mode]):
@@ -693,7 +745,16 @@ class FakeTensorTest(TestCase):
 
                 for inps in [inps1, inps2]:
                     out = fn(*inps)
-                    self.assertIs(out[4], inps[-3])
+                    # weight_buf is cudnn only <- this is a3 and inps[-3]
+                    # in cudnn_rnn, it passthroughs the inps[-3] to out[4],
+                    #   so the test expects self.assertIs(out[4], inps[-3])
+                    # in miopen_rnn, it does not need the input argument weight_buf,
+                    #   the miopen_rnn generate a new weight_buf instead,
+                    #   and it returns via out[4]
+                    if torch.version.hip:
+                        self.assertIsNotNone(out[4])
+                    else:
+                        self.assertIs(out[4], inps[-3])
                     for ten in out:
                         if i == 1:
                             self.assertTrue(isinstance(ten, FakeTensor))
@@ -1057,6 +1118,17 @@ class FakeTensorTest(TestCase):
 
         self.assertIsInstance(r[0], FakeTensor)
         self.assertIsInstance(r[1], FakeTensor)
+
+    def test_fast_div_int_to_float(self):
+        mode = FakeTensorMode()
+        with mode:
+            x = torch.empty(2, 2, device="cpu", dtype=torch.int32)
+            y = torch.empty(2, 2, device="cpu", dtype=torch.int32)
+        from torch._subclasses.fake_impls import get_fast_op_impls
+
+        fast_div = get_fast_op_impls()[torch.ops.aten.div.Tensor]
+        z = fast_div(mode, x, y)
+        self.assertEqual(z.dtype, torch.float32)
 
     def test_fast_div(self):
         mode = FakeTensorMode()
@@ -1802,7 +1874,7 @@ class FakeTensorPropTest(TestCase):
         sd = model.state_dict()
         sd["tt"] = TwoTensor(torch.randn(2), torch.randn(2))
 
-        def _read_tensor_and_check(key, sd_loaded, all_bytes, device):
+        def _read_tensor_and_check(key, sd_loaded, sd_orig, all_bytes, device):
             dtype = torch.float32
             t = sd_loaded[key]
             self.assertEqual(t.device.type, device)
@@ -1810,6 +1882,14 @@ class FakeTensorPropTest(TestCase):
                 untyped_storage_a, untyped_storage_b = (
                     t.a.untyped_storage(),
                     t.b.untyped_storage(),
+                )
+                self.assertEqual(
+                    untyped_storage_a.nbytes(),
+                    sd_orig[key].a.untyped_storage().nbytes(),
+                )
+                self.assertEqual(
+                    untyped_storage_b.nbytes(),
+                    sd_orig[key].b.untyped_storage().nbytes(),
                 )
                 offset_a, offset_b = (
                     untyped_storage_a._checkpoint_offset,
@@ -1825,15 +1905,18 @@ class FakeTensorPropTest(TestCase):
                 result_b = torch.frombuffer(
                     all_bytes, dtype=dtype, count=nbytes_b, offset=offset_b
                 ).resize_(t.b.size())
-                self.assertEqual(TwoTensor(result_a, result_b), sd[key])
+                self.assertEqual(TwoTensor(result_a, result_b), sd_orig[key])
             else:
                 untyped_storage = t.untyped_storage()
+                self.assertEqual(
+                    untyped_storage.nbytes(), sd_orig[key].untyped_storage().nbytes()
+                )
                 offset = untyped_storage._checkpoint_offset
                 nbytes = untyped_storage.nbytes() // 4
                 result = torch.frombuffer(
                     all_bytes, dtype=dtype, count=nbytes, offset=offset
                 ).resize_(t.size())
-                self.assertEqual(result, sd[key])
+                self.assertEqual(result, sd_orig[key])
 
         with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
             # Create state_dict to be loaded later
@@ -1845,13 +1928,13 @@ class FakeTensorPropTest(TestCase):
             with fake_mode:
                 sd_loaded = torch.load(f)
             for k in sd:
-                _read_tensor_and_check(k, sd_loaded, all_bytes, "cpu")
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
             with fake_mode:
                 sd_loaded = torch.load(f, map_location="cuda")
             for k in sd:
-                _read_tensor_and_check(k, sd_loaded, all_bytes, "cuda")
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cuda")
 
-        for k in sd.keys():
+        for k in sd:
             sd[k] = sd[k].to("cuda")
 
         with TemporaryFileName() as f, torch.serialization.safe_globals([TwoTensor]):
@@ -1863,11 +1946,11 @@ class FakeTensorPropTest(TestCase):
             with fake_mode:
                 sd_loaded = torch.load(f)
             for k in sd:
-                _read_tensor_and_check(k, sd_loaded, all_bytes, "cuda")
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cuda")
             with fake_mode:
                 sd_loaded = torch.load(f, map_location="cpu")
             for k in sd:
-                _read_tensor_and_check(k, sd_loaded, all_bytes, "cpu")
+                _read_tensor_and_check(k, sd_loaded, sd, all_bytes, "cpu")
 
 
 make_propagate_real_tensors_cls(FakeTensorPropTest)
@@ -2471,7 +2554,7 @@ class FakeTensorDispatchCache(TestCase):
 
         def count_invoke_subgraph_keys():
             invoke_subgraph_keys = 0
-            for cache_key in FakeTensorMode.cache.keys():
+            for cache_key in FakeTensorMode.cache:
                 if isinstance(cache_key.key[0], torch._ops.HigherOrderOperator):
                     invoke_subgraph_keys += 1
             return invoke_subgraph_keys

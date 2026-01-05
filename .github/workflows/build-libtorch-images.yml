@@ -52,8 +52,8 @@ jobs:
           { tag: "cuda12.9" },
           { tag: "cuda12.8" },
           { tag: "cuda12.6" },
-          { tag: "rocm6.4"  },
           { tag: "rocm7.0"  },
+          { tag: "rocm7.1"  },
           { tag: "cpu"      },
         ]
     steps:

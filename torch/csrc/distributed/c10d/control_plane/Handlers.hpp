@@ -18,6 +18,14 @@ class TORCH_API Request {
   virtual const std::string& body() const = 0;
 
   virtual const std::multimap<std::string, std::string>& params() const = 0;
+
+  std::string getParam(const std::string& key) const {
+    auto it = params().find(key);
+    if (it != params().end()) {
+      return it->second;
+    }
+    return "";
+  }
 };
 
 // Response represents a response to the handler. This conceptually maps to an

@@ -1,6 +1,6 @@
 import math
 from collections.abc import Iterator
-from typing import Optional, TypeVar
+from typing import TypeVar
 
 import torch
 import torch.distributed as dist
@@ -66,8 +66,8 @@ class DistributedSampler(Sampler[_T_co]):
     def __init__(
         self,
         dataset: Dataset,
-        num_replicas: Optional[int] = None,
-        rank: Optional[int] = None,
+        num_replicas: int | None = None,
+        rank: int | None = None,
         shuffle: bool = True,
         seed: int = 0,
         drop_last: bool = False,

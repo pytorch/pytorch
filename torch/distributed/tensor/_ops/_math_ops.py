@@ -4,7 +4,7 @@ import math
 from collections.abc import Sequence
 from dataclasses import dataclass
 from enum import Enum
-from typing import cast, Optional, Union
+from typing import cast, Union
 
 import torch
 from torch.distributed.device_mesh import DeviceMesh
@@ -29,6 +29,7 @@ from torch.distributed.tensor._ops.utils import (
 )
 from torch.distributed.tensor._utils import normalize_to_torch_size
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -47,7 +48,7 @@ class Reduction(Enum):
 
 @dataclass(frozen=True)
 class NormReduction:
-    norm_type: Union[int, float, str]
+    norm_type: int | float | str
 
 
 ReductionOpType = Union[NormReduction, str]
@@ -71,9 +72,9 @@ class _NormPartial(Partial):
     similarly for inf and -inf norm. For 0-norm, the reduction op is sum.
     """
 
-    norm_type: Union[int, float, str] = 2
+    norm_type: int | float | str = 2
 
-    def __init__(self, norm_type: Union[int, float, str] = 2):
+    def __init__(self, norm_type: int | float | str = 2):
         reduce_op = None
         if norm_type in (float("inf"), "inf"):
             reduce_op = "max"
@@ -140,7 +141,6 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore [unsupported-operation]
                 return tensor**self.norm_type
         return tensor
 
@@ -151,7 +151,6 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore [unsupported-operation]
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 
@@ -163,8 +162,18 @@ class _NormPartial(Partial):
     def __hash__(self) -> int:
         return 1 + hash(self.norm_type)
 
+    def __repr__(self) -> str:
+        """
+        machine readable representation of the _NormPartial placement
+        """
+        return f"_NormPartial(reduce_op={self.reduce_op}, norm_type={self.norm_type})"
 
-def _infer_reduction_dims(dims_arg: object, ndim: int) -> Optional[list[int]]:
+    def __str__(self) -> str:
+        """human readable representation of the _NormPartial placement"""
+        return f"_NormP({self.reduce_op}, {self.norm_type})"
+
+
+def _infer_reduction_dims(dims_arg: object, ndim: int) -> list[int] | None:
     if dims_arg is None:
         return None
     dims = cast(list[int], as_list(dims_arg))
@@ -248,8 +257,10 @@ def map_placements_after_reduction(
         if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
         else:
-            if not isinstance(placement, Shard):
-                raise AssertionError(f"Expected Shard, got {type(placement)}")
+            if not isinstance(placement, Shard | _StridedShard):
+                raise AssertionError(
+                    f"Expected Shard/_StridedShard, got {type(placement)}"
+                )
             shard_dim = placement.dim
             new_shard_dim = reduction_dims_map[shard_dim]
             if new_shard_dim == -1 or shard_dim in reduction_dims:
@@ -257,7 +268,14 @@ def map_placements_after_reduction(
                 # (i.e. for the case where keepdims=True), we generate partial
                 new_placements.append(get_placement_from_reduction_op(reduction_op))
             else:
-                new_placements.append(Shard(new_shard_dim))
+                if isinstance(placement, Shard):
+                    new_placements.append(Shard(new_shard_dim))
+                else:
+                    new_placements.append(
+                        _StridedShard(
+                            new_shard_dim, split_factor=placement.split_factor
+                        )
+                    )
     return tuple(new_placements)
 
 
@@ -335,8 +353,8 @@ def common_reduction_strategy(
 
 
 LINEAR_REDUCTION_OP_MAP = {
-    aten.all.default: "sum",
-    aten.all.dim: "sum",
+    aten.all.default: "product",
+    aten.all.dim: "product",
     aten.sum.default: "sum",
     aten.sum.dim_IntList: "sum",
     aten.any.default: "sum",
@@ -360,6 +378,9 @@ LINEAR_REDUCTION_OP_MAP = {
     aten.amax.out: "max",
     aten.amin.default: "min",
     aten.amin.out: "min",
+    # argmax and argmin is using custom hanndler leveraging linear reduction of max and min
+    aten.argmax.default: "max",
+    aten.argmin.default: "min",
 }
 
 
@@ -405,10 +426,15 @@ def cumsum_strategy(op_schema: OpSchema) -> OpStrategy:
 
 
 @register_op_strategy(
-    [aten.var.correction, aten.var.correction_out],
+    [
+        aten.std.correction,
+        aten.std.correction_out,
+        aten.var.correction,
+        aten.var.correction_out,
+    ],
     schema_info=RuntimeSchemaInfo(1, ["keepdim"]),
 )
-def var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
+def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
     if not isinstance(input_strategy, OpStrategy):
@@ -441,15 +467,11 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     keepdim = args_schema[3] if len(args_schema) > 3 else False
     dims = _infer_reduction_dims(dim, input_strategy.ndim)
     reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
-    reduction_linear = all(
-        all(not p.is_partial() for p in op_spec.output_spec.placements)
-        for op_spec in input_strategy.strategies
-    )
     return common_reduction_strategy(
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
-        reduction_linear=reduction_linear,
+        reduction_linear=True,
         reduction_op=NormReduction(norm_type),
     )
 
@@ -472,15 +494,40 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         if not isinstance(op_strategy, OpStrategy):
             raise AssertionError(f"Expected OpStrategy, got {type(op_strategy)}")
         reduce_dims = list(range(op_strategy.ndim))
-        reduction_linear = all(
-            all(not p.is_partial() for p in op_spec.output_spec.placements)
-            for op_spec in op_strategy.strategies
-        )
         output_strategy = common_reduction_strategy(
             op_strategy,
             reduce_dims,
-            reduction_linear=reduction_linear,
+            reduction_linear=True,
             reduction_op=NormReduction(norm_type),
+        )
+        output_tuple_strategy_children.append(output_strategy)
+    return TupleStrategy(output_tuple_strategy_children)
+
+
+@register_op_strategy(
+    [aten._foreach_max.default], schema_info=RuntimeSchemaInfo(1, needs_pytree=True)
+)
+def foreach_max_strategy(op_schema: OpSchema) -> TupleStrategy:
+    """
+    Strategy for _foreach_max, which reduces each tensor in a list to its maximum value.
+    """
+    args_schema = op_schema.args_schema
+    input_tuple_strategy = args_schema[0]
+    if not isinstance(input_tuple_strategy, TupleStrategy):
+        raise AssertionError(
+            f"Expected TupleStrategy, got {type(input_tuple_strategy)}"
+        )
+    output_tuple_strategy_children: list[OpStrategy] = []
+    for op_strategy in input_tuple_strategy.children:
+        if not isinstance(op_strategy, OpStrategy):
+            raise AssertionError(f"Expected OpStrategy, got {type(op_strategy)}")
+        # Reduce all dimensions to get a scalar
+        reduce_dims = list(range(op_strategy.ndim))
+        output_strategy = common_reduction_strategy(
+            op_strategy,
+            reduce_dims,
+            reduction_linear=True,
+            reduction_op="max",
         )
         output_tuple_strategy_children.append(output_strategy)
     return TupleStrategy(output_tuple_strategy_children)
@@ -1089,7 +1136,7 @@ def _common_norm_backward_strategy(
     out_tuple_strategy = OpStrategy([])
     for idx, input_placement_strategy in enumerate(input_strategy.strategies):
         # args for OpSpec
-        output_specs_list: list[Optional[DTensorSpec]] = []
+        output_specs_list: list[DTensorSpec | None] = []
         input_specs_list: list[DTensorSpec] = []
         redistribute_costs = []
 

@@ -7,7 +7,7 @@ from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Sequence
 from copy import deepcopy
 from itertools import chain
-from typing import Any, cast, Optional, overload, TypeAlias, TypeVar, Union
+from typing import Any, cast, overload, TypeAlias, TypeVar
 from typing_extensions import ParamSpec, Self
 
 import torch
@@ -28,13 +28,11 @@ _P = ParamSpec("_P")
 Args: TypeAlias = tuple[Any, ...]
 Kwargs: TypeAlias = dict[str, Any]
 StateDict: TypeAlias = dict[str, Any]
-DeviceDict: TypeAlias = dict[Optional[torch.device], torch.Tensor]
-DeviceDtypeDict: TypeAlias = dict[
-    Optional[tuple[torch.device, torch.dtype]], torch.Tensor
-]
+DeviceDict: TypeAlias = dict[torch.device | None, torch.Tensor]
+DeviceDtypeDict: TypeAlias = dict[tuple[torch.device, torch.dtype] | None, torch.Tensor]
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
-    ["Optimizer", Args, Kwargs], Optional[tuple[Args, Kwargs]]
+    ["Optimizer", Args, Kwargs], tuple[Args, Kwargs] | None
 ]
 GlobalOptimizerPostHook: TypeAlias = Callable[["Optimizer", Args, Kwargs], None]
 
@@ -62,7 +60,7 @@ def _use_grad_for_differentiable(func: Callable[_P, _T]) -> Callable[_P, _T]:
     def _use_grad(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         import torch._dynamo
 
-        # pyrefly: ignore  # unsupported-operation
+        # pyrefly: ignore [unsupported-operation]
         self = cast(Optimizer, args[0])  # assume first positional arg is `self`
         prev_grad = torch.is_grad_enabled()
         try:
@@ -106,7 +104,7 @@ def _stack_if_compiling(x):
 
 
 def _disable_dynamo_if_unsupported(
-    single_tensor_fn: Optional[Callable[..., object]] = None,
+    single_tensor_fn: Callable[..., object] | None = None,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # workaround for torchscript BC
     # it requires all called functions to be in the
@@ -136,13 +134,13 @@ def _disable_dynamo_if_unsupported(
             if torch.compiler.is_compiling() and (
                 not kwargs.get("capturable", False)
                 and has_state_steps
-                # pyrefly: ignore  # unsupported-operation
+                # pyrefly: ignore [unsupported-operation]
                 and (arg := args[state_steps_ind])
                 and isinstance(arg, Sequence)
                 and arg[0].is_cuda
                 or (
                     "state_steps" in kwargs
-                    # pyrefly: ignore  # unsupported-operation
+                    # pyrefly: ignore [unsupported-operation]
                     and (kwarg := kwargs["state_steps"])
                     and isinstance(kwarg, Sequence)
                     and kwarg[0].is_cuda
@@ -204,7 +202,7 @@ def _device_dtype_check_for_fused(
         )
 
 
-def _view_as_real(params, *state_and_grads):
+def _view_as_real(params, *state_and_grads) -> None:
     for i, p in enumerate(params):
         if torch.is_complex(p):
             params[i] = torch.view_as_real(params[i])
@@ -230,7 +228,7 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     return capturable_supported_devices
 
 
-def _to_scalar(x: Union[float, torch.Tensor]):
+def _to_scalar(x: float | torch.Tensor):
     r"""This function converts a hyperparameter to a 0-dimension (scalar) tensor
     if it is a nonzero-dimensions 1-element tensor. If it is not a tensor, it is
     kept as is.
@@ -331,9 +329,11 @@ def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> Removabl
     return handle
 
 
-ParamsT: TypeAlias = Union[
-    Iterable[torch.Tensor], Iterable[dict[str, Any]], Iterable[tuple[str, torch.Tensor]]
-]
+ParamsT: TypeAlias = (
+    Iterable[torch.Tensor]
+    | Iterable[dict[str, Any]]
+    | Iterable[tuple[str, torch.Tensor]]
+)
 
 R = TypeVar("R")
 T = TypeVar("T")
@@ -356,24 +356,24 @@ class Optimizer:
 
     OptimizerPreHook: TypeAlias = Callable[
         [Self, Args, Kwargs],  # type: ignore[misc]
-        Optional[tuple[Args, Kwargs]],
+        tuple[Args, Kwargs] | None,
     ]
     OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[misc]
 
     _optimizer_step_pre_hooks: dict[int, OptimizerPreHook]
     _optimizer_step_post_hooks: dict[int, OptimizerPostHook]
-    # pyrefly: ignore  # not-a-type
+    # pyrefly: ignore [not-a-type]
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
     _optimizer_state_dict_post_hooks: (
-        # pyrefly: ignore  # not-a-type
-        'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+        # pyrefly: ignore [not-a-type]
+        'OrderedDict[int, Callable[["Optimizer", StateDict], StateDict | None]]'
     )
     _optimizer_load_state_dict_pre_hooks: (
-        # pyrefly: ignore  # not-a-type
-        'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+        # pyrefly: ignore [not-a-type]
+        'OrderedDict[int, Callable[["Optimizer", StateDict], StateDict | None]]'
     )
     _optimizer_load_state_dict_post_hooks: (
-        # pyrefly: ignore  # not-a-type
+        # pyrefly: ignore [not-a-type]
         'OrderedDict[int, Callable[["Optimizer"], None]]'
     )
 
@@ -522,7 +522,7 @@ class Optimizer:
                                 f"{func} must return None or a tuple of (new_args, new_kwargs), but got {result}."
                             )
 
-                # pyrefly: ignore  # invalid-param-spec
+                # pyrefly: ignore [invalid-param-spec]
                 out = func(*args, **kwargs)
                 self._optimizer_step_code()
 
@@ -541,10 +541,10 @@ class Optimizer:
     def _group_tensors_by_device_and_dtype(
         tensorlistlist: TensorListList,
         with_indices: bool = False,
-    ) -> Union[
-        dict[tuple[None, None], tuple[TensorListList, Indices]],
-        dict[tuple[torch.device, torch.dtype], tuple[TensorListList, Indices]],
-    ]:
+    ) -> (
+        dict[tuple[None, None], tuple[TensorListList, Indices]]
+        | dict[tuple[torch.device, torch.dtype], tuple[TensorListList, Indices]]
+    ):
         """Group a list of lists of tensors by device and dtype.
 
         Skips this step if we are compiling since this will occur during inductor lowering.
@@ -641,7 +641,7 @@ class Optimizer:
 
     def register_state_dict_post_hook(
         self,
-        hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
+        hook: Callable[["Optimizer", StateDict], StateDict | None],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a state dict post-hook which will be called after :meth:`~torch.optim.Optimizer.state_dict` is called.
@@ -800,7 +800,7 @@ class Optimizer:
 
     def register_load_state_dict_pre_hook(
         self,
-        hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
+        hook: Callable[["Optimizer", StateDict], StateDict | None],
         prepend: bool = False,
     ) -> RemovableHandle:  # noqa: D205 D400
         r"""Register a load_state_dict pre-hook which will be called before
@@ -941,7 +941,9 @@ class Optimizer:
             )
         param_lens = (len(g["params"]) for g in groups)
         saved_lens = (len(g["params"]) for g in saved_groups)
-        if any(p_len != s_len for p_len, s_len in zip(param_lens, saved_lens)):
+        if any(
+            p_len != s_len for p_len, s_len in zip(param_lens, saved_lens, strict=True)
+        ):
             raise ValueError(
                 "loaded state dict contains a parameter group "
                 "that doesn't match the size of optimizer's group"
@@ -952,6 +954,7 @@ class Optimizer:
             zip(
                 chain.from_iterable(g["params"] for g in saved_groups),
                 chain.from_iterable(g["params"] for g in groups),
+                strict=True,
             )
         )
 
@@ -961,9 +964,9 @@ class Optimizer:
                 return Optimizer._process_value_according_to_param_policy(
                     param,
                     value,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     param_id,
-                    # pyrefly: ignore  # bad-argument-type
+                    # pyrefly: ignore [bad-argument-type]
                     param_groups,
                     key,
                 )
@@ -975,8 +978,9 @@ class Optimizer:
                     for k, v in value.items()
                 }
             elif isinstance(value, Iterable):
+                # pyrefly: ignore [bad-instantiation]
                 return type(value)(
-                    # pyrefly: ignore  # bad-argument-count
+                    # pyrefly: ignore [bad-argument-count]
                     _cast(param, v, param_id=param_id, param_groups=param_groups)
                     for v in value
                 )  # type: ignore[call-arg]
@@ -1005,7 +1009,9 @@ class Optimizer:
                 new_group["param_names"] = group["param_names"]
             return new_group
 
-        param_groups = [update_group(g, ng) for g, ng in zip(groups, saved_groups)]
+        param_groups = [
+            update_group(g, ng) for g, ng in zip(groups, saved_groups, strict=True)
+        ]
         self.__setstate__({"state": state, "param_groups": param_groups})
 
         for post_hook in self._optimizer_load_state_dict_post_hooks.values():
@@ -1036,9 +1042,10 @@ class Optimizer:
         if not hasattr(self, "_zero_grad_profile_name"):
             self._patch_step_function()
 
-        per_device_and_dtype_grads: Optional[
+        per_device_and_dtype_grads: (
             defaultdict[torch.device, defaultdict[torch.dtype, list[torch.Tensor]]]
-        ]
+            | None
+        )
         if foreach:
             per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         else:
@@ -1080,7 +1087,7 @@ class Optimizer:
     @overload
     def step(self, closure: Callable[[], float]) -> float: ...
 
-    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:
         r"""Perform a single optimization step to update parameter.
 
         Args:

@@ -3,7 +3,6 @@ import copy
 import operator
 from collections import namedtuple
 from collections.abc import Callable
-from typing import Union
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -115,7 +114,7 @@ _FIXED_QPARAM_OP_NEG1TO1_CONSTRAINTS = DTypeWithConstraints(
     scale_exact_match=2.0 / 256.0,
     zero_point_exact_match=128,
 )
-_FIXED_QPARAMS_OP_TO_CONSTRAINTS: dict[Union[Callable, str], DTypeWithConstraints] = {
+_FIXED_QPARAMS_OP_TO_CONSTRAINTS: dict[Callable | str, DTypeWithConstraints] = {
     torch.nn.Hardsigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
     torch.nn.functional.hardsigmoid: _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
     "hardsigmoid": _FIXED_QPARAM_OP_0TO1_CONSTRAINTS,
@@ -678,7 +677,7 @@ def _get_bn_configs(dtype_configs: list[DTypeConfig]) -> list[BackendPatternConf
         torch.nn.BatchNorm2d: nni.BNReLU2d,
         torch.nn.BatchNorm3d: nni.BNReLU3d,
     }
-    for bn in bn_to_fused_bn.keys():
+    for bn in bn_to_fused_bn:
         fused_bn = bn_to_fused_bn[bn]
         # bn module + relu module fusion config
         bn_configs.append(

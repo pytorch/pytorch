@@ -261,7 +261,8 @@ class ModelReport:
             raise ValueError("The node_fqn is was not found within the module.")
 
         # assert for MyPy
-        assert isinstance(node_to_return, torch.fx.node.Node)
+        if not isinstance(node_to_return, torch.fx.node.Node):
+            raise AssertionError("node_to_return must be a torch.fx.node.Node")
 
         return node_to_return
 

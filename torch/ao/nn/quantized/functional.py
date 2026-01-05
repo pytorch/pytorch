@@ -2,7 +2,6 @@
 r"""Functional interface (quantized)."""
 
 import warnings
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -439,9 +438,9 @@ def interpolate(
 def linear(
     input: Tensor,
     weight: Tensor,
-    bias: Optional[Tensor] = None,
-    scale: Optional[float] = None,
-    zero_point: Optional[int] = None,
+    bias: Tensor | None = None,
+    scale: float | None = None,
+    zero_point: int | None = None,
 ) -> Tensor:
     r"""
     Applies a linear transformation to the incoming quantized data:
@@ -558,8 +557,8 @@ def leaky_relu(
     input: Tensor,
     negative_slope: float = 0.01,
     inplace: bool = False,
-    scale: Optional[float] = None,
-    zero_point: Optional[int] = None,
+    scale: float | None = None,
+    zero_point: int | None = None,
 ):
     r"""
     Quantized version of the.
@@ -577,7 +576,8 @@ def leaky_relu(
     See :class:`~torch.nn.LeakyReLU` for more details.
     """
     if scale is not None and zero_point is not None:
-        assert not inplace, "Cannot rescale with `inplace`"
+        if inplace:
+            raise AssertionError("Cannot rescale with `inplace`")
         output = torch._empty_affine_quantized(
             input.shape, scale=scale, zero_point=int(zero_point), dtype=input.dtype
         )

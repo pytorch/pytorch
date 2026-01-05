@@ -38,6 +38,7 @@ from torch._export.serde.serialize import (
     _to_json_bytes,
     canonicalize,
     deserialize,
+    deserialize_torch_artifact,
     ExportedProgramDeserializer,
     ExportedProgramSerializer,
     GraphModuleSerializer,
@@ -600,6 +601,8 @@ def forward(self, x):
             in_ptr1,
             out_ptr,
             n_elements,
+            fval,
+            ival,
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
@@ -608,7 +611,7 @@ def forward(self, x):
             mask = offsets < n_elements
             x = tl.load(in_ptr0 + offsets, mask=mask)
             y = tl.load(in_ptr1 + offsets, mask=mask)
-            output = x + y
+            output = x + y + fval + ival
             tl.store(out_ptr + offsets, output, mask=mask)
 
         def custom_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
@@ -618,7 +621,9 @@ def forward(self, x):
             def grid(meta):
                 return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-            wrap_triton(add_kernel)[grid](x, y, output, n_elements, 16)
+            wrap_triton(add_kernel)[grid](
+                x, y, output, n_elements, 3.14, 42, BLOCK_SIZE=16
+            )
 
             return output
 
@@ -633,7 +638,9 @@ def forward(self, x):
             def grid(meta):
                 return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
 
-            wrap_triton(add_kernel)[grid](x, y, output, n_elements, 16, num_warps=8)
+            wrap_triton(add_kernel)[grid](
+                x, y, output, n_elements, 3.14, 42, BLOCK_SIZE=16, num_warps=8
+            )
 
             return output
 
@@ -661,34 +668,44 @@ def forward(self, x):
             self.assertIsNotNone(triton_node)
 
             args = []
-            kwargs = []
+            kwargs = {}
 
             for arg in triton_node.inputs:
                 if arg.kind == ArgumentKind.POSITIONAL:
                     args.append(arg.arg)
                 elif arg.kind == ArgumentKind.KEYWORD:
-                    kwargs.append(arg.arg)
+                    kwargs[arg.name] = arg.arg
 
-            self.assertEqual(len(args), 4)
-            self.assertEqual(len(kwargs), 5)
+            self.assertEqual(len(args), 6)
+            # Always: name, grid, output_indices and num_warps are
+            # Triton version dependent: num_cpu_threads, shared_memory_bytes
+            self.assertTrue(len(kwargs) >= 4)
 
             for i in range(3):
                 self.assertIsNotNone(args[i].as_tensor)
 
             self.assertEqual(args[3].as_int, 3)
-
-            self.assertEqual(kwargs[0].as_string, "add_kernel")  # name
-            self.assertEqual(kwargs[1].as_ints, [1, 1, 1])  # grid
-            self.assertEqual(kwargs[2].as_ints, [2])  # output indices
+            self.assertAlmostEqual(args[4].as_float, 3.14, places=2)
+            self.assertEqual(args[5].as_int, 42)
+            kernel_name = kwargs["name"].as_string
+            symbol_name = kernel_name.rpartition("_")[0]
+            self.assertEqual(symbol_name, "add_kernel")
+            self.assertEqual(kwargs["grid"].as_ints, [1, 1, 1])
+            self.assertEqual(kwargs["output_indices"].as_ints, [2])
             self.assertEqual(
-                kwargs[3].as_int, 8 if isinstance(m, MyModelAutotune) else 4
-            )  # num warps
-            self.assertEqual(kwargs[4].as_int, 0)  # shared mem bytes
+                kwargs["num_warps"].as_int, 8 if isinstance(m, MyModelAutotune) else 4
+            )
+
+            if "num_cpu_threads" in kwargs:
+                self.assertEqual(kwargs["num_cpu_threads"].as_int, 0)
+            if "shared_memory_bytes" in kwargs:
+                self.assertEqual(kwargs["shared_memory_bytes"].as_int, 0)
 
             self.assertEqual(len(triton_node.outputs), 1)
             self.assertIsNotNone(triton_node.outputs[0].as_tensors)
             self.assertEqual(
-                len(triton_node.outputs[0].as_tensors), len(kwargs[2].as_ints)
+                len(triton_node.outputs[0].as_tensors),
+                len(kwargs["output_indices"].as_ints),
             )
             self.assertEqual(triton_node.outputs[0].as_tensors[0].name, "getitem")
 
@@ -1231,12 +1248,12 @@ class TestDeserialize(TestCase):
                 super().__init__()
 
             def forward(self, x, y):
-                z = x[:, -y.shape[0] :, :]
+                z = x[:, -((y.shape[0] >> 1) << 1) :, :]
                 return z
 
         inputs = (torch.ones(4, 5, 10), torch.ones(3))
         dynamic_shapes = {"x": {}, "y": {0: Dim("seqlen", max=4)}}
-        # Compile with dynamic_shapes set to get operator.neg involved
+        # Compile with dynamic_shapes set to get operator.neg/shifts involved
         self.check_graph(MyModule(), inputs, dynamic_shapes=dynamic_shapes)
 
     def test_auto_functionalize(self):
@@ -1888,6 +1905,16 @@ class TestSaveLoad(TestCase):
 
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 
+    def test_deserialize_torch_artifact_dict(self):
+        data = {"key": torch.tensor([1, 2, 3])}
+        buf = io.BytesIO()
+        torch.save(data, buf)
+        serialized = buf.getvalue()
+        result = deserialize_torch_artifact(serialized)
+
+        self.assertIsInstance(result, dict)
+        self.assertTrue(torch.equal(result["key"], torch.tensor([1, 2, 3])))
+
     @unittest.skipIf(IS_WINDOWS, "Cannot modify file in windows")
     def test_save_file(self):
         class Foo(torch.nn.Module):
@@ -1994,7 +2021,6 @@ class TestSaveLoad(TestCase):
         save(ep, buffer)
         buffer.seek(0)
         loaded_ep = load(buffer)
-
         inp = (torch.tensor(1),)
         self.assertTrue(torch.allclose(ep.module()(*inp), loaded_ep.module()(*inp)))
 

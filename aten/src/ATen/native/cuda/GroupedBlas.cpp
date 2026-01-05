@@ -4,8 +4,8 @@
 #include <c10/util/SmallVector.h>
 #include <c10/core/Scalar.h>
 #include <c10/core/ScalarType.h>
-#include <c10/util/Exception.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/NamedTensor.h>
 #include <ATen/Dispatch.h>
@@ -78,9 +78,9 @@ _mx8_mx8_bf16_grouped_mm_fbgemm(
         const Tensor& mat_a,
         const Tensor& mat_b,
         const Tensor& scale_a,
-        const SwizzleType& swizzle_a,
+        const SwizzleType swizzle_a,
         const Tensor& scale_b,
-        const SwizzleType& swizzle_b,
+        const SwizzleType swizzle_b,
         const std::optional<at::Tensor>& offs,
         Tensor& out) {
     const bool a_is_2d = mat_a.dim() == 2;
@@ -216,9 +216,9 @@ _f4_f4_bf16_grouped_mm_fbgemm(
       const Tensor& mat_a,
       const Tensor& mat_b,
       const Tensor& scale_a,
-      const Tensor& global_scale_a,
+      const std::optional<Tensor>& global_scale_a,
       const Tensor& scale_b,
-      const Tensor& global_scale_b,
+      const std::optional<Tensor>& global_scale_b,
       const std::optional<Tensor>& offs,
       const std::optional<Tensor>& bias,
       Tensor& out) {
@@ -228,14 +228,28 @@ _f4_f4_bf16_grouped_mm_fbgemm(
       "mat_a must be Float4_e2n1fn_2, got: ", mat_a.scalar_type());
   TORCH_CHECK_VALUE(mat_b.scalar_type() == at::kFloat4_e2m1fn_x2,
       "mat_b must be Float4_e2n1fn_2, got: ", mat_b.scalar_type());
-  TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e4m3fn,
-      "scale_a must be Float8_e4m3fn, got: ", scale_a.scalar_type());
-  TORCH_CHECK_VALUE(scale_b.scalar_type() == at::kFloat8_e4m3fn,
-      "scale_b must be Float8_e4m3fn, got: ", scale_b.scalar_type());
-  TORCH_CHECK_VALUE(global_scale_a.scalar_type() == at::kFloat,
-      "global_scale_a must be Float, got: ", global_scale_a.scalar_type());
-  TORCH_CHECK_VALUE(global_scale_b.scalar_type() == at::kFloat,
-      "global_scale_b must be Float, got: ", global_scale_b.scalar_type());
+
+  std::optional<Tensor> combined_global_scale = std::nullopt;
+  if (global_scale_a.has_value() || global_scale_b.has_value()) {
+      // NVFP4
+      TORCH_CHECK_VALUE(global_scale_a.has_value() && global_scale_b.has_value(),
+          "For NVFP4 grouped gemm both of global_scale_{a,b} must have values")
+      TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e4m3fn,
+          "scale_a must be Float8_e4m3fn, got: ", scale_a.scalar_type());
+      TORCH_CHECK_VALUE(scale_b.scalar_type() == at::kFloat8_e4m3fn,
+          "scale_b must be Float8_e4m3fn, got: ", scale_b.scalar_type());
+      TORCH_CHECK_VALUE(global_scale_a.value().scalar_type() == at::kFloat,
+          "global_scale_a must be Float, got: ", global_scale_a.value().scalar_type());
+      TORCH_CHECK_VALUE(global_scale_b.value().scalar_type() == at::kFloat,
+          "global_scale_b must be Float, got: ", global_scale_b.value().scalar_type());
+      combined_global_scale = global_scale_a.value().mul(global_scale_b.value());
+  } else {
+      // MXFP4
+      TORCH_CHECK_VALUE(scale_a.scalar_type() == at::kFloat8_e8m0fnu,
+          "scale_a must be Float8_e8m0fnu, got: ", scale_a.scalar_type());
+      TORCH_CHECK_VALUE(scale_b.scalar_type() == at::kFloat8_e8m0fnu,
+          "scale_b must be Float8_e8m0fnu, got: ", scale_b.scalar_type());
+  }
 
   auto o = fbgemm_gpu::f4f4bf16_grouped_mm(
       mat_a,
@@ -244,7 +258,7 @@ _f4_f4_bf16_grouped_mm_fbgemm(
       scale_b,
       offs.value(),
       out,
-      global_scale_a.mul(global_scale_b)
+      combined_global_scale
   );
 #else
   TORCH_CHECK_NOT_IMPLEMENTED(false, "nvfp4 grouped gemm is not supported without USE_FBGEMM_GENAI, and only for CUDA")
@@ -474,9 +488,10 @@ namespace {
 
 using acceptance_fn = std::function<bool(c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&, c10::ScalarType, std::vector<ScalingType>&, ArrayRef<Tensor>&)>;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 3> scale_grouped_kernel_dispatch = {{
+std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 4> scale_grouped_kernel_dispatch = {{
   { "rowwise_rowwise", scaled_blas::check_rowwise_recipe, ScaledGemmImplementation::ROWWISE_ROWWISE},
   { "mxfp8_mxfp8", scaled_blas::check_mxfp8_recipe, ScaledGemmImplementation::MXFP8_MXFP8},
+  { "mxfp4_mxfp4", scaled_blas::check_mxfp4_recipe, ScaledGemmImplementation::MXFP4_MXFP4},
   { "nvfp4_nvfp4", scaled_blas::check_nvfp4_recipe, ScaledGemmImplementation::NVFP4_NVFP4}}};
 
 } // anonymous namespace
@@ -507,13 +522,13 @@ _scaled_grouped_mm_cuda_v2(
 
   // NOTE(slayton): For sub-1B formats want contraction_dim argument?
   if (!a_is_2d || !b_is_2d) {
-    if (contraction_dim.size() > 0) {
+    if (!contraction_dim.empty()) {
       const int dim_a = contraction_dim[0], dim_b = mat_b.size(contraction_dim[1]);
       TORCH_CHECK_VALUE(mat_a.size(dim_a) == mat_b.size(dim_b),
           "Contraction dimensions (", dim_a, ",", dim_b, ") of mat_a and mat_b must match, got: ", mat_a.size(dim_a), " and ",
           mat_b.size(dim_b));
       // Note: only (-1, -2) is currently supported
-      TORCH_CHECK_VALUE(dim_a == -1 && dim_b == -2, "Curently contraction dims must be (-1, -2) only");
+      TORCH_CHECK_VALUE(dim_a == -1 && dim_b == -2, "Currently contraction dims must be (-1, -2) only");
     } else {
       TORCH_CHECK_VALUE(mat_a.size(-1) == mat_b.size(-2), "contraction dimension of mat_a and mat_b must match");
     }
@@ -592,6 +607,8 @@ _scaled_grouped_mm_cuda_v2(
       // scale shape checks
       _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
       _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      // swizze checks
+      TORCH_CHECK_VALUE(swizzle_a_enum.size() == 1 && swizzle_b_enum.size() == 1, "Expected single swizzle argument");
       return _mx8_mx8_bf16_grouped_mm_fbgemm(
           mat_a,
           mat_b,
@@ -600,6 +617,21 @@ _scaled_grouped_mm_cuda_v2(
           scale_b[0],
           swizzle_b_enum[0],
           offs.value(),
+          out);
+    }
+    case ScaledGemmImplementation::MXFP4_MXFP4: {
+      // scale shape checks
+      _check_scales_blocked(mat_a, scale_a[0], 0 /* dim */, 0 /* arg_idx */);
+      _check_scales_blocked(mat_b, scale_b[0], 1 /* dim */, 1 /* arg_idx */);
+      return _f4_f4_bf16_grouped_mm_fbgemm(
+          mat_a,
+          mat_b,
+          scale_a[0], /* block-scale A */
+          std::nullopt, /* global-scale A */
+          scale_b[0], /* block-scale B */
+          std::nullopt, /* global-scale B */
+          offs.value(),
+          std::nullopt, /* bias */
           out);
     }
     case ScaledGemmImplementation::NVFP4_NVFP4: {
@@ -635,26 +667,33 @@ std::optional<c10::ScalarType> out_dtype) {
   );
 #ifndef USE_ROCM
   bool use_fast_path = _scaled_mm_allowed_device(/*sm90_only*/true, /*sm100_only*/true) && a_b_and_out_are_bf16;
-#else
-  // _scaled_mm_allowed_device is used here within _grouped_mm_cuda which seems incorrect since scale is not used.
-  // the _grouped_mm_fallback should be safe for any ROCm GPU since it's just calling typical mm/bmm
-  bool use_fast_path = false;
-  if (at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950"})) {
-    use_fast_path = true;
-  }
-#endif
   const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
   Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
   if (use_fast_path) {
     // fast path, no d2h sync needed
-#ifndef USE_ROCM
     at::cuda::detail::bf16bf16_grouped_mm(mat_a, mat_b, offs, bias, out);
-#else
-    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
-#endif
   } else {
     _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
   }
+#else
+  // On ROCm fast path routes to group_gemm_ck and slow path to _grouped_mm_fallback.
+  // Keep use_fast_path as false till ck kernel perf is optimal.
+  // To enable CK path, use env variable ROCM_ALLOW_GROUP_GEMM_CK=1.
+  bool use_fast_path = false;
+  // ifdef USE_ROCM_CK_GEMM is required since ROCm systems w/o CK should not call ck path.
+#if defined(USE_ROCM_CK_GEMM)
+  if (at::globalContext().rocmAllowGroupGemmCk() && at::detail::getCUDAHooks().isGPUArch({"gfx942", "gfx950", "gfx90a"})) {
+    use_fast_path = true;
+  }
+#endif //USE_ROCM_CK_GEMM
+  const auto out_dtype_ = _resolve_grouped_mm_out_dtype(mat_a, mat_b, out_dtype);
+  Tensor out = create_grouped_gemm_output_tensor(mat_a, mat_b, offs, out_dtype_);
+  if (use_fast_path) {
+    at::hip::detail::group_gemm_ck(mat_a, mat_b, offs, bias, out);
+  } else {
+    _grouped_mm_fallback(mat_a, mat_b, offs, bias, out_dtype, out);
+  }
+#endif //ifndef USE_ROCM
   return out;
 }
 

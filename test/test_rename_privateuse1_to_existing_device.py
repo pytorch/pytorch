@@ -1,7 +1,7 @@
 # Owner(s): ["module: PrivateUse1"]
 
 import torch
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 
 
 class DummyPrivateUse1Module:
@@ -31,6 +31,9 @@ class DummyPrivateUse1Module:
 
 
 class TestRenamePrivateuseoneToExistingBackend(TestCase):
+    @skipIfTorchDynamo(
+        "TorchDynamo exposes https://github.com/pytorch/pytorch/issues/166696"
+    )
     def test_external_module_register_with_existing_backend(self):
         torch.utils.rename_privateuse1_backend("maia")
         with self.assertRaisesRegex(RuntimeError, "has already been set"):

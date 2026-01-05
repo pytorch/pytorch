@@ -2,7 +2,6 @@
 
 #include <ATen/nnapi/nnapi_bind.h>
 #include <torch/csrc/jit/backends/backend.h>
-#include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 
@@ -121,7 +120,7 @@ class NnapiBackend : public PyTorchBackendInterface {
         shape_compute_module.run_method("prepare", ser_model, inputs)
             .toTensorList();
 
-    // Create and initialize NnapiComilation object
+    // Create and initialize NnapiCompilation object
     comp_ = std::make_unique<torch::nnapi::bind::NnapiCompilation>();
     auto weights = dict.at("weights").toTensorVector();
     comp_->init(ser_model, weights);

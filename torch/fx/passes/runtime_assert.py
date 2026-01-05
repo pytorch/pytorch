@@ -165,6 +165,7 @@ def insert_deferred_runtime_asserts(
         node: torch.fx.Node,
         stack_trace: Optional[str] = None,
         nn_module_stack: Optional[dict[str, Any]] = None,
+        custom: Optional[dict[str, Any]] = None,
     ) -> None:
         fake_args = pytree.tree_map(
             lambda arg: (
@@ -188,6 +189,8 @@ def insert_deferred_runtime_asserts(
             node.meta["stack_trace"] = stack_trace
         if nn_module_stack is not None:
             node.meta["nn_module_stack"] = nn_module_stack
+        if custom is not None:
+            node.meta["custom"] = custom
 
     # Track asserts/checks we've added
     added_asserts: set[sympy.Expr] = set()
@@ -360,7 +363,7 @@ def insert_deferred_runtime_asserts(
             ):
                 # this guards against deleting calls like item() that produce new untracked symbols
                 def has_new_untracked_symbols():
-                    # pyrefly: ignore  # missing-attribute
+                    # pyrefly: ignore [missing-attribute]
                     for symbol in sym_expr.free_symbols:
                         if symbol not in expr_to_proxy:
                             return True
@@ -373,11 +376,9 @@ def insert_deferred_runtime_asserts(
                     shape_env, node.meta.get("unbacked_bindings", {})
                 )
 
-                assert resolved_unbacked_bindings is not None
-
                 def has_new_unbacked_bindings():
-                    # pyrefly: ignore  # missing-attribute
-                    for key in resolved_unbacked_bindings.keys():
+                    assert resolved_unbacked_bindings is not None
+                    for key in resolved_unbacked_bindings:
                         if key not in expr_to_proxy:
                             return True
                     return False
@@ -606,7 +607,7 @@ def insert_deferred_runtime_asserts(
 
                     if (
                         expr_to_proxy[i0].node.target
-                        != cast_symbool_to_symint_guardless
+                        is not cast_symbool_to_symint_guardless
                     ):
                         # TODO(pianpwk): calling sym_constrain_range_for_size or adding bound asserts
                         # raises AOTAutograd errors on cast_symbool_to_symint_guardless
@@ -617,6 +618,9 @@ def insert_deferred_runtime_asserts(
                                 _node_metadata_hook,
                                 stack_trace=node.meta.get("stack_trace"),
                                 nn_module_stack=node.meta.get("nn_module_stack"),
+                                # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                                # as the input node to the assertion
+                                custom=node.meta.get("custom"),
                             ),
                         ):
                             if (min_val := convert(vr.lower)) is not None:

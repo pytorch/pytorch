@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import sys
 from collections.abc import Callable, Iterable
-from typing import Any, Optional
+from typing import Any
 
 import torch
 from torch.ao.quantization.qconfig import QConfigAny
@@ -17,10 +17,10 @@ __all__: list[str] = []
 
 # TODO(future PR): the 1st argument is typed as `List[Node]`, but a better type
 # would be a recursive `List[Union[Node, Tuple[Union[Node, ...]]]]`
-_MatchResult = tuple[Node, list[Node], Optional[Pattern], QuantizeHandler]
+_MatchResult = tuple[Node, list[Node], Pattern | None, QuantizeHandler]
 
 _MatchResultWithQConfig = tuple[
-    Node, list[Node], Optional[Pattern], QuantizeHandler, QConfigAny
+    Node, list[Node], Pattern | None, QuantizeHandler, QConfigAny
 ]
 
 
@@ -33,7 +33,8 @@ def _is_match(modules, node, pattern, max_uses=sys.maxsize):
     if isinstance(pattern, tuple):
         self_match, *arg_matches = pattern
         if self_match is getattr:
-            assert len(pattern) == 2, "Expecting getattr pattern to have two elements"
+            if len(pattern) != 2:
+                raise AssertionError("Expecting getattr pattern to have two elements")
             arg_matches = []
     else:
         self_match = pattern
@@ -82,9 +83,9 @@ def _find_matches(
     modules: dict[str, torch.nn.Module],
     patterns: dict[Pattern, QuantizeHandler],
     root_node_getter_mapping: dict[Pattern, Callable],
-    standalone_module_names: Optional[list[str]] = None,
-    standalone_module_classes: Optional[list[type]] = None,
-    custom_module_classes: Optional[list[Any]] = None,
+    standalone_module_names: list[str] | None = None,
+    standalone_module_classes: list[type] | None = None,
+    custom_module_classes: list[Any] | None = None,
 ) -> dict[str, _MatchResult]:
     """
     Matches the nodes in the input graph to quantization patterns, and
@@ -190,7 +191,8 @@ def _find_matches(
                     break
 
     # add custom module instances to the match result
-    assert modules is not None
+    if modules is None:
+        raise AssertionError("modules must not be None")
     for node in graph.nodes:
         if (
             node.op == "call_module"
@@ -204,7 +206,8 @@ def _find_matches(
             )
 
     def is_standalone_module(node_target: str, modules: dict[str, torch.nn.Module]):
-        assert modules is not None
+        if modules is None:
+            raise AssertionError("modules must not be None")
         return (
             node_target in standalone_module_names
             or type(modules[node_target])  # type: ignore[operator]

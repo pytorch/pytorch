@@ -7,7 +7,6 @@
 #include <c10/util/error.h>
 #include <torch/csrc/distributed/c10d/socket.h>
 
-#include <cstring>
 #include <optional>
 #include <system_error>
 #include <utility>
@@ -25,7 +24,6 @@
 #include <netinet/tcp.h>
 #include <poll.h>
 #include <sys/socket.h>
-#include <sys/types.h>
 #include <unistd.h>
 #endif
 
@@ -247,12 +245,12 @@ namespace fmt {
 
 template <>
 struct formatter<::addrinfo> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) const {
+  constexpr auto parse(format_parse_context& ctx) const {
     return ctx.begin();
   }
 
   template <typename FormatContext>
-  decltype(auto) format(const ::addrinfo& addr, FormatContext& ctx) const {
+  auto format(const ::addrinfo& addr, FormatContext& ctx) const {
     return fmt::format_to(
         ctx.out(),
         "{}",
@@ -262,14 +260,13 @@ struct formatter<::addrinfo> {
 
 template <>
 struct formatter<c10d::detail::SocketImpl> {
-  constexpr decltype(auto) parse(format_parse_context& ctx) const {
+  constexpr auto parse(format_parse_context& ctx) const {
     return ctx.begin();
   }
 
   template <typename FormatContext>
-  decltype(auto) format(
-      const c10d::detail::SocketImpl& socket,
-      FormatContext& ctx) const {
+  auto format(const c10d::detail::SocketImpl& socket, FormatContext& ctx)
+      const {
     ::sockaddr_storage addr_s{};
 
     auto addr_ptr = reinterpret_cast<::sockaddr*>(&addr_s);

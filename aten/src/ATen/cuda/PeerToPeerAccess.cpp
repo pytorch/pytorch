@@ -42,10 +42,10 @@ void init_p2p_access_cache(int64_t num_devices) {
 bool get_p2p_access(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
-  TORCH_CHECK(dev >= 0 || dev < num_devices_, dev, " is not a device");
+  TORCH_CHECK(dev >= 0 || dev < num_devices_, static_cast<int>(dev), " is not a device");
   TORCH_CHECK(
       dev_to_access >= 0 || dev_to_access < num_devices_,
-      dev_to_access,
+      static_cast<int>(dev_to_access),
       " is not a device");
   TORCH_INTERNAL_ASSERT(num_devices_ >= 0, "p2p access cache not initialized");
 
@@ -147,7 +147,7 @@ bool get_fabric_access(c10::DeviceIndex dev) {
 #if !defined USE_ROCM && defined CUDA_VERSION && CUDA_VERSION >= 12040 && defined PYTORCH_C10_DRIVER_API_SUPPORTED
   at::globalContext().lazyInitDevice(c10::DeviceType::CUDA);
 
-  TORCH_CHECK(dev >= 0 || dev < num_devices_, dev, " is not a device");
+  TORCH_CHECK(dev >= 0 || dev < num_devices_, static_cast<int>(dev), " is not a device");
   auto& cache = fabricAccessEnabled_[dev];
   if (cache != -1) {
     return cache;

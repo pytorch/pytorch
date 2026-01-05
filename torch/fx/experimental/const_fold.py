@@ -81,10 +81,14 @@ class FoldedGraphModule(torch.fx.GraphModule):
         setattr(self, self.fx_const_folded_attrs_name, params)
 
 
-def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
+def _inline_module(
+    gm: torch.fx.GraphModule, inline_mod_name: str
+) -> dict[torch.fx.Node, torch.fx.Node]:
     """
     Given `gm` and some graph module which is called with target name `inline_mod_name`,
     this helper will inline all of the nodes from that called graph module into `gm`.
+
+    Returns a mapping from subgraph nodes to the newly created/mapped nodes in gm.
     """
     # Fetch the inner graph module that we want to inline inside `gm`.
     inline_mod = dict(gm.named_modules())[inline_mod_name]
@@ -123,14 +127,43 @@ def _inline_module(gm: torch.fx.GraphModule, inline_mod_name: str):
         if inline_node.op == "output":
             outputs = inline_node.args[0]
             output_replacements = map_arg(outputs, replacement_fn)
+
+            # If output is a tuple, we need to handle getitem users specially.
+            # Capture users before replace_all_uses_with modifies them.
+            getitem_users: list[torch.fx.Node] = []
+            if isinstance(output_replacements, (list, tuple)):
+                import operator
+
+                getitem_users = [
+                    user
+                    for user in call_mod_node_to_replace.users
+                    if user.op == "call_function"
+                    and user.target is operator.getitem
+                    and isinstance(user.args[1], int)
+                ]
+
             call_mod_node_to_replace.replace_all_uses_with(output_replacements)
+
+            # Inline getitem nodes that now index into the tuple literal
+            for user in getitem_users:
+                idx = user.args[1]
+                assert isinstance(idx, int)
+                user.replace_all_uses_with(output_replacements[idx])
+                gm.graph.erase_node(user)
+
             continue
 
         with gm.graph.inserting_before(call_mod_node_to_replace):
             new_node = gm.graph.node_copy(inline_node, replacement_fn)
         replacement_mapping[inline_node] = new_node
 
+    # Explicitly remove the module that was just inlined,
+    # this module may contain impure ops so cannot be dead code eliminated,
+    # this module is unneeded as it's just inlined back to main graph.
+    gm.graph.erase_node(call_mod_node_to_replace)
     gm.graph.eliminate_dead_code()
+
+    return replacement_mapping
 
 
 def get_unique_attr_name_in_module(mod_traced: torch.fx.GraphModule, name: str) -> str:
@@ -173,6 +206,25 @@ def split_const_subgraphs(
     else:
         mod_traced = module
 
+    def _subgraph_has_impure_ops(module: torch.fx.GraphModule) -> bool:
+        """
+        Return True if a GraphModule type subgraph contains any impure op, else False.
+        """
+        assert isinstance(module, torch.fx.GraphModule), (
+            "caller should only pass GraphModule to subgraph_has_impure_ops check"
+        )
+        for node in module.graph.nodes:
+            if node.op == "call_function" and node.is_impure():
+                return True
+            if (
+                node.op == "call_module"
+                # pyrefly: ignore [not-callable]
+                and (submodule := module.get_submodule(node.target))
+                and isinstance(submodule, torch.fx.GraphModule)
+            ):
+                return _subgraph_has_impure_ops(submodule)
+        return False
+
     # Build up a list of const_nodes, defined as nodes that are themselves
     # get_attrs, or have all get_attr or other constant node inputs.
     const_nodes: set[torch.fx.Node] = set()
@@ -200,6 +252,16 @@ def split_const_subgraphs(
 
         # Skip folding nodes that have symbolic fill_value
         if isinstance(node.kwargs.get("fill_value", None), sympy.Expr):
+            continue
+
+        # Skip folding submodules that have impure ops
+        if (
+            node.op == "call_module"
+            # pyrefly: ignore [not-callable]
+            and (target_mod := mod_traced.get_submodule(node.target))
+            and isinstance(target_mod, torch.fx.GraphModule)
+            and _subgraph_has_impure_ops(target_mod)
+        ):
             continue
 
         # Must be a constant foldable node at this point.
