@@ -1746,6 +1746,12 @@ class triton:
         == "1"
     )
 
+    # The fused version may have worse perf than non-fused version for
+    # small workload. When a workload is small enough, data can be
+    # fully cached in GPU L2 cache. We skip MixOrderReduction when
+    # `num_columns * num_rows` is smaller than this threshold.
+    mix_order_reduction_numel_threshold = 5 * 2**20
+
     enable_tlx_templates: bool = (
         os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
     )
