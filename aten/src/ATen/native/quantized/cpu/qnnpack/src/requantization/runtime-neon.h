@@ -10,7 +10,7 @@
 
 #include <arm_neon.h>
 
-PYTORCH_QNNP_INLINE uint16x8_t
+static PYTORCH_QNNP_INLINE uint16x8_t
 sub_zero_point(const uint8x8_t va, const uint8x8_t vzp) {
 #if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
   // Run-time quantization

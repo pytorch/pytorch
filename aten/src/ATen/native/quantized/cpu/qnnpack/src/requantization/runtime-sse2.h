@@ -10,7 +10,7 @@
 
 #include <immintrin.h>
 
-PYTORCH_QNNP_INLINE __m128i
+static PYTORCH_QNNP_INLINE __m128i
 sub_zero_point(const __m128i va, const __m128i vzp) {
 #if PYTORCH_QNNPACK_RUNTIME_QUANTIZATION
   // Run-time quantization
