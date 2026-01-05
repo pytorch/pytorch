@@ -15433,6 +15433,22 @@ instantiate_device_type_tests(
     TestAutogradStreamSynchronization, globals(), except_for=None
 )
 
+
+def test_trace_backward_rectangular_issue():
+    x = torch.zeros(4, 2, requires_grad=True)
+    torch.trace(x).backward()
+
+    expected = torch.tensor([
+        [1., 0.],
+        [0., 1.],
+        [0., 0.],
+        [0., 0.],
+    ])
+
+    assert torch.equal(x.grad, expected)
+
+
+
 instantiate_parametrized_tests(TestAutograd)
 instantiate_parametrized_tests(TestNestedCheckpoint)
 
