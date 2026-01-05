@@ -3,7 +3,6 @@
 #include <ATen/MemoryOverlap.h>
 #include <ATen/core/symbol.h>
 #include <ATen/record_function.h>
-#include <c10/core/CPUAllocator.h>
 #include <c10/core/InferenceMode.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/MaybeOwned.h>
@@ -17,14 +16,12 @@
 #include <torch/csrc/jit/passes/eliminate_no_ops.h>
 #include <torch/csrc/jit/passes/freeze_module.h>
 #include <torch/csrc/jit/passes/remove_mutation.h>
-#include <torch/csrc/jit/passes/subgraph_rewrite.h>
 #include <torch/csrc/jit/passes/variadic_ops.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 #include <torch/csrc/jit/runtime/static/fusion.h>
 #include <torch/csrc/jit/runtime/static/memory_planner.h>
 #include <torch/csrc/jit/runtime/static/ops.h>
 #include <torch/csrc/jit/runtime/static/passes.h>
-#include <torch/csrc/jit/runtime/vararg_functions.h>
 #include <algorithm>
 #include <cstdint>
 #include <iostream>
@@ -145,9 +142,9 @@ std::string dumpValueSet(
   std::ostringstream oss;
   oss << set_name << ": {";
   for (const auto* val : value_set) {
-    oss << "%" << val->debugName() << ", ";
+    oss << '%' << val->debugName() << ", ";
   }
-  oss << "}";
+  oss << '}';
   return oss.str();
 }
 
@@ -1521,7 +1518,7 @@ void BlockRunner::benchmark(
     } else if (results.native_nodes.count(kind)) {
       std::cout << ", native)" << '\n';
     } else {
-      std::cout << ")" << '\n';
+      std::cout << ')' << '\n';
     }
 
     if (generate_ai_pep_output) {
@@ -1566,13 +1563,13 @@ void BlockRunner::benchmark(
   auto unsupported_nodes_count = results.total_nodes_count -
       results.out_nodes_count - results.native_nodes.size();
   std::cout << "Total number of 'out' variant nodes/total number of nodes: "
-            << results.out_nodes_count << "/" << results.total_nodes_count
+            << results.out_nodes_count << '/' << results.total_nodes_count
             << " ("
             << 100.0 * static_cast<float>(results.out_nodes_count) /
           static_cast<float>(results.total_nodes_count)
             << "%)" << '\n';
   std::cout << "Total number of nodes not covered by SR/total number of nodes: "
-            << unsupported_nodes_count << "/" << results.total_nodes_count
+            << unsupported_nodes_count << '/' << results.total_nodes_count
             << " ("
             << 100.0 * static_cast<float>(unsupported_nodes_count) /
           static_cast<float>(results.total_nodes_count)

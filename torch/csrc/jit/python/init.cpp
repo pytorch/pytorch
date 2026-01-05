@@ -159,7 +159,7 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
   // on various object types, but we want it to work with all types.
   try {
     return toTypeInferredIValue(input);
-  } catch (const c10::Error& e) {
+  } catch (const c10::Error&) {
     return std::nullopt;
   }
 }
@@ -878,9 +878,8 @@ void initJITBindings(PyObject* module) {
               } else if (pair.first == "DYNAMIC") {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
-                TORCH_INTERNAL_ASSERT(
-                    false,
-                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
+                throw py::value_error(
+                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: " +
                     pair.first);
               }
             }
@@ -1693,7 +1692,7 @@ void initJITBindings(PyObject* module) {
       [](const std::string& op_name, const std::string& overload_name) {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          const auto& operations = getAllOperatorsFor(symbol);
+          auto operations = getAllOperatorsFor(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
               return op->schema();
@@ -1714,7 +1713,7 @@ void initJITBindings(PyObject* module) {
          const std::string& overload_name) -> std::optional<py::tuple> {
         try {
           auto symbol = Symbol::fromQualString(op_name);
-          const auto& operations = getAllOperatorsFor(symbol);
+          auto operations = getAllOperatorsFor(symbol);
           bool allow_numbers_as_tensors = opAllowsNumbersAsTensors(symbol);
           for (const auto& op : operations) {
             if (op->schema().overload_name() == overload_name) {
@@ -1798,7 +1797,7 @@ void initJITBindings(PyObject* module) {
                     << "' with schema(s):\n";
 
           for (const auto& op : sortedOps) {
-            docstring << "  " << op->schema() << "\n";
+            docstring << "  " << op->schema() << '\n';
           }
 
           py::list overload_names;
@@ -1862,35 +1861,6 @@ void initJITBindings(PyObject* module) {
       &parseSchema,
       py::arg("schema"),
       py::arg("allow_typevars") = true);
-  m.def(
-      "_make_opaque_object",
-      [](py::object payload) {
-        auto obj = c10::make_intrusive<OpaqueObject>(payload);
-        auto typePtr =
-            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
-        return torch::jit::toPyObject(c10::IValue(std::move(obj)));
-      },
-      R"doc(Creates an opaque object which stores the given Python object.)doc");
-  m.def(
-      "_get_opaque_object_payload",
-      [](py::object obj) {
-        auto typePtr =
-            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
-        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-        auto customObj = ivalue.toCustomClass<OpaqueObject>();
-        return customObj->getPayload();
-      },
-      R"doc(Returns the Python object stored on the given opaque object.)doc");
-  m.def(
-      "_set_opaque_object_payload",
-      [](py::object obj, py::object payload) {
-        auto typePtr =
-            torch::getCustomClass("__torch__.torch.classes.aten.OpaqueObject");
-        auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
-        auto customObj = ivalue.toCustomClass<OpaqueObject>();
-        customObj->setPayload(std::move(payload));
-      },
-      R"doc(Sets the payload of the given opaque object with the given Python object.)doc");
   m.def(
       "_register_opaque_type",
       [](const std::string& type_name) {

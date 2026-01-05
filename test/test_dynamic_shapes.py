@@ -13,11 +13,13 @@ import sympy
 
 import torch
 import torch.fx
+import torch.nn as nn
 import torch.nn.functional as F
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch._inductor.utils import fresh_cache
+from torch.export import export
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
@@ -510,6 +512,13 @@ class TestPySymInt(TestCase):
         a0 = create_symint(shape_env, 2)
         r = torch.empty(a0, device="meta")
         self.assertIsInstance(r.shape[0], SymInt)
+
+    def test_hash_size(self):
+        # See issue #168254
+        shape_env = ShapeEnv()
+        a0 = create_symint(shape_env, 2)
+        r = torch.empty(a0, device="meta")
+        self.assertRaises(TypeError, lambda: hash(r.shape))
 
     def test_guard_int(self):
         shape_env = ShapeEnv()
@@ -1605,7 +1614,7 @@ class TestSymNumberMagicMethods(TestCase):
         ) and fn in sym_node.only_float_magic_methods:
             self.skipTest(f"{fn} is not an int method")
 
-        if second_type == "float" and fn in ["mod"]:
+        if second_type == "float" and fn == "mod":
             self.skipTest(f"{fn} only handles int")
 
         if fn in sym_node.bitwise_ops and (first_type != "int" or second_type != "int"):
@@ -3250,6 +3259,57 @@ class TestGuardsExpressions(TestCase):
             f"Size comparison should not cause recompilation.",
         )
 
+    @skipIfTorchDynamo("Test uses torch.compile")
+    def test_python_mod_padding_no_recompile(self):
+        """
+        Test that padding with PythonMod and slicing back to original size
+        doesn't cause guards or recompilation.
+        """
+        cnt = CompileCounter()
+
+        @torch.compile(backend=cnt, dynamic=True)
+        def func(x):
+            # Padding to align to multiple of 4
+            padding = (-x.size()[0]) % 4
+            aligned_size = x.size()[0] + padding
+            tensor = torch.empty(aligned_size, x.size()[1])
+            # Do some work on padded tensor
+            tensor = tensor * 100
+            # Remove padding with slicing
+            remove_padding = tensor[0 : x.size()[0], ...]
+            # View should work without guards since shapes match
+            return remove_padding.view(x.size())
+
+        # First call we pass something does not need padding
+        result1 = func(torch.rand(4, 10))
+        self.assertEqual(result1.shape, (4, 10))
+
+        # Second call with different size needs padding
+        result1 = func(torch.rand(10, 12))
+        self.assertEqual(result1.shape, (10, 12))
+
+        # Should only compile once despite different input shapes
+        self.assertEqual(
+            cnt.frame_count,
+            1,
+            f"Expected 1 compilation, got {cnt.frame_count}. "
+            f"PythonMod padding should not cause recompilation.",
+        )
+
+        # test with unbacked.
+        torch._dynamo.reset()
+
+        a = torch.rand(10, 10)
+        torch._dynamo.decorators.mark_unbacked(a, 0)
+        torch._dynamo.decorators.mark_unbacked(a, 1)
+        result1 = func(a)
+        self.assertEqual(result1.shape, (10, 10))
+
+        result1 = func(torch.rand(4, 10))
+        self.assertEqual(result1.shape, (4, 10))
+
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_remove_symbols_without_guarding(self):
         from torch._functorch.partitioners import _remove_symbols_without_guarding
 
@@ -3485,6 +3545,58 @@ class TestUnbacked(TestCase):
         a = torch.tensor([1])
         b = torch.tensor([1])
         func(a, b)
+
+    def test_ignorable_fresh_unbacked_symbols(self):
+        # Test that symbols created during fake tensor tracing but not returned
+        # can be marked as ignorable to avoid unbound symbol errors
+
+        # Positive case: marking symbol as ignorable should work
+        with torch.library._scoped_library("test_ignorable", "FRAGMENT") as lib:
+            torch.library.define(
+                "test_ignorable::custom_op",
+                "(Tensor x, bool y) -> Tensor",
+                lib=lib,
+            )
+
+            @torch.library.register_fake("test_ignorable::custom_op", lib=lib)
+            def custom_op_fake(x, y):
+                ctx = torch._custom_op.impl.get_ctx()
+                # Create a symint during fake tensor tracing
+                if y:
+                    with ctx._shape_env.ignore_fresh_unbacked_symbols():
+                        sz = ctx.new_dynamic_size()
+                else:
+                    sz = ctx.new_dynamic_size()
+                # Return something else (not the symint we created)
+                return x.clone()
+
+            @torch.library.impl(
+                "test_ignorable::custom_op",
+                "CompositeExplicitAutograd",
+                lib=lib,
+            )
+            def custom_op_impl(x, y):
+                return x.clone()
+
+            @torch.compile(fullgraph=True)
+            def func_positive(x):
+                return torch.ops.test_ignorable.custom_op(x, True)
+
+            @torch.compile(fullgraph=True)
+            def func_negative(x):
+                return torch.ops.test_ignorable.custom_op(x, False)
+
+            x = torch.randn(3, 4)
+
+            # This should not raise an error about unbound symbols
+            result = func_positive(x)
+            self.assertEqual(result, x)
+
+            # This should raise an error about unbound symbols
+            with self.assertRaisesRegex(
+                Exception, "Pending unbacked symbols.*not in returned outputs"
+            ):
+                func_negative(x)
 
 
 class TestUbackedOps(TestCase):
@@ -4478,6 +4590,46 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
     @skipIfTorchDynamo()
     @torch.fx.experimental._config.patch("backed_size_oblivious", True)
+    def test_backed_size_oblivious_expand(self):
+        cnt = CompileCounterWithBackend("inductor")
+        torch._dynamo.reset()
+
+        def func(a, shape):
+            return a.expand(*shape)
+
+        compiled = torch.compile(func, fullgraph=True, backend=cnt, dynamic=True)
+
+        def run(a, shape):
+            self.assertEqual(compiled(a, shape), func(a, shape))
+
+        # No specialization - matching dimensions
+        run(torch.rand(2, 10), (2, 10))
+        run(torch.rand(5, 5), (5, 5))
+        self.assertEqual(cnt.frame_count, 1)  # Single compilation
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # Specialize input dim to 1 (broadcasting)
+        # Input dim is 1, needs to expand to larger size
+        run(torch.rand(1, 10), (9, 10))  # Compile with input[0] == 1
+        run(torch.rand(1, 5), (7, 5))  # Reuse same compiled graph
+        self.assertEqual(cnt.frame_count, 1)
+        # Changing input from 1 triggers recompilation
+        run(torch.rand(5, 10), (5, 10))
+        self.assertEqual(cnt.frame_count, 2)
+
+        cnt.clear()
+        torch._dynamo.reset()
+
+        # Multi-dimensional broadcasting
+        # Multiple dimensions with different broadcast semantics
+        run(torch.rand(1, 1, 10), (5, 7, 10))  # Broadcast first two dims
+        run(torch.rand(1, 1, 5), (3, 4, 5))  # Reuse pattern
+        self.assertEqual(cnt.frame_count, 1)
+
+    @skipIfTorchDynamo()
+    @torch.fx.experimental._config.patch("backed_size_oblivious", True)
     def test_backed_size_oblivious_broadcast(self):
         cnt = CompileCounterWithBackend("inductor")
         torch._dynamo.reset()
@@ -4523,6 +4675,57 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         self.assertEqual(cnt.frame_count, 1)
         run(torch.rand(2, 10), torch.rand(2, 10))
         self.assertEqual(cnt.frame_count, 2)
+
+    @torch._dynamo.config.patch("capture_dynamic_output_shape_ops", True)
+    def test_unbacked_view_extra(self):
+        def fn(x):
+            i0 = x.nonzero().size(0)
+            y = torch.zeros((i0, 192))
+            return y.view([12, -1, 192])
+
+        res1 = torch.compile(fn, fullgraph=True)(torch.ones((12,)))
+        res2 = fn(torch.ones((12,)))
+        self.assertEqual(res1, res2)
+
+    def test_hint_int(self):
+        class FunModule(nn.Module):
+            def forward(self, x, y):
+                d = torch.ones([x.item()])
+                return d * 10, torch.ones([x.item() * 2])
+
+        # Create example inputs
+        x = torch.tensor(3)
+        y = torch.tensor([1.0, 2.0, 3.0])
+
+        # Create module instance
+        mod = FunModule()
+
+        # Export the module
+        exported_program = export(mod, args=(x, y))
+
+        def test_pass(graph: torch.fx.Graph):
+            cnt = 0
+            for node in graph.nodes:
+                print(node.name)
+                if node.name == "ones":
+                    cnt += 1
+                    self.assertEqual(
+                        torch.fx.experimental.symbolic_shapes.hint_int(
+                            node.meta["val"].shape[0], fallback=300
+                        ),
+                        300,
+                    )
+                if node.name == "ones_1":
+                    self.assertEqual(
+                        torch.fx.experimental.symbolic_shapes.hint_int(
+                            node.meta["val"].shape[0], fallback=300
+                        ),
+                        600,
+                    )
+                    cnt += 1
+            self.assertEqual(cnt, 2)
+
+        test_pass(exported_program.graph_module.graph)
 
 
 instantiate_parametrized_tests(TestUnbacked)

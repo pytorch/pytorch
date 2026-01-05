@@ -270,7 +270,7 @@ TCPStore::TCPStore(std::string host, const TCPStoreOptions& opts)
       // server successfully started
       C10D_DEBUG("The server has started on port = {}.", server_->port());
       addr_.port = server_->port();
-    } catch (const SocketError& e) {
+    } catch (const SocketError&) {
       bool useAgentStore = getCvarBool({"TORCHELASTIC_USE_AGENT_STORE"}, false);
       int masterPort = getCvarInt({"MASTER_PORT"}, 0);
       if (useAgentStore && masterPort == opts.port) {
@@ -721,6 +721,30 @@ int64_t TCPStore::queueLen(const std::string& key) {
   buffer.flush();
 
   return client_->receiveValue<int64_t>();
+}
+
+std::vector<std::string> TCPStore::listKeys() {
+  STATIC_SCOPED_WAIT_COUNTER(pytorch.wait_counter.TCPStore__list);
+
+  const std::lock_guard<std::mutex> lock(activeOpLock_);
+
+  detail::SendBuffer buffer(*client_, detail::QueryType::LIST_KEYS);
+  buffer.flush();
+
+  auto numKeys = client_->receiveValue<int64_t>();
+  std::vector<std::string> keys;
+  keys.reserve(numKeys);
+  for (auto i = 0; i < numKeys; ++i) {
+    auto bits = client_->receiveBits();
+    std::string str(bits.begin(), bits.end());
+    if (str.find(keyPrefix_) == 0) {
+      str = str.substr(keyPrefix_.size());
+    } else {
+      continue;
+    }
+    keys.emplace_back(str);
+  }
+  return keys;
 }
 
 bool TCPStore::hasExtendedApi() const {

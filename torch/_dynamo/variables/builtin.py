@@ -26,12 +26,13 @@ import itertools
 import logging
 import math
 import operator
+import sys
 import types
 import typing
 import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
-from typing import Any, TYPE_CHECKING, Union
+from typing import Any, cast, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
@@ -41,7 +42,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
-    AttributeMutationError,
     ObservedAttributeError,
     ObservedUserStopIteration,
     raise_observed_exception,
@@ -689,7 +689,7 @@ class BuiltinVariable(VariableTracker):
         def expand_list_like(
             tx: "InstructionTranslator", lst: VariableTracker, const: VariableTracker
         ) -> VariableTracker:
-            if isinstance(lst, ConstantVariable):
+            if not isinstance(lst, BaseListVariable) and lst.is_python_constant():
                 lst, const = const, lst
             try:
                 assert isinstance(lst, BaseListVariable)
@@ -885,7 +885,6 @@ class BuiltinVariable(VariableTracker):
                         and left.exc_type is not right.exc_type
                     ):
                         return ConstantVariable.create(op(left, right))
-                    return None
 
                 result.append(((VariableTracker, VariableTracker), handle_is))  # type: ignore[arg-type]
 
@@ -954,7 +953,7 @@ class BuiltinVariable(VariableTracker):
         for arg in args:
             if isinstance(arg, variables.GetAttrVariable):
                 return False
-            any_tensor = any_tensor or isinstance(arg, variables.TensorVariable)
+            any_tensor = any_tensor or arg.is_tensor()
         return any_tensor
 
     def tensor_args_type(self, arg_types: list[type]) -> bool:
@@ -971,7 +970,7 @@ class BuiltinVariable(VariableTracker):
         tensor_args = []
         non_tensor_args = []
         for i in itertools.chain(args, kwargs.values()):
-            if isinstance(i, variables.TensorVariable):
+            if i.is_tensor():
                 tensor_args.append(i)
             else:
                 non_tensor_args.append(i)
@@ -1001,7 +1000,7 @@ class BuiltinVariable(VariableTracker):
     ) -> Callable[
         [
             "InstructionTranslator",
-            Sequence[VariableTracker],
+            tuple[VariableTracker, ...],
             dict[str, VariableTracker],
         ],
         VariableTracker | None,
@@ -1017,7 +1016,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if inspect.isclass(fn) and (
-            issubclass(fn, Exception)
+            issubclass(fn, BaseException)
             # GeneratorExit doesn't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
@@ -1026,12 +1025,11 @@ class BuiltinVariable(VariableTracker):
 
             def create_exception_class_object(
                 tx: "InstructionTranslator",
-                args: Sequence[VariableTracker],
+                args: tuple[VariableTracker, ...],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
                 if fn is AssertionError and not all(
-                    isinstance(x, variables.ConstantVariable)
-                    and isinstance(x.value, str)
+                    x.is_python_constant() and isinstance(x.as_python_constant(), str)
                     for x in args
                 ):
                     unimplemented(
@@ -1278,7 +1276,7 @@ class BuiltinVariable(VariableTracker):
                 # Ensure the builtin maps are populated before accessing them
                 populate_builtin_to_tensor_fn_map()
                 # Use sourceless builder, we built the map ourselves
-                if not isinstance(args[0], TensorVariable):
+                if not args[0].is_tensor():
                     if self.fn in BUILTIN_TO_TENSOR_RFN_MAP:
                         func = BUILTIN_TO_TENSOR_RFN_MAP[self.fn]
                     else:
@@ -1333,8 +1331,10 @@ class BuiltinVariable(VariableTracker):
 
             # Interaction between ndarray and tensors:
             #   We prefer the tensor op whenever there are tensors involved
+            # NB: Use exact type check here - NumpyNdarrayVariable is a TensorVariable
+            # subclass but should NOT trigger the tensor path
             if check_numpy_ndarray_args(args, kwargs) and not any(
-                type(arg) is variables.TensorVariable for arg in args
+                type(arg) is TensorVariable for arg in args
             ):
                 proxy = tx.output.create_proxy(
                     "call_function",
@@ -1344,15 +1344,11 @@ class BuiltinVariable(VariableTracker):
 
                 return wrap_fx_proxy_cls(variables.NumpyNdarrayVariable, tx, proxy)
 
-            if (
-                fn is operator.eq
-                and len(args) == 2
-                and isinstance(args[0], variables.TensorVariable)
-            ):
+            if fn is operator.eq and len(args) == 2 and args[0].is_tensor():
                 # Dynamo expects `__eq__` str while operator.eq gives just `eq`
                 # TODO - supporting all comparison operators could also work but
                 # it fails lots of tests because graph str changes.
-                return args[0].call_method(tx, "__eq__", args[1:], kwargs)
+                return args[0].call_method(tx, "__eq__", list(args[1:]), kwargs)
             proxy = tx.output.create_proxy(
                 "call_function",
                 fn,
@@ -1502,10 +1498,17 @@ class BuiltinVariable(VariableTracker):
                     args[1:],
                 )
 
-        if self.fn is float and len(args) == 1 and name in ("fromhex", "hex"):
-            if isinstance(args[0], ConstantVariable):
+        if (
+            self.fn in (float, complex)
+            and len(args) == 1
+            and (
+                (self.fn is float and name in ("fromhex", "hex"))
+                or (name == "from_number" and sys.version_info >= (3, 14))
+            )
+        ):
+            if args[0].is_python_constant():
                 try:
-                    fn = getattr(float, name)
+                    fn = getattr(self.fn, name)
                     res = fn(args[0].as_python_constant())
                     return variables.ConstantVariable.create(res)
                 except (OverflowError, ValueError) as e:
@@ -1526,7 +1529,6 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in dict_methods:
                 if isinstance(args[0], variables.UserDefinedDictVariable):
-                    # pyrefly: ignore [missing-attribute]
                     return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.ConstDictVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1535,7 +1537,6 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in set_methods:
                 if isinstance(args[0], variables.UserDefinedSetVariable):
-                    # pyrefly: ignore [missing-attribute]
                     return args[0]._set_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.SetVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1549,10 +1550,12 @@ class BuiltinVariable(VariableTracker):
         if self.fn is str and len(args) >= 1:
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in str_methods:
+                # Only delegate to ConstantVariable, not other types that happen to be constants
                 if isinstance(args[0], ConstantVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
 
         if self.fn is float and len(args) >= 1:
+            # Only delegate to ConstantVariable, not other types that happen to be constants
             if isinstance(args[0], ConstantVariable):
                 return ConstantVariable.create(
                     getattr(float, name)(args[0].as_python_constant())
@@ -1565,8 +1568,8 @@ class BuiltinVariable(VariableTracker):
     ) -> VariableTracker | None:
         # Handle cases like int(torch.seed())
         # Also handle sym_float to sym_int cases
-        if isinstance(arg, (SymNodeVariable, variables.TensorVariable)):
-            if isinstance(arg, variables.TensorVariable):
+        if arg.is_tensor() or isinstance(arg, SymNodeVariable):
+            if arg.is_tensor():
                 item = arg.call_method(tx, "item", [], {})
             else:
                 item = arg
@@ -1590,6 +1593,15 @@ class BuiltinVariable(VariableTracker):
     def call_bool(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
+        if arg.is_tensor():
+            item = arg.call_method(tx, "item", [], {})
+            if isinstance(item, SymNodeVariable) and isinstance(
+                item.sym_num, torch.SymBool
+            ):
+                return item
+            if isinstance(item, variables.ConstantVariable):
+                return variables.ConstantVariable.create(bool(item.value))
+            return SymNodeVariable.create(tx, item.as_proxy() != 0)
         # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.
         # https://github.com/python/cpython/blob/3.12/Objects/object.c#L1674-L1697
         if isinstance(arg, SymNodeVariable):
@@ -1715,9 +1727,9 @@ class BuiltinVariable(VariableTracker):
             # to return something
             return None
         if self.tensor_args(a, b):
-            if not isinstance(a, variables.TensorVariable):
+            if not a.is_tensor():
                 a, b = b, a
-            assert isinstance(a, variables.TensorVariable)
+            assert a.is_tensor()
 
             # result of an item call is a scalar convert to a tensor
             if isinstance(a, FakeItemVariable):
@@ -1773,6 +1785,7 @@ class BuiltinVariable(VariableTracker):
                 for i in [a, b]
             ):
                 if any(isinstance(val, FakeItemVariable) for val in [a, b]):
+                    # type: ignore[arg-type]
                     return variables.FakeItemVariable.from_tensor_variable(result)
 
                 if b.is_python_constant():
@@ -1790,7 +1803,9 @@ class BuiltinVariable(VariableTracker):
                     if isinstance(x, variables.UnspecializedPythonVariable)
                 )
                 return variables.UnspecializedPythonVariable.from_tensor_variable(
-                    result, raw_res, need_unwrap
+                    result,  # type: ignore[arg-type]
+                    raw_res,
+                    need_unwrap,
                 )
             # otherwise return tensor
             else:
@@ -1806,7 +1821,7 @@ class BuiltinVariable(VariableTracker):
                 a.as_python_constant(),
                 b.as_python_constant(),
             )
-            return ConstantVariable(value)
+            return ConstantVariable.create(value)
         return None
 
     call_min = _call_min_max
@@ -1833,7 +1848,7 @@ class BuiltinVariable(VariableTracker):
     def call_index(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        if isinstance(arg, variables.TensorVariable):
+        if arg.is_tensor():
             unimplemented(
                 gb_type="unsupported index(Tensor)",
                 context="",
@@ -2158,7 +2173,7 @@ class BuiltinVariable(VariableTracker):
                 "2 args",
                 f"{len(args)} args",
             )
-        # pyrefly: ignore [bad-unpacking]
+
         arg, value = args
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
@@ -2167,7 +2182,6 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, dict):
             arg_list = [ConstantVariable.create(k) for k in arg]
             return DictVariableType(
-                # pyrefly: ignore [bad-argument-type]
                 dict.fromkeys(arg_list, value),
                 user_cls,
                 mutation_type=ValueMutationNew(),
@@ -2176,7 +2190,6 @@ class BuiltinVariable(VariableTracker):
             keys = arg.force_unpack_var_sequence(tx)
             if all(is_hashable(v) for v in keys):
                 return DictVariableType(
-                    # pyrefly: ignore [bad-argument-type]
                     dict.fromkeys(keys, value),
                     user_cls,
                     mutation_type=ValueMutationNew(),
@@ -2280,11 +2293,11 @@ class BuiltinVariable(VariableTracker):
                     "1 kwargs (`strict`)",
                     f"{len(kwargs)} kwargs",
                 )
-        strict = kwargs.pop("strict", False)
+        strict = kwargs.pop("strict", ConstantVariable.create(False))
         iter_args = [BuiltinVariable(iter).call_function(tx, [arg], {}) for arg in args]
         return variables.ZipVariable(
             iter_args,
-            strict=strict,  # type: ignore[arg-type]
+            strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
 
@@ -2474,8 +2487,31 @@ class BuiltinVariable(VariableTracker):
         return None
 
     def call_map(
-        self, tx: "InstructionTranslator", fn: VariableTracker, *seqs: VariableTracker
+        self,
+        tx: "InstructionTranslator",
+        fn: VariableTracker,
+        *seqs: VariableTracker,
+        **kwargs: VariableTracker,
     ) -> VariableTracker:
+        strict = ConstantVariable.create(False)
+        if kwargs:
+            if sys.version_info >= (3, 14):
+                if not (len(kwargs) == 1 and "strict" in kwargs):
+                    raise_args_mismatch(
+                        tx,
+                        "map",
+                        "1 kwargs (`strict`)",
+                        f"{len(kwargs)} kwargs",
+                    )
+                strict = kwargs.pop("strict", ConstantVariable.create(False))
+            else:
+                raise_args_mismatch(
+                    tx,
+                    "map",
+                    "0 kwargs",
+                    f"{len(kwargs)} kwargs",
+                )
+
         seq_list = [
             seq.unpack_var_sequence(tx) if seq.has_unpack_var_sequence(tx) else seq
             for seq in seqs
@@ -2483,6 +2519,7 @@ class BuiltinVariable(VariableTracker):
         return variables.MapVariable(
             fn,
             seq_list,  # type: ignore[arg-type]
+            strict=strict.as_python_constant(),
             mutation_type=ValueMutationNew(),
         )
 
@@ -2530,7 +2567,7 @@ class BuiltinVariable(VariableTracker):
         name = name_var.as_python_constant()
 
         # See NOTE [Tensor "grad" and "_grad" attr]
-        if isinstance(obj, TensorVariable) and name == "_grad":
+        if obj.is_tensor() and name == "_grad":
             name = "grad"
 
         if tx.output.side_effects.is_attribute_mutation(obj):
@@ -2562,7 +2599,7 @@ class BuiltinVariable(VariableTracker):
         if default is not None:
             hasattr_var = self.call_hasattr(tx, obj, name_var)
             if hasattr_var is not None:
-                assert hasattr_var.as_python_constant() in (True, False)
+                assert hasattr_var.is_constant_match(True, False)
                 if not hasattr_var.as_python_constant():
                     return default
             else:
@@ -2622,8 +2659,9 @@ class BuiltinVariable(VariableTracker):
                         "Please report an issue to PyTorch.",
                     ],
                 )
-            if isinstance(obj, TensorVariable):
-                fake_val = obj.proxy.node.meta["example_value"]
+            if obj.is_tensor():
+                # pyrefly: ignore[missing-attribute]
+                fake_val = obj.as_proxy().node.meta["example_value"]
                 if (
                     isinstance(fake_val, torch.Tensor)
                     and is_sparse_any(fake_val)
@@ -2692,6 +2730,7 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
+                variables.TracebackVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
@@ -2700,7 +2739,7 @@ class BuiltinVariable(VariableTracker):
             and name_var.is_python_constant()
         ):
             name = name_var.as_python_constant()
-            if isinstance(obj, variables.TensorVariable):
+            if obj.is_tensor():
                 from .builder import wrap_fx_proxy
 
                 # Some special handling for tensor attributes.
@@ -2809,8 +2848,14 @@ class BuiltinVariable(VariableTracker):
             return val
         elif isinstance(obj, variables.NNModuleVariable):
             if not tx.output.is_root_tracer():
-                raise AttributeMutationError(
-                    "Can't inplace modify module params/buffers inside HigherOrderOp"
+                unimplemented(
+                    gb_type="nn.Module mutation in HigherOrderOp",
+                    context=f"nn.Module: {obj}",
+                    explanation="Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
+                    hints=[
+                        "Remove the mutation or move it outside of the HigherOrderOp.",
+                        *graph_break_hints.FUNDAMENTAL,
+                    ],
                 )
             if name_var.is_python_constant() and isinstance(
                 val, variables.TensorVariable
@@ -2822,7 +2867,7 @@ class BuiltinVariable(VariableTracker):
                 except (AttributeError, ObservedAttributeError):
                     getattr_var = None
 
-                if isinstance(getattr_var, variables.TensorVariable):
+                if getattr_var is not None and getattr_var.is_tensor():
                     # get_fake_val will get the same fake tensor
                     existing_fake_attr = get_fake_value(getattr_var.as_proxy().node, tx)
 
@@ -2945,8 +2990,8 @@ class BuiltinVariable(VariableTracker):
                     install_guard(args[0].source.make_guard(GuardBuilder.ID_MATCH))
             constant_result = id(args[0].value)
             return variables.ConstantVariable.create(constant_result)
-        elif len(args) == 1 and isinstance(args[0], TensorVariable):
-            tensor_variable = args[0]
+        elif len(args) == 1 and args[0].is_tensor():
+            tensor_variable = cast(TensorVariable, args[0])
             return tensor_variable.call_id(tx)
         elif istype(args[0], variables.UserFunctionVariable):
             return variables.ConstantVariable.create(id(args[0].fn))
@@ -2989,8 +3034,8 @@ class BuiltinVariable(VariableTracker):
 
         if op in [operator.is_, operator.is_not]:
             is_result = (
-                isinstance(left, TensorVariable)
-                and isinstance(right, TensorVariable)
+                left.is_tensor()
+                and right.is_tensor()
                 and id(extract_fake_example_value(left.as_proxy().node))
                 == id(extract_fake_example_value(right.as_proxy().node))
             )
@@ -3024,7 +3069,7 @@ class BuiltinVariable(VariableTracker):
                     f"when attempting to trace the comparison op {op.__name__}.",
                     hints=[*graph_break_hints.USER_ERROR],
                 )
-        tensor_cls = left if isinstance(left, TensorVariable) else right
+        tensor_cls = left if left.is_tensor() else right
         proxy = tx.output.create_proxy(
             "call_function", op, (left.as_proxy(), right.as_proxy()), {}
         )
@@ -3069,9 +3114,7 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3114,9 +3157,7 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3135,9 +3176,7 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3155,9 +3194,7 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3191,9 +3228,7 @@ class BuiltinVariable(VariableTracker):
         # Rely on constant_handler
         if isinstance(a, ConstantVariable) and isinstance(b, ConstantVariable):
             return None
-        if isinstance(a, (SymNodeVariable, ConstantVariable)) and isinstance(
-            b, (SymNodeVariable, ConstantVariable)
-        ):
+        if a.is_symnode_like() and b.is_symnode_like():
             return SymNodeVariable.create(
                 tx,
                 tx.output.create_proxy(
@@ -3242,6 +3277,15 @@ class BuiltinVariable(VariableTracker):
         self, tx: "InstructionTranslator", a: VariableTracker, b: VariableTracker
     ) -> VariableTracker:
         return a.call_method(tx, "__contains__", [b], {})
+
+    def is_python_hashable(self):
+        return True
+
+    def get_python_hash(self):
+        return hash(self.fn)
+
+    def is_python_equal(self, other):
+        return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
 
 
 @contextlib.contextmanager

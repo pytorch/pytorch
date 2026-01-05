@@ -2,9 +2,6 @@
 #include <torch/nn/init.h>
 #include <torch/nn/modules/linear.h>
 
-#include <torch/types.h>
-#include <torch/utils.h>
-
 #include <cmath>
 #include <cstdint>
 
@@ -55,7 +52,7 @@ void LinearImpl::pretty_print(std::ostream& stream) const {
   stream << std::boolalpha
          << "torch::nn::Linear(in_features=" << options.in_features()
          << ", out_features=" << options.out_features()
-         << ", bias=" << options.bias() << ")";
+         << ", bias=" << options.bias() << ')';
 }
 
 Tensor LinearImpl::forward(const Tensor& input) {
@@ -70,7 +67,7 @@ void FlattenImpl::reset() {}
 
 void FlattenImpl::pretty_print(std::ostream& stream) const {
   stream << "torch::nn::Flatten(start_dim=" << options.start_dim()
-         << ", end_dim=" << options.end_dim() << ")";
+         << ", end_dim=" << options.end_dim() << ')';
 }
 
 Tensor FlattenImpl::forward(const Tensor& input) {
@@ -161,7 +158,7 @@ void BilinearImpl::pretty_print(std::ostream& stream) const {
          << "torch::nn::Bilinear(in1_features=" << options.in1_features()
          << ", in2_features=" << options.in2_features()
          << ", out_features=" << options.out_features()
-         << ", bias=" << options.bias() << ")";
+         << ", bias=" << options.bias() << ')';
 }
 
 Tensor BilinearImpl::forward(const Tensor& input1, const Tensor& input2) {

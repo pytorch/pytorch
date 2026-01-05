@@ -2,7 +2,6 @@
 # for different load-balancing strategies in tensor sharding.
 import functools
 from abc import ABC, abstractmethod
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -12,7 +11,7 @@ from torch.nn.attention.flex_attention import BlockMask
 # make it private since it's still a prototype
 class _LoadBalancer(ABC):
     @abstractmethod
-    def _generate_indices(self, restore: bool = False) -> Optional[Tensor]:
+    def _generate_indices(self, restore: bool = False) -> Tensor | None:
         """
         Generate indices for load balancing.
         Args:
@@ -478,7 +477,7 @@ class _PTRRLoadBalancer(_LoadBalancer):
 
 def _create_default_load_balancer(
     seq_length: int, world_size: int, device: str | torch.device
-) -> Optional[_LoadBalancer]:
+) -> _LoadBalancer | None:
     from ._attention import _cp_options
 
     if _cp_options.enable_load_balance:

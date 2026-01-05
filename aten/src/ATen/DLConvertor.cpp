@@ -1,5 +1,4 @@
 #include <ATen/DLConvertor.h>
-#include <ATen/Functions.h>
 
 using namespace std;
 namespace at {
@@ -152,7 +151,10 @@ DLDevice torchDeviceToDLDevice(at::Device device) {
   return ctx;
 }
 
-static Device getATenDevice(DLDeviceType type, c10::DeviceIndex index, void* data = nullptr) {
+Device dlDeviceToTorchDevice(
+    DLDeviceType type,
+    c10::DeviceIndex index,
+    void* data) {
   switch (type) {
     case DLDeviceType::kDLCPU:
       return at::Device(DeviceType::CPU);
@@ -356,7 +358,17 @@ ScalarType toScalarType(const DLDataType& dtype) {
   return stype;
 }
 
+
 namespace {
+
+int64_t toStorageOffset(int64_t byte_offset, ScalarType stype) {
+  if (byte_offset == 0) {
+    return 0;
+  }
+  const auto element_size = c10::elementSize(stype);
+  TORCH_CHECK_VALUE(byte_offset % element_size == 0, "byte offset must be multiple of element size");
+  return byte_offset / element_size;
+}
 
 // The templated classes below are needed for supporting both:
 //   - DLManagedTensor
@@ -393,13 +405,18 @@ T* toDLPackImpl(const Tensor& src) {
   atDLMTensor->handle = src;
   atDLMTensor->tensor.manager_ctx = atDLMTensor;
   atDLMTensor->tensor.deleter = &deleter<T>;
-  atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
+  if (src.device().type()  == kMPS) {
+      atDLMTensor->tensor.dl_tensor.data = src.storage().mutable_data();
+      atDLMTensor->tensor.dl_tensor.byte_offset = src.storage_offset() * c10::elementSize(src.scalar_type());
+  } else {
+      atDLMTensor->tensor.dl_tensor.data = src.data_ptr();
+      atDLMTensor->tensor.dl_tensor.byte_offset = 0;
+  }
   atDLMTensor->tensor.dl_tensor.device = torchDeviceToDLDevice(src.device());
   atDLMTensor->tensor.dl_tensor.ndim = static_cast<int32_t>(src.dim());
   atDLMTensor->tensor.dl_tensor.dtype = getDLDataType(src);
   atDLMTensor->tensor.dl_tensor.shape = const_cast<int64_t*>(src.sizes().data());
   atDLMTensor->tensor.dl_tensor.strides = const_cast<int64_t*>(src.strides().data());
-  atDLMTensor->tensor.dl_tensor.byte_offset = 0;
   fillVersion(&atDLMTensor->tensor);
 
   return &(atDLMTensor->tensor);
@@ -422,10 +439,12 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
   }
 
   DLTensor& dl_tensor = src->dl_tensor;
-  Device device = getATenDevice(dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
+  Device device = dlDeviceToTorchDevice(
+      dl_tensor.device.device_type, dl_tensor.device.device_id, dl_tensor.data);
   ScalarType stype = toScalarType(dl_tensor.dtype);
 
   if (!dl_tensor.strides) {
+    TORCH_CHECK_VALUE(dl_tensor.byte_offset == 0, "Expected zero byte_offset");
     return at::from_blob(
         dl_tensor.data,
         IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
@@ -437,6 +456,7 @@ at::Tensor fromDLPackImpl(T* src, std::function<void(void*)> deleter) {
       dl_tensor.data,
       IntArrayRef(dl_tensor.shape, dl_tensor.ndim),
       IntArrayRef(dl_tensor.strides, dl_tensor.ndim),
+      toStorageOffset(dl_tensor.byte_offset, stype),
       deleter,
       at::device(device).dtype(stype),
       {device});
@@ -447,6 +467,21 @@ template at::Tensor fromDLPackImpl<DLManagedTensor>(DLManagedTensor* src, std::f
 template at::Tensor fromDLPackImpl<DLManagedTensorVersioned>(DLManagedTensorVersioned* src, std::function<void(void*)> deleter);
 
 } // namespace
+
+void toDLPackNonOwning(const Tensor& src, DLTensor* out) {
+  // Fill in the pre-allocated DLTensor struct with direct pointers
+  // This is a non-owning conversion - the caller owns the tensor
+  // and must keep it alive for the duration of DLTensor usage
+  out->data = src.data_ptr();
+  out->device = torchDeviceToDLDevice(src.device());
+  out->ndim = static_cast<int32_t>(src.dim());
+  out->dtype = getDLDataType(src);
+  // sizes() and strides() return pointers to TensorImpl's stable storage
+  // which remains valid as long as the tensor is alive
+  out->shape = const_cast<int64_t*>(src.sizes().data());
+  out->strides = const_cast<int64_t*>(src.strides().data());
+  out->byte_offset = 0;
+}
 
 DLManagedTensor* toDLPack(const Tensor& src) {
   return toDLPackImpl<DLManagedTensor>(src);
@@ -472,7 +507,7 @@ Tensor maybeCopyTensor(
   bool force_move = copy.has_value() && !*copy;
 
   if (optional_dl_device.has_value()) {
-    auto device = at::getATenDevice(
+    auto device = at::dlDeviceToTorchDevice(
         optional_dl_device->device_type,
         static_cast<c10::DeviceIndex>(optional_dl_device->device_id));
 

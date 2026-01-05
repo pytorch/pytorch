@@ -43,7 +43,7 @@ static std::string declareExternalFunction(const std::string& func_name) {
       "int64_t* extra_args);";
 }
 
-CppPrinter::CppPrinter(std::ostream* os) : IRPrinter(*os), lane_(0) {}
+CppPrinter::CppPrinter(std::ostream* os) : IRPrinter(*os) {}
 
 CppPrinter::~CppPrinter() = default;
 
@@ -89,28 +89,28 @@ static inline std::enable_if_t<std::is_floating_point_v<T>, void> visit_mod(
     std::ostream& os,
     const ExprPtr& lhs,
     const ExprPtr& rhs) {
-  os << "std::fmod(" << *lhs << ", " << *rhs << ")";
+  os << "std::fmod(" << *lhs << ", " << *rhs << ')';
 }
 
 template <typename T>
 static inline std::
     enable_if_t<std::is_floating_point_v<T> || std::is_integral_v<T>, void>
     visit_max(std::ostream& os, const ExprPtr& lhs, const ExprPtr& rhs) {
-  os << "std::max(" << *lhs << ", " << *rhs << ")";
+  os << "std::max(" << *lhs << ", " << *rhs << ')';
 }
 
 template <typename T>
 static inline std::
     enable_if_t<!std::is_floating_point_v<T> && !std::is_integral_v<T>, void>
     visit_max(std::ostream& os, const ExprPtr& lhs, const ExprPtr& rhs) {
-  os << "(" << *lhs << " < " << *rhs << ") ? " << *rhs << " : " << *lhs;
+  os << '(' << *lhs << " < " << *rhs << ") ? " << *rhs << " : " << *lhs;
 }
 
 template <typename T>
 static inline std::
     enable_if_t<std::is_floating_point_v<T> || std::is_integral_v<T>, void>
     visit_min(std::ostream& os, const ExprPtr& lhs, const ExprPtr& rhs) {
-  os << "std::min(" << *lhs << ", " << *rhs << ")";
+  os << "std::min(" << *lhs << ", " << *rhs << ')';
 }
 
 template <typename T>
@@ -176,14 +176,14 @@ void CppPrinter::visit(const MinPtr& v) {
 }
 
 void CppPrinter::visit(const CompareSelectPtr& v) {
-  os() << "((" << *v->lhs() << " "
-       << IRPrinter::to_string(v->compare_select_op()) << " " << *v->rhs()
-       << ") ? " << *v->ret_val1() << " : " << *v->ret_val2() << ")";
+  os() << "((" << *v->lhs() << ' '
+       << IRPrinter::to_string(v->compare_select_op()) << ' ' << *v->rhs()
+       << ") ? " << *v->ret_val1() << " : " << *v->ret_val2() << ')';
 }
 
 void CppPrinter::visit(const IfThenElsePtr& v) {
   os() << "((" << *v->condition() << ") ? " << *v->true_value() << " : "
-       << *v->false_value() << ")";
+       << *v->false_value() << ')';
 }
 
 void CppPrinter::visit(const AllocatePtr& v) {
@@ -211,7 +211,7 @@ void CppPrinter::visit(const FreePtr& v) {
 void CppPrinter::visit(const LoadPtr& v) {
   auto flat_idx =
       flatten_index(v->buf()->dims(), v->indices(), v->buf()->strides());
-  os() << *v->base_handle() << "[" << *flat_idx << "]";
+  os() << *v->base_handle() << '[' << *flat_idx << ']';
 }
 
 void CppPrinter::visit(const StorePtr& v) {
@@ -221,19 +221,19 @@ void CppPrinter::visit(const StorePtr& v) {
   for (int lane = 0; lane < lanes; lane++) {
     lane_ = lane;
     emitIndent();
-    os() << *v->base_handle() << "[" << *flat_idx << "] = " << *v->value()
-         << ";" << '\n';
+    os() << *v->base_handle() << '[' << *flat_idx << "] = " << *v->value()
+         << ';' << '\n';
   }
 }
 
 void CppPrinter::visit(const CastPtr& v) {
   os() << "static_cast<" << v->dtype().ToCppString() << ">(" << *v->src_value()
-       << ")";
+       << ')';
 }
 
 void CppPrinter::visit(const BitCastPtr& v) {
   os() << "std::bitcast<" << v->src_value()->dtype().ToCppString() << ", "
-       << v->dtype().ToCppString() << ">(" << *v->src_value() << ")";
+       << v->dtype().ToCppString() << ">(" << *v->src_value() << ')';
 }
 
 void CppPrinter::visit(const IntrinsicsPtr& v) {
@@ -241,14 +241,14 @@ void CppPrinter::visit(const IntrinsicsPtr& v) {
     throw std::runtime_error("kRand and kSigmoid are not supported");
   }
 
-  os() << "std::" << v->func_name() << "(";
+  os() << "std::" << v->func_name() << '(';
   for (size_t i = 0; i < v->nparams(); i++) {
     if (i > 0) {
       os() << ", ";
     }
     os() << *v->param(i);
   }
-  os() << ")";
+  os() << ')';
 }
 
 void CppPrinter::visit(const ExternalCallPtr& v) {
@@ -272,7 +272,7 @@ void CppPrinter::visit(const ExternalCallPtr& v) {
   };
 
   emitIndent();
-  os() << "{" << '\n';
+  os() << '{' << '\n';
   indent_++;
 
   emitIndent();
@@ -315,9 +315,9 @@ void CppPrinter::visit(const ExternalCallPtr& v) {
   os() << "};" << '\n';
 
   emitIndent();
-  os() << v->func_name() << "(" << '\n';
+  os() << v->func_name() << '(' << '\n';
   emitIndent();
-  os() << "    " << bufs.size() << "," << '\n';
+  os() << "    " << bufs.size() << ',' << '\n';
   emitIndent();
   os() << "    buf_ptrs," << '\n';
   emitIndent();
@@ -327,20 +327,20 @@ void CppPrinter::visit(const ExternalCallPtr& v) {
   emitIndent();
   os() << "    buf_dtypes," << '\n';
   emitIndent();
-  os() << "    " << v->args().size() << "," << '\n';
+  os() << "    " << v->args().size() << ',' << '\n';
   emitIndent();
   os() << "    extra_args);" << '\n';
 
   indent_--;
   emitIndent();
-  os() << "}" << '\n';
+  os() << '}' << '\n';
 }
 
 void CppPrinter::visit(const LetPtr& v) {
   if (v->var()->dtype().lanes() == 1) {
     emitIndent();
-    os() << v->var()->dtype().ToCppString() << " " << *v->var() << " = "
-         << *v->value() << ";" << '\n';
+    os() << v->var()->dtype().ToCppString() << ' ' << *v->var() << " = "
+         << *v->value() << ';' << '\n';
   } else {
     vector_vars_[v->var()] = v->value();
   }
@@ -370,7 +370,7 @@ void CppCodeGen::init() {
   apply_visitor(var_name_rewriter_.get());
 
   printer_->printPrologue();
-  os() << "void " << kernel_func_name() << "(";
+  os() << "void " << kernel_func_name() << '(';
   const std::vector<BufferArg> buffer_args = this->buffer_args();
   for (size_t i = 0; i < buffer_args.size(); i++) {
     if (i > 0) {
@@ -381,7 +381,7 @@ void CppCodeGen::init() {
     Dtype dtype = buffer_arg.dtype();
     os() << dtype.ToCppString() << (buffer_arg.isVar() ? " " : "* ") << *var;
   }
-  os() << ")";
+  os() << ')';
   stmt()->accept(printer_.get());
   os() << '\n';
 }

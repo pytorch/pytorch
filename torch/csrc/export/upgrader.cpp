@@ -78,7 +78,7 @@ void registerUpgrader(
                      << " and keypath: ";
         for (size_t i = 0; i < keypath.size(); ++i) {
           if (i > 0)
-            error_stream << ".";
+            error_stream << '.';
           error_stream << keypath[i];
         }
         TORCH_CHECK(false, error_stream.str());

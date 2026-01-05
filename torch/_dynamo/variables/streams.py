@@ -14,6 +14,7 @@ from ..graph_bytecode_inputs import (
     get_external_object_by_index,
     register_graph_created_object,
 )
+from ..source import CurrentStreamSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .ctx_manager import FxTracebackAnnotateVariable
@@ -48,6 +49,24 @@ def new_stream(*args: tuple[Any], **kwargs: Any) -> int:
         StreamVariable.make_construct_in_graph_stream_fn(
             TupleVariable([]), ConstDictVariable({})
         ),
+    )
+
+
+def _codegen_current_stream(device: torch.device, cg: "PyCodegen") -> None:
+    cg.add_push_null(
+        lambda: cg.load_import_from(
+            torch._dynamo.graph_bytecode_inputs.__name__,  # type: ignore[implicit-imports]
+            "stash_graph_created_object",
+        )
+    )
+    cg(CurrentStreamSource(device))
+    cg.extend_output(create_call_function(1, False))
+
+
+def get_current_stream(device: torch.device) -> int:
+    stream = torch.accelerator.current_stream(device)
+    return register_graph_created_object(
+        stream, lambda _, cg: _codegen_current_stream(device, cg)
     )
 
 
@@ -156,6 +175,36 @@ def _(
 has_side_effect(torch.ops.streams.wait_stream.default)
 
 
+@custom_op("streams::sync_dealloc", mutates_args=())
+def sync_dealloc(
+    wait_event_index: int, src_stream_index: int, to_dealloc: torch.Tensor
+) -> None:
+    """An op which waits on an event and moves the last usage of to_dealloc
+    after the wait, so that after the sync occurs, the deallocation or
+    subsequent reuse of the tensor's memory will be guaranteed to happen
+    after a side stream is finished using it.
+    See https://docs.pytorch.org/docs/stable/generated/torch.Tensor.record_stream.html#torch.Tensor.record_stream
+    for more details"""
+    torch.ops.streams.wait_event.default(wait_event_index, src_stream_index)
+
+
+has_side_effect(torch.ops.streams.sync_dealloc.default)
+
+
+@custom_op("streams::record_stream", mutates_args=())
+def record_stream(tensor: torch.Tensor, stream_index: int) -> None:
+    tensor.record_stream(_get_stream_by_index(stream_index))
+
+
+@record_stream.register_fake
+def _(
+    src_stream_index: int,
+    wait_event_index: int,
+    to_dealloc: torch.Tensor,
+) -> None:
+    pass
+
+
 class SymbolicStreamState:
     """Track the currently entered stream if any"""
 
@@ -257,7 +306,7 @@ class StreamVariable(StreamContextVariable):
         self.value = value
         # pyrefly: ignore [read-only]
         self.device = value.device
-        # pyrefly: ignore [read-only]
+
         self.user_object_index = user_object_index
         super().__init__(None, **kwargs)
 
@@ -356,12 +405,19 @@ class StreamVariable(StreamContextVariable):
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
                 lambda: codegen.load_import_from(
+                    torch._dynamo.graph_bytecode_inputs.__name__,  # type: ignore[implicit-imports]
+                    "stash_graph_created_object",
+                )
+            )
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
                     torch._dynamo.utils.__name__, "build_stream"
                 )
             )
             codegen(args)
             codegen(kwargs)
             codegen.extend_output(create_call_function(2, False))
+            codegen.extend_output(create_call_function(1, False))
 
         return fn
 
@@ -467,12 +523,19 @@ class EventVariable(VariableTracker):
         def fn(index: int, codegen: "PyCodegen") -> None:
             codegen.add_push_null(
                 lambda: codegen.load_import_from(
+                    torch._dynamo.graph_bytecode_inputs.__name__,  # type: ignore[implicit-imports]
+                    "stash_graph_created_object",
+                )
+            )
+            codegen.add_push_null(
+                lambda: codegen.load_import_from(
                     torch._dynamo.utils.__name__, "build_event"
                 )
             )
             codegen(args)
             codegen(kwargs)
             codegen.extend_output(create_call_function(2, False))
+            codegen.extend_output(create_call_function(1, False))
 
         return fn
 

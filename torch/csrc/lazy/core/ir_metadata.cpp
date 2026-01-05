@@ -16,8 +16,8 @@ void EmitShortFrameInfo(
     } else {
       ++pos;
     }
-    stream << ", location=" << frame.function << "@" << frame.file.substr(pos)
-           << ":" << frame.line;
+    stream << ", location=" << frame.function << '@' << frame.file.substr(pos)
+           << ':' << frame.line;
   }
 }
 
@@ -26,7 +26,7 @@ std::ostream& operator<<(
     const std::vector<SourceLocation>& frames) {
   stream << "Frames:\n";
   for (auto& location : frames) {
-    stream << "  " << location.function << " (" << location.file << ":"
+    stream << "  " << location.function << " (" << location.file << ':'
            << location.line << ")\n";
   }
   return stream;

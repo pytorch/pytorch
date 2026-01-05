@@ -494,7 +494,7 @@ def fold_weight(
         return map_arg(a, lambda node: env[node.name])
 
     for node in quantized_model.graph.nodes:
-        prepack_node = folded_nodes.get(node.name, None)
+        prepack_node = folded_nodes.get(node.name)
         if prepack_node is node:
             packed_weight = packed_weights[node.name]
             # add a prepacked attribute to root
@@ -951,7 +951,7 @@ def _lower_static_weighted_ref_functional(
         # Use the right prepack op and prepare the corresponding args
         # Linear prepack args: (quantized weights[, bias])
         # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
-        prepack_args = [quantized_weight] + remaining_func_args
+        prepack_args: list[Any] = [quantized_weight] + remaining_func_args
         if func_node.target is F.linear:
             weight_dtype = quantized_weight.args[-1]
             prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)
@@ -1109,7 +1109,7 @@ def _lower_dynamic_weighted_ref_functional(
         # Use the right prepack op and prepare the corresponding args
         # Linear prepack args: (quantized weights[, bias])
         # Conv prepack args: (quantized weights[, bias, stride, padding, dilation, groups])
-        prepack_args = [quantized_weight] + remaining_func_args
+        prepack_args: list[Any] = [quantized_weight] + remaining_func_args
         prepack_kwargs = {}
         if func_node.target is F.linear:
             prepack_op = get_linear_prepack_op_for_dtype(weight_dtype)

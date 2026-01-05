@@ -15,7 +15,7 @@ _IS_MONKEYTYPE_INSTALLED = True
 try:
     import monkeytype  # type: ignore[import]
 
-    # pyrefly: ignore [import-error]
+    # pyrefly: ignore [import-error, missing-import]
     from monkeytype import trace as monkeytype_trace
     from monkeytype.config import _startswith, LIB_PATHS  # type: ignore[import]
     from monkeytype.db.base import (  # type: ignore[import]
@@ -84,9 +84,6 @@ if _IS_MONKEYTYPE_INSTALLED:
 
     class JitTypeTraceStoreLogger(CallTraceStoreLogger):
         """A JitTypeCallTraceLogger that stores logged traces in a CallTraceStore."""
-
-        def __init__(self, store: CallTraceStore) -> None:
-            super().__init__(store)
 
         def log(self, trace: CallTrace) -> None:
             # pyrefly: ignore [missing-attribute]

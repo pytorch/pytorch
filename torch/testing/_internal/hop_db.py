@@ -104,6 +104,7 @@ FIXME_hop_that_doesnt_have_opinfo_test_allowlist = [
     "foreach_map",
     "aoti_call_delegate",
     "print",
+    "inductor_compiled_code",  # Tested separately in test_inductor_wrap_inductor_compile_regions
 ]
 
 torch.library.define(
@@ -117,19 +118,19 @@ torch.library.define(
 def foo_impl_cpu(x, z):
     x.add_(5)
     z.add_(5)
-    return x, z, x + z
+    return x.clone(), z.clone(), x + z
 
 
 @torch.library.impl("testlib::mutating_custom_op", "cuda")
 def foo_impl_cuda(x, z):
     x.add_(5)
     z.add_(5)
-    return x, z, x + z
+    return x.clone(), z.clone(), x + z
 
 
 @torch.library.register_fake("testlib::mutating_custom_op")
 def foo_impl_abstract(x, z):
-    return x, z, x + z
+    return x.clone(), z.clone(), x + z
 
 
 def sample_inputs_cond(opinfo, device, dtype, requires_grad, **kwargs):

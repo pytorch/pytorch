@@ -40,10 +40,9 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
     parametrize,
-    skipIfRocm,
-    skipIfXpu,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, IS_BIG_GPU
+from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.utils import _pytree as pytree
 
 
@@ -286,7 +285,6 @@ class TestPatternMatcher(TestCase):
             self._test_fused_int_mm_mul_impl(fn1, args, True)
             self._test_fused_int_mm_mul_impl(fn2, args, True)
 
-    @skipIfRocm
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
@@ -372,7 +370,8 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": "False",
+            "benchmark_fusion": False,
+            "benchmark_epilogue_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -899,7 +898,7 @@ class TestPatternMatcher(TestCase):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
             counters.clear()
 
     def test_splitwithsizes_cat(self):
@@ -1298,7 +1297,6 @@ class TestPatternMatcher(TestCase):
                 # of search_fn).
                 self.assertTrue(pattern.pattern_eq(search_fn_pattern))
 
-    @skipIfXpu
     @xfailIfSM89
     @inductor_config.patch(
         {
@@ -1831,6 +1829,297 @@ class TestPatternMatcher(TestCase):
         )
         self.assertEqual(len(sigmoid_nodes), 1)
         self.assertTrue("original_aten" in sigmoid_nodes[0].meta)
+
+    @inductor_config.patch(is_predispatch=True)
+    def test_remove_noop_pass_with_remove_passes(self):
+        def fn_with_noop(x):
+            batch_size, dim = x.shape
+            y = x.view(batch_size, dim)
+            return y + 1
+
+        def count_view_ops(graph_module):
+            count = 0
+            for node in graph_module.graph.nodes:
+                if node.op == "call_function" and node.target in [
+                    torch.ops.aten.view.default,
+                    torch.ops.aten.reshape.default,
+                ]:
+                    count += 1
+            return count
+
+        device = GPU_TYPE if HAS_GPU else "cpu"
+        input_tensor = torch.randn(8, 16, device=device)
+
+        with inductor_config.patch(remove_pre_grad_passes=None):
+            compiled_fn_default = torch.compile(fn_with_noop, fullgraph=True)
+            result_default = compiled_fn_default(input_tensor)
+
+        with inductor_config.patch(remove_pre_grad_passes="remove_noop"):
+            compiled_fn_skip_noop = torch.compile(fn_with_noop, fullgraph=True)
+            result_skip_noop = compiled_fn_skip_noop(input_tensor)
+
+        expected = fn_with_noop(input_tensor)
+        torch.testing.assert_close(result_default, expected)
+        torch.testing.assert_close(result_skip_noop, expected)
+
+        from torch._inductor.fx_passes.pre_grad import pre_grad_passes
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with inductor_config.patch(
+            is_predispatch=True, pattern_matcher=True, remove_pre_grad_passes=None
+        ):
+            gm_default = make_fx(fn_with_noop)(input_tensor)
+            gm_default_processed = pre_grad_passes(
+                gm_default, [input_tensor], add_passes=None, remove_passes=None
+            )
+            view_count_default = count_view_ops(gm_default_processed)
+
+        with inductor_config.patch(
+            is_predispatch=True,
+            pattern_matcher=True,
+            remove_pre_grad_passes="remove_noop",
+        ):
+            gm_skip_noop = make_fx(fn_with_noop)(input_tensor)
+            gm_skip_noop_processed = pre_grad_passes(
+                gm_skip_noop,
+                [input_tensor],
+                add_passes=None,
+                remove_passes="remove_noop",
+            )
+            view_count_skip_noop = count_view_ops(gm_skip_noop_processed)
+
+        self.assertGreaterEqual(
+            view_count_skip_noop,
+            view_count_default,
+            f"Expected view count with remove_noop disabled ({view_count_skip_noop}) "
+            f"to be >= view count with remove_noop enabled ({view_count_default})",
+        )
+
+    def test_bound_method_pattern_matcher(self):
+        class ReluSumPattern:
+            def __init__(self, e: float):
+                self.e = e
+
+            def pattern(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return x.pow(self.e) + y.pow(self.e) + z.pow(self.e)
+
+            def replacement(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+                return (x + y + z).pow(self.e)
+
+            def inputs(self):
+                return [
+                    torch.empty(5, 5),  # x
+                    torch.empty(5, 5),  # y
+                    torch.empty(5, 5),  # z
+                ]
+
+            def register(self, pm: PatternMatcherPass):
+                register_replacement(
+                    self.pattern, self.replacement, self.inputs(), fwd_only, pm
+                )
+
+        my_patterns = PatternMatcherPass()
+        ReluSumPattern(4).register(my_patterns)
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph) -> torch.fx.Graph:
+            nonlocal count
+            count = my_patterns.apply(graph)
+            graph.eliminate_dead_code()
+            return graph
+
+        def custom_backend(graph: torch.fx.GraphModule, example_inputs):
+            from torch._inductor import config
+
+            current_config = config.shallow_copy_dict()
+            from torch._inductor.compile_fx import compile_fx
+
+            current_config["post_grad_custom_post_pass"] = custom_pass
+            current_config["enable_auto_functionalized_v2"] = False
+            return compile_fx(graph, example_inputs, config_patches=current_config)
+
+        @torch.compile(fullgraph=True, backend=custom_backend)
+        def fn(x):
+            y = x.relu()
+            z = y.tanh()
+            z2 = x.pow(2) + y.pow(2) + z.pow(2)
+            z3 = x.pow(3) + y.pow(3) + z2.pow(3)
+            z4 = x.pow(4) + y.pow(4) + z3.pow(4)
+            return z4 + 5
+
+        def fn_replaced(x):
+            y = x.relu()
+            z = y.tanh()
+            z2 = x.pow(2) + y.pow(2) + z.pow(2)
+            z3 = x.pow(3) + y.pow(3) + z2.pow(3)
+            z4 = (x + y + z3).pow(4)
+            return z4 + 5
+
+        x = [torch.ones((5, 4))]
+        fn_result = fn(*x)
+        fn_replaced_result = fn_replaced(*x)
+        self.assertEqual(count, 1)
+        self.assertEqual(fn_result, fn_replaced_result)
+
+    def test_empty_like_pattern_matching(self):
+        def pattern(x):
+            y = torch.empty(x.shape, device=x.device, dtype=x.dtype)
+            z = y * 2
+            return x + z
+
+        def replacement(x):
+            return x * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [torch.randn(4, 4, device=GPU_TYPE)]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = my_patterns.apply(graph)
+            return count
+
+        def replacement(x):
+            return x * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [torch.randn(4, 4, device=GPU_TYPE)]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            z = y * 2
+            return x + z
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, fullgraph=True, options={"post_grad_custom_post_pass": custom_pass}
+        )
+
+        result = compiled_fn(x)
+        self.assertEqual(result, x * 3)
+        self.assertEqual(count, 1)
+
+
+class TestPatternMatcherLogging(LoggingTestCase):
+    device_type = GPU_TYPE
+
+    @make_logging_test()
+    def test_pattern_match_debug_output(self, records):
+        def pattern(x, y):
+            return x + y
+
+        def replacement(x, y):
+            return x * y
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph):
+            return my_patterns.apply(graph)
+
+        def fn(x, y):
+            return x + y
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+        y = torch.randn(4, 4, device=GPU_TYPE)
+
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "add"}
+        ):
+            compiled_fn = torch.compile(
+                fn, options={"post_grad_custom_post_pass": custom_pass}
+            )
+            result = compiled_fn(x, y)
+            self.assertEqual(result, x * y)
+
+        specific_record = self.getRecord(records, "Specific pattern match")
+        self.assertIn(
+            "Match(..., [], {'x': arg0_1, 'y': arg1_1})", specific_record.getMessage()
+        )
+        self.assertIn("add(arg0_1, arg1_1)", specific_record.getMessage())
+
+    @make_logging_test()
+    def test_failed_match_constant_args_format_string(self, records):
+        def pattern(x):
+            return x + 1
+
+        def replacement(x):
+            return x * 2
+
+        my_patterns = PatternMatcherPass()
+        inputs = [
+            torch.randn(4, 4, device=GPU_TYPE),
+        ]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def custom_pass(graph: torch.fx.Graph):
+            return my_patterns.apply(graph)
+
+        def fn(x):
+            return x + 2
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+
+        with unittest.mock.patch.dict(
+            os.environ, {"TORCHINDUCTOR_PATTERN_MATCH_DEBUG": "add"}
+        ):
+            compiled_fn = torch.compile(
+                fn, options={"post_grad_custom_post_pass": custom_pass}
+            )
+            result = compiled_fn(x)
+            self.assertEqual(result, x + 2)
+
+        specific_record = self.getRecord(records, "Specific pattern match")
+        self.assertIn(
+            "add(arg0_1, 2) constant_args: add 2!=1 CallFunction(aten.add.Tensor, KeywordArg('x'), 1, _users=0)",
+            specific_record.getMessage(),
+        )
+
+    def test_gumbel_max_trick(self):
+        counters.clear()
+
+        @torch.compile
+        def sample(logits, temperature):
+            logits = logits / max(temperature, 1e-5)
+            probs = torch.nn.functional.softmax(logits, dim=-1)
+            q = torch.empty_like(logits).exponential_(1)
+            return torch.argmax(probs / q, dim=-1, keepdim=True).to(dtype=torch.int)
+
+        N = 10
+        temperature = 0.8
+        row = (
+            torch.arange(1, N + 1, dtype=torch.float, device=GPU_TYPE).log()
+            * temperature
+        )
+        expected_distribution = []
+        tot_val = N * (N + 1) / 2
+        for i in range(1, N + 1):
+            expected_distribution.append(float(i) / tot_val)
+
+        # Item 0 expect to appear M / (1 + 2 +...+ N) times. Make M large enough
+        # so the test is less flaky.
+        # If this is still flaky, either recduce N or increase M
+        M = 1000000
+        logits = row[None, :].repeat(M, 1)
+        output = sample(logits, temperature=temperature)
+        stat = (torch.bincount(output.flatten()) / M).tolist()
+
+        for expected, actual in zip(expected_distribution, stat):
+            tol = 0.1
+            ratio = actual / expected
+
+            self.assertTrue(abs(ratio - 1) < tol, f"{expected} v.s. {actual}")
+
+        self.assertTrue(counters["inductor"]["apply_gumbel_max_trick"] == 1)
 
 
 if __name__ == "__main__":

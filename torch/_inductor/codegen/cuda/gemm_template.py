@@ -1026,7 +1026,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             filter_res = self.filter_op(op)
             if (
                 filter_res is not None
-                and res.get(filter_res.configuration_name(), None) is None
+                and res.get(filter_res.configuration_name()) is None
             ):
                 res[filter_res.configuration_name()] = filter_res
         log.info(
@@ -1329,19 +1329,6 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
     CUTLASS 3x GEMM Template, which is used to generate CUTLASS GEMM kernels
     including those which allow flexible fusions with epilogues.
     """
-
-    def __init__(
-        self,
-        input_nodes: list[Buffer],
-        layout: Layout,
-        alpha: float,
-        beta: float,
-        input_reorder: Optional[list[int]] = None,
-        use_fast_accum: Optional[bool] = None,
-    ):
-        super().__init__(
-            input_nodes, layout, alpha, beta, input_reorder, use_fast_accum
-        )
 
     @staticmethod
     def add_cutlass_gemm_choices(

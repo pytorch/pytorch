@@ -12,7 +12,6 @@
 #include <ATen/TensorUtils.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/grad_mode.h>
-#include <ATen/native/layer_norm.h>
 
 namespace at::native {
 

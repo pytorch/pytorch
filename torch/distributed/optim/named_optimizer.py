@@ -2,7 +2,7 @@ import logging
 import warnings
 from collections.abc import Callable, Collection, Mapping
 from copy import deepcopy
-from typing import Any, Optional, overload, Union
+from typing import Any, overload
 
 import torch
 import torch.nn as nn
@@ -62,10 +62,10 @@ class _NamedOptimizer(optim.Optimizer):
 
     def __init__(
         self,
-        named_parameters: Mapping[str, Union[torch.Tensor, ShardedTensor]],
+        named_parameters: Mapping[str, torch.Tensor | ShardedTensor],
         optimizer_class: optim.Optimizer,
-        param_groups: Optional[Collection[Mapping[str, Any]]] = None,
-        module: Optional[nn.Module] = None,
+        param_groups: Collection[Mapping[str, Any]] | None = None,
+        module: nn.Module | None = None,
         *args: tuple[Any, ...],
         **kwargs: dict[str, Any],
     ) -> None:
@@ -152,7 +152,7 @@ class _NamedOptimizer(optim.Optimizer):
     @overload
     def step(self, closure: Callable[[], float]) -> float: ...
 
-    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:
         """
         Perform a single optimization step.
 

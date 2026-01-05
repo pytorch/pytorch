@@ -47,10 +47,10 @@ std::ostream& operator<<(std::ostream& out, Instruction inst) {
   auto nargs = std::strlen(OpInfo(inst.op));
   out << inst.op;
   if (nargs > 0) {
-    out << " " << inst.X;
+    out << ' ' << inst.X;
   }
   if (nargs > 1) {
-    out << " " << inst.N;
+    out << ' ' << inst.N;
   }
   return out;
 }

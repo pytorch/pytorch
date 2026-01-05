@@ -2,7 +2,6 @@ import logging
 import operator
 import types
 from collections import defaultdict
-from typing import Optional
 
 import torch
 import torch.fx._pytree as fx_pytree
@@ -177,7 +176,7 @@ def _construct_inputs(
     signature: ModuleCallSignature,
     node_name_map: dict[str, torch.fx.Node],
 ) -> tuple[list[torch.fx.Node], dict[str, torch.fx.Node]]:
-    tree_unflatten_args: list[Optional[torch.fx.Node]] = []
+    tree_unflatten_args: list[torch.fx.Node | None] = []
     for input_ in signature.inputs:
         if isinstance(input_, ConstantArgument) and input_.value is None:
             # Constants should be directly embedded into the graph and not used

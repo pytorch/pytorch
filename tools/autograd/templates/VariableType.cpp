@@ -47,6 +47,18 @@ namespace{
     meta->grad_accumulator_.reset();
   }
 }
+[[maybe_unused]] size_t expected_fresh_use_count(const Variable& self) {
+  if (!self.defined()) {
+    // An UndefinedTensorImpl always has a use count of 0
+    return 0;
+  }
+  if (self.unsafeGetTensorImpl()->pyobj_slot()->load_pyobj() != nullptr) {
+    // A TensorImpl with a Python object has a use count of 2
+    return 2;
+  }
+  // A fresh TensorImpl (with no PyObject) has a use count of 1
+  return 1;
+}
 }
 
 namespace {
