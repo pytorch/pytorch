@@ -228,16 +228,18 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     explanation="Dynamo does not support opaque objects types with custom __getattr__ methods",
                     hints=[],
                 )
-            method = inspect.getattr_static(value_type, name)
 
             args = [x.as_python_constant() for x in args]
             kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
-            assert method is not None
+
+            method = getattr(self.value, name)
+
             if name == "__setattr__":
-                method(self.value, *args, **kwargs)
-                return self
-            constant_val = method(self.value, *args, **kwargs)
-            return ConstantVariable.create(constant_val)
+                method(*args, **kwargs)
+                return self.value  # pyrefly: ignore[bad-return]
+
+            constant_val = method(*args, **kwargs)
+            return ConstantVariable(constant_val)
 
         unimplemented(
             gb_type="Weird method call on TorchScript object",

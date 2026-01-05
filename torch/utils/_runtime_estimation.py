@@ -90,9 +90,10 @@ def get_compute_time(func_packet, args, kwargs, out, out_dtypes) -> float:  # ty
         float: The estimated compute time in nanoseconds.
     """
     if func_packet in flop_registry:
-        assert len(out_dtypes) == 1, (
-            f"Only support single out dtype got {out_dtypes} for {func_packet}"
-        )
+        if len(out_dtypes) != 1:
+            raise AssertionError(
+                f"Only support single out dtype got {out_dtypes} for {func_packet}"
+            )
         dtype = out_dtypes.pop()
         # This actually gives peta-FLOPs/s hence multiply by 1e15 to get the FLOPs/s
         peak_gpu_flops = get_device_tflops(dtype) * 1e15
