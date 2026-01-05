@@ -8144,7 +8144,8 @@ class TestNNDeviceType(NNTestCase):
         Returns lower precision for params and higher precision for input to test
         mixed dtype handling without triggering unsupported dtype errors.
         """
-        if device == 'mps':
+        device_type = device.split(':')[0] if isinstance(device, str) else device.type
+        if device_type == 'mps':
             # MPS doesn't support float64, use float16/float32 instead
             return torch.float16, torch.float32
         else:
