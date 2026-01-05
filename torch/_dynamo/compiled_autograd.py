@@ -419,6 +419,7 @@ class AutogradCompilerInstance:
         self.stack.enter_context(
             torch.fx.experimental.symbolic_shapes._suppress_guards(env)
         )
+        # pyrefly: ignore [bad-return]
         return (
             str(CompileContext.current_compile_id()),
             inputs,

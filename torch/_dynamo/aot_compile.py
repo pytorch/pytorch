@@ -4,7 +4,7 @@ import io
 import logging
 import pickle
 import types
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, ExitStack
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING
@@ -100,7 +100,6 @@ class AOTCompiledFunction:
 
         self._artifacts.check_compatibility()
 
-        # pyrefly: ignore [read-only]
         self.fn = self._artifacts.runtime_env.forward_callable(
             self._artifacts.backend_id,
             self._artifacts.compiled_fn,
@@ -200,8 +199,8 @@ def aot_compile_fullgraph(
             from torch._dynamo.types import GuardFilterEntry
 
             def new_guard_filter_fn(
-                guard_entries: list[GuardFilterEntry],
-            ) -> list[bool]:
+                guard_entries: Sequence[GuardFilterEntry],
+            ) -> Sequence[bool]:
                 return [
                     (
                         not (
@@ -231,6 +230,7 @@ def aot_compile_fullgraph(
             torch._guards.tracing(tracing_context),
             torch._functorch.config.patch(
                 {
+                    "bypass_autograd_cache_key": True,
                     "bundled_autograd_cache": True,
                     "force_non_lazy_backward_lowering": True,
                 }

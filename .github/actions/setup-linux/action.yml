@@ -49,28 +49,23 @@ runs:
           fi
         fi
 
-    - name: Log in to ECR
-      uses: nick-fields/retry@v3.0.0
-      env:
-        AWS_RETRY_MODE: standard
-        AWS_MAX_ATTEMPTS: "5"
-        AWS_DEFAULT_REGION: us-east-1
+    - name: Install uv
+      uses: astral-sh/setup-uv@374b9305c53f17cee51e793c1234cdb1897489d5 # v7
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
       with:
-        shell: bash
-        timeout_minutes: 5
-        max_attempts: 3
-        retry_wait_seconds: 30
-        command: |
-          AWS_ACCOUNT_ID=$(aws sts get-caller-identity|grep Account|cut -f4 -d\")
-          aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-              --password-stdin "$AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
+        python-version: 3.12
 
-          # For LF Runners we need to make sure we also login to Meta's ECR docker registry too.
-          META_AWS_ACCOUNT_ID=308535385114
-          if [ "$AWS_ACCOUNT_ID" != "$META_AWS_ACCOUNT_ID" ] ; then
-              aws ecr get-login-password --region "$AWS_DEFAULT_REGION" | docker login --username AWS \
-                  --password-stdin "$META_AWS_ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com"
-          fi
+    - name: Install pip
+      shell: bash
+      if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false' }}
+      run: |
+        set -euo pipefail
+        if command -v pip3 &> /dev/null; then
+          echo "pip3 is already installed."
+        else
+          echo "pip3 not found, installing..."
+          uv tool install pip
+        fi
 
     - name: Preserve github env variables for use in docker
       shell: bash

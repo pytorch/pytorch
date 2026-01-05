@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -51,8 +50,8 @@ class Exponential(ExponentialFamily):
 
     def __init__(
         self,
-        rate: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        rate: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         (self.rate,) = broadcast_all(rate)
         batch_shape = torch.Size() if isinstance(rate, _Number) else self.rate.size()

@@ -8,7 +8,7 @@ import warnings
 import weakref
 from dataclasses import dataclass
 from functools import reduce
-from typing import cast, Optional, TYPE_CHECKING
+from typing import cast, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -392,9 +392,9 @@ class ShardedTensor(ShardedTensorBase):
     def gather(  # type: ignore[override]
         self,
         dst: int = 0,
-        out: Optional[torch.Tensor] = None,
+        out: torch.Tensor | None = None,
         enforce_dtype: bool = False,
-        dtype: Optional[torch.dtype] = None,
+        dtype: torch.dtype | None = None,
     ) -> None:
         """
         Creates a full :class:`Tensor` on rank ``dst`` by gathering all shards of the
@@ -444,7 +444,7 @@ class ShardedTensor(ShardedTensorBase):
             rank_sizes[shard_rank] += shard_size(shard_md)
             max_rank_size = max(max_rank_size, rank_sizes[shard_rank])
 
-        gather_list: Optional[list[torch.Tensor]]
+        gather_list: list[torch.Tensor] | None
         if rank == dst:
             assert out is not None
             if enforce_dtype:
@@ -725,7 +725,7 @@ class ShardedTensor(ShardedTensorBase):
 
     @classmethod
     def _normalize_pg(
-        cls, process_group: Optional[dist.ProcessGroup]
+        cls, process_group: dist.ProcessGroup | None
     ) -> dist.ProcessGroup:
         if process_group is not None:
             return process_group
@@ -758,7 +758,7 @@ class ShardedTensor(ShardedTensorBase):
         current_rank = dist.get_rank()  # intentional to get global rank
         world_size = dist.get_world_size(process_group)
 
-        local_sharded_tensor_metadata: Optional[ShardedTensorMetadata] = None
+        local_sharded_tensor_metadata: ShardedTensorMetadata | None = None
         global_tensor_size = _flatten_tensor_size(global_size)
 
         if len(local_shards) > 0:
@@ -768,7 +768,7 @@ class ShardedTensor(ShardedTensorBase):
 
         # STEP 2. Validate metadata across ranks, and build a global sharded tensor
         # metadata by gathering local ShardedTensorMetadata
-        gathered_metadatas: list[Optional[ShardedTensorMetadata]] = []
+        gathered_metadatas: list[ShardedTensorMetadata | None] = []
         if world_size > 1:
             gathered_metadatas = [None for _ in range(world_size)]
 
@@ -833,7 +833,7 @@ class ShardedTensor(ShardedTensorBase):
         local_tensor: torch.Tensor,
         sharding_spec: shard_spec.ShardingSpec,
         *global_size: Sequence[int],
-        process_group: Optional[dist.ProcessGroup] = None,
+        process_group: dist.ProcessGroup | None = None,
         init_rrefs=False,
     ) -> ShardedTensor:
         """

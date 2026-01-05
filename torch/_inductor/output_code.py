@@ -196,7 +196,7 @@ def cudagraph_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
-    constants: dict[str, torch.Tensor],
+    constants: dict[str, Union[torch.Tensor, type]],
     boxed_forward_device_index: Optional[BoxedDeviceIndex],
 ) -> None:
     """
@@ -226,6 +226,10 @@ def cudagraph_post_compile(
 
         current_callable = compiled_graph.current_callable
         assert current_callable is not None
+        # Filter to only tensor constants (exclude opaque value type classes)
+        tensor_constants = {
+            k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
+        }
         compiled_graph.current_callable = cudagraphify(
             current_callable,
             static_input_idxs=static_input_idxs or (),
@@ -233,7 +237,7 @@ def cudagraph_post_compile(
             stack_traces=stack_traces,
             is_backward=is_backward,
             is_inference=is_inference,
-            constants=tuple(constants.values()),
+            constants=tuple(tensor_constants.values()),
             placeholders=placeholders,
             mutated_input_idxs=tuple(compiled_graph.mutated_input_idxs),
         )
@@ -259,7 +263,7 @@ def cudagraph_partition_post_compile(
     example_inputs: Sequence[InputType],
     compiled_graph: CompiledFxGraph,
     cudagraphs: BoxedBool,
-    constants: dict[str, torch.Tensor],
+    constants: dict[str, Union[torch.Tensor, type]],
     boxed_forward_device_index: Optional[BoxedDeviceIndex],
 ) -> None:
     """
@@ -292,12 +296,17 @@ def cudagraph_partition_post_compile(
     mutated_input_idxs = compiled_graph.mutated_input_idxs
     device_index = next(iter(compiled_graph.device_idxs))
 
+    # Filter to only tensor constants (exclude opaque value type classes)
+    tensor_constants = {
+        k: v for k, v in constants.items() if isinstance(v, torch.Tensor)
+    }
+
     graph_metadata = CudagraphMetadata(
         compiled_graph.cudagraph_info.placeholders,
         static_input_idxs,
         mutated_input_idxs,
         compiled_graph.cudagraph_info.stack_traces,
-        constants,
+        tensor_constants,
     )
 
     prepare_cudagraph_post_compile(
@@ -369,9 +378,9 @@ class CompiledFxGraphConstants:
     the value of constants directly off of the original saved object.
     """
 
-    def unwrap(self, g: CompiledFxGraph) -> dict[str, torch.Tensor]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, Union[torch.Tensor, type]]:
         assert g.constants is not None
-        return g.constants
+        return {**g.constants, **g.opaque_value_type_classes}
 
 
 class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
@@ -386,13 +395,13 @@ class CompiledFxGraphConstantsWithGm(CompiledFxGraphConstants):
     def __init__(self, gm: torch.fx.GraphModule) -> None:
         self.gm = gm
 
-    def unwrap(self, g: CompiledFxGraph) -> dict[str, torch.Tensor]:
+    def unwrap(self, g: CompiledFxGraph) -> dict[str, Union[torch.Tensor, type]]:
         frozen_params = {
             name: getattr(self.gm, orig_name)
             for name, orig_name in g.frozen_param_names.items()
         }
         constants = g.constants or {}
-        return {**constants, **frozen_params}
+        return {**constants, **frozen_params, **g.opaque_value_type_classes}
 
 
 @dataclasses.dataclass
@@ -419,6 +428,7 @@ class CompiledFxGraph(OutputCode):
     constants: Optional[dict[str, torch.Tensor]]
     frozen_param_names: dict[str, str]
     torchbind_constants: dict[str, torch._C.ScriptObject | FakeScriptObject]
+    opaque_value_type_classes: dict[str, type]
     output_strides: Optional[list[Optional[tuple[_StrideExprStr, ...]]]]
     disabled_cudagraphs_reason: Optional[str]
     metrics_deltas: metrics.CachedMetricsDeltas
@@ -503,6 +513,7 @@ class CompiledFxGraph(OutputCode):
                     self.constants[k] = v
 
         self.torchbind_constants = graph.torchbind_constants
+        self.opaque_value_type_classes = graph.opaque_value_type_classes
         self.output_strides = output_strides
         self.disabled_cudagraphs_reason = disabled_cudagraphs_reason
         self.metrics_deltas = metrics_deltas
@@ -824,6 +835,7 @@ class CompiledAOTI(OutputCode):
             current_callable = self.filename
 
         if isinstance(current_callable, torch.fx.GraphModule):
+            # pyrefly: ignore [bad-assignment]
             self.current_callable = current_callable
             return
 
