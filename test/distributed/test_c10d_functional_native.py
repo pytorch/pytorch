@@ -466,6 +466,40 @@ class TestWithNCCL(DistributedTestBase):
         )
         self.assertEqual(torch._C._distributed_c10d._get_work_registry_size(), 1)
 
+    @skip_if_lt_x_gpu(2)
+    def test_cudagraph_all_gather(self) -> None:
+        self._init_process_group()
+
+        input = torch.full((10, 10), float(self.rank), device=self.device)
+
+        g = torch.cuda.CUDAGraph()
+
+        # ncclUnhandledCudaError: Call to CUDA function failed.
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "CUDA error: operation failed due to a previous error during capture",
+        ):
+            with torch.cuda.graph(g):
+                output = torch.ops._c10d_functional.all_gather_into_tensor(
+                    input,
+                    self.world_size,
+                    "default",
+                )
+
+            # Uncomment when all_gather_into_tensor is compatible with cudagraph.
+            #     output = torch.ops._c10d_functional.wait_tensor(output)
+
+            # g.replay()
+
+            # expect = torch.cat(
+            #     [
+            #         torch.full((10, 10), float(rank), device=self.device)
+            #         for rank in self.ranks
+            #     ]
+            # )
+            # assert torch.allclose(output, expect)
+            # assert output.eq(expect).all()
+
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
