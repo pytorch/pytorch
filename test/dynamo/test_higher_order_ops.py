@@ -1787,6 +1787,95 @@ class GraphModule(torch.nn.Module):
         arg_count = ifdynstaticdefault(2, 3)
         self._test_wrap_simple(f, default_args_generator((x, y, 8)), arg_count)
 
+    def test_flatten_automatic(self):
+        import unittest.mock as mock
+
+        mod = torch.nn.Linear(10, 10)
+        x = torch.randn(10, 10)
+        y = torch.randn(10, 10)
+
+        def gn(x, mod, y):
+            return y + x + mod(x)
+
+        def fn(x, y, mod):
+            return wrap(gn, x, mod, y)
+
+        # Patch the default value of set_subgraph_inputs to flatten_automatic
+        from torch._dynamo.variables import higher_order_ops
+
+        original_fn = higher_order_ops.speculate_subgraph_with_auto_output_flattening
+
+        def patched_fn(*args, **kwargs):
+            kwargs.setdefault("set_subgraph_inputs", "flatten_automatic")
+            return original_fn(*args, **kwargs)
+
+        with mock.patch.object(
+            higher_order_ops,
+            "speculate_subgraph_with_auto_output_flattening",
+            patched_fn,
+        ):
+            backend = EagerAndRecordGraphs()
+            opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+
+            ref = fn(x, y, mod)
+            res = opt_fn(x, y, mod)
+            self.assertEqual(ref, res)
+
+            if torch._dynamo.config.assume_static_by_default:
+                self.assertExpectedInline(
+                    normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                    """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[10, 10]", L_y_: "f32[10, 10]", L_mod_parameters_weight_: "f32[10, 10]", L_mod_parameters_bias_: "f32[10]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
+        l_mod_parameters_bias_ = L_mod_parameters_bias_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_mod_parameters_weight_, l_mod_parameters_bias_, l_x_, l_y_);  wrap_body_0 = l_mod_parameters_weight_ = l_mod_parameters_bias_ = l_x_ = l_y_ = None
+        getitem: "f32[10, 10]" = wrap[0];  wrap = None
+        return (getitem,)
+
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_mod_parameters_weight_: "f32[10, 10]", l_mod_parameters_bias_: "f32[10]", l_x_: "f32[10, 10]", l_y_: "f32[10, 10]"):
+            detach: "f32[10, 10]" = l_mod_parameters_weight_.detach();  detach = None
+            detach_1: "f32[10]" = l_mod_parameters_bias_.detach();  detach_1 = None
+
+            add: "f32[10, 10]" = l_y_ + l_x_;  l_y_ = None
+            linear: "f32[10, 10]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+            add_1: "f32[10, 10]" = add + linear;  add = linear = None
+            return (add_1,)
+""",
+                )
+            else:
+                self.assertExpectedInline(
+                    normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                    """\
+class GraphModule(torch.nn.Module):
+    def forward(self, s77: "Sym(10)", L_x_: "f32[10, 10]", L_y_: "f32[10, 10]", L_mod_parameters_weight_: "f32[10, 10]", L_mod_parameters_bias_: "f32[10]"):
+        l_x_ = L_x_
+        l_y_ = L_y_
+        l_mod_parameters_weight_ = L_mod_parameters_weight_
+        l_mod_parameters_bias_ = L_mod_parameters_bias_
+
+        wrap_body_0 = self.wrap_body_0
+        wrap = torch.ops.higher_order.wrap(wrap_body_0, l_mod_parameters_weight_, l_mod_parameters_bias_, s77, l_x_, l_y_);  wrap_body_0 = l_mod_parameters_weight_ = l_mod_parameters_bias_ = s77 = l_x_ = l_y_ = None
+        getitem: "f32[10, 10]" = wrap[0];  wrap = None
+        return (getitem,)
+
+    class wrap_body_0(torch.nn.Module):
+        def forward(self, l_mod_parameters_weight_: "f32[10, 10]", l_mod_parameters_bias_: "f32[10]", s77: "Sym(10)", l_x_: "f32[10, 10]", l_y_: "f32[10, 10]"):
+            detach: "f32[10, 10]" = l_mod_parameters_weight_.detach();  detach = None
+            detach_1: "f32[10]" = l_mod_parameters_bias_.detach();  detach_1 = None
+
+            add: "f32[10, 10]" = l_y_ + l_x_;  l_y_ = None
+            linear: "f32[10, 10]" = torch._C._nn.linear(l_x_, l_mod_parameters_weight_, l_mod_parameters_bias_);  l_x_ = l_mod_parameters_weight_ = l_mod_parameters_bias_ = None
+            add_1: "f32[10, 10]" = add + linear;  add = linear = None
+            return (add_1,)
+""",
+                )
+
     def test_map_subgraph_name_is_valid(self):
         xs = torch.randn(2, 3, 3)
         y = torch.randn(3)
