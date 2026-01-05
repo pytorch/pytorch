@@ -1286,20 +1286,20 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
     if context := TracingContext.try_get():
         fake_mode = context.fake_mode
         if fake_mode is not None:
-            # When doing cross precompilation we expect to have a stack of different
-            # fake modes. Instead of aggregating the fake_modes like in normal
-            # torch.compile and verifying they are all the same fake mode, we instead
-            # use the first one we find.
+            # When doing cross precompilation we expect to have some input tensors
+            # with a different fake mode than the one we use when compiling. Instead of
+            # aggregating the fake_modes like in normal torch.compile and verifying they
+            # are all the same fake mode, we instead use the first one we find.
             return fake_mode
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
     for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
-            # When doing cross precompilation we expect to have a stack of different
-            # fake modes. Instead of aggregating the fake_modes like in normal
-            # torch.compile and verifying they are all the same fake mode, we instead
-            # use the first one we find.
+            # When doing cross precompilation we expect to have some input tensors
+            # with a different fake mode than the one we use when compiling. Instead of
+            # aggregating the fake_modes like in normal torch.compile and verifying they
+            # are all the same fake mode, we instead use the first one we find.
             return m
 
     flat_inputs = pytree.tree_leaves(inputs)

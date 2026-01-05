@@ -1223,7 +1223,7 @@ from user code:
             )
 
             outer_fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
-            with outer_fake_mode, torch._dynamo.config.patch(install_free_tensors=True):
+            with outer_fake_mode:
                 local_input_ids = torch.randint(
                     0, vocab_size, (batch_size, seq_len), device=device
                 )
@@ -1231,15 +1231,13 @@ from user code:
                     local_input_ids, device_mesh, [Shard(0)]
                 )
 
-                from torch._dynamo.functional_export import (
-                    _dynamo_graph_capture_for_export,
-                )
+            from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 
-                gm = _dynamo_graph_capture_for_export(model)(input_ids_dt)
+            gm = dynamo_graph_capture_for_export(model)(input_ids_dt)
 
-                _restore_state_dict(model, gm)
+            _restore_state_dict(model, gm)
 
-                fake_mode = gm.meta["fake_mode"]
+            fake_mode = gm.meta["fake_mode"]
 
             with contextlib.ExitStack() as stack:
                 if fake_mode is not None:
