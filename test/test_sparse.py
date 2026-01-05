@@ -451,6 +451,17 @@ class TestSparse(TestSparseBase):
 
     @dtypes(torch.double)
     @dtypesIfMPS(torch.float32)
+    def test_negative_indices(self, device, dtype):
+        indices = torch.tensor([[0, 1, -1], [2, 0, 1]])
+        values = torch.tensor([1, 2, 3])
+        shape = torch.Size([3, 3])
+        with self.assertWarnsRegex(UserWarning, "WARNING THIS IS DANGEROUS, as sparse tensor invariant checks"):
+            x = torch.sparse_coo_tensor(indices, values, shape, check_invariants=False)
+        with self.assertRaisesRegex(RuntimeError, "found negative index"):
+            torch.sparse_coo_tensor(indices, values, shape, check_invariants=True)
+
+    @dtypes(torch.double)
+    @dtypesIfMPS(torch.float32)
     @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/89395")
     def test_coalesce_reference_cycle(self, device, dtype):
         # Test coalesce doesn't create autograd graph cycles (gh-52253)
