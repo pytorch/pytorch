@@ -12,7 +12,8 @@ except ImportError:
         @staticmethod
         def _fail(*args, **kwargs):
             raise RuntimeError(
-                "NVTX functions not installed. Are you sure you have a CUDA build?"
+                "NVTX functions not installed. "
+                "Are you sure you have a CUDA or ROCm build?"
             )
 
         rangePushA = _fail
