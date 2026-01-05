@@ -6,6 +6,7 @@ import traceback
 import unittest
 import unittest.mock
 import warnings
+from collections import namedtuple
 from functools import lru_cache
 
 import torch
@@ -16,10 +17,13 @@ import torch.utils._pytree as python_pytree
 from torch._dynamo.exc import ResumePrologueTracingError, Unsupported
 from torch._dynamo.testing import skipIfNotPy312, skipIfOnlyNotPy312
 from torch._dynamo.utils import counters
+from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_utils import (
     IS_FBCODE,
+    make_tensor,
     munge_exc,
     scoped_load_inline,
+    TestCase,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 
@@ -2537,6 +2541,183 @@ User code traceback:
 """,
         )
 
+
+class ErrorMessageClarityTest(TestCase):
+    def __init__(self, method_name):
+        super().__init__(method_name)
+        self.N = 7312
+        self.S0 = 420
+        self.S1 = self.N - self.S0
+        torch._dynamo.config.capture_scalar_outputs = True
+
+    def opSetup(self, lib_name):
+        torch.library.define(
+            lib_name + "::iterator_mismatch", "(Tensor input, int[] sizes) -> Tensor[]"
+        )
+
+        def iterator_mismatch_fn(input, sizes):
+            return [
+                t.clone() for t in torch.ops.aten.split_with_sizes.default(input, sizes)
+            ]
+
+        torch.library.impl(
+            lib_name + "::iterator_mismatch", "default", iterator_mismatch_fn
+        )
+
+        @torch.library.register_fake(lib_name + "::iterator_mismatch")
+        def iterator_mismatch_abstract(input, sizes):
+            rs = torch.ops.aten.split_with_sizes.default(input, sizes)
+            return [input.new_empty(r.size()) for r in rs]
+
+    def test_list_iterator_contents_error_message(self, device):
+        lib_name = "test_clarity_list"
+        self.opSetup(lib_name)
+
+        @torch.compile()
+        def f(sz, x):
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.test_clarity_list.iterator_mismatch.default(x, [s0, s1])
+            return torch.ops.aten.sort.default(r1)
+
+        with self.assertRaisesRegex(
+            Exception,
+            re.escape(
+                """got RuntimeError("test_clarity_list::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'immutable_list(SymInt, SymInt)'."""
+            ),
+        ):
+            f(
+                torch.tensor([self.S0, self.S1], device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
+            )
+
+    def test_tuple_iterator_contents_error_message(self, device):
+        lib_name = "test_clarity_tuple"
+        self.opSetup(lib_name)
+
+        @torch.compile()
+        def f(sz, x):
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.test_clarity_tuple.iterator_mismatch.default(x, (s0, s1))
+            return torch.ops.aten.sort.default(r1)
+
+        with self.assertRaisesRegex(
+            Exception,
+            re.escape(
+                """got RuntimeError("test_clarity_tuple::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'tuple(SymInt, SymInt)'."""
+            ),
+        ):
+            f(
+                torch.tensor((self.S0, self.S1), device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
+            )
+
+    def test_dict_iterator_contents_error_message(self, device):
+        lib_name = "test_clarity_dict"
+        self.opSetup(lib_name)
+
+        @torch.compile()
+        def f(sz, x):
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.test_clarity_dict.iterator_mismatch.default(
+                x, {1: s0, 2: s1}
+            )
+            return torch.ops.aten.sort.default(r1)
+
+        with self.assertRaisesRegex(
+            Exception,
+            re.escape(
+                """got RuntimeError("test_clarity_dict::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'immutable_dict(int, int)'."""
+            ),
+        ):
+            f(
+                torch.tensor((self.S0, self.S1), device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
+            )
+
+    def test_named_tuple_iterator_contents_error_message(self, device):
+        lib_name = "test_clarity_named_tuple"
+        self.opSetup(lib_name)
+
+        @torch.compile
+        def f(sz, x):
+            inSizes = namedtuple("inSizes", ["size_0", "size_1"])
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.test_clarity_named_tuple.iterator_mismatch.default(
+                x, inSizes(s0, s1)
+            )
+            return torch.ops.aten.sort.default(r1)
+
+        with self.assertRaisesRegex(
+            Exception,
+            re.escape(
+                """got RuntimeError("test_clarity_named_tuple::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'inSizes (aka NamedTuple(size_0, size_1))'."""
+            ),
+        ):
+            f(
+                torch.tensor([self.S0, self.S1], device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
+            )
+
+    def test_iterable_with_failing_iter_error_message(self, device):
+        class FailingIterator:
+            def __iter__(self):
+                return self
+
+            def __next__(self):
+                raise RuntimeError("Iterator access failed")
+
+        class IterableWithFailingIter:
+            def __iter__(self):
+                return FailingIterator()
+
+        lib_name = "test_clarity_failing_iter"
+        self.opSetup(lib_name)
+
+        @torch.compile
+        def f(sz, x, obj):
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.test_clarity_failing_iter.iterator_mismatch.default(
+                x, obj
+            )
+            return torch.ops.aten.sort.default(r1)
+
+        failing_obj = IterableWithFailingIter()
+
+        with self.assertRaisesRegex(
+            Exception,
+            re.escape(
+                """test_clarity_failing_iter::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'IterableWithFailingIter(empty)'."""
+            ),
+        ):
+            f(
+                torch.tensor([self.S0, self.S1], device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
+                failing_obj,
+            )
+
+    def test_noniter_contents_error_message(self, device):
+        lib_name = "test_clarity_noniter"
+        self.opSetup(lib_name)
+
+        @torch.compile
+        def f(sz, x):
+            s0, s1 = sz.tolist()
+            r0, r1 = torch.ops.test_clarity_noniter.iterator_mismatch.default(x, s0)
+            return torch.ops.aten.sort.default(r1)
+
+        with self.assertRaisesRegex(
+            Exception,
+            re.escape(
+                """got RuntimeError("test_clarity_noniter::iterator_mismatch() Expected a value of type 'List[int]' for argument 'sizes' but instead found type 'SymInt'."""
+            ),
+        ):
+            f(
+                torch.tensor([self.S0, self.S1], device=device),
+                make_tensor(self.N, dtype=torch.float32, device=device),
+            )
+
+
+instantiate_device_type_tests(ErrorMessageClarityTest, globals())
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
