@@ -271,15 +271,12 @@ class MixOrderReduction:
         nrow = sympy.Max(g1[0], g1[1])
         ncol = sympy.Min(g1[0], g1[1])
 
-        # the fused version has worse perf than non-fused version for
-        # small workload. When a workload is small enough, data can be
-        # fully cached by L2
-        size_thres = 5 * 2**20
-
         # Call evaluate_expr rather than statically_known_geq since nrow can
         # have dynamic shape in real models.
         # Don't use hint directly since hint can be non-representative.
-        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow * ncol, size_thres)):
+        if not V.graph.sizevars.evaluate_expr(
+            sympy.Ge(nrow * ncol, config.triton.mix_order_reduction_numel_threshold)
+        ):
             return False
 
         # We require more more row than columns since
