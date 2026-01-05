@@ -1931,7 +1931,6 @@ class MetaConverter(Generic[_TensorT]):
         # when source is not None.  Because we refakify after Dynamo is done,
         # we don't want to dump info again from AOTAutograd, it is redundant.
         trace: bool = True,
-        fake_mode: FakeTensorMode | None = None,
     ) -> _TensorT:
         callback_: _MetaTensorCallback[_TensorT]
         if callback is None:
@@ -1999,10 +1998,6 @@ class MetaConverter(Generic[_TensorT]):
                 exit_stack.enter_context(
                     torch._functorch.pyfunctorch.temporarily_clear_interpreter_stack()
                 )
-            # Enter the fake mode if provided. This ensures the correct fake mode
-            # is active when creating symbolic shapes during cross-compilation.
-            if fake_mode is not None:
-                exit_stack.enter_context(fake_mode)
 
             r = self.meta_tensor(
                 t_desc,
