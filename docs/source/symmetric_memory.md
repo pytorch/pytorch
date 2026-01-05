@@ -433,10 +433,10 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     Example::
 
         >>> # doctest: +SKIP
+        >>> # Reduce the bottom-right quadrant of a tensor
+        >>> tile_size = full_size // 2
         >>> full_inp = symm_mem.empty(full_size, full_size)
         >>> full_out = symm_mem.empty(full_size, full_size)
-        >>> # Operate on the bottom-right quadrant of the tensor
-        >>> tile_size = full_size // 2
         >>> s = slice(tile_size, 2 * tile_size)
         >>> in_tile = full_inp[s, s]
         >>> out_tile = full_out[s, s]
@@ -452,5 +452,18 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     : param list[int] roots: A list of root ranks each corresponding to an input tile in `in_tiles`, in the same order. A rank cannot be a root more than once.
     : param str group_name: Name of the group to use for the collective operation.
     : param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> # Reduce four quadrants of a tensor, each to a different root
+        >>> tile_size = full_size // 2
+        >>> full_inp = symm_mem.empty(full_size, full_size)
+        >>> s0 = slice(0, tile_size)
+        >>> s1 = slice(tile_size, 2 * tile_size)
+        >>> in_tiles = [ full_inp[s0, s0], full_inp[s0, s1], full_inp[s1, s0], full_inp[s1, s1] ]
+        >>> out_tile = symm_mem.empty(tile_size, tile_size)
+        >>> roots = [0, 1, 2, 3]
+        >>> torch.ops.symm_mem.multi_root_tile_reduce(in_tiles, out_tile, roots, group_name)
 
 ```
