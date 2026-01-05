@@ -6869,7 +6869,7 @@ Example::
             [0, 2],
             [1, 1],
             [1, 2]])
-""",
+""".format(**multi_dim_common),
 )
 
 add_docstr(
