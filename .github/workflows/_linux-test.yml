@@ -479,7 +479,7 @@ jobs:
           aws-region: us-east-1
 
       - name: Upload the benchmark results
-        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@main
+        uses: pytorch/test-infra/.github/actions/upload-benchmark-results@detech-xpu-device
         if: inputs.build-environment != 'linux-s390x-binary-manywheel' && steps.check-tpu.outputs.has_tpu != 'true'
         with:
           benchmark-results-dir: test/test-reports
