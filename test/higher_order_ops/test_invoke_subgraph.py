@@ -2837,8 +2837,6 @@ class GraphModule(torch.nn.Module):
 """,
             )
 
-    # High priority - grads are wrong
-    @unittest.expectedFailure
     def test_grad_accuracy_check(self):
         class Foo:
             def __init__(self, a, b):
@@ -2873,6 +2871,78 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(ref, res)
         self.assertEqual(x.grad, x_clone.grad)
+
+        # We should see a single forward subgraph
+        self.assertExpectedInline(
+            empty_line_normalizer(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False))
+            ),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[8, 8]"):
+        partitioned_fw_subgraph_0_1 = self.partitioned_fw_subgraph_0_1
+        invoke_subgraph_4 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_1, 'partitioned_fw_subgraph_0_1', primals_1);  partitioned_fw_subgraph_0_1 = primals_1 = None
+        getitem_10: "f32[8, 8]" = invoke_subgraph_4[2]
+        getitem: "f32[8, 8]" = invoke_subgraph_4[0]
+        getitem_1: "f32[8, 8]" = invoke_subgraph_4[1];  invoke_subgraph_4 = None
+        partitioned_fw_subgraph_0_0 = self.partitioned_fw_subgraph_0_0
+        invoke_subgraph_6 = torch.ops.higher_order.invoke_subgraph(partitioned_fw_subgraph_0_0, 'partitioned_fw_subgraph_0_0', getitem);  partitioned_fw_subgraph_0_0 = getitem = None
+        getitem_11: "f32[8, 8]" = invoke_subgraph_6[2]
+        getitem_2: "f32[8, 8]" = invoke_subgraph_6[0]
+        getitem_3: "f32[8, 8]" = invoke_subgraph_6[1];  invoke_subgraph_6 = None
+        add: "f32[8, 8]" = torch.ops.aten.add.Tensor(getitem_1, getitem_2);  getitem_1 = getitem_2 = None
+        add_1: "f32[8, 8]" = torch.ops.aten.add.Tensor(add, getitem_3);  add = getitem_3 = None
+        return (add_1, getitem_10, getitem_11)
+    class partitioned_fw_subgraph_0_1(torch.nn.Module):
+        def forward(self, primals_0: "f32[8, 8]"):
+            sin: "f32[8, 8]" = torch.ops.aten.sin.default(primals_0)
+            cos: "f32[8, 8]" = torch.ops.aten.cos.default(primals_0)
+            return (sin, cos, primals_0)
+    class partitioned_fw_subgraph_0_0(torch.nn.Module):
+        def forward(self, primals_0: "f32[8, 8]"):
+            sin: "f32[8, 8]" = torch.ops.aten.sin.default(primals_0)
+            cos: "f32[8, 8]" = torch.ops.aten.cos.default(primals_0)
+            return (sin, cos, primals_0)
+""",
+        )
+
+        # The backward graph should be traced twice because tangents aliasing changed
+        # Note that in the first partitioned_bw_subgraph_0_0, mul_1 is using tangents_1, which is
+        # only correct when tangents_1 and tangents_0 are aliases.
+        self.assertExpectedInline(
+            empty_line_normalizer(
+                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False))
+            ),
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, getitem_10: "f32[8, 8]", getitem_11: "f32[8, 8]", tangents_1: "f32[8, 8]"):
+        partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
+        invoke_subgraph_7 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', getitem_11, tangents_1, tangents_1);  partitioned_bw_subgraph_0_0 = getitem_11 = None
+        getitem_4: "f32[8, 8]" = invoke_subgraph_7[0];  invoke_subgraph_7 = None
+        partitioned_bw_subgraph_0_1 = self.partitioned_bw_subgraph_0_1
+        invoke_subgraph_5 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_1, 'partitioned_bw_subgraph_0_1', getitem_10, getitem_4, tangents_1);  partitioned_bw_subgraph_0_1 = getitem_10 = getitem_4 = tangents_1 = None
+        getitem_7: "f32[8, 8]" = invoke_subgraph_5[0];  invoke_subgraph_5 = None
+        return (getitem_7,)
+    class partitioned_bw_subgraph_0_0(torch.nn.Module):
+        def forward(self, primals_0: "f32[8, 8]", tangents_0: "f32[8, 8]", tangents_1: "f32[8, 8]"):
+            sin_1: "f32[8, 8]" = torch.ops.aten.sin.default(primals_0)
+            neg: "f32[8, 8]" = torch.ops.aten.neg.default(sin_1);  sin_1 = None
+            mul: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, neg);  neg = None
+            cos_1: "f32[8, 8]" = torch.ops.aten.cos.default(primals_0);  primals_0 = None
+            mul_1: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, cos_1);  tangents_1 = cos_1 = None
+            add: "f32[8, 8]" = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
+            return (add,)
+    class partitioned_bw_subgraph_0_1(torch.nn.Module):
+        def forward(self, primals_0: "f32[8, 8]", tangents_0: "f32[8, 8]", tangents_1: "f32[8, 8]"):
+            sin_1: "f32[8, 8]" = torch.ops.aten.sin.default(primals_0)
+            neg: "f32[8, 8]" = torch.ops.aten.neg.default(sin_1);  sin_1 = None
+            mul: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, neg);  tangents_1 = neg = None
+            cos_1: "f32[8, 8]" = torch.ops.aten.cos.default(primals_0);  primals_0 = None
+            mul_1: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_0, cos_1);  tangents_0 = cos_1 = None
+            add: "f32[8, 8]" = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
+            return (add,)
+""",
+        )
 
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
