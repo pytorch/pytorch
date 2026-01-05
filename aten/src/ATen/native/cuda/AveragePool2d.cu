@@ -109,8 +109,9 @@ __global__ void avg_pool2d_out_cuda_frame_nhwc(const int nthreads,
     accscalar_t aveval = accscalar_t(0);
     const scalar_t* const bottom_slice = bottom_data + n * channels * height * width + c;
     for (int h = hstart; h < hend; ++h) {
+      const int hwidth = h * width;
       for (int w = wstart; w < wend; ++w) {
-        aveval += bottom_slice[(h * width + w) * channels];
+        aveval += bottom_slice[(hwidth + w) * channels];
       }
     }
     int divide_factor;
