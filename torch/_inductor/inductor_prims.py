@@ -121,7 +121,6 @@ def _reserve_rng_state(device: torch.device, used_offset):
     seed_base, offset_base, internal_offset = torch.ops.aten.inductor_reserve_rng_state(
         gen, int(used_offset)
     )
-    torch.ops.aten.inductor_reserve_rng_state(gen, int(used_offset))
     offset_val = internal_offset.item()
     final_offset = offset_base + offset_val
     base = final_offset.div(4, rounding_mode="floor")
