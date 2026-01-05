@@ -22,7 +22,7 @@ FLASH_ATTENTION_HOPPER_DIR="${FLASH_ATTENTION_DIR}/hopper"
 if [[ -z "$FA_FINAL_PACKAGE_DIR" ]]; then
     FA_FINAL_PACKAGE_DIR="${FLASH_ATTENTION_HOPPER_DIR}/dist"
 fi
-mkdir -p "$FA_FINAL_PACKAGE_DIR" || true
+mkdir -p "$FA_FINAL_PACKAGE_DIR"
 
 
 ARCH=$(uname -m)
