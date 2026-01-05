@@ -320,10 +320,11 @@ class ShapePropagator : public PropertyPropBase {
     }
     // we should not get here because isValidArgumentForRunning should have
     // prevented it
-    std::stringstream ss;
-    ss << "unable to create representative value for: " << type_->str()
-       << ". File a bug report";
-    throw std::runtime_error(ss.str());
+    TORCH_CHECK(
+        false,
+        "unable to create representative value for: ",
+        type_->str(),
+        ". File a bug report");
   }
 
   void broadcastBinary(
