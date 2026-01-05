@@ -1,7 +1,6 @@
 # pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
-from typing import Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -14,6 +13,7 @@ def graph_pool_handle() -> _POOL_HANDLE:
     """
     Return an opaque token representing the id of a graph memory pool.
     """
+    # pyrefly: ignore [missing-attribute]
     return torch._C._mtia_graphPoolHandle()
 
 
@@ -63,24 +63,23 @@ class MTIAGraph(torch._C._MTIAGraph):
 
 
 class graph:
-    default_capture_stream: Optional[torch.mtia.Stream] = None
+    default_capture_stream: torch.mtia.Stream | None = None
 
     def __init__(
         self,
         mtia_graph: MTIAGraph,
-        pool: Optional[_POOL_HANDLE] = None,
-        stream: Optional[torch.mtia.Stream] = None,
+        pool: _POOL_HANDLE | None = None,
+        stream: torch.mtia.Stream | None = None,
     ):
         if self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.mtia.current_stream()
 
-        self.pool: Union[tuple[()], tuple[_POOL_HANDLE]] = (
-            () if pool is None else (pool,)
-        )
+        self.pool: tuple[()] | tuple[_POOL_HANDLE] = () if pool is None else (pool,)
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )
-        assert self.capture_stream is not None
+        if self.capture_stream is None:
+            raise AssertionError("capture_stream must not be None")
         self.stream_ctx = torch.mtia.stream(self.capture_stream)
         self.mtia_graph = mtia_graph
 
