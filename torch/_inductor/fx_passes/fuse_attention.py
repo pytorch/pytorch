@@ -1097,7 +1097,7 @@ def _get_sfdp_patterns():
             ),
         ]
         mask_fp32_patterns = ["pattern_16"]
-        if dtype == torch.half or dtype == torch.bfloat16:
+        if dtype == torch.half:
             # Add inputs of bf16 q/k/v and fp32 mask, for models like albert.
             candidates.append(
                 (
