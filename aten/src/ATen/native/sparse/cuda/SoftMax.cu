@@ -316,7 +316,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> compute_pool_max(
       [offsets_ptr] __device__(int64_t x, int64_t y) {
         return offsets_ptr[x] == offsets_ptr[y];
       });
-  auto new_sz = thrust::distance(
+  auto new_sz = ::cuda::std::distance(
       thrust_ptr(pool_sizes.template data_ptr<int64_t>()), new_end.second);
   pool_sizes.resize_({new_sz});
 
