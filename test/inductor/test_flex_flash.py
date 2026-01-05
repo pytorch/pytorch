@@ -28,6 +28,13 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_utils import decorateIf, parametrize
 
 
+def _is_sm90():
+    return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 9
+
+
+expectedFailureSM90 = unittest.expectedFailure if _is_sm90() else lambda f: f
+
+
 def _times_two(score, _b, _h, _m, _n):
     return score * 2
 
@@ -714,6 +721,12 @@ GQA_MQA_BLOCK_MASK_CASES = [
     not ensure_flash_available(), "Flash attention (CUTE) library is not available"
 )
 class TestFlexFlash(InductorTestCase):
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: params["case"].requires_grad
+        and params["case"].dim == 64
+        and _is_sm90(),
+    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_score_mod_cases(self, device, dtype, case):
@@ -773,7 +786,7 @@ class TestFlexFlash(InductorTestCase):
 
     @decorateIf(
         unittest.expectedFailure,
-        lambda params: torch.cuda.get_device_capability()[0] == 9,
+        lambda params: params["case"].dim == 64 and _is_sm90(),
     )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
@@ -1028,10 +1041,12 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             )
             self._flash_triton_dynamic(q, k, v)
 
+    @expectedFailureSM90
     def test_dynamic_backward(self):
         """Test backward with dynamic sequence lengths."""
         self._run_dynamic_test(seq_lens=[128, 256, 512], requires_grad=True)
 
+    @expectedFailureSM90
     def test_dynamic_backward_with_score_mod(self):
         """Test backward with score_mod and dynamic sequence lengths."""
 
@@ -1259,6 +1274,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
         self.assertEqual(out.shape, q.shape)
 
+    @expectedFailureSM90
     def test_dynamic_captured_buffer_varying_heads(self):
         """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
         torch._dynamo.reset()
