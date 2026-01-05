@@ -3311,6 +3311,39 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(8, 8),))
 
+    def test_silu_exact_eager(self):
+        """Test that compiled SiLU matches eager exactly."""
+
+        def fn(a):
+            return torch.nn.functional.silu(a)
+
+        # Test with normal random values
+        x = torch.randn(1024, device=self.device)
+        eager_result = fn(x)
+        compiled_fn = torch.compile(fn)
+        compiled_result = compiled_fn(x)
+        self.assertEqual(eager_result, compiled_result)
+
+        # Test with bfloat16 edge cases (all possible bf16 values)
+        x_bf16 = (
+            torch.arange(0, 2**16, dtype=torch.int32, device=self.device)
+            .to(torch.int16)
+            .view(torch.bfloat16)
+        )
+        eager_result_bf16 = fn(x_bf16)
+        torch._dynamo.reset()
+        compiled_result_bf16 = compiled_fn(x_bf16)
+        # Filter out NaN and inf values for comparison (inf - inf = nan)
+        mask = (
+            ~eager_result_bf16.isnan()
+            & ~eager_result_bf16.isinf()
+            & ~x_bf16.isnan()
+        )
+        self.assertEqual(
+            eager_result_bf16[mask],
+            compiled_result_bf16[mask],
+        )
+
     @skip_if_halide  # halide has buggy nan handling
     def test_nan_to_num(self):
         def fn(a):
