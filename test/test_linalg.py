@@ -7030,7 +7030,8 @@ class TestLinalg(TestCase):
             torch.backends.cuda.preferred_linalg_library('default')
 
     def _test_lobpcg_method(self, device, dtype, method):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix, random_hermitian_pd_matrix
+        from torch.testing._internal.common_utils import (random_symmetric_pd_matrix,
+                                                          random_sparse_pd_matrix, random_hermitian_pd_matrix)
         from torch._linalg_utils import matmul, qform
         from torch._lobpcg import lobpcg
 
@@ -7104,10 +7105,10 @@ class TestLinalg(TestCase):
                 # input
                 if method == 'basic' and (m, n, k) in [(9, 2, 2), (100, 15, 5)]:
                     continue
-                if(dtype == torch.double):
+                if dtype == torch.double:
                     A = random_symmetric_pd_matrix(m, *batches, device=device, dtype=dtype)
                     B = random_symmetric_pd_matrix(m, *batches, device=device, dtype=dtype)
-                elif(dtype == torch.cdouble):
+                elif dtype == torch.cdouble:
                     A = random_hermitian_pd_matrix(m, *batches, device=device, dtype=dtype)
                     B = random_hermitian_pd_matrix(m, *batches, device=device, dtype=dtype)
 
@@ -7246,7 +7247,7 @@ class TestLinalg(TestCase):
 
         E2a, V2a = scipy_lobpcg(A2, X2, maxiter=niter, largest=False)
 
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / torch.linalg.norm(E1, float('inf'))
+        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - V2 * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-6)        # std
         self.assertLess(eq_err_scipy, 1e-6)  # std
@@ -7255,17 +7256,14 @@ class TestLinalg(TestCase):
 
         # Generalized eigenvalue problem
         lambdas1 = []
-
         def tracker(worker):
             lambdas1.append(worker.E[:])
-
         E1, V1 = torch.lobpcg(A1, B=B1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
         E2, V2, lambdas2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True, retLambdaHistory=True, tol=39 * tol)
         E2a, V2a = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=False)
         iters1 = len(lambdas1)
         iters2 = len(lambdas2)
         self.assertLess(abs(iters1 - iters2), 0.05 * max(iters1, iters2))
-
         eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-6)        # general
@@ -7323,7 +7321,7 @@ scipy_lobpcg  | {elapsed_scipy_ms:10.2f}  | {elapsed_general_scipy_ms:10.2f}  | 
 
         E1, V1 = torch.lobpcg(A1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
         iters1 = len(lambdas1)
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / torch.linalg.norm(E1, float('inf'))
+        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
 
         try:
             E2, V2, lambdas2 = scipy_lobpcg(A2, X2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)
@@ -7341,7 +7339,7 @@ scipy_lobpcg  | {elapsed_scipy_ms:10.2f}  | {elapsed_general_scipy_ms:10.2f}  | 
 
         E1, V1 = torch.lobpcg(A1, X=X1, B=B1, niter=niter, largest=True, tracker=tracker, tol=tol)
         iters1_general = len(lambdas1)
-        eq_err_general = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / torch.linalg.norm(E1, float('inf'))
+        eq_err_general = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
 
         try:
             E2, V2, lambdas2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True, retLambdaHistory=True, tol=tol)
