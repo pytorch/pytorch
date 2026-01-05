@@ -3608,10 +3608,15 @@ def meta_convolution_backward(
     backend_grad_weight = None
     backend_grad_bias = None
 
-    # GPU backends (CUDA/MPS) may use channels_last format for outputs
-    # when any of the relevant inputs is channels_last.
-    # For grad_input: check grad_output and weight
-    # For grad_weight: check input and grad_output
+    # Backend layout expectation: GPU backends (CUDA via cudnn_conv_suggest_memory_format,
+    # MPS via mps_conv_use_channels_last) return channels_last outputs when either input
+    # tensor is channels_last. This must be matched here to avoid stride assertion failures
+    # in inductor when the predicted strides don't match actual backend output strides.
+    # See: https://github.com/pytorch/pytorch/issues/171622
+    #
+    # Memory format inference rules (matching backend behavior):
+    #   - grad_input format: derived from grad_output and weight
+    #   - grad_weight format: derived from input and grad_output
     def _conv_memory_format(t1, t2):
         # Match the logic in cudnn_conv_suggest_memory_format and mps_conv_use_channels_last:
         # Use channels_last if either tensor suggests it
