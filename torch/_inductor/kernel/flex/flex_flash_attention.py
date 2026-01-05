@@ -12,7 +12,6 @@ from sympy import Expr, Integer
 
 import torch
 from torch.fx import GraphModule
-from torch.utils._sympy.functions import Identity
 
 from ...ir import FixedLayout, ShapeAsConstantBuffer, Subgraph, TensorBox
 from ...lowering import empty_strided
@@ -48,37 +47,46 @@ flash_attention_backward_cutedsl_template = CuteDSLTemplate(
 )
 
 
-def _fixed_indexer_cute(
+class HierarchicalIndex(sympy.Function):
+    """
+    Inert wrapper to carry an N-D index tuple through Inductor's SymPy-based IR.
+
+    Inductor generally represents a tensor index as a single `sympy.Expr` (often a
+    flattened linear offset in memory). CuteDSL, however, wants structured coordinates so it
+    can emit `tensor[i, j, ...]` and handle strides internally. We therefore wrap
+    the per-dimension indices in a `sympy.Function` node: this keeps the value a
+    `sympy.Expr` for existing substitution/CSE machinery, while letting CuteDSL
+    codegen pattern-match and unpack the coordinates via `index.args`.
+
+    `eval()` returns None to keep the node inert (no simplification/flattening).
+
+    These nodes are intended to be short-lived wrappers and are only interpreted by
+    CuteDSL codegen (see `ModificationWrapperCuteDSL.load` in
+    `torch/_inductor/codegen/cutedsl/cutedsl_kernel.py`).
+    """
+
+    @classmethod
+    def eval(cls, *args):
+        return None
+
+
+def _hierarchical_indexer_cute(
     size: Sequence[int],
-    stride: Optional[Sequence[int]] = None,
+    stride: Sequence[int] | None = None,
     offset: Expr = Integer(0),
 ) -> Callable[[Sequence[Expr]], Expr]:
-    """
-    Colexicographic indexer for CuteDSL - matches CuTe's coordinate interpretation.
+    """Return an indexer that preserves multi-dimensional indices for CuteDSL."""
 
-    CuTe interprets linear indices in colexicographic (column-major) order,
-    whereas Inductor's default _fixed_indexer uses lexicographic (row-major) order.
-
-    For size=[4, 128] with index=[b, q_idx]:
-    - Lexicographic:    b*128 + q_idx*1
-    - Colexicographic:  b*1 + q_idx*2
-
-    CuTe then applies the tensor's actual memory strides to get the correct offset.
-    """
-
-    def indexer(index: Sequence[Expr]) -> Expr:
-        assert offset == Integer(0), "Offset not supported for colexicographic indexing"
-        if not index:
+    def indexer(indices: Sequence[Expr]) -> Expr:
+        assert offset == Integer(0), "Offset not supported for hierarchical indexing"
+        assert len(indices) == len(size), (
+            f"Rank mismatch: got {len(indices)} indices for tensor of rank {len(size)}"
+        )
+        if not indices:
             return Integer(0)
-
-        result = index[0]
-        runner = size[0]
-
-        for idx, sz in zip(index[1:], size[1:], strict=True):
-            result = result + runner * Identity(idx)
-            runner = runner * sz
-
-        return result
+        if len(indices) == 1:
+            return indices[0]
+        return HierarchicalIndex(*indices)
 
     return indexer
 
@@ -86,17 +94,17 @@ def _fixed_indexer_cute(
 @contextmanager
 def patch_fixed_layout_indexer_for_cutedsl():
     """
-    Temporarily swap FixedLayout.make_indexer so CuteDSL sees colexicographic indexing.
+    Temporarily swap FixedLayout.make_indexer so CuteDSL sees hierarchical indexing.
 
     Note [CuteDSL indexer patch]:
     Flex flash attention only supports a limited set of IR ops (pointwise, reads, no stores),
-    so temporarily changing the indexing order is safe for the kernels we emit today.
+    so temporarily changing the indexing behavior is safe for the kernels we emit today.
     TODO(dynamic shapes): Reconfirm once flex flash attention supports dynamic shapes.
     """
     original_make_indexer = FixedLayout.make_indexer
 
     def cutedsl_make_indexer(self):
-        return _fixed_indexer_cute(self.size, self.stride, self.offset)
+        return _hierarchical_indexer_cute(self.size, self.stride, self.offset)
 
     FixedLayout.make_indexer = cutedsl_make_indexer  # type: ignore[assignment]
     try:
@@ -111,7 +119,7 @@ def wrap_choice_render_with_cutedsl_indexer(choice: Any) -> None:
 
     See Note [CuteDSL indexer patch]:
     CuteDSL handles tensor strides internally, so template rendering must use
-    colexicographic indexing.
+    hierarchical indexing.
     """
     original_make_kernel_render = choice.make_kernel_render
 
@@ -174,8 +182,54 @@ def _supports_nontrivial_mask_graphs() -> bool:
     return torch.cuda.get_device_capability()[0] == 10
 
 
+def _is_symbol_from_tensor_shape(symbol: sympy.Symbol, shape_env: Any) -> bool:
+    """Check if a symbol originates from a tensor size/stride (TensorPropertySource)."""
+    from torch._dynamo.source import TensorPropertySource
+
+    sources = shape_env.var_to_sources.get(symbol, [])
+    return any(isinstance(s, TensorPropertySource) for s in sources)
+
+
+def _has_unsupported_captured_scalars(
+    score_mod_other_buffers: Sequence[Any],
+    mask_mod_other_buffers: Sequence[Any],
+) -> bool:
+    """Check if any captured buffers are dynamic scalars that cannot be inlined.
+
+    When compiling with dynamic=True, captured Python scalars in score_mod or
+    mask_mod may become:
+    - sympy symbols from LocalSource (captured ints) - NOT from tensor shapes
+    - 0-dim CPU tensors (captured floats)
+
+    Symbols from TensorPropertySource (tensor size/stride) are fine because they
+    get resolved at runtime.
+
+    The FLASH backend cannot inline captured scalar symbolic values into the CuteDSL template.
+    """
+    from torch._inductor.virtualized import V
+
+    shape_env = V.graph.sizevars.shape_env
+
+    for buf in list(score_mod_other_buffers) + list(mask_mod_other_buffers):
+        # Captured int becomes sympy.Symbol - check if it's NOT from a tensor shape
+        if isinstance(buf, sympy.Expr):
+            for symbol in buf.free_symbols:
+                if not _is_symbol_from_tensor_shape(symbol, shape_env):
+                    return True
+        # Captured float becomes 0-dim TensorBox on CPU
+        if isinstance(buf, TensorBox):
+            device = buf.get_device()
+            size = buf.get_size()
+            if device is not None and device.type == "cpu" and len(size) == 0:
+                # 0-dimensional CPU tensor (scalar) - can't be inlined into CUDA kernel
+                return True
+    return False
+
+
 def _can_use_flex_flash_attention(
-    subgraph: Subgraph, mask_graph: Subgraph, num_score_mod_placeholders: int
+    subgraph: Subgraph,
+    mask_graph: Subgraph,
+    num_score_mod_placeholders: int,
 ) -> tuple[bool, str]:
     """Check if flex flash attention can be used for the given inputs.
 
@@ -190,6 +244,7 @@ def _can_use_flex_flash_attention(
             False,
             "Input buffers require gradients (not supported by flash attention)",
         )
+
     mask_trivial = is_trivial_mask_graph(mask_graph.graph_module)
 
     if mask_trivial:
@@ -228,7 +283,9 @@ def _use_flex_flash_attention(
         return False
 
     can_use, reason = _can_use_flex_flash_attention(
-        subgraph, mask_graph, num_score_mod_placeholders
+        subgraph,
+        mask_graph,
+        num_score_mod_placeholders,
     )
 
     if not can_use:
@@ -441,7 +498,7 @@ def create_flex_flash_attention_backward_kernel(
         raise RuntimeError("CUTE flash attention not available")
 
     batch_size, num_heads, seq_len_q, head_dim = query.get_size()
-    v_head_dim = value.get_size()[-1]
+    _, num_heads_kv, seq_len_kv, v_head_dim = value.get_size()
     device = query.get_device()
     dtype = query.get_dtype()
     assert device is not None
@@ -457,25 +514,26 @@ def create_flex_flash_attention_backward_kernel(
     )
 
     grad_key_strides = infer_dense_strides(
-        [batch_size, num_heads, value.get_size()[2], head_dim], key.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, head_dim], key.get_stride()
     )
     grad_key = empty_strided(
-        size=[batch_size, num_heads, value.get_size()[2], head_dim],
+        size=[batch_size, num_heads_kv, seq_len_kv, head_dim],
         stride=grad_key_strides,
         dtype=dtype,
         device=device,
     )
 
     grad_value_strides = infer_dense_strides(
-        [batch_size, num_heads, value.get_size()[2], v_head_dim], value.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, v_head_dim], value.get_stride()
     )
     grad_value = empty_strided(
-        size=[batch_size, num_heads, value.get_size()[2], v_head_dim],
+        size=[batch_size, num_heads_kv, seq_len_kv, v_head_dim],
         stride=grad_value_strides,
         dtype=dtype,
         device=device,
     )
 
+    # we use dq as the output layout
     output_layout = FixedLayout(
         device=device,
         dtype=dtype,
