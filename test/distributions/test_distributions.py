@@ -5336,12 +5336,9 @@ class TestDistributionShapes(DistributionsTestCase):
             tweedie.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3))
         )
 
-
     def test_tweedie_shape_tensor_params(self):
         tweedie = Tweedie(
-            torch.tensor([2.0, 3.0]),
-            torch.tensor([1.0, 1.5]),
-            torch.tensor([1.5, 1.6])
+            torch.tensor([2.0, 3.0]), torch.tensor([1.0, 1.5]), torch.tensor([1.5, 1.6])
         )
         self.assertEqual(tweedie._batch_shape, torch.Size((2,)))
         self.assertEqual(tweedie._event_shape, torch.Size(()))
