@@ -177,11 +177,6 @@ def is_trivial_mask_graph(graph_module: GraphModule) -> bool:
 
 
 @functools.lru_cache(maxsize=1)
-def _supports_nontrivial_mask_graphs() -> bool:
-    """Currently only supported on Blackwell (SM100) GPUs."""
-    return torch.cuda.get_device_capability()[0] == 10
-
-
 def _is_symbol_from_tensor_shape(symbol: sympy.Symbol, shape_env: Any) -> bool:
     """Check if a symbol originates from a tensor size/stride (TensorPropertySource)."""
     from torch._dynamo.source import TensorPropertySource
@@ -243,17 +238,6 @@ def _can_use_flex_flash_attention(
         return (
             False,
             "Input buffers require gradients (not supported by flash attention)",
-        )
-
-    mask_trivial = is_trivial_mask_graph(mask_graph.graph_module)
-
-    if mask_trivial:
-        return True, ""
-
-    if not _supports_nontrivial_mask_graphs():
-        return (
-            False,
-            "NYI: Non-trivial mask graphs only supported on Blackwell (SM100) for flash attention",
         )
 
     return True, ""
@@ -405,14 +389,6 @@ def _can_use_flex_flash_attention_backward(
 ) -> tuple[bool, str]:
     if not ensure_flash_available():
         return False, "CUTE flash attention is not available"
-
-    mask_trivial = is_trivial_mask_graph(mask_graph.graph_module)
-    if not mask_trivial:
-        if not _supports_nontrivial_mask_graphs():
-            return (
-                False,
-                "NYI: Block sparsity in backward only supported on SM100",
-            )
 
     if input_buffers_require_grads(
         fw_subgraph.graph_module, num_score_mod_placeholders

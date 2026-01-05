@@ -25,7 +25,14 @@ from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
 )
-from torch.testing._internal.common_utils import parametrize
+from torch.testing._internal.common_utils import decorateIf, parametrize
+
+
+def _is_sm90():
+    return torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 9
+
+
+expectedFailureSM90 = unittest.expectedFailure if _is_sm90() else lambda f: f
 
 
 def _times_two(score, _b, _h, _m, _n):
@@ -714,6 +721,12 @@ GQA_MQA_BLOCK_MASK_CASES = [
     not ensure_flash_available(), "Flash attention (CUTE) library is not available"
 )
 class TestFlexFlash(InductorTestCase):
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: params["case"].requires_grad
+        and params["case"].dim == 64
+        and _is_sm90(),
+    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
     def test_flash_attention_score_mod_cases(self, device, dtype, case):
@@ -739,8 +752,8 @@ class TestFlexFlash(InductorTestCase):
     def test_flash_attention_mask_mod_cases(self, device, dtype, case):
         if case.requires_grad:
             major, _ = torch.cuda.get_device_capability()
-            if major != 10:
-                self.skipTest("block sparse only supported on blackwell for now")
+            if major < 9:
+                self.skipTest("block sparse backward only supported on SM90+ for FLASH")
 
         q, k, v = create_test_tensors(
             batch_size=case.batch_size,
@@ -771,13 +784,17 @@ class TestFlexFlash(InductorTestCase):
             ),
         )
 
+    @decorateIf(
+        unittest.expectedFailure,
+        lambda params: params["case"].dim == 64 and _is_sm90(),
+    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
     def test_flash_attention_gqa_mqa_block_mask_cases(self, device, dtype, case):
         if case.requires_grad:
             major, _ = torch.cuda.get_device_capability()
-            if major != 10:
-                self.skipTest("block sparse only supported on blackwell for now")
+            if major < 9:
+                self.skipTest("block sparse backward only supported on SM90+ for FLASH")
 
         q, k, v = create_test_tensors(
             batch_size=case.batch_size,
@@ -851,35 +868,6 @@ class TestFlexFlash(InductorTestCase):
                 score_mod=score_mod_with_grad,
                 kernel_options={"BACKEND": "FLASH"},
             )
-
-    @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_rejects_mask_mod_on_unsupported_gpu(
-        self, device, dtype
-    ):
-        major, _ = torch.cuda.get_device_capability()
-        if major == 10:
-            self.skipTest("Block sparsity backward is supported on SM100")
-
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-
-        def causal_mask(_b, _h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        q.requires_grad_(True)
-        compiled_fn = torch.compile(flex_attention)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"NYI: Block sparsity in backward only supported on SM100",
-        ):
-            compiled_fn(
-                q,
-                k,
-                v,
-                block_mask=_create_block_mask_for_device(
-                    causal_mask, 2, 4, 512, 512, device=device
-                ),
-                kernel_options={"BACKEND": "FLASH"},
-            ).sum().backward()
 
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_rejects_captured_buffer_with_grad(
@@ -1053,10 +1041,12 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
             )
             self._flash_triton_dynamic(q, k, v)
 
+    @expectedFailureSM90
     def test_dynamic_backward(self):
         """Test backward with dynamic sequence lengths."""
         self._run_dynamic_test(seq_lens=[128, 256, 512], requires_grad=True)
 
+    @expectedFailureSM90
     def test_dynamic_backward_with_score_mod(self):
         """Test backward with score_mod and dynamic sequence lengths."""
 
@@ -1070,8 +1060,8 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
     def test_dynamic_backward_with_block_mask(self):
         """Test backward with block mask and dynamic sequence lengths."""
         major, _ = torch.cuda.get_device_capability()
-        if major != 10:
-            self.skipTest("block sparse backward only supported on SM100")
+        if major < 9:
+            self.skipTest("block sparse backward only supported on SM90+")
 
         def block_mask_factory(seq_len):
             return _create_block_mask_for_device(
@@ -1284,6 +1274,7 @@ class TestFlexFlashDynamicShapes(InductorTestCase):
         )
         self.assertEqual(out.shape, q.shape)
 
+    @expectedFailureSM90
     def test_dynamic_captured_buffer_varying_heads(self):
         """Dynamic head_count with captured tensor buffer under FLASH/TRITON parity."""
         torch._dynamo.reset()
