@@ -24,6 +24,7 @@ from torch.distributed.tensor._ops.utils import (
 )
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -812,13 +813,16 @@ def _flip_strategy_impl(
     for input_placement_strategy in input_strategy.strategies:
         input_src_spec = input_placement_strategy.output_spec
 
-        # If sharded on any flip dimension, we need to replicate
+        # If sharded on any flip dimension, we need to replicate.
+        # Use inverted logic to default to Replicate() for unknown placement types.
         input_tgt_placements = []
         for placement in input_src_spec.placements:
-            if isinstance(placement, Shard) and placement.dim in flip_dims:
-                input_tgt_placements.append(Replicate())
-            else:
+            if isinstance(placement, (Replicate, Partial)):
                 input_tgt_placements.append(placement)
+            elif isinstance(placement, (Shard, _StridedShard)) and placement.dim not in flip_dims:
+                input_tgt_placements.append(placement)
+            else:
+                input_tgt_placements.append(Replicate())
 
         input_tgt_spec = DTensorSpec(
             placements=tuple(input_tgt_placements),
