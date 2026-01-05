@@ -96,8 +96,8 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
       : device_id_(std::exchange(other.device_id_, -1)),
         green_ctx_(std::exchange(other.green_ctx_, nullptr)),
         context_(std::exchange(other.context_, nullptr)),
-        parent_stream_(std::exchange(other.parent_stream_, nullptr)),
-        curr_stream_idx_(std::exchange(other.curr_stream_idx_, -1)) {
+        parent_stream_(std::exchange(other.parent_stream_, nullptr)) {
+        curr_stream_idx_.exchange(other.curr_stream_idx_);
         std::swap(this->green_ctx_streams_, other.green_ctx_streams_);
   }
 #else
@@ -128,7 +128,7 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
       green_ctx_ = std::exchange(other.green_ctx_, nullptr);
       context_ = std::exchange(other.context_, nullptr);
       parent_stream_ = std::exchange(other.parent_stream_, nullptr);
-      curr_stream_idx_ = std::exchange(other.curr_stream_idx_, -1);
+      curr_stream_idx_.exchange(other.curr_stream_idx_);
       std::swap(this->green_ctx_streams_, other.green_ctx_streams_);
     }
     return *this;

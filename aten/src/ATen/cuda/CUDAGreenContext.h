@@ -41,6 +41,6 @@ class TORCH_CUDA_CPP_API GreenContext {
   CUcontext context_ = nullptr;
   cudaStream_t parent_stream_ = nullptr;
   std::array<CUstream, kStreamPerGreenContextPool> green_ctx_streams_;
-  int32_t curr_stream_idx_ = -1;
+  std::atomic<int32_t> curr_stream_idx_ = -1;
 };
 } // namespace at::cuda
