@@ -985,12 +985,48 @@ def validate_args_and_maybe_create_graph_inputs(
     description: str,
     sub_args_names: Sequence[str] | None = None,
 ) -> list[Any]:
-    from . import AutogradFunctionContextVariable
     from .builder import wrap_fx_proxy_cls
 
     assert tracer.parent is not None
 
-    if set_subgraph_inputs == "flatten_manual":
+    if set_subgraph_inputs == "automatic":
+        # Just rely on the Dynamo tracing to find the inputs of the subgraph and
+        # lift them.
+        return sub_args
+    elif set_subgraph_inputs == "flatten_automatic":
+        from torch._dynamo.external_utils import get_state_dict_values
+
+        # The goal of flatten_automatic is to extract all tensor variables from the
+        # inputs, in the order of *args and **kwargs, and immediately lift them as
+        # subgraph inputs. It's possible that a subgraph input might not actually be
+        # used in the subgraph, but that's acceptable.
+        #
+        # This behavior is beneficial for:
+        #   - local_map (TODO), which wants the same ordering as the original function args
+        #   - invoke_subgraph's upcoming `is_pure` logic, which needs a stable, guaranteed
+        #     ordering of subgraph inputs for a simpler implementation.
+        for arg in sub_args:
+            if isinstance(arg, variables.UnspecializedNNModuleVariable):
+                states = _make_inlined(tx, get_state_dict_values)(
+                    arg
+                ).unpack_var_sequence(tx)
+                for state in states:
+                    if isinstance(state, variables.TensorVariable):
+                        tracer.maybe_lift_tracked_freevar_to_input(state.proxy)
+
+        flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
+            ListVariable(sub_args)
+        ).unpack_var_sequence(tx)
+
+        # lift the tensor variables as subgraph inputs right away.
+        for arg in flat_args.unpack_var_sequence(tx):
+            if isinstance(arg, variables.TensorVariable):
+                tracer.maybe_lift_tracked_freevar_to_input(arg.proxy)
+
+        return _make_inlined(tx, pytree.tree_unflatten)(
+            flat_args, tree_spec
+        ).unpack_var_sequence(tx)
+    elif set_subgraph_inputs == "flatten_manual":
         flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
             ListVariable(sub_args)
         ).unpack_var_sequence(tx)
@@ -1014,10 +1050,7 @@ def validate_args_and_maybe_create_graph_inputs(
         for idx, a in enumerate(sub_args):
             assert isinstance(a, VariableTracker)
             new_arg = None
-            if set_subgraph_inputs == "automatic":
-                args.append(a)
-                continue
-            elif set_subgraph_inputs == "automatic_with_forced_inputs":
+            if set_subgraph_inputs == "automatic_with_forced_inputs":
                 if isinstance(a, variables.TensorVariable):
                     node = a.maybe_fx_node()
                     assert node is not None
@@ -1053,17 +1086,6 @@ def validate_args_and_maybe_create_graph_inputs(
                 tracer.create_graph_input(
                     arg_name, a.python_type(), a.as_python_constant()
                 )
-                new_arg = a
-            # Weird special case, we probably want to delete it or fold it
-            # into the next case (of `a` being placeable into a graph)
-            elif isinstance(a, AutogradFunctionContextVariable):
-                example_value = a.as_proxy().node.meta["example_value"]
-                arg_name = (
-                    a.as_proxy().node.name
-                    if sub_args_names is None
-                    else sub_args_names[idx]
-                )
-                tracer.create_graph_input(arg_name, a.python_type(), example_value)
                 new_arg = a
             # If `a` can be put into a graph
             elif a.maybe_fx_node() is not None:
@@ -1421,13 +1443,14 @@ def get_hop_args(
         sub_args_names,
     )
 
-    validate_args_and_maybe_create_graph_inputs(
-        sub_kwargs.values(),  # type: ignore[arg-type]
-        subtracer,
-        tx,
-        set_subgraph_inputs="automatic",
-        description=description,
-    )
+    if sub_kwargs:
+        validate_args_and_maybe_create_graph_inputs(
+            sub_kwargs.values(),  # type: ignore[arg-type]
+            subtracer,
+            tx,
+            set_subgraph_inputs=set_subgraph_inputs,
+            description=description,
+        )
     return args
 
 
@@ -1458,7 +1481,11 @@ def speculate_subgraph_with_auto_output_flattening(
     # backward where we do need to account for all the inputs of the backwards
     # to be lifted as inputs for making the fwd-bwd graph consistent.
     set_subgraph_inputs: Literal[
-        "automatic", "automatic_with_forced_inputs", "flatten_manual", "manual"
+        "automatic",
+        "automatic_with_forced_inputs",
+        "flatten_manual",
+        "manual",
+        "flatten_automatic",
     ] = "automatic",
     # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
     # access intermediates from the subgraph, this is useful for mutation
@@ -1591,11 +1618,12 @@ def speculate_subgraph_with_auto_output_flattening(
         "automatic",
         "automatic_with_forced_inputs",
         "flatten_manual",
+        "flatten_automatic",
         "manual",
     }, "Please use one of the supported set_subgraph_inputs options."
 
     # See NOTE [Temporary argument `set_subgraph_inputs`]
-    if sub_kwargs and set_subgraph_inputs != "automatic":
+    if sub_kwargs and "automatic" not in set_subgraph_inputs:
         unimplemented(
             gb_type="invalid set_subgraph_inputs and sub_kwargs settings",
             context=f"set_subgraph_inputs: {set_subgraph_inputs}, sub_kwargs: {sub_kwargs}",
@@ -1814,9 +1842,7 @@ def speculate_subgraph(
     # 3. if your HOP must preserve inputs that are not tensor or symnode as placeholders e.g. AutogradFunctionContextVariable
     # use set_subgraph_inputs="manual" (not recommended). We do not recommend it in general because it has the
     # restriction that user need to manually control how to create placeholders and VariableTrackers for the args.
-    set_subgraph_inputs: Literal[
-        "automatic", "semi_automatic", "flatten_manual", "manual"
-    ] = "automatic",
+    set_subgraph_inputs: Literal["automatic", "flatten_manual", "manual"] = "automatic",
     restore_side_effects: bool = True,
     should_flatten_outputs: bool = False,
     # if should_flatten_outputs is True, `remove_consts_from_outputs` remove the
