@@ -65,7 +65,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: linux-jammy-py3.12-gcc11-halide
       docker-image-name: ci-image:pytorch-linux-jammy-py3.12-halide
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
@@ -89,7 +89,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: linux-jammy-py3.12-gcc11-pallas
       docker-image-name: ci-image:pytorch-linux-jammy-py3.12-pallas
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
@@ -108,38 +108,12 @@ jobs:
       test-matrix: ${{ needs.inductor-pallas-cpu-build.outputs.test-matrix }}
     secrets: inherit
 
-  inductor-pallas-gpu-build:
-    name: inductor-pallas-gpu-build
-    uses: ./.github/workflows/_linux-build.yml
-    needs: get-label-type
-    with:
-      build-environment: linux-jammy-cuda12.8-py3.12-gcc11
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-py3.12-pallas
-      cuda-arch-list: '9.0'
-      runner: linux.8xlarge.memory
-      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      test-matrix: |
-        { include: [
-          { config: "inductor-pallas-gpu", shard: 1, num_shards: 1, runner: "linux.aws.h100" },
-        ]}
-    secrets: inherit
-
-  inductor-pallas-gpu-test:
-    name: inductor-pallas-gpu-test
-    uses: ./.github/workflows/_linux-test.yml
-    needs: inductor-pallas-gpu-build
-    with:
-      build-environment: ${{ needs.inductor-pallas-gpu-build.outputs.build-environment }}
-      docker-image: ${{ needs.inductor-pallas-gpu-build.outputs.docker-image }}
-      test-matrix: ${{ needs.inductor-pallas-gpu-build.outputs.test-matrix }}
-    secrets: inherit
-
   inductor-triton-cpu-build:
     name: inductor-triton-cpu-build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: linux-jammy-py3.12-gcc11-triton-cpu
       docker-image-name: ci-image:pytorch-linux-jammy-py3.12-triton-cpu
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
