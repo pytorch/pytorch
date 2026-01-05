@@ -649,11 +649,25 @@ bool plan_errata_exception(
     const std::string& executionPlanTag) {
   static bool has_json =
       cudnn_frontend::load_from_config(errata_json_handle, "");
+  static auto hardcoded_errata_json_handle = nlohmann::json::parse(R"(
+            { "version" : 1, 
+              "rules"   : 
+                [ 
+                    { "rule_id"             : "ConvBwdData", 
+                      "operation"           : "ConvBwdData",
+                      "engine"              : 24, 
+                      "cudnn_version_start" : 8000, 
+                      "cudnn_version_end"   : -1 
+                    }
+            })");
   if (!has_json) {
-    return false;
+    return cudnn_frontend::check_errata(
+        hardcoded_errata_json_handle, executionPlanTag, handle, []() { return true; });
   } else {
     return cudnn_frontend::check_errata(
-        errata_json_handle, executionPlanTag, handle, []() { return true; });
+        errata_json_handle, executionPlanTag, handle, []() { return true; })
+    or cudnn_frontend::check_errata(
+        hardcoded_errata_json_handle, executionPlanTag, handle, []() { return true; });
   }
 }
 
