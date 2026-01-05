@@ -1000,11 +1000,7 @@ def validate_args_and_maybe_create_graph_inputs(
         # lift them.
         return sub_args
     elif set_subgraph_inputs == "flatten_automatic":
-<<<<<<< HEAD
         from torch._dynamo.external_utils import get_state_dict_values
-=======
-        from torch._dynamo.external_utils import get_params_and_buffers_list
->>>>>>> 5ebd13e448b ([wip][invoke_subgraph] Prototype no retracing for is_pure)
 
         # The goal of flatten_automatic is to extract all tensor variables from the
         # inputs, in the order of *args and **kwargs, and immediately lift them as
@@ -1017,23 +1013,12 @@ def validate_args_and_maybe_create_graph_inputs(
         #     ordering of subgraph inputs for a simpler implementation.
         for arg in sub_args:
             if isinstance(arg, variables.UnspecializedNNModuleVariable):
-<<<<<<< HEAD
                 states = _make_inlined(tx, get_state_dict_values)(
                     arg
                 ).unpack_var_sequence(tx)
                 for state in states:
                     if isinstance(state, variables.TensorVariable):
                         tracer.maybe_lift_tracked_freevar_to_input(state.proxy)
-=======
-                params_and_buffers = _make_inlined(tx, get_params_and_buffers_list)(
-                    arg
-                ).unpack_var_sequence(tx)
-                for param_or_buffer in params_and_buffers:
-                    if isinstance(param_or_buffer, variables.TensorVariable):
-                        tracer.maybe_lift_tracked_freevar_to_input(
-                            param_or_buffer.proxy
-                        )
->>>>>>> 5ebd13e448b ([wip][invoke_subgraph] Prototype no retracing for is_pure)
 
         flat_args, tree_spec = _make_inlined(tx, pytree.tree_flatten)(
             ListVariable(list(sub_args))
@@ -5180,16 +5165,16 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
         to lift the subgraph args. We can follow the exact same process here.
 
         """
-        from torch._dynamo.external_utils import get_params_and_buffers_list
+        from torch._dynamo.external_utils import get_state_dict_values
 
         lifted_tensor_args = {}
         for arg in args:
             if isinstance(arg, variables.UnspecializedNNModuleVariable):
-                for param_buffer in _make_inlined(tx, get_params_and_buffers_list)(
+                for state in _make_inlined(tx, get_state_dict_values)(
                     arg
                 ).unpack_var_sequence(tx):
-                    if isinstance(param_buffer, variables.TensorVariable):
-                        lifted_tensor_args[param_buffer] = None
+                    if isinstance(state, variables.TensorVariable):
+                        lifted_tensor_args[state] = None
 
         flat_args, _ = _make_inlined(tx, pytree.tree_flatten)(
             ListVariable(list(args))
@@ -5408,7 +5393,6 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                 ],
             )
 
-<<<<<<< HEAD
         # Extract nested compile config and store in node meta
         # This will be used in regional_inductor_invoke_subgraph
         config = None
@@ -5427,12 +5411,11 @@ class InvokeSubgraphHigherOrderVariable(WrapHigherOrderVariable):
                     exc_info=True,
                 )
                 raise
-=======
+
         if is_pure:
             self.save_subgraph_output_types_assuming_pure(
                 tx, fn_vt, invoke_subgraph_cache, body_r
             )
->>>>>>> a8e74b860f1 ([wip][invoke_subgraph] Prototype no retracing for is_pure)
 
         p_args = (
             p_args[0],

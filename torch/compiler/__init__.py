@@ -662,13 +662,9 @@ def skip_all_guards_unsafe(guard_entries):
     return [False for entry in guard_entries]
 
 
-<<<<<<< HEAD
 def nested_compile_region(
-    fn=None, options: Optional[NestedCompileRegionOptions] = None
+    fn=None, options: Optional[NestedCompileRegionOptions] = None, is_pure=False
 ):
-=======
-def nested_compile_region(fn=None, is_pure=False):
->>>>>>> a8e74b860f1 ([wip][invoke_subgraph] Prototype no retracing for is_pure)
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
     compile region (which is often repeated in the full model) whose code can be
@@ -694,20 +690,16 @@ def nested_compile_region(fn=None, is_pure=False):
     compilation cost only when required.
 
     Args:
-<<<<<<< HEAD
-        fn: The function to wrap
+        fn: The function to be marked as a nested compile region. Can be None
+            when used as a decorator.
         options: Optional backend to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
-=======
-        fn: The function to be marked as a nested compile region. Can be None
-            when used as a decorator.
         is_pure: If True, indicates that the function is pure (has no side effects
             and produces the same output for the same inputs). This allows the
             compiler to apply additional tracing optimizations in the compiler
             frontend (specifically TorchDynamo) to assume that a single traced
             graph is sound to be reused again.
->>>>>>> a8e74b860f1 ([wip][invoke_subgraph] Prototype no retracing for is_pure)
     """
 
     if options is not None:
@@ -722,11 +714,7 @@ def nested_compile_region(fn=None, is_pure=False):
         mark_compile_region as _mark_compile_region,
     )
 
-<<<<<<< HEAD
-    return _mark_compile_region(fn, options=options)
-=======
-    return _mark_compile_region(fn, is_pure)
->>>>>>> a8e74b860f1 ([wip][invoke_subgraph] Prototype no retracing for is_pure)
+    return _mark_compile_region(fn, options=options, is_pure=is_pure)
 
 
 def load_compiled_function(

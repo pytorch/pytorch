@@ -165,16 +165,12 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 invoke_subgraph = InvokeSubgraphHOP()
 
 
-<<<<<<< HEAD
 # Registers dispatches for SAC
 redirect_to_mode(invoke_subgraph, _CachingTorchDispatchMode)
 redirect_to_mode(invoke_subgraph, _CachedTorchDispatchMode)
 
 
-def invoke_subgraph_placeholder(func, *args, **kwargs):
-=======
 def invoke_subgraph_placeholder(func, is_pure, *args, **kwargs):
->>>>>>> a8e74b860f1 ([wip][invoke_subgraph] Prototype no retracing for is_pure)
     if torch.compiler.is_dynamo_compiling():
         # This is just a placeholder for Dynamo to replace with invoke_subgraph
         raise RuntimeError("invoke_subgraph should not be called directly in Dynamo")
@@ -187,29 +183,17 @@ def invoke_subgraph_placeholder(func, is_pure, *args, **kwargs):
 
         from torch._higher_order_ops.utils import setup_compilation_env
 
-<<<<<<< HEAD
         with setup_compilation_env() as backend:
             return torch.compile(
                 _invoke_subgraph_placeholder_wrapper,
                 backend=backend,
                 fullgraph=True,
-            )(func, args)
-=======
-                return torch.compile(
-                    _invoke_subgraph_placeholder_wrapper,
-                    backend=backend,
-                    fullgraph=True,
-                )(func, is_pure, args)
->>>>>>> a8e74b860f1 ([wip][invoke_subgraph] Prototype no retracing for is_pure)
+            )(func, is_pure, args)
 
     return func(*args, **kwargs)
 
 
-<<<<<<< HEAD
-def mark_compile_region(fn=None, options: Optional[NestedCompileRegionOptions] = None):
-=======
-def mark_compile_region(fn=None, is_pure=False):
->>>>>>> a8e74b860f1 ([wip][invoke_subgraph] Prototype no retracing for is_pure)
+def mark_compile_region(fn=None, options: Optional[NestedCompileRegionOptions] = None, is_pure=False):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
     reuse the compiled artifact, instead of the usual way of aggressively
@@ -218,19 +202,16 @@ def mark_compile_region(fn=None, is_pure=False):
     Under the hood, it tells TorchDynamo to use InvokeSubgraph HOP for the
     region. For PyTorch eager, this is a no-op.
 
-<<<<<<< HEAD
     Args:
         fn: The function to wrap
         options: Optional config to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
-=======
-    is_pure=True indicates that the function is pure (has no side effects and
-    produces the same output for the same inputs). This allows the compiler to
-    apply additional tracing optimizations in the compiler frontend
-    (specifically TorchDynamo) to assume that a single traced graph is sound to
-    be reused again.
->>>>>>> a8e74b860f1 ([wip][invoke_subgraph] Prototype no retracing for is_pure)
+        is_pure: If True, indicates that the function is pure (has no side
+            effects and produces the same output for the same inputs). This
+            allows the compiler to apply additional tracing optimizations in
+            the compiler frontend (specifically TorchDynamo) to assume that a
+            single traced graph is sound to be reused again.
     """
 
     def wrap(func):
