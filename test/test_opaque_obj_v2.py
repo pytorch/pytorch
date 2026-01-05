@@ -237,13 +237,13 @@ class TestOpaqueObject(TestCase):
         self.lib.define(
             f"queue_pop({get_opaque_type_name(OpaqueQueue)} a) -> Tensor",
         )
-        
+
         def pop_impl(queue: OpaqueQueue) -> torch.Tensor:
             assert isinstance(queue, OpaqueQueue)
             return queue.pop()
 
         self.lib.impl("queue_pop", pop_impl, "CompositeExplicitAutograd")
-        
+
         def pop_impl_fake(q: OpaqueQueue) -> torch.Tensor:
             # This is not accurate since the queue could have tensors that are
             # not rank 1
@@ -252,7 +252,7 @@ class TestOpaqueObject(TestCase):
             return torch.empty(u0)
 
         self.lib._register_fake("queue_pop", pop_impl_fake)
-        
+
         torch.library._register_effectful_op(
             "_TestOpaqueObject::queue_pop", EffectType.ORDERED
         )
@@ -291,6 +291,7 @@ class TestOpaqueObject(TestCase):
 
         @torch.library.register_fake("_TestOpaqueObject::noisy_inject", lib=self.lib)
         def noisy_inject_fake(x: torch.Tensor, obj: RNGState) -> torch.Tensor:
+            assert isinstance(obj, RNGState)
             assert obj.seed >= 0
             return torch.empty_like(x)
 
@@ -329,7 +330,7 @@ class TestOpaqueObject(TestCase):
             elif config.mode == "double":
                 return x + x
             else:
-                return x
+                return x.clone()
 
         @torch.library.register_fake(
             "_TestOpaqueObject::process_with_config", lib=self.lib
@@ -360,7 +361,7 @@ class TestOpaqueObject(TestCase):
             elif config.config.mode == "double":
                 return x + x
             else:
-                return x
+                return x.clone()
 
         @torch.library.register_fake(
             "_TestOpaqueObject::process_nested_config", lib=self.lib
@@ -388,9 +389,10 @@ class TestOpaqueObject(TestCase):
             if config is None:
                 return x.clone()
             else:
+                x_res = x.clone()
                 for size in config:
-                    x += size.size
-                return x
+                    x_res += size.size
+                return x_res
 
         @torch.library.register_fake(
             "_TestOpaqueObject::process_multiple_sizes", lib=self.lib
@@ -569,6 +571,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
     def test_compile1(self):
         def foo(rng_state, x):
+            assert isinstance(rng_state, RNGState)
             x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
             x = x * x
             x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
@@ -590,9 +593,9 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             f"""\
-def forward(self, L_x_ : torch.Tensor, L_rng_state_ : {fx_class}):
-    l_x_ = L_x_
+def forward(self, L_rng_state_ : {fx_class}, L_x_ : torch.Tensor):
     l_rng_state_ = L_rng_state_
+    l_x_ = L_x_
     x = torch.ops._TestOpaqueObject.noisy_inject(l_x_, l_rng_state_);  l_x_ = None
     x_1 = x * x;  x = None
     x_2 = torch.ops._TestOpaqueObject.noisy_inject(x_1, l_rng_state_);  x_1 = l_rng_state_ = None
@@ -603,9 +606,9 @@ def forward(self, L_x_ : torch.Tensor, L_rng_state_ : {fx_class}):
             backend.fw_graphs[0].code.strip(),
             """\
 def forward(self, arg0_1, arg1_1):
-    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg0_1, arg1_1);  arg0_1 = None
+    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg1_1, arg0_1);  arg1_1 = None
     mul = torch.ops.aten.mul.Tensor(noisy_inject, noisy_inject);  noisy_inject = None
-    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg1_1);  mul = arg1_1 = None
+    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg0_1);  mul = arg0_1 = None
     add = torch.ops.aten.add.Tensor(noisy_inject_1, noisy_inject_1);  noisy_inject_1 = None
     return (add,)""",  # noqa: B950
         )
@@ -694,7 +697,10 @@ def forward(self, arg0_1, arg1_1):
             pop2 = nested_queue.pop_q()
             return pop1 + pop2
 
-        inp = (NestedQueue(OpaqueQueue([], torch.empty(0).fill_(-1))), torch.randn(2, 3))
+        inp = (
+            NestedQueue(OpaqueQueue([], torch.empty(0).fill_(-1))),
+            torch.randn(2, 3),
+        )
         backend = AotEagerAndRecordGraphs()
         res = torch.compile(foo, fullgraph=True, backend=backend)(*inp)
         self.assertEqual(res, foo(*inp))
@@ -753,7 +759,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
     add_4 = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
     return (getitem_6, add_4)""",  # noqa: B950
         )
-
 
     def test_compile_global(self):
         counter = Counter(0, 10)

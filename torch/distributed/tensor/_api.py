@@ -1426,6 +1426,8 @@ register_opaque_type(
         "shape": MemberType.CONSTANT,
         "mesh_dim_names": MemberType.CONSTANT,
         "get_group": MemberType.CONSTANT,
+        "_hash": MemberType.CONSTANT,
+        "_create_flatten_mesh": MemberType.CONSTANT,
         # INLINED: Inline these methods without guards
         "_coordinate_on_dim": MemberType.INLINED,
         "_dim_group_names": MemberType.INLINED,
