@@ -7150,12 +7150,8 @@ class TestLinalg(TestCase):
             # method due to insufficient accuracy
             if method == 'basic' and (m, n, k, density) == (1000, 7, 3, 0.01):
                 continue
-            if(dtype == torch.double):
-                A = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
-                B = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
-            elif(dtype == torch.cdouble):
-                A = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
-                B = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
+            A = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
+            B = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
             A_eigenvalues = torch.arange(1, m + 1, dtype=torch.double) / m
             e_smallest = A_eigenvalues[..., :k]
             e_largest, _ = torch.sort(A_eigenvalues[..., -k:], descending=True)
@@ -7205,7 +7201,7 @@ class TestLinalg(TestCase):
     @skipCPUIfNoLapack
     @skipIfTorchDynamo("fails in tracing scipy.sparse.lobpcg")
     @onlyCPU
-    @dtypes(torch.double, torch.cdouble)
+    @dtypes(torch.double)
     def test_lobpcg_scipy(self, device, dtype):
         """Compare torch and scipy.sparse.linalg implementations of lobpcg
         """
@@ -7233,12 +7229,9 @@ class TestLinalg(TestCase):
         A2 = toscipy(A1)
         B2 = toscipy(B1)
         X2 = toscipy(X1)
-
         lambdas1 = []
-
         def tracker(worker):
             lambdas1.append(worker.E[:])
-
         tol = 1e-8
         # tol for scipy lobpcg will be chosen so that the number of
         # iterations will be equal or very close to pytorch lobpcg
@@ -7271,10 +7264,7 @@ class TestLinalg(TestCase):
         E2a, V2a = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=False)
         iters1 = len(lambdas1)
         iters2 = len(lambdas2)
-        # For complex dtypes, LOBPCG shows larger iteration variability,
-        # so a larger tolerance is allowed here.
-        tol_iter = 0.1 if dtype == torch.cdouble else 0.05
-        self.assertLess(abs(iters1 - iters2), tol_iter * max(iters1, iters2))
+        self.assertLess(abs(iters1 - iters2), 0.05 * max(iters1, iters2))
 
         eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()

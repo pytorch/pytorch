@@ -665,7 +665,9 @@ def _lobpcg(
             A_ = bA[i]
             B_ = bB[i] if bB is not None else None
             X_ = (
-                torch.randn((m, n), dtype=A.dtype, device=device) if bX is None else bX[i]
+                    torch.randn((m, n), dtype=A.dtype, device=device)
+                    if bX is None
+                    else bX[i]
             )
             if not (len(X_.shape) == 2 and X_.shape == (m, n)):
                 raise AssertionError(

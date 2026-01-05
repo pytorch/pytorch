@@ -4998,11 +4998,10 @@ def random_sparse_pd_matrix(matrix_size, density=0.01, dtype=torch.double, **kwa
       while <A density is smaller than required>:
           <choose random i, j in range(matrix_size), theta in [0, 2*pi]>
           R = <rotation matrix (i,j,theta)>
-          A = R^T A R
+          A = R^H A R
     """
     import math
     torch = kwargs.get('torch', globals()['torch'])
-    dtype = kwargs.get('dtype', dtype)
     device = kwargs.get('device', 'cpu')
     data = {(i, i): float(i + 1) / matrix_size
             for i in range(matrix_size)}
