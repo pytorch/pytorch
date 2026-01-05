@@ -219,7 +219,7 @@ def is_tf32_supported() -> bool:
     r"""Return a bool indicating if the current CUDA/ROCm device supports dtype tf32."""
     if torch.version.hip:
         prop_name = torch.cuda.get_device_properties().gcnArchName
-        archs = ("gfx94", "gfx95")
+        archs = ("gfx94", "gfx95", "gfx115")
         for arch in archs:
             if arch in prop_name:
                 return True
