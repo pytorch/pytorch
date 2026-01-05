@@ -89,7 +89,6 @@ from .bytecode_transformation import (
 from .code_context import code_context
 from .codegen import PyCodegen
 from .exc import (
-    ArgsMismatchError,
     augment_exc_message_with_hop_name,
     BackendCompilerFailed,
     collapse_resume_frames,
@@ -211,8 +210,6 @@ compare_op_handlers["in"] = lambda tx, args, _: handle_contains(
 compare_op_handlers["not in"] = lambda tx, args, _: handle_not(
     tx, [handle_contains(tx, [*reversed(args)], {})], {}
 )
-
-PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
 ExceptionVals: TypeAlias = Union[
     variables.ExceptionVariable,
@@ -2070,7 +2067,7 @@ class InstructionTranslatorBase(
         exit, exc = self.popn(2)
         assert exc is None
         self.push(exc)
-        # pyrefly: ignore [bad-argument-type]
+
         self.push(exit.call_function(self, [ConstantVariable.create(None)] * 3, {}))
 
     def WITH_CLEANUP_FINISH(self, inst: Instruction) -> None:
@@ -3842,13 +3839,12 @@ class InstructionTranslatorBase(
                 args = [contents[1]]
 
         if kw_names:
-            # pyrefly: ignore [bad-argument-type]
             args = args + contents[2 : -len(kw_names)]
-            # pyrefly: ignore [bad-argument-type]
+
             kwargs_list = contents[-len(kw_names) :]
-            # pyrefly: ignore [no-matching-overload]
+
             kwargs = dict(zip(kw_names, kwargs_list))
-            # pyrefly: ignore [bad-argument-type]
+
             assert len(kwargs) == len(kw_names)
         else:
             args = args + contents[2:]
@@ -4842,7 +4838,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # trace through.
             if (
                 hasattr(getattr(func, "fn", None), "_origin")
-                # pyrefly: ignore [missing-attribute]
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4916,20 +4911,22 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             if not config.dont_skip_tracing and tracing_ctx:
                 tracing_ctx.previously_inlined_functions[code] = result
 
+        sub_locals = None
         try:
-            # pyrefly: ignore [missing-attribute]
             sub_locals = func.bind_args(parent, args, kwargs)
         except TypeError as e:
-            # Wrap the general TypeError during bind_args() to the internal ArgsMismatchError with detailed info
-            raise ArgsMismatchError(  # noqa: B904
-                "{reason}.\n  func = {func}, args = {args}, kwargs = {kwargs}".format(
-                    reason=str(e),
-                    # pyrefly: ignore [missing-attribute]
-                    func=f"'{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}",
-                    args=[arg.python_type() for arg in args],
-                    kwargs=kwargs,
-                ),
+            unimplemented(
+                gb_type="failed to bind arguments when attempting to inline",
+                context=f"func='{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}; "
+                f"args = {[arg.python_type() for arg in args]}; kwargs = {kwargs}",
+                explanation=f"Argument mismatch when attempting to trace function {func.get_name()}.",
+                hints=[
+                    *graph_break_hints.USER_ERROR,
+                ],
+                from_exc=e,
             )
+
+        assert sub_locals is not None
 
         for v in itertools.chain(sub_locals.values()):
             if not isinstance(v, VariableTracker):
@@ -5201,6 +5198,8 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             else:
                 fglobals_value = _import_module(module_name)
             # Dont use lazy vt because we will do a setattr afterwards
+            # TODO: fix InstructionTranslator -> InstructionTranslatorBase
+            # pyrefly: ignore[bad-argument-type]
             fglobals_vt = VariableBuilder(self, module_source)(fglobals_value)
             global_source = AttrSource(module_source, name)
         else:
@@ -5210,6 +5209,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             globals_source = GlobalSource(globals_name)
             fglobals_value = self.f_globals  # type: ignore[assignment]
             # Dont use lazy vt because we will do a setattr afterwards
+            # pyrefly: ignore[bad-argument-type]
             fglobals_vt = VariableBuilder(self, globals_source)(fglobals_value)
             global_source = DictGetItemSource(globals_source, name)  # type: ignore[assignment]
 
@@ -5274,10 +5274,7 @@ class InliningGeneratorInstructionTranslator(InliningInstructionTranslator):
         top = self.pop()
         self.generated_items.append(top)
         if len(self.generated_items) > MAX_ITERATOR_LIMIT:
-            raise exc.InfiniteGeneratorError(
-                "Too many yield values in generator. Maybe you are inlining an infinite generator. "
-                f"If not, please report a bug at {PT2_ISSUE_TRACKER_URL}",
-            )
+            raise exc.InfiniteGeneratorError
         self.push(ConstantVariable.create(None))
         if (
             config.enable_faithful_generator_behavior

@@ -3268,7 +3268,7 @@ def iota(
 
 @register_lowering(aten.select_scatter, type_promotion_kind=None)
 def select_scatter(x, src, dim: int, index: int):
-    assert x.get_dtype() == src.get_dtype()
+    src = to_dtype(src, x.get_dtype())
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     if V.graph.sizevars.guard_or_false(sympy.Lt(index, 0)):
@@ -7633,10 +7633,31 @@ def with_effects(token, op, *args, **kwargs):
         )
 
     try:
-        args, kwargs = pytree.tree_map_only(
-            ir.TorchBindObject, lambda a: a.get_value(), (args, kwargs)
+
+        def convert_ir_to_value(a):
+            if isinstance(a, ir.TorchBindObject):
+                return a.get_value()
+            elif isinstance(a, TensorBox):
+                # TensorBox wraps StorageBox, which wraps the actual buffer
+                # We need to get the example tensor from the inner buffer
+                try:
+                    storage = a.data
+                    if hasattr(storage, "data") and hasattr(
+                        storage.data, "get_example"
+                    ):
+                        return (
+                            storage.data.get_example()
+                        )  # pyrefly: ignore[missing-attribute]
+                except (AttributeError, NotImplementedError):
+                    pass
+                # Fall back to returning the TensorBox itself if get_example fails
+                return a
+            return a
+
+        schema_args, schema_kwargs = pytree.tree_map(
+            convert_ir_to_value, (args, kwargs)
         )
-        schema = _get_schema(op, args, kwargs)
+        schema = _get_schema(op, schema_args, schema_kwargs)
     except RuntimeError as e:
         error_msg = str(e)
         log.warning(

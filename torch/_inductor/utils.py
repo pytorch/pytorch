@@ -2169,8 +2169,7 @@ def use_decompose_k_choice(
     decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
 
     return (
-        not torch.version.hip
-        and V.graph.sizevars.statically_known_true(
+        V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
                 sympy.Ge(k, decompose_k_threshold * n),
@@ -2411,7 +2410,7 @@ def use_cpp_gemm_template(
         return False
 
     int8_gemm = mat1.get_dtype() in [torch.uint8, torch.int8]
-    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8, torch.int8]
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1,
         mat2,

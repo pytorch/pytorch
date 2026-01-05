@@ -550,6 +550,8 @@ class IRNode:
     # traces back to where the IRNode is created in Inductor
     traceback: Optional[list[str]] = dataclasses.field(init=False)
     origin_node: Optional[torch.fx.Node] = dataclasses.field(init=False)
+    # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
+    annotations: dict[str, Any] = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -587,6 +589,8 @@ class IRNode:
             "traceback", traceback.format_stack() if config.debug_ir_traceback else None
         )
         self._post_init_setattr("origin_node", None)
+        # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
+        self._post_init_setattr("annotations", {})
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -5049,6 +5053,8 @@ class TemplateBuffer(OperationBuffer):
         self.make_kernel_render = make_kernel_render
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
+        # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
+        self.annotations: dict[str, Any] = {}
 
     def get_read_writes(self) -> dependencies.ReadWrites:
         return self.extract_read_writes(normalize=True)
@@ -5828,7 +5834,7 @@ class ExternKernel(InputsKernel):
         layout: OutputSpec,
         inputs: Sequence[Union[IRNode, Sequence[IRNode]]],
         constant_args: Sequence[Any] = (),
-        kwargs: Optional[dict[str, Any]] = None,
+        kwargs: dict[str, Any] | None = None,
         output_view: Optional[ReinterpretView] = None,
         python_kernel_name: Optional[str] = None,
         cpp_kernel_name: Optional[str] = None,
@@ -5851,6 +5857,8 @@ class ExternKernel(InputsKernel):
         self.unbacked_bindings = {}
         self.mutation_outputs = []
         self.fx_node = V.graph.current_node
+        # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
+        self.annotations: dict[str, Any] = {}
 
     def get_outputs(self) -> list[Buffer]:
         return [self, *self.mutation_outputs]
@@ -8220,10 +8228,11 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = cls.find_device(tensor_args, example_output)
 
-        if not device and isinstance(
-            kernel, torch._higher_order_ops.torchbind.CallTorchBind
+        # Default to CPU for torchbind methods or HOPs that don't produce tensors
+        if not device and (
+            isinstance(kernel, torch._higher_order_ops.torchbind.CallTorchBind)
+            or kernel is torch.ops.higher_order.print
         ):
-            # use CPU device for torchbind methods that don't take in or output any tensor, e.g. size()
             device = torch.device("cpu")
 
         if example_output is None:
@@ -8233,6 +8242,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
 
@@ -8244,6 +8254,7 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
+                kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
 
@@ -8311,6 +8322,7 @@ class ComplexView(FallbackKernel):
         nontensor_args: Sequence[Any],
         unflatten_args: Callable[..., Any],
         *,
+        kwargs: dict[str, Any] | None = None,
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
@@ -8319,6 +8331,7 @@ class ComplexView(FallbackKernel):
             tensor_args,
             nontensor_args,
             unflatten_args,
+            kwargs=kwargs,
             unbacked_bindings=unbacked_bindings,
         )
 
