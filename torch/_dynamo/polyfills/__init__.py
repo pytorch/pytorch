@@ -35,6 +35,7 @@ if TYPE_CHECKING:
         struct as struct,
         sys as sys,
         torch_c_nn as torch_c_nn,
+        traceback as traceback,
     )
 
 from torch.overrides import BaseTorchFunctionMode

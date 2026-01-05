@@ -42,6 +42,14 @@ torch.set_float32_matmul_precision("high")
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices"
 
 
+def _is_cuda_device(device) -> bool:
+    if isinstance(device, torch.device):
+        return device.type == "cuda"
+    if isinstance(device, str):
+        return "cuda" in device
+    return False
+
+
 def _fix_fp8_dtype_for_rocm(
     dtype: Union[torch.dtype, list[torch.dtype], tuple[torch.dtype]], device
 ) -> Union[torch.dtype, list[torch.dtype], tuple[torch.dtype]]:
@@ -54,7 +62,7 @@ def _fix_fp8_dtype_for_rocm(
     # Also it allows to enable FP8 inductor tests for CPU
     if (
         torch.version.hip
-        and ("cuda" in device)
+        and (_is_cuda_device(device))
         and ("gfx94" in torch.cuda.get_device_properties(0).gcnArchName.split(":")[0])
     ):
         # MI300 uses different float8 dtypes
@@ -81,7 +89,7 @@ class TestFP8Types(TestCase):
         We should not pick a XBLOCK larger than xnumel
         """
         float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
-        if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
+        if _is_cuda_device(device) and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
 
         def f(x):
@@ -94,7 +102,7 @@ class TestFP8Types(TestCase):
 
     @parametrize("dtype", (torch.float16, torch.bfloat16))
     def test_eager_fallback(self, dtype: torch.dtype, device: torch.device):
-        if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
+        if _is_cuda_device(device) and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
         weight_shape = (32, 16)
 
@@ -140,7 +148,7 @@ class TestFP8Types(TestCase):
     def test_valid_cast(
         self, dtype: torch.dtype, shape: str, dst_types: tuple, device: torch.device
     ):
-        if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
+        if _is_cuda_device(device) and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
         dst_types = _fix_fp8_dtype_for_rocm(dst_types, device=device)
         e4m3, e5m2 = dst_types
@@ -192,7 +200,7 @@ class TestFP8Types(TestCase):
         shape: str,
         device: torch.device,
     ):
-        if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
+        if _is_cuda_device(device) and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
         dst_dtype = _fix_fp8_dtype_for_rocm(dst_dtype, device=device)
 
@@ -215,7 +223,7 @@ class TestFP8Types(TestCase):
         self, float8_dtype: torch.dtype, shape: str, device: torch.device
     ):
         float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
-        if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
+        if _is_cuda_device(device) and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(
                 "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
             )
@@ -244,7 +252,7 @@ class TestFP8Types(TestCase):
     def test_amax_along_with_fp8_quant(
         self, float8_dtype: torch.dtype, shape: str, device: torch.device
     ):
-        if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
+        if _is_cuda_device(device) and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(f8_msg)
         float8_dtype = _fix_fp8_dtype_for_rocm(float8_dtype, device=device)
         shape = [int(dim) for dim in shape.split(",")]
@@ -282,7 +290,7 @@ class TestFP8Types(TestCase):
         shape: str,
         device: torch.device,
     ):
-        if device == "cuda" and not PLATFORM_SUPPORTS_FP8:
+        if _is_cuda_device(device) and not PLATFORM_SUPPORTS_FP8:
             raise unittest.SkipTest(
                 "FP8 is only supported on H100+ and sm_89 and MI300+ devices"
             )
@@ -816,11 +824,12 @@ class TestFP8Lowering(TestCase):
     @xfailIf(
         torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0)
     )  # cuBLAS 128-element blockwise scaling is only supported for CC 9.0
-    @parametrize("shape", ((16, 256, 256), (1024, 512, 1024)))
+    @parametrize("shape", ((16, 256, 256), (1024, 512, 1024), (32768, 4096, 4096)))
     @parametrize("use_fast_accum", (False, True))
     @parametrize(
-        "scaling_block_sizes", ((1, 128, 128, 128), (1, 128, 1, 128))
-    )  # (BlockWise1x128, BlockWise128x128), (BlockWise1x128, BlockWise1x128)
+        "scaling_block_sizes",
+        ((1, 128, 128, 128), (1, 128, 1, 128), (128, 128, 1, 128)),
+    )  # (BlockWise1x128, BlockWise128x128), (BlockWise1x128, BlockWise1x128), (BlockWise128x128, BlockWise1x128)
     def test_main_loop_scaling(
         self,
         shape: tuple[int, int, int],
