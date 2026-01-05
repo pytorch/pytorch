@@ -4616,6 +4616,22 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         test_pixel_shuffle_unshuffle_4D()
         test_pixel_shuffle_unshuffle_5D()
 
+    def test_pixel_unshuffle_empty_tensor_cuda(self):
+        # Test that empty tensors with large downscale factors don't cause
+        # stride calculation overflow on CUDA
+        downscale_factor = 4323455642275676160
+        input_tensor = torch.zeros((0, 0, 0), dtype=torch.float32)
+        layer = nn.PixelUnshuffle(downscale_factor=downscale_factor)
+
+        # CPU check
+        out_cpu = layer(input_tensor)
+        self.assertEqual(out_cpu.shape, torch.Size([0, 0, 0]))
+
+        # CUDA check, previously failed with stride overflow
+        if torch.cuda.is_available():
+            out_cuda = layer(input_tensor.cuda())
+            self.assertEqual(out_cuda.shape, torch.Size([0, 0, 0]))
+
     @set_default_dtype(torch.double)
     def test_pixel_shuffle_nhwc_cpu(self):
         input = torch.randn(3, 18, 4, 4, device='cpu')

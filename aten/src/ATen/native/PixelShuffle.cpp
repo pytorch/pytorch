@@ -116,6 +116,10 @@ Tensor math_pixel_shuffle(const Tensor& self, int64_t upscale_factor) {
 Tensor math_pixel_unshuffle(const Tensor& self, int64_t downscale_factor) {
   check_pixel_unshuffle_shapes(self, downscale_factor);
 
+  if (self.numel() == 0) {
+    return self.clone();
+  }
+
   // Format: (B1, ..., Bn), C, H, W
   int64_t c = self.size(-3);
   int64_t h = self.size(-2);
