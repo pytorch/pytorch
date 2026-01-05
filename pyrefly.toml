@@ -51,6 +51,7 @@ project-excludes = [
   "torch/_inductor/codecache.py",
   "torch/distributed/elastic/metrics/__init__.py",
   "torch/_inductor/fx_passes/bucketing.py",
+  "torch/_inductor/kernel/templates/cutedsl_mm_grouped_kernel.py",
   # ====
   "torch/onnx/_internal/exporter/_torchlib/ops/nn.py",
   "torch/include/**",
@@ -112,6 +113,7 @@ ignore-missing-imports = [
     "boto3.*",
     "dill.*",
     "usort.*",
+    "cutlass.*",
     "cutlass_library.*",
     "deeplearning.*",
     "einops.*",
