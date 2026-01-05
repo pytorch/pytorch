@@ -1,3 +1,4 @@
+# @generated
 # ======= BEGIN Dynamo patch =======
 # Owner(s): ["module: dynamo"]
 # ruff: noqa

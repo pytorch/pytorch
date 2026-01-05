@@ -1,6 +1,7 @@
---- /tmp/test_patma_orig.py	2026-01-06 00:48:44
-+++ test/dynamo/cpython/3_13/test_patma.py	2026-01-06 00:48:30
-@@ -1,11 +1,28 @@
+--- /tmp/test_patma_orig.py	2026-01-06 00:55:51
++++ test/dynamo/cpython/3_13/test_patma.py	2026-01-06 00:55:33
+@@ -1,11 +1,29 @@
++# @generated
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +# ruff: noqa
@@ -31,7 +32,7 @@
  
  
  @dataclasses.dataclass
-@@ -14,7 +31,7 @@
+@@ -14,7 +32,7 @@
      y: int
  
  
@@ -40,7 +41,7 @@
  
      def test_refleaks(self):
          # Hunting for leaks using -R doesn't catch leaks in the compiler itself,
-@@ -24,7 +41,7 @@
+@@ -24,7 +42,7 @@
              compile(file.read(), __file__, "exec")
  
  
@@ -49,7 +50,7 @@
  
      @staticmethod
      def check_sequence_then_mapping(x):
-@@ -129,7 +146,7 @@
+@@ -129,7 +147,7 @@
          self.assertEqual(self.check_mapping_then_sequence(GrandchildPost()), "seq")
  
  
@@ -58,7 +59,7 @@
  
      def test_patma_000(self):
          match 0:
-@@ -2888,7 +2905,7 @@
+@@ -2888,7 +2906,7 @@
                  self.assertEqual(h, 1)
  
  
@@ -67,21 +68,21 @@
  
      def assert_syntax_error(self, code: str):
          with self.assertRaises(SyntaxError):
-@@ -3015,6 +3032,13 @@
-                 pass
-         """)
- 
+@@ -3012,6 +3030,13 @@
+         self.assert_syntax_error("""
+         match ...:
+             case a as a:
++                pass
++        """)
++
 +    def test_multiple_assignments_to_name_in_pattern_6(self):
 +        self.assert_syntax_error("""
 +        match ...:
 +            case a as a + 1:  # NAME and expression with no ()
-+                pass
-+        """)
-+
-     def test_multiple_starred_names_in_sequence_pattern_0(self):
-         self.assert_syntax_error("""
-         match ...:
-@@ -3222,7 +3246,7 @@
+                 pass
+         """)
+ 
+@@ -3222,7 +3247,7 @@
                  pass
          """)
  
@@ -90,7 +91,7 @@
  
      def test_accepts_positional_subpatterns_0(self):
          class Class:
-@@ -3363,7 +3387,7 @@
+@@ -3363,7 +3388,7 @@
          self.assertIsNone(w)
  
  
@@ -99,7 +100,7 @@
  
      def test_mapping_pattern_checks_duplicate_key_1(self):
          class Keys:
-@@ -3378,7 +3402,7 @@
+@@ -3378,7 +3403,7 @@
          self.assertIs(y, None)
          self.assertIs(z, None)
  
@@ -108,7 +109,7 @@
      def test_jump_threading(self):
          # See gh-123048
          def f():
-@@ -3397,7 +3421,7 @@
+@@ -3397,7 +3422,7 @@
              if inst.opcode in dis.hasjump:
                  self.assertIsNotNone(inst.positions.lineno, "jump without location")
  
@@ -117,7 +118,7 @@
  
      @staticmethod
      def _trace(func, *args, **kwargs):
-@@ -3491,6 +3515,7 @@
+@@ -3491,6 +3516,7 @@
          self.assertListEqual(self._trace(f, 1), [1, 2, 3])
          self.assertListEqual(self._trace(f, 0), [1, 2, 5, 6])
  
@@ -125,7 +126,7 @@
      def test_parser_deeply_nested_patterns(self):
          # Deeply nested patterns can cause exponential backtracking when parsing.
          # See gh-93671 for more information.
-@@ -3513,38 +3538,6 @@
+@@ -3513,38 +3539,6 @@
                  compile(code, "<string>", "exec")
  
  
