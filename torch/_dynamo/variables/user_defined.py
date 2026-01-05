@@ -21,6 +21,7 @@ These classes help Dynamo track and handle arbitrary Python objects during traci
 maintaining proper semantics while enabling optimizations where possible.
 """
 
+# from __future__ import annotations
 import _collections  # type: ignore[import-not-found]
 import builtins
 import collections
@@ -38,7 +39,7 @@ import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING, Union
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -97,7 +98,6 @@ from ..utils import (
 )
 from .base import MutationType, raise_type_error_exc, ValueMutationNew, VariableTracker
 from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
-from .lists import ListVariable, SizeVariable, TupleVariable
 
 
 try:
@@ -116,6 +116,8 @@ if TYPE_CHECKING:
     from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.constant import ConstantVariable
+
+    from .lists import ListVariable, TupleVariable
 
 
 def is_standard_setattr(val: object) -> bool:
@@ -743,7 +745,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     )
                 items = args[0].force_unpack_var_sequence(tx)
             else:
-                field_defaults = self.value._field_defaults
+                field_defaults = self.value._field_defaults  # type: ignore[attr-defined]
 
                 items = list(args)
                 # pyrefly: ignore[bad-argument-type]
@@ -772,12 +774,16 @@ class UserDefinedClassVariable(UserDefinedVariable):
             from .lists import NamedTupleVariable
 
             return NamedTupleVariable(
-                items, self.value, mutation_type=AttributeMutationNew()
+                items,
+                self.value,  # type: ignore[arg-type]
+                mutation_type=AttributeMutationNew(),
             )
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
+            from .lists import SizeVariable
+
             tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
-            return SizeVariable(tup.items)
+            return SizeVariable(tup.items)  # type: ignore[missing-attribute]
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)  # type: ignore[arg-type]
             assert self.source is not None
@@ -828,11 +834,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
+            from .lists import ListVariable
+
             if (
                 np
                 and self.value in tensortype_to_dtype
                 and len(args) == 1
-                and isinstance(args[0], variables.ListVariable)
+                and isinstance(args[0], ListVariable)
                 and len(args[0].items) > 1
                 and all(x.is_tensor() for x in args[0].items)
             ):
@@ -849,6 +857,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             if issubclass(self.value, torch.Stream):
                 from .constant import ConstantVariable
+                from .lists import TupleVariable
 
                 var_kwargs = ConstDictVariable(
                     {ConstantVariable(k): v for k, v in kwargs.items()}
@@ -875,6 +884,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
             elif issubclass(self.value, torch.Event):
                 from .constant import ConstantVariable
+                from .lists import TupleVariable
 
                 # Register newly created event for reconstruction
                 var_kwargs = ConstDictVariable(
@@ -1119,7 +1129,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx: "InstructionTranslator",
         fn: VariableTracker,
-        types: TupleVariable,
+        types: "TupleVariable",
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
@@ -2499,14 +2509,16 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
     """
 
     def __init__(
-        self, value: object, list_vt: ListVariable | None = None, **kwargs: Any
+        self, value: object, list_vt: Union["ListVariable", None] = None, **kwargs: Any
     ) -> None:
+        from .lists import ListVariable
+
         super().__init__(value, **kwargs)
         if list_vt is None:
             assert self.source is None, (
                 "list_vt must be constructed by builder.py when source is present"
             )
-            self._list_vt = variables.ListVariable([], mutation_type=ValueMutationNew())
+            self._list_vt = ListVariable([], mutation_type=ValueMutationNew())
         else:
             self._list_vt = list_vt
 
@@ -2549,6 +2561,8 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
     def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
+        from .lists import TupleVariable
+
         tx = kwargs.pop("tx", None)
         super().__init__(value, init_args=init_args, **kwargs)
         if tuple_vt is None:
@@ -2565,9 +2579,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
                 tx = InstructionTranslator.current_tx()
             elems = init_args[0].force_unpack_var_sequence(tx)
-            self._tuple_vt = variables.TupleVariable(
-                elems, mutation_type=ValueMutationNew()
-            )
+            self._tuple_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
         else:
             self._tuple_vt = tuple_vt
 

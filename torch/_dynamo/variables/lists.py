@@ -48,6 +48,7 @@ from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .functions import UserFunctionVariable
 from .iter import IteratorVariable
+from .user_defined import UserDefinedTupleVariable
 
 
 if TYPE_CHECKING:
@@ -1378,18 +1379,11 @@ class SizeVariable(TupleVariable):
         return variables.ConstantVariable.create(hasattr(torch.Size, name))
 
 
-def import_userdefinedtuplevariable_class():
-    """Wrapper Function to avoid circular imports."""
-    from .user_defined import UserDefinedTupleVariable
-
-    return UserDefinedTupleVariable
-
-
-class NamedTupleVariable(import_userdefinedtuplevariable_class()):
+class NamedTupleVariable(UserDefinedTupleVariable):
     _nonvar_fields = {
         "tuple_cls",
         "dynamic_attributes",
-        *import_userdefinedtuplevariable_class()._nonvar_fields,
+        *UserDefinedTupleVariable._nonvar_fields,
     }
 
     def __init__(
