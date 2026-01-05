@@ -708,7 +708,6 @@
     NestedTensorCPU, NestedTensorHPU, NestedTensorCUDA: NestedTensor_all
   tags: reduction
 
-
 - func: all.dims(Tensor self, int[]? dim=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   structured_delegate: all.dims_out
@@ -3873,12 +3872,14 @@
   dispatch:
     CPU, CUDA: _aminmax_all
   autogen: _aminmax.out
+  tags: reduction
 
 # DEPRECATED: Use torch.aminmax instead
 - func: _aminmax.dim(Tensor self, int dim, bool keepdim=False) -> (Tensor, Tensor)
   dispatch:
     CPU, CUDA: _aminmax
   autogen: _aminmax.dim_out
+  tags: reduction
 
 - func: aminmax(Tensor self, *, int? dim=None, bool keepdim=False) -> (Tensor min, Tensor max)
   device_check: NoCheck   # TensorIterator
@@ -4047,9 +4048,11 @@
 - func: nanmean(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
   device_check: NoCheck   # Composite
   variants: function, method
+  tags: reduction
 
 - func: nanmean.out(Tensor self, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # Composite
+  tags: reduction
 
 - func: median(Tensor self) -> Tensor
   variants: function, method
@@ -5557,6 +5560,7 @@
     CPU, CUDA, MPS: sinh_out
     SparseCPU, SparseCUDA, SparseMPS: sinh_sparse_out
     SparseCsrCPU, SparseCsrCUDA, SparseCsrMeta: sinh_sparse_csr_out
+  tags: pointwise
 
 # Returns a copy of this `Variable` that is detached from its autograd graph.
 # This method is OK to call if the `Variable` is a view.
@@ -5569,7 +5573,6 @@
 # to false to make such changes explicitly illegal, in order to prevent users from
 # changing metadata of the detached tensor and expecting the original tensor to also
 # be updated.
-  tags: pointwise
 - func: detach(Tensor(a) self) -> Tensor(a)
   variants: function, method
   dispatch:
@@ -5812,7 +5815,6 @@
   variants: function, method
   device_check: NoCheck
   device_guard: False
-
 
 - func: squeeze.dims(Tensor(a) self, int[] dim) -> Tensor(a)
   variants: function, method
@@ -6629,8 +6631,8 @@
 - func: var.dim(Tensor self, int[1]? dim, bool unbiased=True, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
   variants: function, method
-  tags: [core, reduction]
   cpp_no_default_args: ["unbiased"]
+  tags: [core, reduction]
 
 - func: var.correction(Tensor self, int[1]? dim=None, *, Scalar? correction=None, bool keepdim=False) -> Tensor
   device_check: NoCheck   # TensorIterator
@@ -10221,14 +10223,14 @@
     CPU, CUDA: min
     MPS: min_mps
     QuantizedCPU: min_quantized_cpu
-  tags: [reduction]
+  tags: reduction
 
 - func: min.unary_out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   dispatch:
     CPU, CUDA: min_unary_out
     QuantizedCPU: min_quantized_unary_out
-  tags: [reduction]
+  tags: reduction
 
 - func: fmin(Tensor self, Tensor other) -> Tensor
   structured_delegate: fmin.out
@@ -10251,7 +10253,7 @@
     CPU, CUDA: max
     MPS: max_mps
     QuantizedCPU: max_quantized_cpu
-  tags: [reduction]
+  tags: reduction
 
 - func: fmax(Tensor self, Tensor other) -> Tensor
   structured_delegate: fmax.out
@@ -10298,7 +10300,7 @@
   dispatch:
     CPU, CUDA: max_unary_out
     QuantizedCPU: max_quantized_unary_out
-  tags: [reduction]
+  tags: reduction
 
 - func: minimum(Tensor self, Tensor other) -> Tensor
   structured_delegate: minimum.out
@@ -13842,9 +13844,11 @@
 - func: special_logsumexp(Tensor self, int[1] dim, bool keepdim=False) -> Tensor
   python_module: special
   variants: function
+  tags: reduction
 
 - func: special_logsumexp.out(Tensor self, int[1] dim, bool keepdim=False, *, Tensor(a!) out) -> Tensor(a!)
   python_module: special
+  tags: reduction
 
 - func: special_expit(Tensor self) -> Tensor
   python_module: special

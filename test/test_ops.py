@@ -42,6 +42,7 @@ from torch.testing._internal.common_dtype import (
 from torch.testing._internal.common_methods_invocations import (
     BinaryUfuncInfo,
     op_db,
+    OpInfo,
     ops_and_refs,
     python_ref_db,
     ReductionOpInfo,
@@ -74,6 +75,7 @@ from torch.testing._internal.common_utils import (
     unMarkDynamoStrictTest,
 )
 from torch.testing._internal.inductor_utils import maybe_skip_size_asserts
+from torch.testing._internal.opinfo.utils import compute_reduced_shape
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
@@ -252,6 +254,162 @@ class TestCommon(TestCase):
                 self.skipTest(
                     "Skipped! Only supports single tensor or iterable of tensor outputs."
                 )
+
+    def test_reduction_tag_coverage(self):
+        reduction_ops = [
+            torch.ops.aten.all.default,
+            torch.ops.aten.all.dim,
+            torch.ops.aten.all.dims,
+            torch.ops.aten.all.out,
+            torch.ops.aten.all.dims_out,
+            torch.ops.aten.all.all_out,
+            torch.ops.aten.all.dimname,
+            torch.ops.aten.all.dimname_out,
+            # Cannot register tag, since they are registered manually
+            # torch.ops.aten.all.int,
+            # torch.ops.aten.all.float,
+            # torch.ops.aten.all.bool,
+            torch.ops.aten.any.default,
+            torch.ops.aten.any.dim,
+            torch.ops.aten.any.dims,
+            torch.ops.aten.any.out,
+            torch.ops.aten.any.dims_out,
+            torch.ops.aten.any.all_out,
+            torch.ops.aten.any.dimname,
+            torch.ops.aten.any.dimname_out,
+            # Cannot register tag, since they are registered manually
+            # torch.ops.aten.any.str,
+            # torch.ops.aten.any.int,
+            # torch.ops.aten.any.float,
+            # torch.ops.aten.any.bool,
+            torch.ops.aten.sum.dim_IntList,
+            torch.ops.aten.sum.default,
+            torch.ops.aten.sum.dim_DimnameList,
+            torch.ops.aten.sum.DimnameList_out,
+            torch.ops.aten.sum.IntList_out,
+            torch.ops.aten.sum.out,
+            # Cannot register tag, since they are registered manually
+            # torch.ops.aten.sum.int,
+            # torch.ops.aten.sum.float,
+            # torch.ops.aten.sum.complex,
+            # torch.ops.aten.sum.bool
+            torch.ops.aten.amin.default,
+            torch.ops.aten.amin.out,
+            torch.ops.aten.amax.default,
+            torch.ops.aten.amax.out,
+            torch.ops.aten.argmin.default,
+            torch.ops.aten.argmin.out,
+            torch.ops.aten.argmax.default,
+            torch.ops.aten.argmax.out,
+            # count_nonzero
+            torch.ops.aten.count_nonzero.dim_IntList,
+            torch.ops.aten.count_nonzero.default,
+            # aminmax
+            torch.ops.aten.aminmax.default,
+            torch.ops.aten.aminmax.out,
+            # mean
+            torch.ops.aten.mean.default,
+            torch.ops.aten.mean.dim,
+            torch.ops.aten.mean.names_dim,
+            torch.ops.aten.mean.names_out,
+            torch.ops.aten.mean.out,
+            torch.ops.aten.mean.dtype_out,
+            # nanmean
+            torch.ops.aten.nanmean.default,
+            torch.ops.aten.nanmean.out,
+            # std
+            torch.ops.aten.std.default,
+            torch.ops.aten.std.dim,
+            torch.ops.aten.std.correction,
+            torch.ops.aten.std.names_dim,
+            torch.ops.aten.std.names_out,
+            torch.ops.aten.std.out,
+            torch.ops.aten.std.correction_out,
+            torch.ops.aten.std.correction_names,
+            torch.ops.aten.std.correction_names_out,
+            # var
+            torch.ops.aten.var.default,
+            torch.ops.aten.var.dim,
+            torch.ops.aten.var.correction,
+            torch.ops.aten.var.names_dim,
+            torch.ops.aten.var.names_out,
+            torch.ops.aten.var.out,
+            torch.ops.aten.var.correction_out,
+            torch.ops.aten.var.correction_names,
+            torch.ops.aten.var.correction_names_out,
+            # prod
+            torch.ops.aten.prod.default,
+            torch.ops.aten.prod.dim_int,
+            torch.ops.aten.prod.dim_Dimname,
+            torch.ops.aten.prod.Dimname_out,
+            torch.ops.aten.prod.int_out,
+            # nansum
+            torch.ops.aten.nansum.default,
+            torch.ops.aten.nansum.out,
+            # linalg_vector_norm
+            torch.ops.aten.linalg_vector_norm.default,
+            torch.ops.aten.linalg_vector_norm.out,
+            # max
+            # binary operator, no reduction tag
+            # torch.ops.aten.max.other,
+            # torch.ops.aten.max.out,
+            torch.ops.aten.max.default,
+            torch.ops.aten.max.dim,
+            torch.ops.aten.max.dim_max,
+            torch.ops.aten.max.names_dim,
+            torch.ops.aten.max.names_dim_max,
+            torch.ops.aten.max.unary_out,
+            # min
+            # binary operator, no reduction tag
+            # torch.ops.aten.min.other,
+            # torch.ops.aten.min.out,
+            torch.ops.aten.min.default,
+            torch.ops.aten.min.dim,
+            torch.ops.aten.min.dim_min,
+            torch.ops.aten.min.names_dim,
+            torch.ops.aten.min.names_dim_min,
+            torch.ops.aten.min.unary_out,
+            # logsumexp
+            torch.ops.aten.logsumexp.default,
+            torch.ops.aten.logsumexp.names,
+            torch.ops.aten.logsumexp.names_out,
+            torch.ops.aten.logsumexp.out,
+            # special_logsumexp
+            torch.ops.aten.special_logsumexp.default,
+            torch.ops.aten.special_logsumexp.out,
+            # std_mean
+            torch.ops.aten.std_mean.default,
+            torch.ops.aten.std_mean.dim,
+            torch.ops.aten.std_mean.correction,
+            torch.ops.aten.std_mean.names_dim,
+            torch.ops.aten.std_mean.correction_names,
+            # var_mean
+            torch.ops.aten.var_mean.default,
+            torch.ops.aten.var_mean.dim,
+            torch.ops.aten.var_mean.correction,
+            torch.ops.aten.var_mean.names_dim,
+            torch.ops.aten.var_mean.correction_names,
+            # norm
+            torch.ops.aten.norm.Scalar,
+            torch.ops.aten.norm.ScalarOpt_dim,
+            torch.ops.aten.norm.names_ScalarOpt_dim,
+            torch.ops.aten.norm.ScalarOpt_dim_dtype,
+            torch.ops.aten.norm.dtype_out,
+            torch.ops.aten.norm.out,
+            torch.ops.aten.norm.ScalarOpt_dtype,
+            torch.ops.aten.norm.names_ScalarOpt_dim_dtype,
+            torch.ops.aten.norm.names_dtype_out,
+            torch.ops.aten.norm.names_out,
+        ]
+        for overload_op in reduction_ops:
+            # tags are not propagated to generated overload,
+            # and there's no way of specifying them
+            if torch.Tag.generated in overload_op.tags:
+                continue
+            self.assertTrue(
+                torch.Tag.reduction in overload_op.tags,
+                f"The operator {overload_op} is a reduction operator and should have the reduction tag",
+            )
 
     def test_pointwise_tag_coverage(self):
         pytorch_dir = os.path.abspath(__file__ + "/../../")
@@ -2399,6 +2557,38 @@ class _TestTagsMode(TorchDispatchMode):
         return rs
 
 
+class _TestReductionTagsMode(TorchDispatchMode):
+    """
+    This class provides a torch dispatch that verify that all operators marked as reduction indeed reduce the
+    dimension of the input tensor
+    """
+
+    def __init__(self, test_case: TestCase):
+        super().__init__()
+        self.test_case = test_case
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        output = func(*args, **kwargs)
+        # These are reduction operators but with different schema
+        operators_to_skip = [
+            "prims::var",
+            "aten::linalg_vector_norm",
+            "aten::norm.ScalarOpt_dim",
+        ]
+        if torch.Tag.reduction not in func.tags or func.name() in operators_to_skip:
+            return output
+
+        input_tensor = args[0]
+        dims = args[1] if len(args) >= 2 else (kwargs.get("dims") or kwargs.get("dim"))
+        keepdim = args[2] if len(args) >= 3 else kwargs.get("keepdim", False)
+
+        expected_shape = compute_reduced_shape(input_tensor.shape, True, dims, keepdim)
+        outputs = output if isinstance(output, Sequence) else [output]
+        for o in outputs:
+            self.test_case.assertEqual(o.shape, expected_shape)
+        return output
+
+
 # Test to verify the correctness for tags in `tags.yaml`, also available for access through `torch.Tags`
 @unMarkDynamoStrictTest
 class TestTags(TestCase):
@@ -2775,16 +2965,7 @@ class TestFakeTensor(TestCase):
                 continue
 
             def run_with_fake_mode_and_verify(fake_mode, match_results=True):
-                def map_to_fake(e):
-                    if isinstance(e, torch.Tensor):
-                        return fake_mode.from_tensor(e)
-                    else:
-                        return e
-
-                input = tree_map(map_to_fake, sample.input)
-                args = tree_map(map_to_fake, sample.args)
-                kwargs = tree_map(map_to_fake, sample.kwargs)
-
+                input, args, kwargs = self._map_sample_to_fake(fake_mode, sample)
                 try:
                     with context():
                         with fake_mode:
@@ -2853,6 +3034,40 @@ class TestFakeTensor(TestCase):
                     allow_dynamic_output_shape_mode, match_results=False
                 )
 
+    def _map_sample_to_fake(self, fake_mode, sample):
+        def map_to_fake(e):
+            if isinstance(e, torch.Tensor):
+                return fake_mode.from_tensor(e)
+            else:
+                return e
+
+        input = tree_map(map_to_fake, sample.input)
+        args = tree_map(map_to_fake, sample.args)
+        kwargs = tree_map(map_to_fake, sample.kwargs)
+        return input, args, kwargs
+
+    def _verify_op_with_fake_mode(self, fake_mode, op, input, args, kwargs):
+        try:
+            with fake_mode:
+                op(input, *args, **kwargs)
+        except RuntimeError:
+            return False
+        return True
+
+    @ops(op_db, dtypes=OpDTypes.any_one)
+    def test_reduction_ops(self, device, dtype, op: OpInfo):
+        samples = op.sample_inputs(device, dtype, requires_grad=False)
+        for sample in samples:
+            fake_mode = FakeTensorMode()
+            input, args, kwargs = self._map_sample_to_fake(fake_mode, sample)
+
+            if not self._verify_op_with_fake_mode(fake_mode, op, input, args, kwargs):
+                continue
+
+            with _TestReductionTagsMode(self):
+                with fake_mode:
+                    op(input, *args, **kwargs)
+
     @ops(op_db, dtypes=OpDTypes.any_one)
     def test_pointwise_ops(self, device, dtype, op):
         name = op.name
@@ -2887,15 +3102,7 @@ class TestFakeTensor(TestCase):
         for sample in samples:
             mode = FakeTensorMode()
 
-            def map_to_fake(e):
-                if isinstance(e, torch.Tensor):
-                    return mode.from_tensor(e)
-                else:
-                    return e
-
-            input = tree_map(map_to_fake, sample.input)
-            args = tree_map(map_to_fake, sample.args)
-            kwargs = tree_map(map_to_fake, sample.kwargs)
+            input, args, kwargs = self._map_sample_to_fake(mode, sample)
 
             try:
                 op(input, *args, **kwargs)
