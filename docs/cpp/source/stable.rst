@@ -1,7 +1,8 @@
 Torch Stable API
 ================
 
-The PyTorch Stable C++ API provides ABI-stable interfaces for tensor operations.
+The PyTorch Stable C++ API provides a convenient high level interface to call
+ABI-stable tensor operations and other utilities commonly used in custom operators.
 These functions are designed to maintain binary compatibility across PyTorch versions,
 making them suitable for use in ahead-of-time compiled code.
 
@@ -21,22 +22,22 @@ compatibility across PyTorch versions.
 
 Defines a library of operators in a namespace using the stable ABI.
 
-This is the stable ABI equivalent of ``TORCH_LIBRARY``. Use this macro to
-define operator schemas that will maintain binary compatibility across
-PyTorch versions. Only one ``STABLE_TORCH_LIBRARY`` block can exist per
-namespace; use ``STABLE_TORCH_LIBRARY_FRAGMENT`` for additional definitions
-in the same namespace from different translation units.
+This is the stable ABI equivalent of :c:macro:`TORCH_LIBRARY`.
+Use this macro to define operator schemas that will maintain
+binary compatibility across PyTorch versions. Only one ``STABLE_TORCH_LIBRARY``
+block can exist per namespace; use ``STABLE_TORCH_LIBRARY_FRAGMENT`` for
+additional definitions in the same namespace from different translation units.
 
 **Parameters:**
 
-- ``ns`` - The namespace in which to define operators (e.g., ``myops``).
+- ``ns`` - The namespace in which to define operators (e.g., ``mylib``).
 - ``m`` - The name of the StableLibrary variable available in the block.
 
 **Example:**
 
 .. code-block:: cpp
 
-   STABLE_TORCH_LIBRARY(myops, m) {
+   STABLE_TORCH_LIBRARY(mylib, m) {
        m.def("my_op(Tensor input, int size) -> Tensor");
        m.def("another_op(Tensor a, Tensor b) -> Tensor");
    }
@@ -67,12 +68,12 @@ CPU, CUDA) while maintaining binary compatibility across PyTorch versions.
 
 .. code-block:: cpp
 
-   STABLE_TORCH_LIBRARY_IMPL(myops, CPU, m) {
-       m.impl("my_op", TORCH_BOX(my_cpu_kernel));
+   STABLE_TORCH_LIBRARY_IMPL(mylib, CPU, m) {
+       m.impl("my_op", TORCH_BOX(&my_cpu_kernel));
    }
 
-   STABLE_TORCH_LIBRARY_IMPL(myops, CUDA, m) {
-       m.impl("my_op", TORCH_BOX(my_cuda_kernel));
+   STABLE_TORCH_LIBRARY_IMPL(mylib, CUDA, m) {
+       m.impl("my_op", TORCH_BOX(&my_cuda_kernel));
    }
 
 Minimum compatible version: PyTorch 2.9.
@@ -93,12 +94,12 @@ created with ``STABLE_TORCH_LIBRARY``.
 
 Minimum compatible version: PyTorch 2.9.
 
-``TORCH_BOX(func)``
+``TORCH_BOX(&func)``
 ^^^^^^^^^^^^^^^^^^^
 
 Wraps a function to conform to the stable boxed kernel calling convention.
 
-This macro takes an unboxed kernel function and generates a boxed wrapper
+This macro takes an unboxed kernel function pointer and generates a boxed wrapper
 that can be registered with the stable library API.
 
 **Parameters:**
@@ -114,7 +115,7 @@ that can be registered with the stable library API.
    }
 
    STABLE_TORCH_LIBRARY_IMPL(my_namespace, CPU, m) {
-       m.impl("my_op", TORCH_BOX(my_kernel));
+       m.impl("my_op", TORCH_BOX(&my_kernel));
    }
 
 Minimum compatible version: PyTorch 2.9.
@@ -122,9 +123,8 @@ Minimum compatible version: PyTorch 2.9.
 Tensor Class
 ------------
 
-The ``torch::stable::Tensor`` class provides a stable ABI wrapper around PyTorch
-tensors. It offers a user-friendly C++ interface similar to ``torch::Tensor``
-while maintaining binary compatibility across PyTorch versions.
+The ``torch::stable::Tensor`` class offers a user-friendly C++ interface similar
+to ``torch::Tensor`` while maintaining binary compatibility across PyTorch versions.
 
 .. doxygenclass:: torch::stable::Tensor
    :members:
@@ -133,7 +133,8 @@ while maintaining binary compatibility across PyTorch versions.
 Device Class
 ------------
 
-The ``torch::stable::Device`` class provides a stable ABI version of ``c10::Device``.
+The ``torch::stable::Device`` class provides a user-friendly C++ interface similar
+to ``c10::Device`` while maintaining binary compatibility across PyTorch versions.
 It represents a compute device (CPU, CUDA, etc.) with an optional device index.
 
 .. doxygenclass:: torch::stable::Device
@@ -142,9 +143,9 @@ It represents a compute device (CPU, CUDA, etc.) with an optional device index.
 DeviceGuard Class
 -----------------
 
-The ``torch::stable::accelerator::DeviceGuard`` class provides a stable ABI version
-of ``c10::DeviceGuard``. It is an RAII class that sets the current device on
-construction and restores the previous device on destruction.
+The ``torch::stable::accelerator::DeviceGuard`` provides a user-friendly C++
+interface similar to ``c10::DeviceGuard`` while maintaining binary compatibility
+across PyTorch versions.
 
 .. doxygenclass:: torch::stable::accelerator::DeviceGuard
    :members:
@@ -155,8 +156,8 @@ construction and restores the previous device on destruction.
 Stream Utilities
 ----------------
 
-For CUDA stream access, we currently recommend the raw shim API. This will be
-improved in a future release with a more ergonomic wrapper.
+For CUDA stream access, we currently recommend the ABI stable C shim API. This
+will be improved in a future release with a more ergonomic wrapper.
 
 Getting the Current CUDA Stream
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -168,9 +169,9 @@ To obtain the current ``cudaStream_t`` for use in CUDA kernels:
    #include <torch/csrc/inductor/aoti_torch/c/shim.h>
    #include <torch/headeronly/util/shim_utils.h>
 
-   // For now, we rely on the raw shim API to get the current CUDA stream.
+   // For now, we rely on the ABI stable C shim API to get the current CUDA stream.
    // This will be improved in a future release.
-   // When using a raw shim API, we need to use TORCH_ERROR_CODE_CHECK to
+   // When using a C shim API, we need to use TORCH_ERROR_CODE_CHECK to
    // check the error code and throw an appropriate runtime_error otherwise.
    void* stream_ptr = nullptr;
    TORCH_ERROR_CODE_CHECK(
@@ -182,7 +183,7 @@ To obtain the current ``cudaStream_t`` for use in CUDA kernels:
 
 .. note::
 
-   The ``TORCH_ERROR_CODE_CHECK`` macro is required when using raw shim APIs
+   The ``TORCH_ERROR_CODE_CHECK`` macro is required when using C shim APIs
    to properly check error codes and throw appropriate exceptions.
 
 CUDA Error Checking Macros
@@ -205,7 +206,7 @@ Users of this macro are expected to include ``cuda_runtime.h``.
    STD_CUDA_CHECK(cudaMalloc(&ptr, size));
    STD_CUDA_CHECK(cudaMemcpy(dst, src, size, cudaMemcpyDeviceToHost));
 
-Minimum compatible version: PyTorch 2.9.
+Minimum compatible version: PyTorch 2.10.
 
 ``STD_CUDA_KERNEL_LAUNCH_CHECK()``
 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -220,14 +221,14 @@ Checks for errors from the most recent CUDA kernel launch. Equivalent to
    my_kernel<<<blocks, threads, 0, stream>>>(args...);
    STD_CUDA_KERNEL_LAUNCH_CHECK();
 
-Minimum compatible version: PyTorch 2.9.
+Minimum compatible version: PyTorch 2.10.
 
 Header-Only Utilities
 ---------------------
 
 The ``torch::headeronly`` namespace provides header-only versions of common
 PyTorch types and utilities. These can be used without linking against libtorch,
-making them ideal for stable ABI code.
+making them ideal for maintaining binary compatibility across PyTorch versions.
 
 Error Checking
 ^^^^^^^^^^^^^^
