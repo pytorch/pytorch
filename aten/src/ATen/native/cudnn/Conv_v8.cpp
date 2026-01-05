@@ -662,12 +662,19 @@ bool plan_errata_exception(
             })");
   if (!has_json) {
     return cudnn_frontend::check_errata(
-        hardcoded_errata_json_handle, executionPlanTag, handle, []() { return true; });
+        hardcoded_errata_json_handle, executionPlanTag, handle, []() {
+          return true;
+        });
   } else {
     return cudnn_frontend::check_errata(
-        errata_json_handle, executionPlanTag, handle, []() { return true; })
-    or cudnn_frontend::check_errata(
-        hardcoded_errata_json_handle, executionPlanTag, handle, []() { return true; });
+               errata_json_handle,
+               executionPlanTag,
+               handle,
+               []() { return true; }) or
+        cudnn_frontend::check_errata(
+               hardcoded_errata_json_handle, executionPlanTag, handle, []() {
+                 return true;
+               });
   }
 }
 
