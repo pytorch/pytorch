@@ -118,10 +118,13 @@ def _reserve_rng_state(device: torch.device, used_offset):
         dev_index = torch.cuda.current_device()
 
     gen = torch.cuda.default_generators[dev_index]
-    seed_base, offset_base, internal_offset = torch.ops.aten.inductor_reserve_rng_state(gen, int(used_offset))
+    seed_base, offset_base, internal_offset = torch.ops.aten.inductor_reserve_rng_state(
+        gen, int(used_offset)
+    )
+    torch.ops.aten.inductor_reserve_rng_state(gen, int(used_offset))
     offset_val = internal_offset.item()
     final_offset = offset_base + offset_val
-    base = final_offset.div(4, rounding_mode='floor')
+    base = final_offset.div(4, rounding_mode="floor")
 
     return seed_base, base
 
@@ -148,7 +151,9 @@ def _rand_eager_offsets_impl(offsets, device: torch.device) -> Tensor:
     seeds_tensor = torch.stack(seeds).view(-1)
     bases_tensor = torch.stack(bases).view(-1)
     i64 = torch.int64
-    packed = (seeds_tensor.to(dtype=i64) << 32) | (bases_tensor.to(dtype=i64) & 0xFFFFFFFF)
+    packed = (seeds_tensor.to(dtype=i64) << 32) | (
+        bases_tensor.to(dtype=i64) & 0xFFFFFFFF
+    )
     return packed
 
 

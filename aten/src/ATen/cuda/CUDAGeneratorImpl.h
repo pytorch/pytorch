@@ -13,6 +13,11 @@ namespace cuda {
 struct CUDAGraph;
 }
 
+namespace native {
+std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
+    const Generator& gen, int64_t increment);
+}
+
 /**
  * Note [CUDA Graph-safe RNG states]
  * ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

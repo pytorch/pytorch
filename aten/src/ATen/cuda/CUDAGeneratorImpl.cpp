@@ -549,8 +549,8 @@ std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(const Generator& g
     auto state = gen_impl->state_;
     Tensor intragraph_offset = at::tensor({current_intragraph_val}, options.device(at::kCPU));
     return std::make_tuple(
-      state->seed_extragraph_, 
-      state->offset_extragraph_, 
+      state->seed_extragraph_,
+      state->offset_extragraph_,
       intragraph_offset
     );
   } else {
