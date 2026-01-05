@@ -786,7 +786,9 @@ class TestFlexFlash(InductorTestCase):
 
     @decorateIf(
         unittest.expectedFailure,
-        lambda params: params["case"].dim == 64 and _is_sm90(),
+        lambda params: params["case"].requires_grad
+        and params["case"].dim == 64
+        and _is_sm90(),
     )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
