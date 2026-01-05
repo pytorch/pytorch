@@ -6,7 +6,7 @@ This module provides utilities for restoring state dicts to traced modules,
 ensuring that FQNs (Fully Qualified Names) match the original module structure.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any
 
 import torch
@@ -30,17 +30,17 @@ def _get_underlying_module(
     if isinstance(module_or_method, torch.nn.Module):
         return module_or_method
     # Handle bound methods (e.g., module.method)
-    if hasattr(module_or_method, "__self__") and isinstance(
-        module_or_method.__self__, torch.nn.Module
-    ):
-        return module_or_method.__self__
+    if (
+        mod_self := getattr(module_or_method, "__self__", None)
+    ) is not None and isinstance(mod_self, torch.nn.Module):
+        return mod_self
     raise TypeError(
         f"Expected nn.Module or bound method of nn.Module, got {type(module_or_method)}"
     )
 
 
 def _clear_traced_params_buffers(
-    traced_module: torch.fx.GraphModule, const_keys: list[str]
+    traced_module: torch.fx.GraphModule, const_keys: Sequence[str]
 ) -> None:
     """Remove all parameters and buffers from traced module before restoring.
 
@@ -56,8 +56,11 @@ def _clear_traced_params_buffers(
         assert key in traced_module._buffers
         # We don't want constants to show up as a buffer in the state dict.
         # Instead they should just be a direct attribute.
-        buffer = getattr(traced_module, key)
-        torch.fx.graph_module._del_attr(traced_module, key)
+        buffer = traced_module._buffers[key]
+        del traced_module._buffers[key]
+        # Note: setattr will register the value per nn.Module rules:
+        # - If it's a Tensor, it'll be re-registered as a buffer (ends up back in _buffers).
+        # - Otherwise, it becomes a plain attribute (not part of state_dict).
         setattr(traced_module, key, buffer)
 
 
