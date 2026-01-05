@@ -981,7 +981,7 @@ class TestBinaryUfuncs(TestCase):
             dtype == torch.half
             and torch.device(device).type not in ["cuda", "xpu"]
             or dtype == torch.bfloat16
-            and torch.device(device).type not in ["cpu", "xpu"]
+            and device != "cpu"
         )
         d_ref = d_true.float() if rounding_unsupported else d_true
         self.assertEqual(d_trunc, d_ref.trunc().to(dtype))
@@ -1290,75 +1290,34 @@ class TestBinaryUfuncs(TestCase):
     @dtypes(torch.double)
     def test_binary_op_mem_overlap(self, device, dtype):
         ops = [
-            ("add", True, True, "cpu"),
-            ("add", True, True, "cuda"),
-            ("add", True, True, "xpu"),
-            ("mul", True, True, "cpu"),
-            ("mul", True, True, "cuda"),
-            ("mul", True, True, "xpu"),
-            ("sub", True, True, "cpu"),
-            ("sub", True, True, "cuda"),
-            ("sub", True, True, "xpu"),
-            ("div", True, True, "cpu"),
-            ("div", True, True, "cuda"),
-            ("div", True, True, "xpu"),
-            ("pow", True, True, "cpu"),
-            ("pow", True, True, "cuda"),
-            ("pow", True, True, "xpu"),
-            ("fmod", True, True, "cpu"),
-            ("fmod", True, True, "cuda"),
-            ("fmod", True, True, "xpu"),
-            ("atan2", True, True, "cpu"),
-            ("atan2", True, True, "cuda"),
-            ("aten2", True, True, "xpu"),
-            ("hypot", True, True, "cpu"),
-            ("hypot", True, True, "cuda"),
-            ("hypot", True, True, "xpu"),
-            ("igamma", True, True, "cpu"),
-            ("igamma", True, True, "cuda"),
-            ("igamma", True, True, "xpu"),
-            ("igammac", True, True, "cpu"),
-            ("igammac", True, True, "cuda"),
-            ("igammac", True, True, "xpu"),
-            ("nextafter", True, True, "cpu"),
-            ("nextafter", True, True, "cuda"),
-            ("nextafter", True, True, "xpu"),
-            ("le", True, True, "cpu"),
-            ("le", True, True, "cuda"),
-            ("le", True, True, "xpu"),
-            ("lt", True, True, "cpu"),
-            ("lt", True, True, "cuda"),
-            ("lt", True, True, "xpu"),
-            ("ge", True, True, "cpu"),
-            ("ge", True, True, "cuda"),
-            ("ge", True, True, "xpu"),
-            ("gt", True, True, "cpu"),
-            ("gt", True, True, "cuda"),
-            ("gt", True, True, "xpu"),
-            ("eq", True, True, "cpu"),
-            ("eq", True, True, "cuda"),
-            ("eq", True, True, "xpu"),
-            ("ne", True, True, "cpu"),
-            ("ne", True, True, "cuda"),
-            ("ne", True, True, "xpu"),
-            ("logical_and", True, True, "cpu"),
-            ("logical_and", True, True, "cuda"),
-            ("logical_and", True, True, "xpu"),
-            ("logical_or", True, True, "cpu"),
-            ("logical_or", True, True, "cuda"),
-            ("logical_or", True, True, "xpu"),
-            ("logical_xor", True, True, "cpu"),
-            ("logical_xor", True, True, "cuda"),
-            ("logical_xor", True, True, "xpu"),
+            ("add", True, True, ["cpu", "cuda", "xpu"]),
+            ("mul", True, True, ["cpu", "cuda", "xpu"]),
+            ("sub", True, True, ["cpu", "cuda", "xpu"]),
+            ("div", True, True, ["cpu", "cuda", "xpu"]),
+            ("pow", True, True, ["cpu", "cuda", "xpu"]),
+            ("fmod", True, True, ["cpu", "cuda", "xpu"]),
+            ("atan2", True, True, ["cpu", "cuda", "xpu"]),
+            ("hypot", True, True, ["cpu", "cuda", "xpu"]),
+            ("igamma", True, True, ["cpu", "cuda", "xpu"]),
+            ("igammac", True, True, ["cpu", "cuda", "xpu"]),
+            ("nextafter", True, True, ["cpu", "cuda", "xpu"]),
+            ("le", True, True, ["cpu", "cuda", "xpu"]),
+            ("lt", True, True, ["cpu", "cuda", "xpu"]),
+            ("ge", True, True, ["cpu", "cuda", "xpu"]),
+            ("gt", True, True, ["cpu", "cuda", "xpu"]),
+            ("eq", True, True, ["cpu", "cuda", "xpu"]),
+            ("ne", True, True, ["cpu", "cuda", "xpu"]),
+            ("logical_and", True, True, ["cpu", "cuda", "xpu"]),
+            ("logical_or", True, True, ["cpu", "cuda", "xpu"]),
+            ("logical_xor", True, True, ["cpu", "cuda", "xpu"]),
         ]
-
         for (
             fn,
             has_input_output_mem_overlap_check,
             has_internal_mem_overlap_check,
-            dev,
+            devs,
         ) in ops:
-            if dev != device:
+            if torch.device(device).type not in devs:
                 continue
             out_op = getattr(torch, fn)
             inplace_op = getattr(torch.Tensor, fn + "_")
