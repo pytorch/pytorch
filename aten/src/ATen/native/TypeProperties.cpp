@@ -165,7 +165,7 @@ ScalarType result_type(const Tensor &tensor, const Scalar& other) {
 }
 
 ScalarType result_type(const Scalar& scalar, const Tensor &tensor) {
-  return result_type(tensor, scalar);
+  return ::at::native::result_type(tensor, scalar);
 }
 
 ScalarType result_type(const Scalar& scalar1, const Scalar& scalar2) {
