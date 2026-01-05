@@ -177,7 +177,7 @@ class JitScalarType(enum.IntEnum):
 
     @classmethod
     def from_value(
-        cls, value: None | torch._C.Value | torch.Tensor, default=None
+        cls, value: torch._C.Value | torch.Tensor | None, default=None
     ) -> JitScalarType:
         """Create a JitScalarType from an value's scalar type.
 
