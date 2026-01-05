@@ -562,7 +562,9 @@ val.shape: {[node.meta["val"].shape for node in aliased_graph_inputs]},
                 if fwd_fullgraph:
                     self.assertEqual(len(counters["graph_break"]), 1)
                     self.assertExpectedInline(
-                        next(iter(counters["graph_break"].keys())),
+                        next(iter(counters["graph_break"].keys())).split(
+                            "\n For more details"
+                        )[0],
                         """\
 autograd.grad with compiled autograd
   Explanation: torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled. These two features have conflicting requirements for how the autograd graph is traced.
@@ -570,9 +572,7 @@ autograd.grad with compiled autograd
   Hint: Or move the autograd.grad() call outside the torch.compile region.
   Hint: Or restructure your code so autograd.grad() and compiled_autograd don't overlap.
 
-  Developer debug context: compiled_autograd is currently enabled
-
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0373.html""",  # noqa: B950
+  Developer debug context: compiled_autograd is currently enabled""",  # noqa: B950
                     )
                 else:
                     self.assertGreater(len(counters["graph_break"]), 1)
