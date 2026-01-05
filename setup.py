@@ -647,6 +647,8 @@ def mirror_inductor_external_kernels() -> None:
         # Create the dirs involved in new_path if they don't exist
         if not new_path.exists():
             new_path.parent.mkdir(parents=True, exist_ok=True)
+            # Add `__init__.py` for find_packages to see `new_path.parent` as a submodule
+            (new_path.parent / "__init__.py").touch(exist_ok=True)
 
         # Copy the files from the orig location to the new location
         if orig_path.is_file():
@@ -1170,12 +1172,18 @@ class build_ext(setuptools.command.build_ext.build_ext):
         for idx, line in enumerate(otool_cmds):
             if line.strip() == "cmd LC_LOAD_DYLIB":
                 lib_name = otool_cmds[idx + 2].strip()
-                assert lib_name.startswith("name ")
+                if not lib_name.startswith("name "):
+                    raise AssertionError(
+                        f"Expected lib_name to start with 'name ', got: {lib_name}"
+                    )
                 libs.append(lib_name.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
             if line.strip() == "cmd LC_RPATH":
                 rpath = otool_cmds[idx + 2].strip()
-                assert rpath.startswith("path ")
+                if not rpath.startswith("path "):
+                    raise AssertionError(
+                        f"Expected rpath to start with 'path ', got: {rpath}"
+                    )
                 rpaths.append(rpath.split(" ", 1)[1].rsplit("(", 1)[0][:-1])
 
         omplib_path: str = get_cmake_cache_vars()["OpenMP_libomp_LIBRARY"]  # type: ignore[assignment]
@@ -1437,7 +1445,8 @@ class bdist_wheel(setuptools.command.bdist_wheel.bdist_wheel):
         super().write_wheelfile(*args, **kwargs)
 
         if BUILD_LIBTORCH_WHL:
-            assert self.bdist_dir is not None
+            if self.bdist_dir is None:
+                raise AssertionError("self.bdist_dir must not be None")
             bdist_dir = Path(self.bdist_dir)
             # Remove extraneneous files in the libtorch wheel
             for file in itertools.chain(

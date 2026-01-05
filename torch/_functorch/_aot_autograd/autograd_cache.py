@@ -557,7 +557,7 @@ def autograd_cache_key(
         # want to use fallback nonce keys. Unlike caching, it's fine if we can't generate
         # a proper key because we are guaranteed in an AOT precompile world users are in
         # complete control of distributing and loading artifacts.
-        if torch._dynamo.config.enable_aot_compile:
+        if torch._functorch.config.bypass_autograd_cache_key:
             log.info(
                 "Failed to generate AOTAutograd cache key; falling back to nonce due to enable_aot_compile",
                 exc_info=True,

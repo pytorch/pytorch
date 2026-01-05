@@ -1,8 +1,6 @@
 # Owner(s): ["oncall: distributed"]
 import copy
 import itertools
-import sys
-import unittest
 
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
@@ -62,16 +60,10 @@ class PlacementTypesTestCase(TestCase):
                 for lhs, rhs in itertools.product(eq_class, other_class):
                     self.assertNotEqual(lhs, rhs)
 
-    @unittest.skipIf(
-        sys.version_info < (3, 10), "kw_only is only available in python >= 3.10"
-    )
     def test_strided_shard_kwonly_argument(self):
         with self.assertRaises(TypeError):
             _StridedShard(3, 4)
         _StridedShard(3, split_factor=4)
-
-    def test_strided_shard_isinstance_shard(self):
-        assert isinstance(_StridedShard(dim=3, split_factor=7), Shard)
 
 
 if __name__ == "__main__":

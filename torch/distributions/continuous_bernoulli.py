@@ -75,7 +75,8 @@ class ContinuousBernoulli(ExponentialFamily):
             # pyrefly: ignore [read-only]
             self.probs = clamp_probs(self.probs)
         else:
-            assert logits is not None  # helps mypy
+            if logits is None:
+                raise AssertionError("logits is unexpectedly None")
             is_scalar = isinstance(logits, _Number)
             # pyrefly: ignore [read-only]
             (self.logits,) = broadcast_all(logits)

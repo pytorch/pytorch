@@ -38,7 +38,7 @@ from torch.fx.proxy import Proxy
 from .. import graph_break_hints
 from ..eval_frame import skip_code
 from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
-from ..source import AttrSource, CallMethodSource
+from ..source import AttrSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
@@ -172,7 +172,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             return res
 
         if self._is_opaque_reference_type():
-            member_type = get_member_type(self.value.script_class_name, name)
+            member_type = get_member_type(
+                self.value.script_class_name,  # pyrefly: ignore[missing-attribute]
+                name,
+            )
             if member_type is None:
                 unimplemented(
                     gb_type="Attempted to access unregistered member on an OpaqueObject",
@@ -240,14 +243,11 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder, VariableBuilder
-
         value_type = type(self.value)
 
         def call_method_and_return_constant(real_obj):
             # Call the method and return result as constant
 
-            args_const = [x.as_python_constant() for x in args]
             if inspect.getattr_static(value_type, "__getattr__", None) is not None:
                 unimplemented(
                     gb_type="Opaque object with custom __getattr__ not supported",
@@ -256,6 +256,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     hints=[],
                 )
 
+            args_const = [x.as_python_constant() for x in args]
             kwargs_const = {k: v.as_python_constant() for k, v in kwargs.items()}
 
             method = getattr(real_obj, name)
