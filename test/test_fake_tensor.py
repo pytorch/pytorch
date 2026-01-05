@@ -246,6 +246,39 @@ class FakeTensorTest(TestCase):
         ) as exc:
             torch.nextafter(fake_x, fake_y)
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_diagonal_scatter_one_dim_single_elem_cpu_with_cuda_tensor(self):
+        with FakeTensorMode():
+            base = torch.zeros((1, 2), device="cuda")
+            src = torch.tensor([1.0])
+            out = torch.diagonal_scatter(base, src, dim1=0, dim2=1)
+            self.assertEqual(out.shape, (1, 2))
+            self.assertEqual(out.device, base.device)
+            self.assertTrue(isinstance(out, FakeTensor))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_diagonal_scatter_two_dim_cpu_with_cuda_tensor(self):
+        with FakeTensorMode():
+            base = torch.zeros((3, 3, 3))
+            src = torch.ones((3, 3), device="cuda")
+            out = torch.diagonal_scatter(base, src)
+            self.assertEqual(out.shape, (3, 3, 3))
+            self.assertEqual(out.device, base.device)
+            self.assertTrue(isinstance(out, FakeTensor))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_add_one_dim_single_elem_cpu_with_cuda_tensor(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+        with FakeTensorMode():
+            x = torch.randn([1])
+            y = torch.randn(10, device="cuda")
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Unhandled FakeTensor Device Propagation for.*"
+            ) as exc:
+                x + y
+
     def test_nan_to_num(self):
         with FakeTensorMode():
             for dtype in [torch.float16, torch.float32]:

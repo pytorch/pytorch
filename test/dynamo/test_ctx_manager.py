@@ -7,7 +7,6 @@ from contextlib import contextmanager
 import torch
 import torch._dynamo.test_case
 import torch._dynamo.testing
-from torch._dynamo.exc import InternalTorchDynamoError
 from torch._dynamo.testing import EagerAndRecordGraphs, normalize_gm, same
 from torch._dynamo.utils import counters
 from torch.nn import functional as F
@@ -2328,8 +2327,9 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected, result)
 
     def test_graph_break_in_finally(self):
         z = []
@@ -2484,8 +2484,9 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected, result)
 
     def test_disable___exit__(self):
         def h(x):
@@ -2511,8 +2512,9 @@ class GraphModule(torch.nn.Module):
             return y
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected, result)
 
     def test_contextmanager_as_argument(self):
         def h(x):
@@ -2557,8 +2559,10 @@ class GraphModule(torch.nn.Module):
             return x + 1, ctx
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected[0], result[0])
+        self.assertEqual(type(expected[1]).__name__, type(result[1]).__name__)
 
     def test_return_advanced_contextmanager(self):
         L = []
@@ -2580,8 +2584,10 @@ class GraphModule(torch.nn.Module):
             return x + y, ctx
 
         x = torch.tensor([1.0])
-        with self.assertRaises(InternalTorchDynamoError):
-            torch.compile(fn, backend="eager", fullgraph=False)(x)
+        expected = fn(x)
+        result = torch.compile(fn, backend="eager", fullgraph=False)(x)
+        self.assertEqual(expected[0], result[0])
+        self.assertEqual(type(expected[1]).__name__, type(result[1]).__name__)
 
     def test_contextmanager_as_argument_only___enter__(self):
         L = []
