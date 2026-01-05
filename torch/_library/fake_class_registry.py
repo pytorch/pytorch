@@ -165,27 +165,44 @@ def maybe_to_fake_obj(
         FakeOpaqueObject,
         get_opaque_obj_info,
         get_opaque_type_name,
-        is_opaque_reference_type,
         is_opaque_type,
         OpaqueTypeStr,
     )
-    from torch._subclasses.fake_tensor import unset_fake_temporarily
 
     x_type = type(x)
     if is_opaque_type(x_type):
         type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
-        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
 
-        # Reference types with pure methods should also keep the real object
-        # so that those methods can be called during tracing
-        if is_opaque_reference_type(x_type):
-            opaque_info = get_opaque_obj_info(x_type)
-            assert opaque_info is not None
-            for attr_name in opaque_info.members:
-                # Need to unset fake mode as we don't want @property methods
-                # will get evaluated with the fake mode
-                with unset_fake_temporarily():
-                    object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
+        opaque_info = get_opaque_obj_info(x_type)
+        allowed_members = set(opaque_info.members.keys()) if opaque_info else set()
+
+        # Create a dynamic class that inherits from both the real class and
+        # FakeScriptObject. This allows isinstance checks to work correctly.
+        def fake_init(self, wrapped_obj, script_class_name, real_obj):
+            FakeScriptObject.__init__(self, wrapped_obj, script_class_name, real_obj)
+
+        # Override __setattr__ to allow setting registered opaque members
+        # while still preventing setting other attributes in fake kernels
+        def fake_setattr(self, name, value):
+            if name in allowed_members:
+                object.__setattr__(self, name, value)
+            else:
+                FakeScriptObject.__setattr__(self, name, value)
+
+        FakeClass = type(
+            f"Fake{x_type.__name__}",
+            (x_type, FakeScriptObject),
+            {"__init__": fake_init, "__setattr__": fake_setattr},
+        )
+
+        fake_x_wrapped = FakeClass(FakeOpaqueObject(), type_name, x)
+
+        for attr_name in allowed_members:
+            attr_on_class = getattr(x_type, attr_name, None)
+            if isinstance(attr_on_class, property):
+                continue
+
+            object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
 
         return fake_x_wrapped
     else:
