@@ -1480,13 +1480,7 @@ def speculate_subgraph_with_auto_output_flattening(
     # order they are see while tracing). This is useful for autograd.Function
     # backward where we do need to account for all the inputs of the backwards
     # to be lifted as inputs for making the fwd-bwd graph consistent.
-    set_subgraph_inputs: Literal[
-        "automatic",
-        "automatic_with_forced_inputs",
-        "flatten_manual",
-        "manual",
-        "flatten_automatic",
-    ] = "automatic",
+    set_subgraph_inputs: str = "automatic",
     # If True, exposes intermediates to subgraph outputs to allow later tensor ops to
     # access intermediates from the subgraph, this is useful for mutation
     allow_side_effects: bool = False,
@@ -3290,6 +3284,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
         description: str,
         *,
         subgraph_name: str = "wrap_body",
+        set_subgraph_inputs: str = "automatic",
     ) -> tuple[
         tuple[Proxy, ...],
         dict[str, VariableTracker],
@@ -3318,6 +3313,7 @@ class WrapHigherOrderVariable(TorchHigherOrderOperatorVariable):
             ),
             supports_input_mutation=self.supports_input_mutation,
             supports_aliasing=self.supports_aliasing,
+            set_subgraph_inputs=set_subgraph_inputs,
         )
 
         body_gmod = torch.fx.GraphModule(tx.output.nn_modules, body_graph)
@@ -5378,7 +5374,13 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             body_name,
             body_graph_output_vts,
         ) = self.create_wrapped_node(
-            tx, user_func, user_args, kwargs, self.value._name, subgraph_name="subgraph"
+            tx,
+            user_func,
+            user_args,
+            kwargs,
+            self.value._name,
+            subgraph_name="subgraph",
+            set_subgraph_inputs="flatten_automatic",
         )
 
         # Step 4: Validate traced graph signature still matches placement information
