@@ -32,8 +32,7 @@ It consists of
 
 We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please file an issue if you'd like to see support for particular APIs in your custom extension.
 
-<!-- @lint-ignore: URL won't exist till stable.rst cpp docs are published in 2.10 -->
-For complete API documentation of the stable operators, see the [Torch Stable API cpp documentation](https://docs.pytorch.org/cppdocs/stable.html).
+For complete API documentation of the stable operators, see the [Torch Stable API cpp documentation](https://docs.pytorch.org/cppdocs/stable.html). <!-- @lint-ignore: URL won't exist till stable.rst cpp docs are published in 2.10 -->
 
 ### Stable C headers
 
