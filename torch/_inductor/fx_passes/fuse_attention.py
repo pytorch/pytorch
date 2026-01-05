@@ -1131,10 +1131,7 @@ def _get_sfdp_patterns():
             name = pattern.__name__
 
             if dtype != torch.float:
-                if dtype == torch.bfloat16:
-                    name += "_bfloat16"
-                else:
-                    name += "_half"
+                name += "_half"
                 if (
                     any(p in name for p in mask_fp32_patterns)
                     and args[3].dtype == torch.float32
