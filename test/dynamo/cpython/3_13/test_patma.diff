@@ -1,5 +1,5 @@
---- /tmp/test_patma_orig.py    2026-01-06 00:22:11
-+++ test/dynamo/cpython/3_13/test_patma.py    2026-01-06 00:21:56
+--- /tmp/test_patma_orig.py	2026-01-06 00:48:44
++++ test/dynamo/cpython/3_13/test_patma.py	2026-01-06 00:48:30
 @@ -1,11 +1,28 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
@@ -67,20 +67,20 @@
  
      def assert_syntax_error(self, code: str):
          with self.assertRaises(SyntaxError):
-@@ -3012,6 +3029,13 @@
-         self.assert_syntax_error("""
-         match ...:
-             case a as a:
-+                pass
-+        """)
-+
+@@ -3015,6 +3032,13 @@
+                 pass
+         """)
+ 
 +    def test_multiple_assignments_to_name_in_pattern_6(self):
 +        self.assert_syntax_error("""
 +        match ...:
 +            case a as a + 1:  # NAME and expression with no ()
-                 pass
-         """)
- 
++                pass
++        """)
++
+     def test_multiple_starred_names_in_sequence_pattern_0(self):
+         self.assert_syntax_error("""
+         match ...:
 @@ -3222,7 +3246,7 @@
                  pass
          """)
@@ -125,7 +125,7 @@
      def test_parser_deeply_nested_patterns(self):
          # Deeply nested patterns can cause exponential backtracking when parsing.
          # See gh-93671 for more information.
-@@ -3513,38 +3538,7 @@
+@@ -3513,38 +3538,6 @@
                  compile(code, "<string>", "exec")
  
  
@@ -137,7 +137,6 @@
 -    sudo $(which pyperf) system reset
 -    """
 -    import pyperf
-+from torch.testing._internal.common_utils import run_tests
  
 -
 -    class PerfPatma(TestPatma):
