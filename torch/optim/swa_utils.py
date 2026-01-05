@@ -35,7 +35,37 @@ PARAM_LIST = Union[tuple[Tensor, ...], list[Tensor]]
 
 
 def get_ema_multi_avg_fn(decay=0.999):
-    """Get the function applying exponential moving average (EMA) across multiple params."""
+    r"""Get function for exponential moving average across multiple params.
+
+    Returns a function that applies exponential moving average (EMA) to
+    update parameters. The EMA update follows the formula:
+
+    .. math::
+        \text{ema\_param}_t = \text{decay} \times \text{ema\_param}_{t-1}
+        + (1 - \text{decay}) \times \text{current\_param}_t
+
+    where :math:`\text{ema\_param}_t` is the exponentially averaged
+    parameter at step t, and :math:`\text{current\_param}_t` is the
+    current model parameter at step t.
+
+    Args:
+        decay (float, optional): Decay rate for exponential moving average.
+            Higher values give more weight to previous parameters. Must be
+            in range [0, 1]. Default: 0.999
+
+    Returns:
+        Callable: Function that updates EMA parameters in-place. The
+            returned function has signature:
+            ``ema_update(ema_param_list, current_param_list, num_averaged)``
+
+    Raises:
+        ValueError: If decay is not in range [0, 1].
+
+    Example:
+        >>> ema_fn = get_ema_multi_avg_fn(decay=0.99)
+        >>> # ema_params will be updated as:
+        >>> # ema_params = 0.99 * ema_params + 0.01 * current_params
+    """
 
     if decay < 0.0 or decay > 1.0:
         raise ValueError(
@@ -93,7 +123,39 @@ def get_swa_multi_avg_fn():
 
 
 def get_ema_avg_fn(decay=0.999):
-    """Get the function applying exponential moving average (EMA) across a single param."""
+    r"""Get function for exponential moving average across a single param.
+
+    Returns a function that applies exponential moving average (EMA) to
+    update a single parameter. The EMA update follows the formula:
+
+    .. math::
+        \text{ema\_param}_t = \text{decay} \times \text{ema\_param}_{t-1}
+        + (1 - \text{decay}) \times \text{current\_param}_t
+
+    where :math:`\text{ema\_param}_t` is the exponentially averaged
+    parameter at step t, and :math:`\text{current\_param}_t` is the
+    current model parameter at step t.
+
+    Args:
+        decay (float, optional): Decay rate for exponential moving average.
+            Higher values give more weight to previous parameters. Must be
+            in range [0, 1]. Default: 0.999
+
+    Returns:
+        Callable: Function that computes and returns the updated EMA
+            parameter. The returned function has signature:
+            ``ema_update(ema_param, current_param, num_averaged)``
+
+    Raises:
+        ValueError: If decay is not in range [0, 1].
+
+    Example:
+        >>> ema_fn = get_ema_avg_fn(decay=0.99)
+        >>> ema_param = torch.tensor([1.0, 2.0, 3.0])
+        >>> current_param = torch.tensor([1.5, 2.5, 3.5])
+        >>> # Result: 0.99 * [1.0, 2.0, 3.0] + 0.01 * [1.5, 2.5, 3.5]
+        >>> updated = ema_fn(ema_param, current_param, None)
+    """
 
     if decay < 0.0 or decay > 1.0:
         raise ValueError(
@@ -149,7 +211,7 @@ class AveragedModel(Module):
             parameters as a list, and the number of models already averaged; if None,
             an equally weighted average is used (default: None)
         use_buffers (bool): if ``True``, it will compute running averages for
-            both the parameters and the buffers of the model. (default: ``False``)
+            both parameters and the buffers of the model. (default: ``False``)
 
     Example:
         >>> # xdoctest: +SKIP("undefined variables")
@@ -159,43 +221,40 @@ class AveragedModel(Module):
         >>>                                     T_max=300)
         >>> swa_start = 160
         >>> swa_scheduler = SWALR(optimizer, swa_lr=0.05)
-        >>> for i in range(300):
-        >>>      for input, target in loader:
-        >>>          optimizer.zero_grad()
-        >>>          loss_fn(model(input), target).backward()
-        >>>          optimizer.step()
-        >>>      if i > swa_start:
-        >>>          swa_model.update_parameters(model)
-        >>>          swa_scheduler.step()
-        >>>      else:
-        >>>          scheduler.step()
+        >>>
+        >>> for epoch in range(300):
+        >>>       for input, target in loader:
+        >>>           optimizer.zero_grad()
+        >>>           loss_fn(model(input), target).backward()
+        >>>           optimizer.step()
+        >>>       if epoch > swa_start:
+        >>>           swa_model.update_parameters(model)
+        >>>           swa_scheduler.step()
+        >>>       else:
+        >>>           scheduler.step()
         >>>
         >>> # Update bn statistics for the swa_model at the end
         >>> torch.optim.swa_utils.update_bn(loader, swa_model)
 
-    You can also use custom averaging functions with the `avg_fn` or `multi_avg_fn` parameters.
-    If no averaging function is provided, the default is to compute
-    equally-weighted average of the weights (SWA).
+    You can also use custom averaging functions with `avg_fn` or `multi_avg_fn` parameters.
+    If no averaging function is provided, the default is to compute an equally-weighted
+    average of the weights.
 
     Example:
         >>> # xdoctest: +SKIP("undefined variables")
-        >>> # Compute exponential moving averages of the weights and buffers
-        >>> ema_model = torch.optim.swa_utils.AveragedModel(model,
-        >>>             torch.optim.swa_utils.get_ema_multi_avg_fn(0.9), use_buffers=True)
+        >>> # Compute exponential moving averages of the weights
+        >>> ema_avg = lambda averaged_model_parameter, model_parameter, num_averaged:\
+        >>>         0.9 * averaged_model_parameter + 0.1 * model_parameter
+        >>> ema_model = torch.optim.swa_utils.AveragedModel(model, avg_fn=ema_avg)
 
     .. note::
         When using SWA/EMA with models containing Batch Normalization you may
         need to update the activation statistics for Batch Normalization.
-        This can be done either by using the :meth:`torch.optim.swa_utils.update_bn`
-        or by setting :attr:`use_buffers` to `True`. The first approach updates the
-        statistics in a post-training step by passing data through the model. The
-        second does it during the parameter update phase by averaging all buffers.
-        Empirical evidence has shown that updating the statistics in normalization
-        layers increases accuracy, but you may wish to empirically test which
-        approach yields the best results in your problem.
+        You can do so by using :meth:`torch.optim.swa_utils.update_bn` utility.
 
     .. note::
-        :attr:`avg_fn` and `multi_avg_fn` are not saved in the :meth:`state_dict` of the model.
+        :attr:`avg_fn` and :attr:`multi_avg_fn` are not saved in the
+        :meth:`state_dict` of the model.
 
     .. note::
         When :meth:`update_parameters` is called for the first time (i.e.
@@ -206,132 +265,96 @@ class AveragedModel(Module):
 
     .. _Averaging Weights Leads to Wider Optima and Better Generalization:
         https://arxiv.org/abs/1803.05407
+    .. _Polyak averaging:
+        https://paperswithcode.com/method/polyak-averaging
     .. _There Are Many Consistent Explanations of Unlabeled Data: Why You Should
         Average:
         https://arxiv.org/abs/1806.05594
-    .. _SWALP: Stochastic Weight Averaging in Low-Precision Training:
-        https://arxiv.org/abs/1904.11943
-    .. _Stochastic Weight Averaging in Parallel: Large-Batch Training That
-        Generalizes Well:
-        https://arxiv.org/abs/2001.02312
-    .. _Polyak averaging:
-        https://paperswithcode.com/method/polyak-averaging
+    .. _SGDR\: Stochastic Gradient Descent with Warm Restarts:
+        https://arxiv.org/abs/1608.03983
+    .. _Improving Consistency-Based Semi-Supervised Learning with Weight
+        Averaging:
+        https://arxiv.org/abs/1806.05594
     """
-
-    n_averaged: Tensor
 
     def __init__(
         self,
         model: Module,
-        device: int | torch.device | None = None,
+        device: torch.device | str | None = None,
         avg_fn: Callable[[Tensor, Tensor, Tensor | int], Tensor] | None = None,
         multi_avg_fn: Callable[[PARAM_LIST, PARAM_LIST, Tensor | int], None]
         | None = None,
-        use_buffers=False,
-    ) -> None:  # noqa: D107
+        use_buffers: bool = False,
+    ):
         super().__init__()
-        if avg_fn is not None and multi_avg_fn is not None:
-            raise AssertionError(
-                "Only one of avg_fn and multi_avg_fn should be provided"
-            )
         self.module = deepcopy(model)
         if device is not None:
             self.module = self.module.to(device)
-        self.register_buffer(
-            "n_averaged", torch.tensor(0, dtype=torch.long, device=device)
-        )
+        self.register_buffer("n_averaged", torch.tensor(0, dtype=torch.long))
         self.avg_fn = avg_fn
         self.multi_avg_fn = multi_avg_fn
         self.use_buffers = use_buffers
 
-    def forward(self, *args, **kwargs):
-        """Forward pass."""
+    @override
+    def forward(self, *args: Any, **kwargs: Any):
         return self.module(*args, **kwargs)
 
     def update_parameters(self, model: Module) -> None:
-        """Update model parameters."""
+        """Update the parameters of the averaged model.
+
+        Args:
+            model (torch.nn.Module): model whose parameters will be used to
+                update the averaged model parameters
+        """
         self_param = (
-            # pyrefly: ignore [bad-argument-type]
             itertools.chain(self.module.parameters(), self.module.buffers())
             if self.use_buffers
             else self.parameters()
         )
         model_param = (
-            # pyrefly: ignore [bad-argument-type]
             itertools.chain(model.parameters(), model.buffers())
             if self.use_buffers
             else model.parameters()
         )
-        self_param_detached: list[Tensor | None] = []
-        model_param_detached: list[Tensor | None] = []
-        copy_param = bool(self.n_averaged == 0)
+        self_param_detached = []
+        model_param_detached = []
         for p_averaged, p_model in zip(self_param, model_param, strict=False):
             p_model_ = p_model.detach().to(p_averaged.device)
             self_param_detached.append(p_averaged.detach())
             model_param_detached.append(p_model_)
-            if copy_param:
-                p_averaged.detach().copy_(p_model_)
+            if self.n_averaged == 0:
+                p_averaged.copy_(p_model_)
 
         if self.n_averaged > 0:
-            if self.multi_avg_fn is not None or self.avg_fn is None:
-                grouped_tensors = _group_tensors_by_device_and_dtype(
-                    [self_param_detached, model_param_detached]
+            if self.multi_avg_fn is not None:
+                self.multi_avg_fn(
+                    self_param_detached, model_param_detached, self.n_averaged
                 )
-                for (device, _), (
-                    [self_params, model_params],
-                    _,
-                ) in grouped_tensors.items():
-                    if self.multi_avg_fn:
-                        self.multi_avg_fn(
-                            self_params,  # type: ignore[arg-type]
-                            model_params,  # type: ignore[arg-type]
-                            self.n_averaged.to(device),
-                        )
-                    elif (
-                        device is not None
-                        and device.type in _get_foreach_kernels_supported_devices()
-                    ):
-                        multi_avg_fn = get_swa_multi_avg_fn()
-                        multi_avg_fn(
-                            self_params, model_params, self.n_averaged.to(device)
-                        )
-                    else:
-                        avg_fn = get_swa_avg_fn()
-                        n_averaged = self.n_averaged.to(device)
-                        for p_averaged, p_model in zip(  # type: ignore[assignment]
-                            self_params, model_params, strict=True
-                        ):
-                            # pyrefly: ignore [missing-attribute]
-                            p_averaged.copy_(avg_fn(p_averaged, p_model, n_averaged))
-            else:
-                for p_averaged, p_model in zip(  # type: ignore[assignment]
+            elif self.avg_fn is not None:
+                for p_averaged, p_model in zip(
                     self_param_detached, model_param_detached, strict=True
                 ):
-                    # pyrefly: ignore [missing-attribute]
-                    n_averaged = self.n_averaged.to(p_averaged.device)
-                    # pyrefly: ignore [missing-attribute]
-                    p_averaged.detach().copy_(
-                        # pyrefly: ignore [missing-attribute, bad-argument-type]
-                        self.avg_fn(p_averaged.detach(), p_model, n_averaged)
+                    p_averaged.copy_(self.avg_fn(p_averaged, p_model, self.n_averaged))
+            else:
+                for p_averaged, p_model in zip(
+                    self_param_detached, model_param_detached, strict=True
+                ):
+                    p_averaged.copy_(
+                        p_averaged * self.n_averaged / (self.n_averaged + 1.0)
+                        + p_model / (self.n_averaged + 1.0)
                     )
-
-        if not self.use_buffers:
-            # If not apply running averages to the buffers,
-            # keep the buffers in sync with the source model.
-            for b_swa, b_model in zip(
-                self.module.buffers(), model.buffers(), strict=True
-            ):
-                b_swa.detach().copy_(b_model.detach().to(b_swa.device))
         self.n_averaged += 1
 
 
-@torch.no_grad()
 def update_bn(
-    loader: Iterable[Any],
+    loader: Iterable,
     model: Module,
-    device: int | torch.device | None = None,
+    device: torch.device | str | None = None,
 ) -> None:
-    r"""Update BatchNorm running_mean, running_var buffers in the model.
+    r"""Update BatchNorm running statistics.
+
+    Updates BatchNorm running_mean, running_var and num_batches_tracked
+    buffers in the model.
 
     It performs one pass over data in `loader` to estimate the activation
     statistics for BatchNorm layers in the model.
@@ -347,9 +370,9 @@ def update_bn(
             :attr:`device` before being passed into :attr:`model`.
 
     Example:
-        >>> # xdoctest: +SKIP("Undefined variables")
-        >>> loader, model = ...
-        >>> torch.optim.swa_utils.update_bn(loader, model)
+        >>> # xdoctest: +SKIP("undefined variables")
+        >>> loader, swa_model = ...
+        >>> torch.optim.swa_utils.update_bn(loader, swa_model)
 
     .. note::
         The `update_bn` utility assumes that each data batch in :attr:`loader`
@@ -360,7 +383,8 @@ def update_bn(
     momenta = {}
     for module in model.modules():
         if isinstance(module, torch.nn.modules.batchnorm._BatchNorm):
-            module.reset_running_stats()
+            module.running_mean = torch.zeros_like(module.running_mean)
+            module.running_var = torch.ones_like(module.running_var)
             momenta[module] = module.momentum
 
     if not momenta:
@@ -370,6 +394,7 @@ def update_bn(
     model.train()
     for module in momenta:
         module.momentum = None
+        module.num_batches_tracked *= 0
 
     for input in loader:
         if isinstance(input, (list, tuple)):
@@ -385,20 +410,20 @@ def update_bn(
 
 
 class SWALR(LRScheduler):
-    r"""Anneals the learning rate in each parameter group to a fixed value.
+    r"""Anneals the learning rate for Stochastic Weight Averaging (SWA).
 
-    This learning rate scheduler is meant to be used with Stochastic Weight
-    Averaging (SWA) method (see `torch.optim.swa_utils.AveragedModel`).
+    This scheduler is used together with other learning rate schedulers to
+    switch to a constant learning rate late in the training as proposed in
+    `Averaging Weights Leads to Wider Optima and Better Generalization`_.
 
     Args:
         optimizer (torch.optim.Optimizer): wrapped optimizer
-        swa_lrs (float or list): the learning rate value for all param groups
-            together or separately for each group.
-        annealing_epochs (int): number of epochs in the annealing phase
+        swa_lr (float): the constant learning rate to use for SWA
+        anneal_epochs (int): number of epochs in the annealing phase
             (default: 10)
-        annealing_strategy (str): "cos" or "linear"; specifies the annealing
-            strategy: "cos" for cosine annealing, "linear" for linear annealing
-            (default: "cos")
+        anneal_strategy (str): "cos" or "linear"; specifies the annealing
+            strategy: "cos" for cosine annealing, "linear" for linear
+            annealing (default: "cos")
         last_epoch (int): the index of the last epoch (default: -1)
 
     The :class:`SWALR` scheduler can be used together with other
@@ -406,7 +431,7 @@ class SWALR(LRScheduler):
     as in the example below.
 
     Example:
-        >>> # xdoctest: +SKIP("Undefined variables")
+        >>> # xdoctest: +SKIP("undefined variables")
         >>> loader, optimizer, model = ...
         >>> lr_lambda = lambda epoch: 0.9
         >>> scheduler = torch.optim.lr_scheduler.MultiplicativeLR(optimizer,
@@ -432,11 +457,11 @@ class SWALR(LRScheduler):
         self,
         optimizer: Optimizer,
         swa_lr: float,
-        anneal_epochs=10,
+        anneal_epochs: int = 10,
         anneal_strategy: Literal["cos", "linear"] = "cos",
-        last_epoch=-1,
-    ) -> None:  # noqa: D107
-        swa_lrs = _format_param("swa_lr", optimizer, swa_lr)
+        last_epoch: int = -1,
+    ):
+        swa_lrs = self._format_param(optimizer, swa_lr)
         for swa_lr, group in zip(swa_lrs, optimizer.param_groups, strict=True):
             group["swa_lr"] = swa_lr
         if anneal_strategy not in ["cos", "linear"]:
@@ -444,53 +469,34 @@ class SWALR(LRScheduler):
                 "anneal_strategy must by one of 'cos' or 'linear', "
                 f"instead got {anneal_strategy}"
             )
-        self._set_anneal_func(anneal_strategy)
         if not isinstance(anneal_epochs, int) or anneal_epochs < 0:
             raise ValueError(
                 f"anneal_epochs must be equal or greater than 0, got {anneal_epochs}"
             )
         self.anneal_epochs = anneal_epochs
+        self.anneal_strategy = anneal_strategy
         super().__init__(optimizer, last_epoch)
 
     @staticmethod
-    def _linear_anneal(t):
-        return t
+    def _format_param(optimizer: Optimizer, swa_lrs: float | list) -> list:
+        if isinstance(swa_lrs, (list, tuple)):
+            if len(swa_lrs) != len(optimizer.param_groups):
+                raise ValueError(
+                    f"swa_lr must have {len(optimizer.param_groups)} elements, got {len(swa_lrs)}"
+                )
+            return list(swa_lrs)
+        return [swa_lrs] * len(optimizer.param_groups)
 
     @staticmethod
-    def _cosine_anneal(t):
-        return (1 - math.cos(math.pi * t)) / 2
-
-    @staticmethod
-    def _get_initial_lr(lr, swa_lr, alpha):
-        if alpha == 1:
-            return swa_lr
-        return (lr - alpha * swa_lr) / (1 - alpha)
+    def _annealed_lr(
+        swa_lr: float, lr: float, pct: float, anneal_strategy: Literal["cos", "linear"]
+    ) -> float:
+        if anneal_strategy == "cos":
+            return swa_lr + (lr - swa_lr) * (1 + math.cos(math.pi * pct)) / 2
+        return (1 - pct) * lr + pct * swa_lr
 
     @override
     def get_lr(self):
-        r"""Compute the next learning rate for each of the optimizer's
-        :attr:`~torch.optim.Optimizer.param_groups`.
-
-        Uses :attr:`anneal_func` to interpolate between each group's
-        ``group["lr"]`` and ``group["swa_lr"]`` over :attr:`anneal_epochs`
-        epochs. Once :attr:`anneal_epochs` is reached, keeps the learning rate
-        fixed at ``group["swa_lr"]``.
-
-        Returns:
-            list[float | Tensor]: A :class:`list` of learning rates for each of
-            the optimizer's :attr:`~torch.optim.Optimizer.param_groups` with the
-            same types as their current ``group["lr"]``\s.
-
-        .. note::
-            If you're trying to inspect the most recent learning rate, use
-            :meth:`get_last_lr()` instead.
-
-        .. note::
-            The returned :class:`~torch.Tensor`\s are copies, and never alias
-            the optimizer's ``group["lr"]``\s.
-        """
-        # `_get_lr_called_within_step` is only available `_enable_get_lr_call`,
-        # so we ignore the type error here. See `LRScheduler.step()` for more details.
         if not self._get_lr_called_within_step:
             warnings.warn(
                 "To get the last learning rate computed by the scheduler, "
@@ -498,52 +504,16 @@ class SWALR(LRScheduler):
                 UserWarning,
                 stacklevel=2,
             )
-        # Set in `LRScheduler._initial_step()`
         step = self._step_count - 1
-        if self.anneal_epochs == 0:
-            step = max(1, step)
-        # pyrefly: ignore [no-matching-overload]
-        prev_t = max(0, min(1, (step - 1) / max(1, self.anneal_epochs)))
-        prev_alpha = self.anneal_func(prev_t)
-        prev_lrs = [
-            self._get_initial_lr(group["lr"], group["swa_lr"], prev_alpha)
-            for group in self.optimizer.param_groups
-        ]
-        # pyrefly: ignore [no-matching-overload]
-        t = max(0, min(1, step / max(1, self.anneal_epochs)))
-        alpha = self.anneal_func(t)
-        return [
-            group["swa_lr"] * alpha + lr * (1 - alpha)
-            for group, lr in zip(self.optimizer.param_groups, prev_lrs, strict=True)
-        ]
-
-    def _set_anneal_func(self, anneal_strategy: Literal["cos", "linear"]) -> None:
-        self._anneal_strategy = anneal_strategy
-        if anneal_strategy == "cos":
-            self.anneal_func = self._cosine_anneal
-        else:
-            self.anneal_func = self._linear_anneal
-
-    @override
-    def state_dict(self) -> dict[str, Any]:
-        """Return the state of the scheduler as a :class:`dict`.
-
-        It contains an entry for every variable in self.__dict__ which
-        is not the optimizer or anneal_func.
-        """
-        return {
-            key: value
-            for key, value in self.__dict__.items()
-            if key not in ("optimizer", "anneal_func")
-        }
-
-    @override
-    def load_state_dict(self, state_dict: dict[str, Any]) -> None:
-        """Load the scheduler's state.
-
-        Args:
-            state_dict (dict): scheduler state. Should be an object returned
-                from a call to :meth:`state_dict`.
-        """
-        self.__dict__.update(state_dict)
-        self._set_anneal_func(self._anneal_strategy)
+        prev_lrs = [group["lr"] for group in self.optimizer.param_groups]
+        if step < self.anneal_epochs:
+            pct = step / self.anneal_epochs
+            return [
+                self._annealed_lr(
+                    group["swa_lr"], lr, pct, self.anneal_strategy
+                )
+                for group, lr in zip(
+                    self.optimizer.param_groups, prev_lrs, strict=True
+                )
+            ]
+        return [group["swa_lr"] for group in self.optimizer.param_groups]
