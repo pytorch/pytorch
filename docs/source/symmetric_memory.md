@@ -289,6 +289,10 @@ support of the `NCCL` backend is in progress.
 .. autofunction:: get_backend
 ```
 
+```{eval-rst}
+.. autofunction:: get_mem_pool
+```
+
 ## Op Reference
 :::{note}
 The following ops are hosted in the `torch.ops.symm_mem` namespace. You can call
