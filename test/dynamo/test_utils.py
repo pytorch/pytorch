@@ -390,7 +390,7 @@ class TestDynamoTimed(TestCase):
             self.run_forward_backward()
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
 
-        def filter_expected(s):
+        def filter_expected(s: str) -> str:
             d = eval(s)
             if not dynamo_config.run_gc_after_compile:
                 d.pop("gc", None)
