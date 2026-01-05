@@ -2526,6 +2526,7 @@ class TestRefsOpsInfo(TestCase):
         "_refs.contiguous",
         "_refs.dsplit",
         "_refs.dstack",
+        "_refs.empty_like",
         "_refs.fill",
         "_refs.fill_",
         "_refs.flatten",

@@ -3226,7 +3226,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         cnt = CompileCounterWithBackend("inductor")
         fn = torch.compile(fn, backend=cnt)
         fn()
-        self.assertEqual(cnt.frame_count, ifdynstaticdefault(2, 1))
+        self.assertEqual(cnt.frame_count, 3)
 
     def test_mandelbrot_numpy(self):
         def mandelbrot_numpy(max_iter):

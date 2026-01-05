@@ -5227,7 +5227,6 @@ def empty_out(
     return out
 
 
-@register_decomposition(aten.empty_like)
 @out_wrapper()
 def empty_like(
     a: TensorLikeType,
