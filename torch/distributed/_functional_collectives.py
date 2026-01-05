@@ -1062,8 +1062,7 @@ class AsyncCollectiveTensor(torch.Tensor):
             # Fast handle aten.view as a lot of view related op goes to aten.view
             # eventually, this avoids pytree slowdown
 
-            elem = _recursive_unwrap_functorch(args[0].elem)
-            res = func(elem, args[1])
+            res = func(_recursive_unwrap_functorch(args[0].elem), args[1])
             wrapper_res = AsyncCollectiveTensor(res)
             return wrapper_res
 

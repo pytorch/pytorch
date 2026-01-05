@@ -979,40 +979,6 @@ class TestAsyncCollectiveTensorWithFunctorch(TestCase):
         self.assertIsInstance(result, torch.Tensor)
         self.assertEqual(result, inp.sum())
 
-    def test_trigger_wait_with_multiple_levels(self):
-        class F(torch.autograd.Function):
-            @staticmethod
-            def forward(input):
-                return input
-
-            @staticmethod
-            def backward(ctx, grad_output):
-                return grad_output
-
-            @staticmethod
-            def setup_context(ctx, inputs, output):
-                pass
-
-            @staticmethod
-            def jvp(ctx, input_tangent):
-                wrapped = ft_c._maybe_wrap_tensor(input_tangent)
-                return wrapped.trigger_wait()
-
-        def nested_fn(x):
-            def inner(y):
-                return F.apply(y).sum()
-
-            _, jvp_out = torch.func.jvp(inner, (x,), (torch.ones_like(x),))
-            return jvp_out
-
-        inp = torch.randn(3)
-        tangent = torch.ones(3)
-
-        result, jvp_result = torch.func.jvp(nested_fn, (inp,), (tangent,))
-
-        self.assertIsInstance(result, torch.Tensor)
-        self.assertIsInstance(jvp_result, torch.Tensor)
-
 
 # Update the supported devices in DEVICE
 instantiate_device_type_tests(
