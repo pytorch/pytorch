@@ -766,7 +766,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     items[fields.index(name)] = value  # type: ignore[call-overload]
 
                 assert all(x is not None for x in items)
-                items_ret_type = items  # type: ignore[assignment]
 
             # Modify mutability of namedtuple for sourcelesss instantiations.
             from .base import AttributeMutationNew
@@ -778,8 +777,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
             tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
-            from .lists import SizeVariable
-
             return SizeVariable(tup.items)
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)  # type: ignore[arg-type]
@@ -2552,6 +2549,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
     def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
+        tx = kwargs.pop("tx", None)
         super().__init__(value, init_args=init_args, **kwargs)
         if tuple_vt is None:
             assert self.source is None, (
@@ -2570,9 +2568,6 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             self._tuple_vt = variables.TupleVariable(
                 elems, mutation_type=ValueMutationNew()
             )
-        else:
-            self._tuple_vt = tuple_vt
-
         else:
             self._tuple_vt = tuple_vt
 
