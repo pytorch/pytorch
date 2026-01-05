@@ -31,17 +31,17 @@ if [[ "$ARCH" == "x86_64" ]]; then
 elif [[ "$ARCH" == "aarch64" ]]; then
     PIP_PLATFORM="aarch64"
 else
-    echo "Warning: Unknown architecture $ARCH, defaulting to x86_64"
+    echo "warning, unknown architecture $ARCH, defaulting to x86_64"
     PIP_PLATFORM="x86_64"
 fi
 
 if [[ ! -d "$FLASH_ATTENTION_HOPPER_DIR" ]]; then
-    fatal "Flash Attention hopper directory not found: $FLASH_ATTENTION_HOPPER_DIR"
+    fatal "flash attn directory not found $FLASH_ATTENTION_HOPPER_DIR"
 fi
 
 export TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST:-8.0+PTX 8.6 9.0a}"
 
-echo "Installing build dependencies..."
+echo "installing dependencies"
 pip_install einops packaging ninja numpy
 
 export TORCH_CUDA_ARCH_LIST
@@ -74,7 +74,7 @@ python setup.py bdist_wheel \
     -k \
     --plat-name "manylinux_2_28_${PIP_PLATFORM}"
 
-echo "Wheel(s) built:"
+echo "wheel built: "
 find "$FA_FINAL_PACKAGE_DIR" -name '*.whl' -exec ls -la {} \;
 
 popd
