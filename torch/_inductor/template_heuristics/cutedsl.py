@@ -29,8 +29,10 @@ def get_exhaustive_groupgemm_configs() -> list[CuTeGemmConfig]:
     https://github.com/NVIDIA/cutlass/blob/main/examples/python/CuTeDSL/blackwell/grouped_gemm.py
     """
 
-    # Tile_n is always the same regardless of 2cta
-    tile_n_vals = [32, 64, 96, 128, 160, 192, 224, 256]
+    # TILE_N values differ between 2-CTA and non-2-CTA modes
+    # 2-CTA mode requires TILE_N values that work with epilogue layout division
+    tile_n_vals_no_2cta = [32, 64, 96, 128, 160, 192, 224, 256]
+    tile_n_vals_2cta = [64, 128, 192, 256]  # Multiples of 64 for epilogue compatibility
 
     # Valid clusters
     clusters_no_2cta = [
@@ -65,9 +67,9 @@ def get_exhaustive_groupgemm_configs() -> list[CuTeGemmConfig]:
 
     configs: list[CuTeGemmConfig] = []
 
-    for use_2cta, cluster_set, tile_m_range in [
-        (False, clusters_no_2cta, [64, 128]),
-        (True, clusters_2cta, [128, 256]),
+    for use_2cta, cluster_set, tile_m_range, tile_n_vals in [
+        (False, clusters_no_2cta, [64, 128], tile_n_vals_no_2cta),
+        (True, clusters_2cta, [128, 256], tile_n_vals_2cta),
     ]:
         for tensormap_update_mode, tile_m, tile_n, (cluster_m, cluster_n) in product(
             [TensorMapUpdateMode.SMEM, TensorMapUpdateMode.GMEM],
