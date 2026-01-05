@@ -244,6 +244,62 @@ class _FromTorchTensor(torch.autograd.Function):
         return grad_output.to_local(), None, None, None, None, None
 
 
+class _DTensorGradPlacementHook:
+    """Hook to redistribute gradients to conjugate placements during backward pass.
+
+    This hook ensures that gradients flow correctly through DTensor operations by
+    converting placements to their "conjugate" forms:
+    - Replicate in forward → Partial("sum") in backward
+    - Partial in forward → Replicate in backward
+    - Shard stays unchanged
+    """
+
+    def __init__(self, grad_fn, forward_args):
+        self.placements = tuple(
+            arg._spec.placements if isinstance(arg, DTensor) else None
+            for arg in forward_args
+        )
+        self.grad_fn = grad_fn
+        self.grad_fn.register_hook(self._post)
+
+    def _post(self, grad_inputs, grad_outputs):
+        """Redistribute grad_inputs to conjugate placements."""
+        result = []
+        conjugate_placements = self._primal_to_conjugate(self.placements)
+        for target_placements, grad_input in zip(conjugate_placements, grad_inputs):
+            if isinstance(grad_input, DTensor) and target_placements is not None:
+                if target_placements != grad_input._spec.placements:
+                    grad_input = grad_input.redistribute(
+                        device_mesh=grad_input.device_mesh,
+                        placements=target_placements,
+                    )
+            result.append(grad_input)
+        return tuple(result)
+
+    @staticmethod
+    def _primal_to_conjugate(
+        placements_list: tuple[tuple[Placement, ...] | None, ...],
+    ) -> tuple[tuple[Placement, ...] | None, ...]:
+        """Convert primal placements to conjugate placements for gradient flow."""
+        mapped = []
+        for placements in placements_list:
+            if placements is None:
+                mapped.append(None)
+            else:
+                conjugate = []
+                for p in placements:
+                    if isinstance(p, Shard):
+                        conjugate.append(p)
+                    elif isinstance(p, Partial):
+                        conjugate.append(Replicate())
+                    elif isinstance(p, Replicate):
+                        conjugate.append(Partial("sum"))
+                    else:
+                        conjugate.append(p)
+                mapped.append(tuple(conjugate))
+        return tuple(mapped)
+
+
 class DTensor(torch.Tensor):
     """
     ``DTensor`` (Distributed Tensor) is a subclass of ``torch.Tensor`` that provides single-device like
@@ -362,6 +418,20 @@ class DTensor(torch.Tensor):
             device_mesh=self.device_mesh,
             placements=spec.placements,
         )
+
+    @classmethod
+    def __torch_function__(cls, func, types, args, kwargs=None):
+        from torch.utils._pytree import tree_map
+
+        out = super().__torch_function__(func, types, args, kwargs or {})
+
+        def _register_grad_placement_hook(t):
+            if isinstance(t, torch.Tensor) and t.grad_fn is not None:
+                _ = _DTensorGradPlacementHook(t.grad_fn, args)
+            return t
+
+        tree_map(_register_grad_placement_hook, out)
+        return out
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):  # type: ignore[override]
