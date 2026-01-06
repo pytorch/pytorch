@@ -411,7 +411,7 @@ def temporarely_allow_writes_to_output_graph(
 class BlockStackEntry:
     # Current instruction that pushes something to block_stack
     inst: Instruction
-    target: Instruction
+    target: Instruction | None
     stack_index: int
     with_context: Optional[
         Union[ContextWrappingVariable, GenericContextWrappingVariable]
@@ -2032,7 +2032,7 @@ class InstructionTranslatorBase(
     def load_builtin(self, inst: Instruction) -> None:
         self.push(self.load_builtin_from_argval(inst.argval))
 
-    def jump(self, inst: Instruction) -> None:
+    def jump(self, inst: Instruction | BlockStackEntry) -> None:
         assert self.instruction_pointer is not None
         assert self.start_point is not None
         assert inst.target is not None
@@ -2077,7 +2077,7 @@ class InstructionTranslatorBase(
         exit, exc = self.popn(2)
         assert exc is None
         self.push(exc)
-        # pyrefly: ignore [bad-argument-type]
+
         self.push(exit.call_function(self, [ConstantVariable.create(None)] * 3, {}))
 
     def WITH_CLEANUP_FINISH(self, inst: Instruction) -> None:
@@ -2287,6 +2287,7 @@ class InstructionTranslatorBase(
             val = self.stack[-2]
             assert self._isinstance_exception(val)
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
+            # pyrefly: ignore[bad-argument-type]
             tb = val.var_getattr(self, "__traceback__")
 
         args += [typ, val, tb]
@@ -2385,7 +2386,7 @@ class InstructionTranslatorBase(
 
                 # Push a dummy block stack entry of EXCEPT_HANDLER
                 # https://github.com/python/cpython/blob/3.10/Python/ceval.c#L1456
-                except_handler_inst = Instruction(1e6, "EXCEPT_HANDLER", None, 0)
+                except_handler_inst = Instruction(int(1e6), "EXCEPT_HANDLER", None, 0)
                 self.block_stack.append(
                     BlockStackEntry(except_handler_inst, None, len(self.stack))
                 )
@@ -2398,6 +2399,7 @@ class InstructionTranslatorBase(
                     # Traceback is currently mapped to UnknownVariable
                     self.push(variables.UnknownVariable())
                     self.push(old_exception)
+                    # pyrefly: ignore[missing-attribute]
                     self.push(variables.BuiltinVariable(old_exception.exc_type))
                 else:
                     # Push empty exception tb, value, type
@@ -2409,6 +2411,7 @@ class InstructionTranslatorBase(
                 # Traceback is currently mapped to UnknownVariable
                 self.push(variables.UnknownVariable())
                 self.push(exception_var)
+                # pyrefly: ignore[missing-attribute]
                 self.push(variables.BuiltinVariable(exception_var.exc_type))
 
                 # Jump to target
@@ -2914,12 +2917,12 @@ class InstructionTranslatorBase(
         stack_len = len(self.stack) - len(meta.stack_null_idxes)
 
         assert self.current_instruction.offset is not None
-
         new_code: types.CodeType = ContinueExecutionCache.lookup(
             self.f_code,
             self.lineno,
             self.current_instruction.offset,
             resume_inst.offset,
+            # pyre: ignore[missing-attribute]
             tuple(b.target.offset for b in self.block_stack),
             stack_len,
             argnames,
@@ -3851,13 +3854,12 @@ class InstructionTranslatorBase(
                 args = [contents[1]]
 
         if kw_names:
-            # pyrefly: ignore [bad-argument-type]
             args = args + contents[2 : -len(kw_names)]
-            # pyrefly: ignore [bad-argument-type]
+
             kwargs_list = contents[-len(kw_names) :]
-            # pyrefly: ignore [no-matching-overload]
+
             kwargs = dict(zip(kw_names, kwargs_list))
-            # pyrefly: ignore [bad-argument-type]
+
             assert len(kwargs) == len(kw_names)
         else:
             args = args + contents[2:]
@@ -4640,7 +4642,9 @@ class InstructionTranslator(InstructionTranslatorBase):
                     # 2. This conveniently allows codegen to prune away
                     # mutations to these cells, unless they escape the frame.
                     contents_source = LocalSource(
-                        name, is_input=True, is_derefed_cell_contents=True
+                        name,
+                        is_input=True,
+                        is_derefed_cell_contents=True,
                     )
                     contents_var: VariableTracker = LazyVariableTracker.create(
                         value, contents_source
@@ -4852,7 +4856,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             # trace through.
             if (
                 hasattr(getattr(func, "fn", None), "_origin")
-                # pyrefly: ignore [missing-attribute]
                 and func.fn._origin is produce_trampoline_autograd_apply
             ):
                 # Known sound
@@ -4928,7 +4931,6 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
 
         sub_locals = None
         try:
-            # pyrefly: ignore [missing-attribute]
             sub_locals = func.bind_args(parent, args, kwargs)
         except TypeError as e:
             unimplemented(
