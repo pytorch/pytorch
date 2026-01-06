@@ -23,15 +23,10 @@ project-includes = [
 project-excludes = [
   # ==== below will be enabled directory by directory ====
   # ==== to test Pyrefly on a specific directory, simply comment it out ====
-  "torch/_inductor/codegen/triton.py",
-  "tools/linter/adapters/test_device_bias_linter.py",
   "tools/code_analyzer/gen_operators_yaml.py",
   "torch/_inductor/runtime/triton_heuristics.py",
   "torch/_inductor/runtime/triton_helpers.py",
   "torch/_inductor/runtime/halide_helpers.py",
-  "torch/utils/tensorboard/summary.py",
-  "torch/ao/quantization/pt2e/qat_utils.py",
-  "torch/_inductor/codegen/common.py",
   "torch/utils/data/typing.ipynb",
   "torch/utils/data/dataframes_pipes.ipynb",
   "torch/utils/data/standard_pipes.ipynb",
@@ -139,6 +134,18 @@ errors.bad-param-name-override = false
 # Might be a good idea to turn this on in future.
 errors.implicit-import = false
 errors.deprecated = false # re-enable after we've fix import formatting
+
 permissive-ignores = true
 replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*"]
 search-path = ["tools/experimental"]
+
+# Dynamo sub-config - note, we experiment with stricter typing here
+[[sub-config]]
+matches = "torch/_dynamo/**"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+# TODO: Turn on in later version
+# unannotated-attribute=true
+# unannotated-parameter=true
+# unannotated-return=true
