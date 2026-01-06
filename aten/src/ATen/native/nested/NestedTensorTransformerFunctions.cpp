@@ -195,7 +195,7 @@ Tensor NestedTensor_softmax_dropout_cuda(const Tensor& self, const Tensor& query
 Tensor NestedTensor_batch_offsets_from_size_tensor(
     const Tensor& sizes,
     int64_t extra_elements) {
-  const int64_t* sizes_ptr = sizes.const_data_ptr<int64_t>();
+  int64_t* const sizes_ptr = sizes.data_ptr<int64_t>();
   Tensor offsets = at::empty({1 + sizes.size(0) + extra_elements}, at::kInt);
   int32_t* const offsets_ptr = offsets.mutable_data_ptr<int32_t>();
   offsets_ptr[0] = 0;
@@ -235,8 +235,8 @@ Tensor NestedTensor_to_mask(const Tensor& nt, std::optional<int64_t> mask_dim, s
   const auto result_size_1 = mask_dim_length ? *mask_dim_length : NestedTensor_get_max_size(*nt_impl)[0];
   auto result = at::ones({sizes.sizes()[0], result_size_1}, at::kBool);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(sizes.dim() == 2);
-  auto* result_data = result.mutable_data_ptr<bool>();
-  auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
+  auto* result_data = result.data_ptr<bool>();
+  auto* sizes_ptr = sizes.data_ptr<int64_t>();
   const auto sizes_size_1 = sizes.sizes()[1];
   for (const auto ii : c10::irange(sizes.sizes()[0])) {
     auto length = sizes_ptr[ii * sizes_size_1];

@@ -912,7 +912,7 @@ _to_sparse_semi_structured(const Tensor& dense) {
   auto meta_cpu = dense_cpu.new_empty({meta_nrows, meta_ncols},
                                       at::TensorOptions().dtype(meta_dtype));
 
-  const auto* mask_cpu_ptr = mask_cpu.const_data_ptr<bool>();
+  auto* mask_cpu_ptr = mask_cpu.data_ptr<bool>();
   for (auto i = 0; i < meta_nrows; ++i) {
     for (auto j = 0; j < meta_ncols; ++j) {
       uint64_t meta_val = 0;
