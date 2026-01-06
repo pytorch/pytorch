@@ -970,7 +970,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _resolve_group_name_by_ranks_and_tag,
                 get_process_group_ranks,
             )
-            from torch.distributed.tensor import DTensor
 
             @register(
                 _get_group_size_by_name,
@@ -1011,59 +1010,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # the space of invoking functions in the middle of the guard chain is very iffy. As such,
                 # guard propagation via options is the best we can do.
                 return VariableTracker.build(tx, invocation_result)
-
-            @register(DTensor.from_local)
-            def handle_from_local(self, tx: "InstructionTranslator", *args, **kwargs):
-                # rewrite non-primitive args/kwargs to be included in the on-the-fly prim function
-                # and rewrite args to have only proxyable args, then insert call_function
-                placements_vt = kwargs.get("placements")
-
-                if placements_vt is None and len(args) >= 3:
-                    placements_vt = args[2]
-
-                if placements_vt is None:
-                    placements_vt = ConstantVariable.create(None)
-                elif isinstance(placements_vt, variables.UserDefinedObjectVariable):
-                    placements_vt = variables.BuiltinVariable(tuple).call_function(
-                        tx, [placements_vt], {}
-                    )
-
-                new_args = list(args)
-                if len(new_args) >= 3:
-                    new_args[2] = placements_vt
-                elif kwargs.get("placements") is not None:
-                    kwargs["placements"] = placements_vt
-
-                args_as_value = [x.as_python_constant() for x in new_args[1:]]
-                kwargs_as_value = {
-                    k: v.as_python_constant()
-                    for k, v in kwargs.items()
-                    if k not in ["shape", "stride"]
-                }
-
-                kwargs_to_be_proxied = {
-                    k: kwargs[k] for k in ["shape", "stride"] if k in kwargs
-                }
-
-                def fn_with_prim_types(x, shape=None, stride=None):
-                    return self.value(
-                        x, *args_as_value, **kwargs_as_value, shape=shape, stride=stride
-                    )
-
-                # attach the same function name for better debugging
-                fn_with_prim_types.__name__ = "prim " + self.value.__name__
-
-                return wrap_fx_proxy(
-                    tx=tx,
-                    proxy=tx.output.create_proxy(
-                        "call_function",
-                        fn_with_prim_types,
-                        *proxy_args_kwargs(
-                            [args[0]],
-                            kwargs_to_be_proxied,
-                        ),
-                    ),
-                )
 
         @register(torch.nested.nested_tensor)
         def handle_nested_tensor(

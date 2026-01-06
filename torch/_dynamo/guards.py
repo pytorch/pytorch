@@ -2305,7 +2305,7 @@ class GuardBuilder(GuardBuilderBase):
         )
 
         if torch.distributed.is_available():
-            from torch.distributed.device_mesh import DeviceMesh
+            from torch.distributed.device_mesh import _MeshLayout, DeviceMesh
             from torch.distributed.tensor.placement_types import (
                 _StridedShard,
                 Partial,
@@ -2319,6 +2319,7 @@ class GuardBuilder(GuardBuilderBase):
                 Partial,
                 DeviceMesh,
                 _StridedShard,
+                _MeshLayout,
             )
 
         from torch.export.dynamic_shapes import _IntWrapper
