@@ -29,7 +29,7 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
   const int64_t kW_val = kernel_size.size() == 1 ? kH_val : kernel_size[1];
   TORCH_CHECK(kH_val > 0 && kH_val <= std::numeric_limits<int>::max() &&
               kW_val > 0 && kW_val <= std::numeric_limits<int>::max(),
-    "avg_pool2d: kernel_size values must be in range (0, ", std::numeric_limits<int>::max(), "]");
+    "integer out of range");
   const int kH = static_cast<int>(kH_val);
   const int kW = static_cast<int>(kW_val);
 
@@ -40,7 +40,7 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
   if (!stride.empty()) {
     TORCH_CHECK(dH_val > 0 && dH_val <= std::numeric_limits<int>::max() &&
                 dW_val > 0 && dW_val <= std::numeric_limits<int>::max(),
-      "avg_pool2d: stride values must be in range (0, ", std::numeric_limits<int>::max(), "]");
+      "integer out of range");
   }
   const int dH = static_cast<int>(dH_val);
   const int dW = static_cast<int>(dW_val);
@@ -49,9 +49,10 @@ TORCH_PRECOMPUTE_META_FUNC(avg_pool2d)
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
   const int64_t padH_val = padding[0];
   const int64_t padW_val = padding.size() == 1 ? padH_val : padding[1];
-  TORCH_CHECK(padH_val >= 0 && padH_val <= std::numeric_limits<int>::max() &&
-              padW_val >= 0 && padW_val <= std::numeric_limits<int>::max(),
-    "avg_pool2d: padding values must be in range [0, ", std::numeric_limits<int>::max(), "]");
+  // note: negative padding is checked later in pool2d_shape_check with "pad must be non-negative" error
+  TORCH_CHECK(padH_val <= std::numeric_limits<int>::max() &&
+              padW_val <= std::numeric_limits<int>::max(),
+    "integer out of range");
   const int padH = static_cast<int>(padH_val);
   const int padW = static_cast<int>(padW_val);
 
@@ -127,7 +128,7 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   const int64_t kW_val = kernel_size.size() == 1 ? kH_val : kernel_size[1];
   TORCH_CHECK(kH_val > 0 && kH_val <= std::numeric_limits<int>::max() &&
               kW_val > 0 && kW_val <= std::numeric_limits<int>::max(),
-    "avg_pool2d: kernel_size values must be in range (0, ", std::numeric_limits<int>::max(), "]");
+    "integer out of range");
   const int kH = static_cast<int>(kH_val);
   const int kW = static_cast<int>(kW_val);
 
@@ -138,7 +139,7 @@ TORCH_META_FUNC(avg_pool2d_backward) (
   if (!stride.empty()) {
     TORCH_CHECK(dH_val > 0 && dH_val <= std::numeric_limits<int>::max() &&
                 dW_val > 0 && dW_val <= std::numeric_limits<int>::max(),
-      "avg_pool2d: stride values must be in range (0, ", std::numeric_limits<int>::max(), "]");
+      "integer out of range");
   }
   const int dH = static_cast<int>(dH_val);
   const int dW = static_cast<int>(dW_val);
@@ -147,9 +148,10 @@ TORCH_META_FUNC(avg_pool2d_backward) (
     "avg_pool2d: padding must either be a single int, or a tuple of two ints");
   const int64_t padH_val = padding[0];
   const int64_t padW_val = padding.size() == 1 ? padH_val : padding[1];
-  TORCH_CHECK(padH_val >= 0 && padH_val <= std::numeric_limits<int>::max() &&
-              padW_val >= 0 && padW_val <= std::numeric_limits<int>::max(),
-    "avg_pool2d: padding values must be in range [0, ", std::numeric_limits<int>::max(), "]");
+  // note: negative padding is checked later in avg_pool2d_backward_shape_check with "pad must be non-negative" error
+  TORCH_CHECK(padH_val <= std::numeric_limits<int>::max() &&
+              padW_val <= std::numeric_limits<int>::max(),
+    "integer out of range");
   const int padH = static_cast<int>(padH_val);
   const int padW = static_cast<int>(padW_val);
 
