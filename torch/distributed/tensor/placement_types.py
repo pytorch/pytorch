@@ -30,7 +30,10 @@ Placement.__module__ = "torch.distributed.tensor.placement_types"
 
 
 def _raise_error(method_name, _):
-    raise RuntimeError(f"Placement {method_name} should not be called")
+    raise RuntimeError(
+        f"Placement method '{method_name}' should not be called as "
+        "it should be overridden by the subclass"
+    )
 
 
 Placement.__eq__ = functools.partial(_raise_error, method_name="__eq__")
