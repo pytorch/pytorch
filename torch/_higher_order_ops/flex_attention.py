@@ -224,6 +224,10 @@ def math_attention(
         value: The value tensor
         score_mod: The score_mod function
         other_buffers: Other buffers that are passed to the score_mod function
+
+    Notes:
+        Query and Keys are dtype cast up to float64 (if query.dtype is float64) and float32 otherwise.
+        Scores and Values are dtype cast to input query.dtype at the end.
     """
     # broadcast query & key along head dim for GQA
     G = query.size(1) // key.size(1)
@@ -263,7 +267,7 @@ def math_attention(
     # for math impl we divide by log(2) because we will multiply by log(2)
 
     return (
-        post_mod_scores.to(query.dtype) @ value,
+        post_mod_scores.to(query.dtype) @ value.to(query.dtype),
         logsumexp / math.log(2),
         max_scores / math.log(2),
     )
@@ -844,6 +848,12 @@ def sdpa_dense_backward(
 ) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
+    if query.dtype != key.dtype or query.dtype != value.dtype:
+        raise ValueError(
+            f"Backward pass with mixed query, key, and value dtype is not supported, "
+            f"got query.dtype={query.dtype}, key.dtype={key.dtype}, "
+            f"and value.dtype={value.dtype}"
+        )
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
     Bq, Hq, seq_len_q, qk_head_dim = query.shape
