@@ -248,7 +248,7 @@ void reflection_pad2d_out_template(
     "input dimension, but got: padding (", pad_t, ", ", pad_b,
     ") at dimension ", dim_h, " of input ", input.sizes());
 
-  TORCH_CHECK(output_w >= 1 || output_h >= 1,
+  TORCH_CHECK(output_w >= 1 && output_h >= 1,
     "input (H: ", input_h, ", W: ", input_w, ") is too small. Calculated "
     "output H: ", output_h, " W: ", output_w);
 
