@@ -2594,7 +2594,6 @@ class GuardBuilder(GuardBuilderBase):
         self.check_fn_manager.global_state = global_state
 
         code = [
-
             f"___check_global_state() against {self.check_fn_manager.global_state.__getstate__()}"
         ]
 

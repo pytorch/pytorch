@@ -2772,14 +2772,11 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
-
             return get_max_tensorcore_tflops(dtype)
 
         if torch.backends.cuda.matmul.allow_tf32:
-
             return get_max_tensorcore_tflops(torch.float32)
         else:
-
             return get_max_simd_tflops(torch.float32)
 
 
@@ -2792,7 +2789,6 @@ def get_gpu_dram_gbps() -> int:
 
 def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
-
 
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 

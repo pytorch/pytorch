@@ -480,7 +480,6 @@ def autotune_custom_op(
     template = SubgraphTemplate(name=name)
     choices = template.generate_custom_op_choices(
         name=name,
-
         decompositions=decompositions,
         # pyrefly: ignore [no-matching-overload]
         input_nodes=list(inputs),

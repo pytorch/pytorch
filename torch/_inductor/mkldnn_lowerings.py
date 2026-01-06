@@ -792,9 +792,7 @@ def register_onednn_fusion_ops():
                     ) = create_int8_compensation(
                         W_tensor,
                         packed_weight,
-
                         x_scale,
-
                         x_zp,
                         w_scale,
                     )
@@ -1044,7 +1042,6 @@ def register_onednn_fusion_ops():
                 )
 
             if w_zp is None:
-
                 w_zp = V.graph.add_tensor_constant(
                     torch.tensor(0, dtype=torch.int32), name="w_zp"
                 )
@@ -1120,9 +1117,7 @@ def register_onednn_fusion_ops():
                     ) = create_int8_compensation(
                         W_tensor,
                         packed_weight,
-
                         x_scale,
-
                         x_zp,
                         w_scale,
                     )

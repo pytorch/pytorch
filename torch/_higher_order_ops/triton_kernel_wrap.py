@@ -264,7 +264,6 @@ def generate_ttir(
 
     assert isinstance(kernel, JITFunction)
 
-
     context = triton._C.libtriton.ir.context()
     target = triton.runtime.driver.active.get_current_target()
     backend = triton.compiler.compiler.make_backend(target)
@@ -387,7 +386,6 @@ def generate_ttir(
                 except TypeError:  # Unknown arg `specialize_extra`
                     # Older versions of Triton take specialize_extra as an arg to specialize_impl
                     specialize_impl = functools.partial(
-
                         triton.runtime.jit.create_specialize_impl(),
                         specialize_extra=backend.get_arg_specialization,
                     )
@@ -478,7 +476,6 @@ def generate_ttir(
             if i not in constexprs
         }
 
-
     triton._C.libtriton.ir.load_dialects(context)
     backend.load_dialects(context)
 
@@ -488,14 +485,11 @@ def generate_ttir(
     # backward compatibility here.
     make_ir_sig_params = len(inspect.signature(src.make_ir).parameters)
     get_codegen_implementation_sig_params = len(
-
         inspect.signature(backend.get_codegen_implementation).parameters
     )
     if make_ir_sig_params == 2:
-
         ttir_module = src.make_ir(options, context)
     elif make_ir_sig_params == 3:
-
         codegen_fns = backend.get_codegen_implementation()
 
         ttir_module = src.make_ir(options, codegen_fns, context)
@@ -2098,7 +2092,6 @@ class TraceableTritonKernelWrapper:
         kernel_idx: Optional[int],
         grid: Optional["TritonGridType"],
     ) -> None:
-
         self.kernel = None
         self.grid = None
         tracing_triton_hopifier_singleton.init_variable(self, kernel, kernel_idx, grid)

@@ -331,9 +331,7 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif hasattr(triton, "constexpr_function") and isinstance(
-
                     symbol,
-
                     triton.runtime.jit.ConstexprFunction,
                 ):
                     compile_wrapper.newline()

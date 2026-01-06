@@ -820,7 +820,6 @@ def _format_and_log_reordering_stats(
         for snode, node_info in node_stats.items()
     ]
     if importlib.util.find_spec("tabulate"):
-
         from tabulate import tabulate
 
         reorder_log_str += tabulate(
@@ -991,7 +990,6 @@ def _reorder_communication_preserving_peak_memory_internal(
                     group_unmet_deps_names.update(node_dep_sets[candidate])
                     group_output_names.update(node_output_sets[candidate])
 
-
                     if config_comms.reorder_iterative_use_runtime_estimations:
                         if contains_wait(candidate):
                             comm_time, comp_time, _ = wait_exposed_communication_time(
@@ -1016,7 +1014,6 @@ def _reorder_communication_preserving_peak_memory_internal(
                     )
                     info.limiting_factor = msg
                     break
-
 
             if config_comms.reorder_iterative_use_runtime_estimations:
                 # Check if candidate has sync runtime
@@ -1121,7 +1118,6 @@ def _reorder_communication_preserving_peak_memory_internal(
 
             if (
                 potential_peak - peak_memory
-
                 > peak_memory * config_comms.reorder_iterative_peak_memory_budget
             ):
                 info.limiting_factor = (
@@ -1420,7 +1416,6 @@ def _is_node_groupable_for_sink_waits(
             f"candidate contains_async_collective {candidate.get_name()}",
         )
 
-
     if not config_comms.sink_iterative_use_runtime_estimations:
         # Heuristics pre-use_runtime_estimations:
         # TODO(ivankobzarev): Remove them after confirming,
@@ -1672,7 +1667,6 @@ def _format_and_log_sink_waits_stats(
     ]
     log_str = ""
     if importlib.util.find_spec("tabulate"):
-
         from tabulate import tabulate
 
         log_str += tabulate(
@@ -1815,7 +1809,6 @@ def _sink_waits_iterative_internal(
         ):
             break
 
-
         if not (contains_wait(curr) and curr not in processed_waits):
             curr = _prev_curr
             continue
@@ -1887,7 +1880,6 @@ def _sink_waits_iterative_internal(
                     )
 
                     if (
-
                         config_comms.sink_iterative_use_runtime_estimations
                         and contains_collective(candidate)
                     ):
@@ -1907,7 +1899,6 @@ def _sink_waits_iterative_internal(
                     continue
                 elif not data_dep:
                     if (
-
                         not config_comms.sink_waits_iterative_unsafe_collectives_reorder
                         and both_contain_comms
                     ):
@@ -1923,7 +1914,6 @@ def _sink_waits_iterative_internal(
                         f"\n non_group_reason:{groupable_reason}"
                     )
                     break
-
 
             if config_comms.sink_iterative_use_runtime_estimations:
                 if is_wait(candidate.node):
@@ -2018,7 +2008,6 @@ def _sink_waits_iterative_internal(
             )
             if (
                 potential_peak - peak_memory
-
                 > peak_memory * config_comms.sink_iterative_peak_memory_budget
             ):
                 info.limiting_factor = (

@@ -1233,7 +1233,6 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(val_shape),
-
                                 block_name=range_tree.symt.name,
                             )
                         )
@@ -1321,7 +1320,6 @@ class TritonTemplateKernel(TritonKernel):
                 output_index = self.rename_indexing(output_index)
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
-
 
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
@@ -2780,7 +2778,6 @@ class AlgorithmSelectorCache(PersistentCache):
             choice for choice in choices if isinstance(choice, ExternKernelChoice)
         ]
         if len(externs) > 0:
-
             return externs[0]
         else:
             return choices[0]
@@ -4312,7 +4309,6 @@ class AlgorithmSelectorCache(PersistentCache):
             node.get_device(),
             node.get_dtype(),
             V.graph.sizevars.atomically_apply_size_hint(
-
                 node.layout.offset,
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
@@ -4323,7 +4319,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     fallback=config.unbacked_symint_fallback,
                     hint_override=hint_override,
                 )
-
                 for size in V.graph.get_allocation_size(node)
             ),
         )

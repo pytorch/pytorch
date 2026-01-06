@@ -1388,7 +1388,6 @@ class PallasKernel(SIMDKernel):
         """Compute total reduction numel."""
         result = 1
         for tree in self.range_trees:
-
             if tree.is_reduction:
                 numel = self._safe_int(tree.numel)
                 if numel is None:
@@ -1721,7 +1720,6 @@ class PallasKernel(SIMDKernel):
         matching_vars = [
             v
             for v, e in self.range_tree_nodes.items()
-
             if self._safe_int(e.length) == buf_length and not e.is_reduction
         ]
         if len(matching_vars) != 1:
@@ -2178,7 +2176,6 @@ class PallasKernel(SIMDKernel):
             var = used_iter_vars[0]
             var_name = str(var)
             is_reduction_var = (
-
                 var in self.range_tree_nodes and self.range_tree_nodes[var].is_reduction
             )
 
@@ -2541,9 +2538,7 @@ class PallasKernel(SIMDKernel):
 
         # Count the number of pointwise and reduction dimensions
         n_reduction_dims = sum(
-            1
-            for var, entry in self.range_tree_nodes.items()
-            if entry.is_reduction
+            1 for var, entry in self.range_tree_nodes.items() if entry.is_reduction
         )
 
         if reduction_type == "xor_sum":

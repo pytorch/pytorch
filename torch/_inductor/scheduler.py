@@ -5891,7 +5891,6 @@ class Scheduler:
             signatures.append(partition_signature)
 
             unmet_output_names = partition_input_names.union(
-
                 unmet_output_names - returned_output_names
             )
 

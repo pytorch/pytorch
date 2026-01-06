@@ -2041,7 +2041,6 @@ class CppKernel(Kernel):
                 # mask's dtype should be bool
                 mask.dtype = torch.bool
 
-
         self._load_mask = mask
         try:
             yield mask

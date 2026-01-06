@@ -193,7 +193,6 @@ class CPythonTestCase(TestCase):
         method = getattr(self, self._testMethodName)
         method = torch._dynamo.optimize(backend, error_on_graph_break=nopython)(method)
 
-
         setattr(self, self._testMethodName, method)
         return fn
 

@@ -613,9 +613,7 @@ def propagate_permute(permute_node: Node) -> _HandlerRetType:
         if input_meta is not None:
             assert input_meta.chunk_dim == new_chunk_dim
         return _bool_to_status(
-            set_chunking_meta(
-                input_node, meta=output_meta, chunk_dim=new_chunk_dim
-            )
+            set_chunking_meta(input_node, meta=output_meta, chunk_dim=new_chunk_dim)
         )
 
     return propagate_fwd(), propagate_bwd()

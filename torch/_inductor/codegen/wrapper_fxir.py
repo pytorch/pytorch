@@ -212,7 +212,6 @@ class WrapperFxCodegen(PythonWrapperCodegen):
             graph_inputs=self.get_fx_graph_inputs(),
             graph_outputs=self.get_graph_outputs(),
             subgms=self.subgms,
-
             is_subgraph=self.is_subgraph,
         ).generate()
 

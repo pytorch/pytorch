@@ -905,7 +905,6 @@ def logsumexp(
     if not isinstance(dim, Iterable):
         dim = (dim,)
     if self.numel() == 0:
-
         return torch.sum(torch.exp(self), dim, keepdim).log()
 
     maxes = torch.amax(torch.real(self), dim, keepdim=True)
@@ -3445,7 +3444,6 @@ def native_layer_norm(
         input.ndim >= normalized_ndim
         and sym_eq(
             input.shape[(input.ndim - normalized_ndim) :],
-
             tuple(normalized_shape),
         ),
         lambda: "Given normalized_shape="
@@ -4089,7 +4087,6 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLike
         # Takes care of the case when dims is not specified (default)
         # By default, the tensor is flattened before shifting, after which the original shape is restored
         if len_dims == 0 and len_shifts == 1:
-
             return torch.roll(torch.flatten(a), shifts, 0).view(a.shape)
         if len_shifts != len_dims:
             raise RuntimeError(

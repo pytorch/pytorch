@@ -598,7 +598,6 @@ class MetalKernel(SIMDKernel):
         reduction_idx = ""
         acc_buf_size = 1
         for rd in self.range_trees:
-
             if not rd.is_reduction:
                 continue
             if reduction_idx:
@@ -695,10 +694,7 @@ class MetalKernel(SIMDKernel):
                 )
                 idx_val = self._new_idxvar(dtype, default_value=0, is_threadgroup=False)  # type: ignore[assignment]
                 idx_var = next(
-                    t
-                    for t in self.range_tree_nodes.values()
-
-                    if t.is_reduction
+                    t for t in self.range_tree_nodes.values() if t.is_reduction
                 )
                 cmp_op = ">" if reduction_type == "argmax" else "<"
                 nan_suffix = (
@@ -764,7 +760,6 @@ class MetalKernel(SIMDKernel):
     def codegen_iteration_ranges_entry(self, entry: IterationRangesEntry) -> None:
         index_expr = self.rename_indexing(entry.expr)
         index_str = self.sexpr(index_expr)  # type: ignore[misc]
-
 
         if not entry.is_reduction or (
             isinstance(entry.root.numel, sympy.Integer)
@@ -877,10 +872,7 @@ class MetalKernel(SIMDKernel):
 
             if self.inside_reduction:
                 total_reduction_size = math.prod(
-                    t.numel
-                    for t in self.range_trees
-
-                    if t.is_reduction
+                    t.numel for t in self.range_trees if t.is_reduction
                 )
                 # If using dynamic shapes, set the threadgroup size to be the
                 # max possible size
@@ -984,7 +976,6 @@ class MetalKernel(SIMDKernel):
             else:
                 expr = V.graph.wrapper_code.generate_numel_expr(name, tree).inner
 
-
             if not tree.is_reduction or self.inside_reduction:
                 args.append(str(expr))
                 arg_types.append(int)
@@ -1004,7 +995,6 @@ class MetalKernel(SIMDKernel):
             threads = [
                 expr_printer(
                     sympy.Min(v.numel, self.max_threadgroup_size)  # type: ignore[misc]
-
                     if v.is_reduction
                     else v.numel
                 )
@@ -1020,7 +1010,6 @@ class MetalKernel(SIMDKernel):
         if self.inside_reduction:
             threads = [
                 expr_printer(sympy.Min(v.numel, self.max_threadgroup_size))  # type: ignore[misc]
-
                 if v.is_reduction
                 else "1"
                 for v in self.active_range_trees()

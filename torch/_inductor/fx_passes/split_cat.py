@@ -340,7 +340,6 @@ def normalize_cat_default(match: Match, *args, **kwargs):
         ndim == x.meta["example_value"].dim() or is_empty_tensor(x) for x in tensors
     )
 
-
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim
 
@@ -1972,7 +1971,6 @@ def normalize_cat_default_aten(match: Match, *args, **kwargs):
         return len(x_shape) == 1 and x_shape[0] == 0
 
     assert all(ndim == x.meta["val"].dim() or is_empty_tensor(x) for x in tensors)
-
 
     if cat_dim < 0:  # Normalize cat dim
         cat_dim += ndim

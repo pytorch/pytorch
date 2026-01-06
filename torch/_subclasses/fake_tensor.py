@@ -1535,7 +1535,6 @@ class FakeTensorMode(TorchDispatchMode):
                 # For debugging / testing: Validate that the output synthesized
                 # from the cache matches the output created by normal dispatch.
                 with disable_fake_tensor_cache(self):
-
                     self._crosscheck_cache_output(output, func, types, args, kwargs)
             return output
 
@@ -1544,7 +1543,6 @@ class FakeTensorMode(TorchDispatchMode):
         output = self._dispatch_impl(func, types, args, kwargs)
 
         try:
-
             entry = self._make_cache_entry(state, key, func, args, kwargs, output)
         except _BypassDispatchCache as e:
             # We ran "extra" checks on the cache key and determined that it's no
@@ -1929,7 +1927,6 @@ class FakeTensorMode(TorchDispatchMode):
                 self._validate_output_for_cache_entry(
                     state,
                     key,
-
                     func,
                     args,
                     kwargs,
@@ -1939,7 +1936,6 @@ class FakeTensorMode(TorchDispatchMode):
             self._validate_output_for_cache_entry(
                 state,
                 key,
-
                 func,
                 args,
                 kwargs,
@@ -1951,7 +1947,6 @@ class FakeTensorMode(TorchDispatchMode):
                 self._get_output_info_for_cache_entry(
                     state,
                     key,
-
                     func,
                     args,
                     kwargs,
@@ -1969,7 +1964,6 @@ class FakeTensorMode(TorchDispatchMode):
             output_info = self._get_output_info_for_cache_entry(
                 state,
                 key,
-
                 func,
                 args,
                 kwargs,
@@ -2516,7 +2510,6 @@ class FakeTensorMode(TorchDispatchMode):
             )
 
             with self, maybe_ignore_fresh_unbacked_symbols():
-
                 return registered_hop_fake_fns[func](*args, **kwargs)
 
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
@@ -2670,7 +2663,6 @@ class FakeTensorMode(TorchDispatchMode):
                 # may need to get the unbacked settings "early"
                 # TODO: Is this really needed?
                 compute_unbacked_bindings(self.shape_env, fake_out, peek=True)
-
 
             return fake_out
 

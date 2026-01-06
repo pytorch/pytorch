@@ -142,7 +142,6 @@ def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
     def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-
         a = args[0]
         if "inplace" not in kwargs:
             kwargs["inplace"] = False

@@ -1460,7 +1460,6 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Union or issubclass(
-
         origin_type,
         BuiltinUnionType,
     ):  # also handles Optional

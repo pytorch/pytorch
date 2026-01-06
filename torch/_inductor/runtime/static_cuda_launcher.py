@@ -264,7 +264,6 @@ class StaticallyLaunchedCudaKernel:
             self.num_warps,
             self.shared,
             arg_tys,
-
             args,
             stream,
         )

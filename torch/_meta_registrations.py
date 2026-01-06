@@ -7205,7 +7205,6 @@ def rnn_cell_checkSizes(
     )
     torch._check(
         all(
-
             x.device == input_gates.device
             for x in [hidden_gates, input_bias, hidden_bias, prev_hidden]
         ),

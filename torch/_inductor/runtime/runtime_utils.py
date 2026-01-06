@@ -112,7 +112,6 @@ def get_max_y_grid() -> int:
 
 
 try:
-
     import colorama
 
     HAS_COLORAMA = True
