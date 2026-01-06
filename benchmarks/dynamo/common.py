@@ -2302,7 +2302,8 @@ class BenchmarkRunner:
                 is_same = False
 
             if not is_same:
-                accuracy_status = "eager_two_runs_differ"
+                exception_string = str(e)
+                accuracy_status = f"eager_two_runs_differ: {exception_string}"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             correct_rerun_result = None
@@ -2426,7 +2427,8 @@ class BenchmarkRunner:
                 if self.args.skip_accuracy_check:
                     accuracy_status = "pass_due_to_skip"
                 else:
-                    accuracy_status = "fail_accuracy"
+                    exception_string = str(e)
+                    accuracy_status = f"fail_accuracy: {exception_string}"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
         return record_status(accuracy_status, dynamo_start_stats=start_stats)
