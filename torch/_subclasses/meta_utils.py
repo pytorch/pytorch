@@ -950,49 +950,12 @@ class MetaConverter(Generic[_TensorT]):
                     # Don't reallocate the sizes; the shape envs are the same,
                     # so reuse the old sizes/strides/etc
                     return (t.size, t.stride, t.storage_offset)
-                elif fake_mode is not None:
-                    # When transferring tensors between fake modes with different
-                    # shape_envs, we need to handle two cases:
-                    #
-                    # 1. Static tensors: all sizes/strides/storage_offset are concrete
-                    #    integers - preserve them as static
-                    #
-                    # 2. Symbolic tensors: contain SymInt values - allocate new symbols
-                    #    in the new shape_env
-                    has_symbolic = (
-                        any(is_symbolic(sz) for sz in t.size)
-                        or any(is_symbolic(sd) for sd in t.stride)
-                        or is_symbolic(t.storage_offset)
-                    )
-
-                    if not has_symbolic and symbolic_context is None:
-                        return (t.size, t.stride, t.storage_offset)
-
-                    # NB: Currently we only allocate new symbols at the same places
-                    # as the old shape environment, but we do not preserve all the
-                    # axioms/replacements/etc in the old shape environment. This is fine
-                    # in the cross compilation use case since we use the fake mode to
-                    # construct native tensors (eg. cuda) on a box without devices.
-                    t_size = tuple(
-                        shape_env._maybe_specialize_sym_int_with_hint(sz)
-                        for sz in t.size
-                    )
-                    t_stride = tuple(
-                        shape_env._maybe_specialize_sym_int_with_hint(sd)
-                        for sd in t.stride
-                    )
-                    t_storage_offset = shape_env._maybe_specialize_sym_int_with_hint(
-                        t.storage_offset
-                    )
-                    return shape_env._create_symbolic_sizes_strides_storage_offset(
-                        t_size,
-                        t_stride,
-                        t_storage_offset,
-                        [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
-                        src,
-                        symbolic_context=symbolic_context,
-                        hint_overrides=t.dynamo_hint_overrides,
-                    )
+                elif fake_mode is not None and fake_mode.shape_env is not shape_env:
+                    # CANARY: I'm pretty sure this will fail but I don't remember
+                    # precisely why other than it is related to export somehow. Putting
+                    # up a canary to refresh my memory.
+                    # In the cross compilation case we just assume static tensors
+                    return (t.size, t.stride, t.storage_offset)
                 else:
                     # TODO: deduplicate this
                     t_size = tuple(
