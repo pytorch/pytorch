@@ -2273,11 +2273,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
                 # Only save tensors that need VC checks via save_for_backward
                 ctx.save_for_backward(*tensors_to_save)
-                # Stash tensors that don't need VC checks directly on ctx
-                # These are tensors from autograd.Function that were saved via ctx.x = x
-                # rather than ctx.save_for_backward(x)
                 ctx._tensors_no_vc_check = tensors_no_vc
-
                 symint_outs = fw_outs[
                     CompiledFunction.metadata.symints_saved_for_backwards_slice
                 ]
@@ -2366,15 +2362,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # Combine tensors from both sources:
                 # 1. ctx.saved_tensors - tensors that went through save_for_backward (with VC check)
                 # 2. ctx._tensors_no_vc_check - tensors stashed directly on ctx (no VC check)
-                # The order matches the partitioner's output: VC-check tensors first, then no-VC-check tensors
-                if len(ctx._tensors_no_vc_check) > 0:
-                    all_saved_tensors = (
-                        list(ctx.saved_tensors) + ctx._tensors_no_vc_check
-                    )
-                else:
-                    all_saved_tensors = ctx.saved_tensors
                 all_args = _backward_prologue_functional(
-                    all_saved_tensors,
+                    (
+                        list(ctx.saved_tensors) + ctx._tensors_no_vc_check
+                        if len(ctx._tensors_no_vc_check) > 0
+                        else ctx.saved_tensors
+                    ),
                     ctx.symints,
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
