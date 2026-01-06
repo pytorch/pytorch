@@ -3378,6 +3378,14 @@ PYTORCH_SPECIFIC_MAPPINGS = collections.OrderedDict([
     ("CUDNN_GRU", "miopenGRU"),
     ("cudnnRNNMode_t", "miopenRNNMode_t"),
     ("magma_queue_create_from_cuda", "magma_queue_create_from_hip"),
+    # TODO: Remove these. They were necessary for Meta-internal builds.
+    ("cudnnHandle_t", "miopenHandle_t"),
+    ("cudnnCreate", "miopenCreate"),
+    ("cudnnDestroy", "miopenDestroy"),
+    ("cudnnSetStream", "miopenSetStream"),
+    ("cudnnTensorDescriptor_t ", "miopenTensorDescriptor_t "),
+    ("CUDNN_ENFORCE", "MIOPEN_ENFORCE"),
+    ("CUDNN_CHECK", "MIOPEN_CHECK"),
 ])
 
 C10_MAPPINGS = collections.OrderedDict([
@@ -3400,6 +3408,50 @@ C10_MAPPINGS = collections.OrderedDict([
     ("c10/cuda/impl/CUDAGuardImpl.h", "c10/hip/impl/HIPGuardImpl.h"),
     ("c10/cuda/impl/CUDATest.h", "c10/hip/impl/HIPTest.h"),
     ("c10/cuda/impl/cuda_cmake_macros.h", "c10/hip/impl/hip_cmake_macros.h"),
+    # TODO: Remove these. They were necessary for Meta-internal builds.
+    ("c10::hip::c10_hip_check_implementation", "c10::cuda::c10_cuda_check_implementation"),
+])
+
+# TODO: Remove CAFFE2_SPECIFIC_MAPPINGS. They were necessary for Meta-internal builds.
+# CAFFE2 mappings for simple filename patterns (no path separators)
+# These work with the word-boundary regex approach
+# NOTE: Removed broad "context_gpu" mapping to prevent double transformation.
+# Use CAFFE2_PATH_MAPPINGS for specific path transformations instead.
+CAFFE2_SPECIFIC_MAPPINGS = collections.OrderedDict([
+    ("cuda_nccl_gpu", "hip/hip_nccl_gpu"),
+    ("mixed_utils", "hip/mixed_utils"),
+    ("operator_fallback_gpu", "hip/operator_fallback_gpu"),
+    ("spatial_batch_norm_op_impl", "hip/spatial_batch_norm_op_impl"),
+    ("recurrent_network_executor_gpu", "hip/recurrent_network_executor_gpu"),
+    ("generate_proposals_op_util_nms_gpu", "hip/generate_proposals_op_util_nms_gpu"),
+    ("max_pool_with_index_gpu", "hip/max_pool_with_index_gpu"),
+    ("THCCachingAllocator_gpu", "hip/THCCachingAllocator_gpu"),
+    ("top_k_heap_selection", "hip/top_k_heap_selection"),
+    ("top_k_radix_selection", "hip/top_k_radix_selection"),
+    ("GpuAtomics", "hip/GpuAtomics"),
+    ("GpuDefs", "hip/GpuDefs"),
+    ("GpuScanUtils", "hip/GpuScanUtils"),
+    ("GpuBitonicSort", "hip/GpuBitonicSort"),
+    # ("gather_op", "hip/gather_op"),  # gather_op.h is device-agnostic, no path transform needed
+    ("HIP_CHECK", "CUDA_CHECK"),
+    # ("HIPContext", "CUDAContext"),
+    ("CUBLAS_ENFORCE", "HIPBLAS_ENFORCE"),
+    ("getCurrentHIPStream", "getCurrentCUDAStream"),
+    ("CaffeHipGetDevice", "CaffeCudaGetDevice"),
+])
+
+# TODO: Remove CAFFE2_PATH_MAPPINGS. They were necessary for Meta-internal builds.
+# CAFFE2 path mappings (contain slashes - need special handling in hipify_python.py)
+CAFFE2_PATH_MAPPINGS = collections.OrderedDict([
+    ("math/reduce.cuh", "math/hip/reduce.cuh"),
+    ("operators/gather_op.cuh", "operators/hip/gather_op.cuh"),
+    ("sgd/adagrad_fused_op_gpu.cuh", "sgd/hip/adagrad_fused_op_gpu.cuh"),
+    ("operators/segment_reduction_op_gpu.cuh", "operators/hip/segment_reduction_op_gpu.cuh"),
+    ("caffe2/core/common_cudnn.h", "caffe2/core/hip/common_miopen.h"),
+    # Add specific mappings for common_gpu and context_gpu to prevent double transformation
+    ("caffe2/core/common_gpu.h", "caffe2/core/hip/common_gpu.h"),
+    ("caffe2/core/context_gpu.h", "caffe2/core/hip/context_gpu.h"),
+    ("hip/hip/", "hip/"),
 ])
 
 CUDA_TO_HIP_MAPPINGS = [
@@ -3409,4 +3461,7 @@ CUDA_TO_HIP_MAPPINGS = [
     CUDA_SPECIAL_MAP,
     PYTORCH_SPECIFIC_MAPPINGS,
     C10_MAPPINGS,
+    # TODO: Remove CAFFE2_SPECIFIC_MAPPINGS and CAFFE2_PATH_MAPPINGS. See above.
+    CAFFE2_SPECIFIC_MAPPINGS,
+    CAFFE2_PATH_MAPPINGS
 ]
