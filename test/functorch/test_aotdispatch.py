@@ -4321,6 +4321,18 @@ def forward(self, tangents_1):
         # Overrides _base and _view_func tensor attributes, so as to avoid the view-replay
         # execution path when reconstructing views.
         class NoViewReplayTensor(torch.Tensor):
+            @staticmethod
+            def __new__(cls, tensor):
+                kwargs = {
+                    "strides": tensor.stride(),
+                    "storage_offset": tensor.storage_offset(),
+                    "device": tensor.device,
+                    "layout": tensor.layout,
+                    "requires_grad": tensor.requires_grad,
+                    "dtype": tensor.dtype,
+                }
+                return torch.Tensor._make_wrapper_subclass(cls, tensor.shape, **kwargs)
+
             @property
             def _base(self):
                 return None
@@ -4328,6 +4340,11 @@ def forward(self, tangents_1):
             @property
             def _view_func(self):
                 return None
+
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return super().__torch_dispatch__(func, types, args, kwargs)
 
         # Wraps the outputs that are views of the FX graph 'g' with NoViewReplayTensor,
         # since they are the only ones that will get reconstructed.
@@ -7599,6 +7616,7 @@ metadata incorrectly.
             self.assertEqual(ref_x.grad, x.grad)
 
     @patch("torch._functorch.config.guess_tangent_strides_as_outputs", True)
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is unavailable")
     def test_flex_attn_noncontiguous_tangents(self):
         with GradsNoForceContiguousContextManager() as ctx:
             E = 16  # embedding dim
@@ -7626,12 +7644,12 @@ metadata incorrectly.
 
                     return y.transpose(1, 2).contiguous().view(B, T, E)
 
-            m = M()
+            m = M().cuda()
             B = 1
             T = 8
 
             def _inp():
-                return torch.randn(B, T, E, requires_grad=True)
+                return torch.randn(B, T, E, requires_grad=True, device="cuda")
 
             x = _inp()
             y = m(x)

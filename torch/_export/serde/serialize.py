@@ -189,8 +189,6 @@ _SYM_OPS = {
     operator.gt,
     operator.neg,
     operator.pos,
-    operator.and_,
-    operator.or_,
     math.trunc,
     torch.sym_not,
     operator.mul,
@@ -207,6 +205,9 @@ _SYM_OPS = {
     torch.sym_sqrt,
     operator.truediv,
     operator.and_,
+    operator.or_,
+    operator.lshift,
+    operator.rshift,
 }
 
 
@@ -3674,7 +3675,7 @@ def canonicalize(
         ExportedProgram: The canonicalized exported program.
     """
     ep = copy.deepcopy(ep)
-    # pyrefly: ignore [annotation-mismatch]
+    # pyrefly: ignore [annotation-mismatch, redefinition]
     constants: set[str] = constants or set()
 
     opset_version = dict(sorted(ep.opset_version.items(), key=operator.itemgetter(0)))

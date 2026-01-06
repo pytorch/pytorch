@@ -44,7 +44,7 @@ namespace at::native {
 namespace {
 
 // TODO: remove duplicate code in Conv_v7.cpp
-constexpr int64_t operator"" _TiB(unsigned long long n) {
+constexpr int64_t operator""_TiB(unsigned long long n) {
   return static_cast<size_t>(n) << 40;
 }
 

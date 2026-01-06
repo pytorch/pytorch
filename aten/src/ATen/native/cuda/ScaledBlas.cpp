@@ -372,8 +372,10 @@ _scaled_gemm(
           const std::optional<Tensor>& alpha = std::nullopt) {
   cublasCommonArgs args(mat1, mat2, out, scale_a, scale_b, std::nullopt, scaling_choice_a, scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
-  TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
-
+  // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
+  if (_scaled_mm_allowed_device(true, false)) {
+    TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
+  }
 // ROCM enables the TunableOp path only
 // but can fallback to at::cuda::blas::scaled_gemm
 #ifdef USE_ROCM
@@ -739,7 +741,7 @@ _scaled_rowwise_rowwise(
   auto dprops = at::cuda::getCurrentDeviceProperties();
   if (((dprops->major < 9 || CUBLAS_VERSION < 120900 || cublasLtGetVersion() < 120900)
       // cuBLAS only supports tiled 1D factor layout for 1D block scaling, no 2D block scales
-      ||  (dprops->major == 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty())))) {
+      ||  (dprops->major >= 10 && (!scale_a.sizes().empty() || !scale_b.sizes().empty())))) {
     TORCH_CHECK_VALUE(out.dtype() == kBFloat16 || out.dtype() == kHalf, "Only bf16 and fp16 high precision output types are supported for row-wise scaling.");
     at::cuda::detail::f8f8bf16_rowwise(
         mat_a,

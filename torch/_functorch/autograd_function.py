@@ -46,6 +46,7 @@ class CustomFunctionHigherOrderOperator(HigherOrderOperator):
         # (because autograd.Function happens before the Python dispatch key)
         # and only traces the forward pass.
         if torch._C._are_functorch_transforms_active():
+            # pyrefly: ignore [missing-attribute]
             return super().__call__(autograd_function, *args, **kwargs)
         return autograd_function.apply(*args, **kwargs)
 

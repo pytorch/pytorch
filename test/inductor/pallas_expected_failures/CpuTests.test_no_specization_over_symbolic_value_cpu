@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpp55sgla0/ut/cuteu2en37ynu4jsggyumldzsump2ek5uo76aeda3ut32ksgcxbd.py", line 11, in pallas_fused_add_full_096daf09_kernel
-    tmp1 = s77
-           ^^^
-NameError: name 's77' is not defined

@@ -19,7 +19,10 @@ def find_first_use_of_broken_modules(exc: PackagingError) -> dict[str, list[str]
     Returns: A dict from broken module names to lists of module names in the path.
     """
 
-    assert isinstance(exc, PackagingError), "exception must be a PackagingError"
+    if not isinstance(exc, PackagingError):
+        raise AssertionError(
+            f"exception must be a PackagingError, got {type(exc).__name__}"
+        )
     uses = {}
     broken_module_names = [
         m for m, attr in exc.dependency_graph.nodes.items() if attr.get("error", False)

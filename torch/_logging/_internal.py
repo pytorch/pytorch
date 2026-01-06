@@ -9,13 +9,14 @@ import logging
 import os
 import os.path
 import pathlib
+import pkgutil
 import re
 import sys
 import tempfile
 import time
 import warnings
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import Any, Generic, Optional, Union
 from typing_extensions import ParamSpec
@@ -256,6 +257,7 @@ def set_logs(
     inductor_metrics: bool = False,
     hierarchical_compile: bool = False,
     compute_dependencies: bool = False,
+    caching: bool = False,
 ) -> None:
     """
     Sets the log level for individual components and toggles individual log
@@ -456,6 +458,9 @@ def set_logs(
         hierarchical_compile (:class:`bool`):
             Whether to emit debug info for hierarchical compilation. Default: ``False``
 
+        caching (:class:`bool`):
+            Whether to emit detailed Inductor caching information. Default: ``False``
+
     Example::
 
         >>> # xdoctest: +SKIP
@@ -505,13 +510,18 @@ def set_logs(
                     log_registry.log_alias_to_log_qnames.get(alias, alias), val
                 )
             elif _is_valid_module(alias):
-                if not _has_registered_parent(alias):
-                    log_registry.register_log(alias, alias)
-                else:
-                    log_registry.register_child_log(alias)
-                log_state.enable_log(
-                    log_registry.log_alias_to_log_qnames.get(alias, alias), val
-                )
+                found_modules = _get_module_and_submodules(alias) or (alias,)
+                for module_name in found_modules:
+                    if not _has_registered_parent(module_name):
+                        log_registry.register_log(module_name, module_name)
+                    else:
+                        log_registry.register_child_log(module_name)
+                    log_state.enable_log(
+                        log_registry.log_alias_to_log_qnames.get(
+                            module_name, module_name
+                        ),
+                        val,
+                    )
             else:
                 raise ValueError(
                     f"Unrecognized log or artifact name passed to set_logs: {alias}"
@@ -570,6 +580,7 @@ def set_logs(
         inductor_metrics=inductor_metrics,
         hierarchical_compile=hierarchical_compile,
         compute_dependencies=compute_dependencies,
+        caching=caching,
     )
 
 
@@ -693,6 +704,10 @@ Examples:
   TORCH_LOGS="+some.random.module,schedule" will set the log level of
   some.random.module to logging.DEBUG and enable the schedule artifact
 
+  TORCH_LOGS="+torch._functorch._aot_autograd" will set the log level of
+  torch._functorch._aot_autograd and all its submodules to logging.DEBUG
+  (directory-based logging)
+
   TORCH_LOGS_FORMAT="%(levelname)s: %(message)s" or any provided format
   string will set the output format
   Valid keys are "levelname", "message", "pathname", "levelno", "lineno",
@@ -813,11 +828,14 @@ def _parse_log_settings(settings):
         elif log_registry.is_artifact(name):
             log_state.enable_artifact(name)
         elif _is_valid_module(name):
-            if not _has_registered_parent(name):
-                log_registry.register_log(name, name)
-            else:
-                log_registry.register_child_log(name)
-            log_state.enable_log(name, level)
+            # Get the module and all its submodules if it's a package
+            found_modules = _get_module_and_submodules(name) or (name,)
+            for module_name in found_modules:
+                if not _has_registered_parent(module_name):
+                    log_registry.register_log(module_name, module_name)
+                else:
+                    log_registry.register_child_log(module_name)
+                log_state.enable_log(module_name, level)
         else:
             raise ValueError(_invalid_settings_err_msg(settings))
 
@@ -827,6 +845,38 @@ def _parse_log_settings(settings):
 def _is_valid_module(qname):
     spec = importlib.util.find_spec(qname)
     return spec is not None
+
+
+def _get_module_and_submodules(qname: str) -> Sequence[str] | None:
+    """
+    Get a module and all its submodules (recursively).
+
+    If qname is a package, this returns a list of all modules and submodules.
+    If qname is a simple module, this returns a list containing just that module.
+
+    Args:
+        qname: The fully qualified module name
+
+    Returns:
+        A list of fully qualified module names, or None if the module doesn't exist
+    """
+    spec = importlib.util.find_spec(qname)
+    if spec is None:
+        return None
+
+    modules = [qname]
+
+    if spec.submodule_search_locations is not None:
+        package = importlib.import_module(qname)
+        if hasattr(package, "__path__"):
+            for importer, modname, ispkg in pkgutil.walk_packages(
+                path=package.__path__,
+                prefix=qname + ".",
+                onerror=lambda x: None,
+            ):
+                modules.append(modname)
+
+    return modules
 
 
 def _update_log_state_from_env() -> None:
