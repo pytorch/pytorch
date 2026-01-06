@@ -1026,7 +1026,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             filter_res = self.filter_op(op)
             if (
                 filter_res is not None
-                and res.get(filter_res.configuration_name(), None) is None
+                and res.get(filter_res.configuration_name()) is None
             ):
                 res[filter_res.configuration_name()] = filter_res
         log.info(

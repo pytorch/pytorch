@@ -74,6 +74,7 @@
   _(cuCtxSetCurrent, 12080)                \
   _(cuGreenCtxCreate, 12080)               \
   _(cuGreenCtxDestroy, 12080)              \
+  _(cuGreenCtxStreamCreate, 12080)         \
   _(cuDevSmResourceSplitByCount, 12080)    \
   _(cuDeviceGet, 12080)                    \
   _(cuDeviceGetDevResource, 12080)         \
