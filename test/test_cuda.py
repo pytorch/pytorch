@@ -2065,8 +2065,10 @@ torch.cuda.synchronize()
             with torch.cuda.stream(s):
                 g = torch.cuda.CUDAGraph()
                 self.assertFalse(torch.cuda.is_current_stream_capturing())
+                self.assertFalse(s.is_capturing())
                 g.capture_begin()
                 self.assertTrue(torch.cuda.is_current_stream_capturing())
+                self.assertTrue(s.is_capturing())
                 g.capture_end()
 
     @unittest.skipIf(
@@ -2085,6 +2087,28 @@ torch.cuda.synchronize()
                 b = b + 1
             g.capture_end()
         torch.cuda.current_stream().wait_stream(s)
+
+        g.replay()
+
+        self.assertEqual(b.sum().item(), 11000.0)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_accelerator_graph_simple(self):
+        s = torch.Stream()
+        g = torch.accelerator.Graph()
+        self.assertFalse(torch.accelerator.current_stream().is_capturing())
+        self.assertTrue(torch.accelerator.is_graph_available())
+
+        with s, g:
+            a = torch.full((1000,), 1, device="cuda")
+            b = a
+            self.assertTrue(s.is_capturing())
+            for _ in range(10):
+                b = b + 1
+        torch.accelerator.current_stream().wait_stream(s)
+        self.assertFalse(torch.accelerator.current_stream().is_capturing())
 
         g.replay()
 

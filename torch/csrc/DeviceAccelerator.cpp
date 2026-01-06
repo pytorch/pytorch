@@ -1,5 +1,6 @@
 #include <c10/core/AllocatorConfig.h>
 #include <torch/csrc/DeviceAccelerator.h>
+#include <torch/csrc/Exceptions.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 
 namespace torch::accelerator {
@@ -100,6 +101,15 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_emptyCache", []() { at::accelerator::emptyCache(); });
 
+  m.def("_accelerator_emptyHostCache", []() {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    if (torch::utils::is_device_lazy_init_supported(device_type) &&
+        !torch::utils::is_device_initialized(device_type)) {
+      return;
+    }
+    at::accelerator::emptyHostCache();
+  });
+
   m.def("_accelerator_getDeviceStats", [](c10::DeviceIndex device_index) {
     using c10::CachingAllocator::Stat;
     using c10::CachingAllocator::StatArray;
@@ -166,6 +176,60 @@ void initModule(PyObject* module) {
 
   m.def("_accelerator_setAllocatorSettings", [](std::string env) {
     c10::CachingAllocator::setAllocatorSettings(env);
+  });
+
+  // Accelerator Graph class binding
+  py::class_<at::accelerator::Graph, std::shared_ptr<at::accelerator::Graph>>(
+      m, "_acceleratorGraph")
+      .def(py::init<bool>(), py::arg("keep_graph") = false)
+      .def(
+          "capture_begin",
+          [](at::accelerator::Graph& self,
+             std::optional<c10::MempoolId_t> pool_opt,
+             const std::string& capture_error_mode) {
+            c10::MempoolId_t pool = pool_opt.has_value()
+                ? pool_opt.value()
+                : c10::MempoolId_t{0, 0};
+            at::GraphCaptureMode capture_mode = at::GraphCaptureMode::Default;
+            if (capture_error_mode == "default") {
+              capture_mode = at::GraphCaptureMode::Default;
+            } else if (capture_error_mode == "global") {
+              capture_mode = at::GraphCaptureMode::Global;
+            } else if (capture_error_mode == "thread_local") {
+              capture_mode = at::GraphCaptureMode::ThreadLocal;
+            } else if (capture_error_mode == "relaxed") {
+              capture_mode = at::GraphCaptureMode::Relaxed;
+            } else {
+              TORCH_CHECK(
+                  false,
+                  "Unknown capture error mode. Expected `default`, `global`, `thread_local`, or `relaxed`, got ",
+                  capture_error_mode);
+            }
+            return self.capture_begin(pool, capture_mode);
+          },
+          py::arg("pool") = std::nullopt,
+          py::arg("capture_error_mode") = "default",
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "capture_end",
+          torch::wrap_pybind_function_no_gil(
+              &at::accelerator::Graph::capture_end))
+      .def(
+          "instantiate",
+          torch::wrap_pybind_function_no_gil(
+              &at::accelerator::Graph::instantiate))
+      .def(
+          "replay",
+          torch::wrap_pybind_function_no_gil(&at::accelerator::Graph::replay))
+      .def(
+          "reset",
+          torch::wrap_pybind_function_no_gil(&at::accelerator::Graph::reset))
+      .def(
+          "pool",
+          torch::wrap_pybind_function_no_gil(&at::accelerator::Graph::pool));
+
+  m.def("_accelerator_isGraphAvailable", []() {
+    return at::accelerator::isGraphAvailable();
   });
 }
 

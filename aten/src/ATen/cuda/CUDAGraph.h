@@ -1,27 +1,23 @@
 #pragma once
 
 #include <ATen/Tensor.h>
+#include <ATen/core/GraphImplInterface.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <c10/core/Device.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAGraphsC10Utils.h>
 #include <c10/cuda/CUDAStream.h>
 #include <c10/util/flat_hash_map.h>
 
-namespace at {
-
-struct Generator;
-struct CUDAGeneratorImpl;
-struct CUDAGeneratorState;
-
-namespace cuda {
+namespace at::cuda {
 
 // Standalone way to get a unique mempool id usable as a pool=... argument
 // to CUDAGraph::capture_begin
 TORCH_CUDA_CPP_API MempoolId_t graph_pool_handle();
 
-struct TORCH_CUDA_CPP_API CUDAGraph {
-  CUDAGraph(bool keep_graph=false);
-  ~CUDAGraph();
+struct TORCH_CUDA_CPP_API CUDAGraphImpl : public at::GraphImplInterface {
+  CUDAGraphImpl(const GraphImplArgs& args = {});
+  ~CUDAGraphImpl() override;
 
   // See Note [Explicit Registration of Generators to the CUDA Graph]
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
@@ -29,11 +25,14 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   void capture_begin(
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
-  void capture_end();
-  void instantiate();
-  void replay();
-  void reset();
-  MempoolId_t pool();
+  void capture_begin(
+      MempoolId_t pool = {0, 0},
+      GraphCaptureMode capture_mode = GraphCaptureMode::Default) override;
+  void capture_end() override;
+  void instantiate() override;
+  void replay() override;
+  void reset() override;
+  MempoolId_t pool() const override;
   void enable_debug_mode();
   void debug_dump(const std::string& debug_path);
   cudaGraph_t raw_cuda_graph();
@@ -91,5 +90,67 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   bool keep_graph_;
 };
 
-} // namespace cuda
-} // namespace at
+struct TORCH_CUDA_CPP_API CUDAGraph {
+  CUDAGraph(bool keep_graph = false) {
+    GraphImplArgs args;
+    args.keep_graph = keep_graph;
+    impl_ = std::make_unique<CUDAGraphImpl>(args);
+  }
+  ~CUDAGraph() = default;
+
+  // See Note [Explicit Registration of Generators to the CUDA Graph]
+  void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state) {
+    impl_->register_generator_state(state);
+  }
+
+  void register_generator_state(const at::Generator& generator) {
+    impl_->register_generator_state(generator);
+  }
+
+  void capture_begin(
+      MempoolId_t pool = {0, 0},
+      cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal) {
+    impl_->capture_begin(pool, capture_mode);
+  }
+
+  void capture_end() {
+    impl_->capture_end();
+  }
+
+  void instantiate() {
+    impl_->instantiate();
+  }
+
+  void replay() {
+    impl_->replay();
+  }
+
+  void reset() {
+    impl_->reset();
+  }
+
+  MempoolId_t pool() const {
+    return impl_->pool();
+  }
+
+  void enable_debug_mode() {
+    impl_->enable_debug_mode();
+  }
+
+  void debug_dump(const std::string& debug_path) {
+    impl_->debug_dump(debug_path);
+  }
+
+  cudaGraph_t raw_cuda_graph() {
+    return impl_->raw_cuda_graph();
+  }
+
+  cudaGraphExec_t raw_cuda_graph_exec(){
+    return impl_->raw_cuda_graph_exec();
+  }
+
+private:
+  std::unique_ptr<CUDAGraphImpl> impl_;
+};
+
+} // namespace at::cuda

@@ -13634,6 +13634,24 @@ Example::
 """,
 )
 
+add_docstr(
+    torch.Stream.is_capturing,
+    r"""
+Stream.is_capturing() -> bool
+
+Return true if this stream is currently recording work for graph capture.
+
+Returns:
+    bool: A boolean indicating if the stream is capturing.
+
+Example::
+
+    >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+    >>> s_cuda = torch.Stream(device='cuda')
+    >>> s_cuda.is_capturing()
+""",
+)
+
 
 add_docstr(
     torch.Stream.wait_event,

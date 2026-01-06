@@ -298,9 +298,7 @@ struct CUDACachingHostAllocatorImpl
   }
 
   bool stream_is_capturing(CUDAStream s) const override {
-    cudaStreamCaptureStatus status{cudaStreamCaptureStatusNone};
-    C10_CUDA_CHECK(cudaStreamIsCapturing(s, &status));
-    return status != cudaStreamCaptureStatusNone;
+    return s.is_capturing();
   }
 };
 

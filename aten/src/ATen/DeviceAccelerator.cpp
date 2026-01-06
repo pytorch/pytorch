@@ -1,4 +1,5 @@
 #include <ATen/Context.h>
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/DeviceAccelerator.h>
 #include <c10/core/impl/VirtualGuardImpl.h>
 
@@ -31,11 +32,11 @@ std::optional<c10::DeviceType> getAccelerator(bool checked) {
   // 2. Check compile-time backends
   std::optional<c10::DeviceType> device_type = std::nullopt;
 
-#define DETECT_AND_ASSIGN_ACCELERATOR_COMP(device_name) \
-  if (at::detail::get##device_name##Hooks().isBuilt()) {  \
+#define DETECT_AND_ASSIGN_ACCELERATOR_COMP(device_name)  \
+  if (at::detail::get##device_name##Hooks().isBuilt()) { \
     TORCH_CHECK(                                         \
         !device_type.has_value(),                        \
-        "Cannot have both " #device_name " and ",             \
+        "Cannot have both " #device_name " and ",        \
         device_type.value(), ".");                       \
     device_type = k##device_name;                        \
   }
@@ -135,6 +136,11 @@ c10::DeviceCapability getDeviceCapability(c10::DeviceIndex device_index) {
   const auto device_type = getAccelerator(true).value();
   c10::impl::VirtualGuardImpl impl(device_type);
   return impl.getDeviceCapability({device_type, device_index});
+}
+
+void emptyHostCache() {
+  const auto device_type = getAccelerator(true).value();
+  at::getHostAllocator(device_type)->empty_cache();
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 

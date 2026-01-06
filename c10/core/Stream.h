@@ -129,6 +129,10 @@ class C10_API Stream final {
   // on this stream has completed running on the device.
   void synchronize() const;
 
+  // Return the stream is currently recording work for graph capture. True while
+  // the stream is in capture mode, false otherwise.
+  bool is_capturing() const;
+
   // The purpose of this function is to more conveniently permit binding
   // of Stream to and from Python.  Without packing, I have to setup a whole
   // class with two fields (device and stream id); with packing I can just

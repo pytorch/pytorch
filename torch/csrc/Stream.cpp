@@ -158,6 +158,19 @@ static PyObject* THPStream_synchronize(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject* THPStream_is_capturing(PyObject* _self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+  auto self = reinterpret_cast<THPStream*>(_self);
+
+  return PyBool_FromLong(c10::Stream::unpack3(
+                             self->stream_id,
+                             static_cast<c10::DeviceIndex>(self->device_index),
+                             static_cast<c10::DeviceType>(self->device_type))
+                             .is_capturing());
+
+  END_HANDLE_TH_ERRORS
+}
+
 static PyObject* THPStream_wait_event(PyObject* _self, PyObject* _event) {
   HANDLE_TH_ERRORS {
     auto self = reinterpret_cast<THPStream*>(_self);
@@ -407,6 +420,7 @@ static const std::initializer_list<PyGetSetDef> THPStream_properties = {
 static const std::initializer_list<PyMethodDef> THPStream_methods = {
     {"query", THPStream_query, METH_NOARGS, nullptr},
     {"synchronize", THPStream_synchronize, METH_NOARGS, nullptr},
+    {"is_capturing", THPStream_is_capturing, METH_NOARGS, nullptr},
     {"wait_event", THPStream_wait_event, METH_O, nullptr},
     {"wait_stream", THPStream_wait_stream, METH_O, nullptr},
     {"record_event",
