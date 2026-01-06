@@ -2390,7 +2390,7 @@ def _convolution_mode(
         "group_i": groups,
     }
 
-
+    # pyrefly: ignore [bad-argument-type]
     n = g.op("Conv", *args, **kwargs)
 
     if (
