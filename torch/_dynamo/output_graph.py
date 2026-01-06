@@ -723,7 +723,8 @@ class OutputGraph(OutputGraphCommon):
         self.has_user_defined_allowed_in_graph = False
 
         # Tracks ALL grad_fn nodes that are consumed by torch.autograd.grad(outputs, inputs).
-        # This is the set of all nodes reachable from outputs' grad_fns, stopping at inputs' grad_fns.
+        # This is the set of all nodes reachable from outputs' grad_fns, excluding inputs' grad_fns
+        # (since autograd.grad stops at inputs without consuming them).
         # Used to detect returning tensors connected to consumed grad_fns (would cause
         # "backward through graph a second time" error in aot_autograd).
         self.autograd_grad_consumed_grad_fns: set[torch.autograd.graph.Node] = set()
