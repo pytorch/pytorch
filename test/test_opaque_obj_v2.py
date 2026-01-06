@@ -98,12 +98,18 @@ class Counter:
         self.start += 1
 
 
-class NestedCounter:
+class NestedCounters:
     def __init__(self, c):
         self.c = c
 
     def get_c(self):
         return self.c
+    
+    def get_starts(self):
+        if isinstance(self.c, list):
+            return [c.start for c in self.c]
+        else:
+            return self.c.start
 
 
 class AddModule(torch.nn.Module):
@@ -172,33 +178,34 @@ register_opaque_type(OpaqueQueue, typ="reference")
 register_opaque_type(
     RNGState,
     typ="reference",
+    guard_fn=lambda obj: [obj.seed],
     members={
-        "seed": MemberType.GUARDED,
-        "get_seed": MemberType.CONSTANT,
+        "seed": MemberType.USE_REAL,
+        "get_seed": MemberType.USE_REAL,
         "noisy_inject": MemberType.INLINED,
     },
 )
 register_opaque_type(
     Counter,
     typ="reference",
-    members={
-        "start": MemberType.GUARDED,
-    },
+    guard_fn=lambda obj: [obj.start],
+    members={"start": MemberType.USE_REAL},
 )
 register_opaque_type(
-    NestedCounter,
+    NestedCounters,
     typ="reference",
     members={
-        "c": MemberType.CONSTANT,
-        "get_c": MemberType.CONSTANT,
+        "c": MemberType.USE_REAL,
+        "get_c": MemberType.USE_REAL,
+        "get_starts": MemberType.USE_REAL,
     },
 )
 register_opaque_type(
     NestedQueue,
     typ="reference",
     members={
-        "q": MemberType.CONSTANT,
-        "get_q": MemberType.CONSTANT,
+        "q": MemberType.USE_REAL,
+        "get_q": MemberType.USE_REAL,
         "pop_q": MemberType.INLINED,
     },
 )
@@ -671,21 +678,48 @@ def forward(self, arg0_1, arg1_1):
 
         cnt = CompileCounter()
         x = torch.ones(2, 3)
-        inp = (NestedCounter(Counter(1, 5)), x)
+        inp = (NestedCounters(Counter(1, 5)), x)
         opt_f = torch.compile(foo, backend=cnt, fullgraph=True)
         res = opt_f(*inp)
         self.assertEqual(res, foo(*inp))
         self.assertEqual(cnt.frame_count, 1)
 
-        inp = (NestedCounter(Counter(1, 6)), x)
+        inp = (NestedCounters(Counter(1, 6)), x)
         res = opt_f(*inp)
         self.assertEqual(res, foo(*inp))
         self.assertEqual(cnt.frame_count, 1)  # we only guard on the first number
 
-        inp = (NestedCounter(Counter(2, 5)), x)
+        inp = (NestedCounters(Counter(2, 5)), x)
         res = opt_f(*inp)
         self.assertEqual(res, foo(*inp))
         self.assertEqual(cnt.frame_count, 2)  # recompile!
+
+    def test_nested_reference_list_trace(self):
+        def foo(nested_counter, x):
+            for c in nested_counter.c:
+                x = torch.ops._TestOpaqueObject.increment_counter(c, x)
+            for start in nested_counter.get_starts():
+                x = x + start
+            return x
+
+        backend = AotEagerAndRecordGraphs()
+        inp = (NestedCounters([Counter(1, 5), Counter(2, 5)]), torch.ones(2, 3))
+        torch.compile(foo, backend=backend, fullgraph=True)(*inp)
+
+        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(Counter))
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            f"""\
+def forward(self, L_x_ : torch.Tensor, object_getattribute_L_nested_counter_c_0_ : {fx_class}, object_getattribute_L_nested_counter_c_1_ : {fx_class}):
+    l_x_ = L_x_
+    object_getattribute_l_nested_counter_c_0_ = object_getattribute_L_nested_counter_c_0_
+    object_getattribute_l_nested_counter_c_1_ = object_getattribute_L_nested_counter_c_1_
+    x = torch.ops._TestOpaqueObject.increment_counter(object_getattribute_l_nested_counter_c_0_, l_x_);  object_getattribute_l_nested_counter_c_0_ = l_x_ = None
+    x_1 = torch.ops._TestOpaqueObject.increment_counter(object_getattribute_l_nested_counter_c_1_, x);  object_getattribute_l_nested_counter_c_1_ = x = None
+    x_2 = x_1 + 1;  x_1 = None
+    x_3 = x_2 + 2;  x_2 = None
+    return (x_3,)""",  # noqa: B950
+        )
 
     def test_nested_reference_trace(self):
         def foo(nested_queue, x):
@@ -705,10 +739,11 @@ def forward(self, arg0_1, arg1_1):
         res = torch.compile(foo, fullgraph=True, backend=backend)(*inp)
         self.assertEqual(res, foo(*inp))
 
+        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(OpaqueQueue))
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
-            """\
-def forward(self, L_nested_queue_get_q_ : __main___OpaqueQueue, L_x_ : torch.Tensor):
+            f"""\
+def forward(self, L_nested_queue_get_q_ : {fx_class}, L_x_ : torch.Tensor):
     l_nested_queue_get_q_ = L_nested_queue_get_q_
     l_x_ = L_x_
     tan = l_x_.tan()
@@ -902,6 +937,23 @@ def forward(self, primals, tangents):
 
         self.assertEqual(compiled_fn(*inp), M()(*inp))
 
+    def test_invalid_reference_type(self):
+        class BadMember:
+            def __init__(self, x):
+                self.x = x
+
+        def foo(bad, y):
+            return y + bad.x
+
+        register_opaque_type(
+            BadMember, typ="reference", members={"y": MemberType.USE_REAL}
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            f"Opaque object of type '{get_opaque_type_name(BadMember)}' was specified to have member 'y'",
+        ):
+            torch.compile(foo)(BadMember(1), torch.ones(1))
+
     def test_invalid_value_type(self):
         class NoEq:
             def __init__(self, x):
@@ -936,6 +988,27 @@ def forward(self, primals, tangents):
 
         with self.assertRaisesRegex(TypeError, "expected to have a `__fx_repr__`"):
             register_opaque_type(NoRepr, typ="value")
+
+        class SpecifyMember:
+            def __init__(self, x):
+                self.x = x
+
+            def __eq__(self, other):
+                return self.x == other.x
+
+            def __hash__(self):
+                return hash(self.x)
+
+            def __fx_repr__(self):
+                return f"SpecifyMember({self.x})"
+
+        with self.assertRaisesRegex(TypeError, "No need to specify `members`"):
+            register_opaque_type(
+                SpecifyMember, typ="value", members={"x": MemberType.USE_REAL}
+            )
+
+        with self.assertRaisesRegex(TypeError, "No need to specify `guard_fn`"):
+            register_opaque_type(SpecifyMember, typ="value", guard_fn=lambda obj: [])
 
     def test_invalid_schema(self):
         with self.assertRaisesRegex(

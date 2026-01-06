@@ -202,6 +202,12 @@ def maybe_to_fake_obj(
             if isinstance(attr_on_class, property):
                 continue
 
+            if not hasattr(x, attr_name):
+                raise TypeError(
+                    f"Opaque object of type '{type_name}' was specified to have member "
+                    f"'{attr_name}', but this doesn't actually exist in the object."
+                )
+
             object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
 
         return fake_x_wrapped
