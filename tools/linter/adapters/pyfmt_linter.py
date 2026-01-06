@@ -75,7 +75,6 @@ def run_isort(content: str, path: Path) -> str:
 
 def run_usort(content: str, path: Path) -> str:
     usort_config = usort.Config.find(path)
-
     return usort.usort_string(content, path=path, config=usort_config)
 
 

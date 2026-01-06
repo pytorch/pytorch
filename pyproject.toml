@@ -115,6 +115,9 @@ multi_line_output = 3
 include_trailing_comma = true
 combine_as_imports = true
 
+[tool.usort]
+preserve_inline_comments = true
+
 [tool.usort.known]
 first_party = ["caffe2", "torch", "torchgen", "functorch", "test"]
 standard_library = ["typing_extensions"]
