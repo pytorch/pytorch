@@ -1534,7 +1534,6 @@ except RuntimeError as e:
 
                 error_message = result.stdout + result.stderr
 
-                # The error message should always contain the check failure message
                 self.assertIn(
                     "Check failed: a == b",
                     error_message,
@@ -1542,7 +1541,6 @@ except RuntimeError as e:
                 )
 
                 if show_cpp_stacktraces:
-                    # When stacktraces are enabled, we should see the C++ traceback
                     self.assertTrue(
                         "C++ CapturedTraceback:" in error_message
                         or "frame #" in error_message.lower()
@@ -1550,7 +1548,6 @@ except RuntimeError as e:
                         f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",  # noqa: B950
                     )
                 else:
-                    # When stacktraces are disabled, we should NOT see detailed traceback
                     self.assertNotIn(
                         "C++ CapturedTraceback:",
                         error_message,
