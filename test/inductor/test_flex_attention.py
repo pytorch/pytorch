@@ -22,6 +22,7 @@ import torch
 import torch.nn as nn
 from torch._dynamo.testing import CompileCounterWithBackend, normalize_gm
 from torch._inductor import config, metrics
+from torch._inductor.exc import InductorError
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import run_and_get_code
@@ -47,11 +48,17 @@ from torch.nn.attention.flex_attention import (
 )
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_BF16, TEST_MULTIGPU
+from torch.testing._internal.common_cuda import (
+    PLATFORM_SUPPORTS_BF16,
+    PLATFORM_SUPPORTS_FP8,
+    TEST_MULTIGPU,
+)
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
     dtypesIfXPU,
+    E4M3_MAX_POS,
+    e4m3_type,
     flex_attention_supported_platform as supported_platform,
     instantiate_device_type_tests,
     largeTensorTest,
@@ -59,6 +66,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIf,
     skipXPUIf,
 )
+from torch.testing._internal.common_quantized import _snr
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.utils._triton import has_triton, has_triton_tma_device
 
@@ -2755,14 +2763,169 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         self.run_test_with_paged_attention(causal_njt, dtype, device=device)
 
     @supported_platform
-    def test_mixed_dtypes_fails(self, device):
-        query = torch.randn((1, 1, 1024, 64), dtype=torch.float32, device=device)
-        key = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
-        value = torch.randn((1, 1, 1024, 64), dtype=torch.float16, device=device)
+    def test_mixed_dtypes_eager(self, device):
+        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
+        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        query = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
+            dtype_low
+        )
+        value = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
+            dtype_low
+        )
+        out = flex_attention(query, key, value, _identity)
+        self.assertEqual(out.shape, query.shape)
+        self.assertEqual(out.dtype, query.dtype)
+
+    @supported_platform
+    def test_mixed_dtypes_compiled(self, device):
+        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
+        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        query = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device)
+        key = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
+            dtype_low
+        )
+        value = torch.randn((1, 1, 1024, 64), dtype=dtype_high, device=device).to(
+            dtype_low
+        )
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        if device == "cpu":
+            with self.assertRaisesRegex(
+                InductorError,
+                "Mixed query, key, and value dtype is not supported on this platform",
+            ):
+                compiled_fn(query, key, value, _identity)
+        else:
+            out = compiled_fn(query, key, value, _identity)
+            self.assertEqual(out.shape, query.shape)
+            self.assertEqual(out.dtype, query.dtype)
+
+    @skip_on_cpu
+    @supported_platform
+    @skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
+    def test_mixed_dtypes_sqnr_per_tensor(self, device):
+        query_ref = torch.testing.make_tensor(
+            (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        key_ref = torch.testing.make_tensor(
+            (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        value_ref = torch.testing.make_tensor(
+            (1, 1, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+
+        key_scale = torch.max(torch.abs(key_ref)) / E4M3_MAX_POS
+        value_scale = torch.max(torch.abs(value_ref)) / E4M3_MAX_POS
+
+        key_fp8 = (key_ref / key_scale).to(e4m3_type)
+        value_fp8 = (value_ref / value_scale).to(e4m3_type)
+
+        def score_mod(score, b, h, m, n):
+            # Dequantize keys inside the attention score computation
+            return score * key_scale
+
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        out = compiled_fn(query_ref, key_fp8, value_fp8, score_mod) * value_scale
+        out_ref = compiled_fn(query_ref, key_ref, value_ref, _identity)
+        _, _, sqnr = _snr(out_ref, out)
+        self.assertGreater(sqnr, 10)
+
+    @skip_on_cpu
+    @supported_platform
+    @skipUnless(PLATFORM_SUPPORTS_FP8, "FP8 is not supported on this platform")
+    def test_mixed_dtypes_sqnr_per_head(self, device):
+        query_ref = torch.testing.make_tensor(
+            (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        key_ref = torch.testing.make_tensor(
+            (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+        value_ref = torch.testing.make_tensor(
+            (1, 4, 1024, 64), dtype=torch.bfloat16, device=device
+        )
+
+        fp8_max = E4M3_MAX_POS
+        key_scale = torch.amax(torch.abs(key_ref), dim=(-2, -1)) / fp8_max  # (B, H)
+        value_scale = torch.amax(torch.abs(value_ref), dim=(-2, -1)) / fp8_max  # (B, H)
+
+        key_scale_b = key_scale[..., None, None]  # (B, H, 1, 1) for broadcasting
+        value_scale_b = value_scale[..., None, None]
+
+        key_fp8 = (key_ref / key_scale_b).to(e4m3_type)
+        value_fp8 = (value_ref / value_scale_b).to(e4m3_type)
+
+        def score_mod(score, b, h, m, n):
+            # Dequantize keys inside the attention score computation
+            return score * key_scale[b, h]
+
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+        out = compiled_fn(query_ref, key_fp8, value_fp8, score_mod) * value_scale_b
+        out_ref = compiled_fn(query_ref, key_ref, value_ref, _identity)
+        _, _, sqnr = _snr(out_ref, out)
+        self.assertGreater(sqnr, 10)
+
+    @supported_platform
+    @skip_on_cpu
+    def test_mixed_dtype_backwards_eager(self, device):
+        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
+        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        q = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=dtype_high,
+            device=device,
+            requires_grad=True,
+        )
+        k = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=dtype_high,
+            device=device,
+            requires_grad=True,
+        ).to(dtype_low)
+        v = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=dtype_high,
+            device=device,
+            requires_grad=True,
+        ).to(dtype_low)
+        out = flex_attention(q, k, v, _identity).mean()
         with self.assertRaisesRegex(
-            ValueError, "Expected query, key, and value to have the same dtype"
+            ValueError,
+            "Backward pass with mixed query, key, and value dtype is not supported",
         ):
-            flex_attention(query, key, value, _identity)
+            out.backward()
+
+    @supported_platform
+    @skip_on_cpu
+    def test_mixed_dtype_backwards_compiled(self, device):
+        dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
+        dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
+        q = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=dtype_high,
+            device=device,
+            requires_grad=True,
+        )
+        k = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=dtype_high,
+            device=device,
+            requires_grad=True,
+        ).to(dtype_low)
+        v = torch.testing.make_tensor(
+            (1, 1, 1024, 64),
+            dtype=dtype_high,
+            device=device,
+            requires_grad=True,
+        ).to(dtype_low)
+
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
+
+        with self.assertRaisesRegex(
+            InductorError,
+            "Backward pass with mixed query, key, and value dtype is not supported",
+        ):
+            out_mixed = (compiled_fn(q, k, v, _identity)).mean()
+            out_mixed.backward()
 
     @supported_platform
     @patch.object(torch._inductor.config, "max_autotune", True)
