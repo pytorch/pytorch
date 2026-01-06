@@ -1026,10 +1026,8 @@ def _div_aten(a, b):
     )
 
     if is_integral:
-
         return torch.div(a, b, rounding_mode="trunc")
     else:
-
         return torch.true_divide(a, b)
 
 
