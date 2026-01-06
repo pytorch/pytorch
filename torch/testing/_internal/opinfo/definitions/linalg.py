@@ -1249,7 +1249,6 @@ op_db: list[OpInfo] = [
         "linalg.cholesky_ex",
         aten_name="linalg_cholesky_ex",
         dtypes=floating_and_complex_types(),
-        dtypesIfMPS=floating_and_complex_types_and(torch.float16, torch.bfloat16),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         # See https://github.com/pytorch/pytorch/pull/78358
@@ -1258,8 +1257,10 @@ op_db: list[OpInfo] = [
         gradcheck_wrapper=gradcheck_wrapper_hermitian_input,
         decorators=[skipCUDAIfNoMagmaAndNoCusolver, skipCPUIfNoLapack],
         skips=(
-            # The following dtypes did not work in backward but are listed by
-            # the OpInfo: {torch.complex64, torch.float16, torch.bfloat16}.
+            # The following dtypes worked in forward but are not listed by the
+            # OpInfo: {torch.bfloat16, torch.float16}. The following dtypes did
+            # not work in backward but are listed by the OpInfo:
+            # {torch.complex64}.
             DecorateInfo(
                 unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
             ),
@@ -1520,6 +1521,13 @@ op_db: list[OpInfo] = [
                 "test_fn_fwgrad_bwgrad",
                 device_type="cpu",
                 dtypes=(torch.complex128,),
+            ),
+            # Exception: "orgqr_cpu" not implemented for 'Half'
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestConsistency",
+                device_type="mps",
+                dtypes=(torch.bfloat16, torch.float16),
             ),
             skipCUDAIfRocm,  # regression in ROCm 6.4
         ],
