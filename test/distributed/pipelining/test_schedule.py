@@ -25,13 +25,13 @@ from torch.distributed.pipelining.runtime import (
     _merge_bw,
     _PipelineScheduleRuntime,
     _simulate_comms_compute,
-    _validate_schedule,
 )
 from torch.distributed.pipelining.schedules import (
     _Action,
     _add_reduce_grad,
     _format_pipeline_order,
     _PipelineSchedule,
+    _validate_schedule,
     B,
     F,
     get_schedule_class,
