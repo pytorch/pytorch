@@ -106,6 +106,9 @@ test_failures = {
     "test_split_zero_size_empty_tensor_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
     ),
+    "test_split_zero_size_multi_dim_dynamic_shapes": TestFailure(
+        ("cpu", "cuda", "xpu"), is_skip=True
+    ),
     "test_to_device_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu"), is_skip=True),
     "test_as_strided_on_views_dynamic_shapes": TestFailure(
         ("cpu", "cuda", "xpu"), is_skip=True
