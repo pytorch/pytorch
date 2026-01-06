@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     skipIfRocmArch,
     TEST_WITH_ROCM,
+    random_matrix_with_scaled_reduction_space,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import (
@@ -1329,12 +1330,16 @@ class TestMaxAutotune(TestCase):
             a_in = torch.stack((a, a), dim=0)
             return (a_in @ b).relu()
 
-        a = torch.randn(
-            32, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        make_tensor = functools.partial(
+            random_matrix_with_scaled_reduction_space,
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+            requires_grad=True,
         )
-        b = torch.randn(
-            32768, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
-        )
+
+        K = 32768
+        a = make_tensor(32, K, reduction_dim=-1)
+        b = make_tensor(K, 64, reduction_dim=-2)
 
         torch._dynamo.reset()
         torch._dynamo.maybe_mark_dynamic(a, 0)
@@ -1356,8 +1361,8 @@ class TestMaxAutotune(TestCase):
             torch.testing.assert_close(
                 out,
                 f(a, b),
-                atol=1e-2,
-                rtol=1e-2,
+                atol=1e-4,
+                rtol=1e-4,
             )
 
     @unittest.skipIf(
@@ -1379,12 +1384,14 @@ class TestMaxAutotune(TestCase):
                 a_in = torch.cat([a for _ in range(256)], dim=0)
                 return (a_in @ b).relu().sum()
 
-            a = torch.randn(
-                8, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            make_tensor = functools.partial(
+                random_matrix_with_scaled_reduction_space,
+                dtype=torch.bfloat16,
+                device=GPU_TYPE,
+                requires_grad=True,
             )
-            b = torch.randn(
-                64, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
-            )
+            a = make_tensor(8, 64, reduction_dim=-1)
+            b = make_tensor(64, 32768, reduction_dim=-2)
 
             torch._dynamo.reset()
             torch._dynamo.maybe_mark_dynamic(a, 0)
