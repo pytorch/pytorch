@@ -3126,7 +3126,7 @@ class CandidateTiling:
     @staticmethod
     def is_good_size(s):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
-        s = V.graph.sizevars.size_hint(s)
+        s = V.graph.sizevars.size_hint(s, fallback=8192)
         return s >= 32 and (s % 32 == 0)
 
 
