@@ -6409,7 +6409,7 @@ fallback_pow_tensor_scalar = fallback_handler(
 
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    if isinstance(b, float) and b == int(b):
+    if isinstance(b, float) and b.is_integer():
         return pow(a, int(b))
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)
