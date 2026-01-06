@@ -1231,8 +1231,7 @@ class TestMaxAutotune(TestCase):
 
             M, N, K = sizes
 
-            # K can be huge huge, and we also operate with reduced precision reductions.
-            # This is why the data distribution is set to iid N(0, K ** 0.5),
+            # K can be huge huge, this is why the data distribution is set to iid N(0, K ** 0.5),
             # which makes the result of reductions distributed as N(0, 1).
             atol = 1e-4
             rtol = 1e-4
