@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 from __future__ import annotations
 
 import atexit
@@ -142,8 +141,8 @@ class MetadataMismatchError(RuntimeError):
 class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
-    allow_non_fake_inputs_override: Optional[bool]
-    non_strict_export_fake_tensor_tracker: weakref.WeakSet
+    allow_non_fake_inputs_override: bool | None
+    non_strict_export_fake_tensor_tracker: weakref.WeakSet[FakeTensor]
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
@@ -158,7 +157,7 @@ def ordered_set(*items: T) -> dict[T, Literal[True]]:
 
 
 @contextlib.contextmanager
-def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, None]:
+def unset_fake_temporarily() -> Generator[TorchDispatchMode | None, None, None]:
     old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
     try:
         yield old
@@ -293,13 +292,13 @@ class FakeTensorConverter:
     @property
     def tensor_memo(
         self,
-    ) -> weakref.WeakValueDictionary:
-        # not valid until py3.10
-        # weakref.WeakValueDictionary["torch._subclasses.meta_utils.MetaTensorId", Optional["FakeTensor"]]
+    ) -> weakref.WeakValueDictionary[
+        torch._subclasses.meta_utils.MetaTensorId, FakeTensor
+    ]:
         return self.meta_converter.tensor_memo
 
-    meta_converter: MetaConverter
-    constant_storage_mapping: dict[StorageWeakRef, list[ReferenceType]]
+    meta_converter: MetaConverter[FakeTensor]
+    constant_storage_mapping: dict[StorageWeakRef, list[ReferenceType[FakeTensor]]]
     export: bool
 
     def __init__(self, *, copy_data: bool = False, export: bool = False) -> None:
@@ -333,6 +332,7 @@ class FakeTensorConverter:
         for weak_tensor_ref in self.constant_storage_mapping[weak_st]:
             ten = weak_tensor_ref()
             if ten is not None:
+                # pyrefly: ignore [missing-attribute]
                 ten._fix_weakref()
                 ten.constant = None
 
@@ -1431,17 +1431,15 @@ class FakeTensorMode(TorchDispatchMode):
 
     def __exit__(
         self,
-        a: Optional[type[BaseException]],
-        b: Optional[BaseException],
-        c: Optional[TracebackType],
+        exc_type: Optional[type[BaseException]],
+        exc_val: Optional[BaseException],
+        exc_tb: Optional[TracebackType],
     ) -> None:
-        (
-            live,
-            maybe_prev_fake_mode,
-            maybe_prev_only_lift_cpu_tensors,
-        ) = self.enter_stack.pop()
+        (live, maybe_prev_fake_mode, maybe_prev_only_lift_cpu_tensors) = (
+            self.enter_stack.pop()
+        )
         if live:
-            super().__exit__(a, b, c)
+            super().__exit__(exc_type, exc_val, exc_tb)
 
             # Re-enable the previous fake mode, if there was one.
             if maybe_prev_fake_mode is not None:
@@ -2019,7 +2017,9 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata.storage_bytes is not None:
             check_value(metadata.storage_bytes, state)
 
-        maybe_suppress: Callable[[], typing.ContextManager] = contextlib.nullcontext
+        maybe_suppress: Callable[[], typing.ContextManager[None]] = (
+            contextlib.nullcontext
+        )
         if self.shape_env is not None:
             maybe_suppress = self.shape_env.suppress_guards
 

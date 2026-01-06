@@ -160,7 +160,7 @@ implicit-any = true
 
 [[sub-config]]
 # TODO: Widen this to the entire subclasses dir
-matches = "torch/_subclasses/fake_impls.py"
+matches = "torch/_subclasses/schema_check_mode.py"
 [sub-config.errors]
 implicit-import = false
 implicit-any = true
