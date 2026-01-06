@@ -24,6 +24,11 @@
 #include <ATen/ops/zeros_like_native.h>
 #endif
 
+#ifndef USE_ROCM
+#include <ATen/native/cudnn/LayerNorm_v8.h>
+#include <ATen/native/cudnn/RMSNorm_v8.h>
+#endif
+
 #include <c10/cuda/CUDAMathCompat.h>
 #include <c10/util/env.h>
 
@@ -1124,6 +1129,18 @@ void LayerNormKernelImplInternal(
   }
 }
 
+inline bool use_cudnn_layernorm(bool gamma, bool beta, at::ScalarType dtype) {
+#ifndef USE_ROCM
+  static bool enabled = (c10::utils::check_env("TORCH_CUDNN_LAYERNORM_ENABLED") == true);
+  // cuDNN only supports bf16, fp16, and fp32
+  bool dtype_supported = dtype != at::ScalarType::Double;
+  bool ok = enabled && gamma && beta && dtype_supported;
+  return ok;
+#else
+  return false;
+#endif
+}
+
 void LayerNormKernelImpl(
     const Tensor& X,
     const Tensor& gamma,
@@ -1134,38 +1151,62 @@ void LayerNormKernelImpl(
     Tensor* Y,
     Tensor* mean,
     Tensor* rstd) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      X.scalar_type(),
-      "LayerNormKernelImpl",
-      [&]() {
-        using acc_t = acc_type<scalar_t, true>;
-        LayerNormKernelImplInternal<scalar_t, acc_t>(
-            X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
-      });
+  if (use_cudnn_layernorm(gamma.numel(), beta.numel(), X.scalar_type())) {
+#ifndef USE_ROCM
+    at::native::raw_cudnn_layernorm_forward_out(X, gamma, beta, eps, mean, rstd, Y, M, N);
+#endif
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        X.scalar_type(),
+        "LayerNormKernelImpl",
+        [&]() {
+          using acc_t = acc_type<scalar_t, true>;
+          LayerNormKernelImplInternal<scalar_t, acc_t>(
+              X, gamma, beta, M, N, static_cast<acc_t>(eps), Y, mean, rstd);
+        });
+  }
+}
+
+inline bool use_cudnn_rmsnorm(bool gamma, at::ScalarType dtype) {
+#ifndef USE_ROCM
+  static bool enabled = (c10::utils::check_env("TORCH_CUDNN_RMSNORM_ENABLED") == true);
+  // cuDNN only supports bf16, fp16, and fp32
+  bool dtype_supported = dtype != at::ScalarType::Double;
+  bool ok = enabled && gamma && dtype_supported;
+  return ok;
+#else
+  return false;
+#endif
 }
 
 void RmsNormKernelImpl(
-  const Tensor& X,
-  const Tensor& gamma,
-  int64_t M,
-  int64_t N,
-  double eps,
-  Tensor* Y,
-  Tensor* rstd) {
-AT_DISPATCH_FLOATING_TYPES_AND2(
-    at::ScalarType::Half,
-    at::ScalarType::BFloat16,
-    X.scalar_type(),
-    "LayerNormKernelImpl",
-    [&]() {
-      using acc_t = acc_type<scalar_t, true>;
-      // rms_norm = true
-      LayerNormKernelImplInternal<scalar_t, acc_t, true>(
-        // pass in at::Tensor() for gamma and nullptr for mean, it won't be accessed with rms_norm = True
-          X, gamma, at::Tensor(), M, N, static_cast<acc_t>(eps), Y, nullptr, rstd);
-    });
+    const Tensor& X,
+    const Tensor& gamma,
+    int64_t M,
+    int64_t N,
+    double eps,
+    Tensor* Y,
+    Tensor* rstd) {
+  if (use_cudnn_rmsnorm(gamma.numel(), X.scalar_type())) {
+#ifndef USE_ROCM
+    at::native::raw_cudnn_rmsnorm_forward_out(X, gamma, eps, rstd, Y, M, N);
+#endif
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        X.scalar_type(),
+        "LayerNormKernelImpl",
+        [&]() {
+          using acc_t = acc_type<scalar_t, true>;
+          // rms_norm = true
+          LayerNormKernelImplInternal<scalar_t, acc_t, true>(
+            // pass in at::Tensor() for gamma and nullptr for mean, it won't be accessed with rms_norm = True
+              X, gamma, at::Tensor(), M, N, static_cast<acc_t>(eps), Y, nullptr, rstd);
+        });
+  }
 }
 
 template<typename T, typename T_ACC, bool rms_norm> __device__
@@ -1671,15 +1712,21 @@ void LayerNormBackwardKernelImpl(
     Tensor* dX,
     Tensor* dgamma,
     Tensor* dbeta) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      X.scalar_type(),
-      "LayerNormBackwardKernelImpl",
-      [&]() {
-        LayerNormBackwardKernelImplInternal<scalar_t>(
-            dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
-      });
+  if (use_cudnn_layernorm(gamma.numel(), dbeta->numel(), X.scalar_type())) {
+#ifndef USE_ROCM
+    at::native::raw_cudnn_layernorm_backward_out(dY, X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+#endif
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        X.scalar_type(),
+        "LayerNormBackwardKernelImpl",
+        [&]() {
+          LayerNormBackwardKernelImplInternal<scalar_t>(
+              dY.contiguous(), X, mean, rstd, gamma, M, N, dX, dgamma, dbeta);
+        });
+  }
 }
 
 void RMSNormBackwardKernelImpl(
@@ -1691,15 +1738,21 @@ void RMSNormBackwardKernelImpl(
     int64_t N,
     Tensor* dX,
     Tensor* dgamma) {
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      at::ScalarType::Half,
-      at::ScalarType::BFloat16,
-      X.scalar_type(),
-      "LayerNormBackwardKernelImpl",
-      [&]() {
-        LayerNormBackwardKernelImplInternal<scalar_t, true>(
-            dY.contiguous(), X, rstd, rstd, gamma, M, N, dX, dgamma, dgamma);
-      });
+  if (use_cudnn_rmsnorm(gamma.numel(), X.scalar_type())) {
+#ifndef USE_ROCM
+    at::native::raw_cudnn_rmsnorm_backward_out(dY, X, rstd, gamma, M, N, dX, dgamma);
+#endif
+  } else {
+    AT_DISPATCH_FLOATING_TYPES_AND2(
+        at::ScalarType::Half,
+        at::ScalarType::BFloat16,
+        X.scalar_type(),
+        "LayerNormBackwardKernelImpl",
+        [&]() {
+          LayerNormBackwardKernelImplInternal<scalar_t, true>(
+              dY.contiguous(), X, rstd, rstd, gamma, M, N, dX, dgamma, dgamma);
+        });
+  }
 }
 
 } // namespace
