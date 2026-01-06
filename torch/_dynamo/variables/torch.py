@@ -687,6 +687,27 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 ],
             )
 
+        @register(torch.library.wrap_triton)
+        def handle_wrap_triton(
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            if len(args) == 1:
+                # torch.library.wrap_triton is a no-op in dynamo
+                return args[0]
+
+            unimplemented(
+                gb_type="torch.library.wrap_triton call with > 1 args",
+                context=f"args={args}, kwargs={kwargs}",
+                explanation="Attempted to call `torch.library.wrap_triton` with > 1 args. Dynamo does not support this.",
+                hints=[
+                    "Remove the torch.library.wrap_triton call or its additional args.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
         @register(*REWRITE_OPS_TO_TENSOR_SIZE_METHOD)
         def handle_tensor_size_rewrites(self, tx: "InstructionTranslator", input):
             assert input.is_tensor()
@@ -1198,7 +1219,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return
 
             return variables.ConstantVariable.create(
-                # pyrefly: ignore [bad-argument-type]
                 torch.fx.experimental.symbolic_shapes.has_static_value(val)
             )
 

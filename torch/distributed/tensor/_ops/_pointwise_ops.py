@@ -16,6 +16,7 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
@@ -212,6 +213,10 @@ pointwise_ops = [
     aten.floor.default,
     aten.floor.out,
     aten.floor_.default,
+    aten.fmax.default,
+    aten.fmax.out,
+    aten.fmin.default,
+    aten.fmin.out,
     aten.fmod.Scalar,
     aten.fmod.Scalar_out,
     aten.fmod.Tensor,
@@ -230,6 +235,8 @@ pointwise_ops = [
     aten.gt.Scalar_out,
     aten.gt.Scalar,
     aten.gt.Tensor,
+    aten.heaviside.default,
+    aten.heaviside.out,
     aten.hypot.default,
     aten.hypot.out,
     aten.hypot_.default,
@@ -248,7 +255,7 @@ pointwise_ops = [
     aten.isneginf.out,
     aten.isposinf.default,
     aten.isposinf.out,
-    aten.ldexp.default,
+    aten.ldexp.Tensor,
     aten.ldexp.out,
     aten.ldexp_.default,
     aten.lt.Tensor,
@@ -381,10 +388,8 @@ pointwise_ops = [
     aten.square.out,
     aten.square_.default,
     aten.sub.Scalar,
-    aten.sub.Tensor,
     aten.sub.out,
     aten.sub_.Scalar,
-    aten.sub_.Tensor,
     aten.tan.default,
     aten.tan.out,
     aten.tan_.default,
@@ -419,6 +424,8 @@ linear_pointwise_ops = {
     aten.to.dtype: 0,
     aten.add.Tensor: 1,
     aten.add_.Tensor: 1,
+    aten.sub.Tensor: 1,
+    aten.sub_.Tensor: 1,
     aten.div.Scalar: 0,
     aten.div_.Scalar: 0,
     aten.mul.Scalar: 0,
@@ -651,9 +658,21 @@ def common_pointwise_strategy(
                     out_placements.append(Shard(new_shard_dim))
             elif isinstance(placement, Partial):
                 is_scalar_arg = any(isinstance(arg, _Number) for arg in args_schema)
-                propagate_partial = not (
-                    op in redistribute_partial_ops and is_scalar_arg
-                )
+                propagate_partial = False
+
+                # ordering matters here since NormPartial is a subclass of Partial
+                if isinstance(placement, _NormPartial):
+                    # explanation for args_schema[1] >= 0 can be found in summary
+                    # https://github.com/pytorch/pytorch/pull/170035
+                    propagate_partial = (
+                        op in norm_partial_avoidable_redistribute_ops
+                        and args_schema[1] >= 0  # pyre-ignore[unsupported-operation]
+                    )
+
+                elif isinstance(placement, Partial):
+                    propagate_partial = not (
+                        op in p_sum_scalar_redistribute_ops and is_scalar_arg
+                    )
 
                 # Check if this partial type should be preserved
                 if preserve_partial is not None and placement.is_partial(
@@ -764,12 +783,29 @@ def common_pointwise_strategy(
     return pointwise_strategy
 
 
-redistribute_partial_ops = {aten.add.Tensor, aten.add_.Tensor}
+p_sum_scalar_redistribute_ops = {
+    aten.add.Tensor,
+    aten.add_.Tensor,
+    aten.sub.Tensor,
+    aten.sub_.Tensor,
+}
+
+norm_partial_avoidable_redistribute_ops = {
+    aten.div.Scalar,
+    aten.div_.Scalar,
+    aten.mul.Scalar,
+    aten.mul_.Scalar,
+}
 
 for op in linear_pointwise_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        linear_pointwise_strategy
-    )
+    if op in norm_partial_avoidable_redistribute_ops:
+        register_op_strategy(
+            op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
+        )(linear_pointwise_strategy)
+    else:
+        register_op_strategy(
+            op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+        )(linear_pointwise_strategy)
 
 for op in partial_preserving_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
