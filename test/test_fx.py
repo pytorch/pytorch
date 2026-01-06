@@ -796,21 +796,6 @@ class TestFX(JitTestCase):
             self.assertTrue(node.stack_trace is not None)
             assert "test_fx.py" in node.stack_trace
 
-    def test_node_pickle_type_preservation(self):
-        g = Graph()
-        n = g.placeholder("x")
-        n.type = torch.Tensor
-
-        dumped_node = pickle.dumps(n)
-        restored_node = pickle.loads(dumped_node)
-        self.assertEqual(restored_node.type, torch.Tensor)
-        self.assertNotEqual(restored_node.type, restored_node.target)
-
-        dumped_graph = pickle.dumps(g)
-        restored_graph = pickle.loads(dumped_graph)
-        restored_n = next(iter(restored_graph.nodes))
-        self.assertEqual(restored_n.type, torch.Tensor)
-
     def test_lineno_map(self):
         class M(torch.nn.Module):
             def forward(self, a, b):

@@ -136,20 +136,14 @@ static void preprocessCaffe2Ops(Block* block) {
             }
             it->fs_(Symbol::attr(arg.name()), values);
           } else {
-            TORCH_CHECK(
-                false,
-                "Unhandled scalar arg: ",
-                arg.name(),
-                ", type: ",
-                c10::typeKindToString(elem_type->kind()));
+            throw std::runtime_error(
+                "Unhandled scalar arg: " + arg.name() +
+                ", type: " + c10::typeKindToString(elem_type->kind()));
           }
         } else {
-          TORCH_CHECK(
-              false,
-              "Unsupported input type of arg ",
-              arg.name(),
-              " in Caffe2 operator: ",
-              c10::typeKindToString(type->kind()));
+          throw std::runtime_error(
+              "Unsupported input type of arg " + arg.name() +
+              " in Caffe2 operator: " + c10::typeKindToString(type->kind()));
         }
       }
     }
@@ -292,15 +286,11 @@ void NodeToONNX(
     // Count all outputs, excluding Handles
     auto num_old_outputs = old_outputs.size();
     if (outputs.size() != num_old_outputs) {
-      TORCH_CHECK(
-          false,
-          "symbolic for ",
-          op_name,
-          " produced an incorrect number of outputs (expected ",
-          num_old_outputs,
-          ", but got ",
-          outputs.size(),
-          ")");
+      std::ostringstream ss;
+      ss << "symbolic for " << op_name
+         << " produced an incorrect number of outputs (expected ";
+      ss << num_old_outputs << ", but got " << outputs.size() << ')';
+      throw std::runtime_error(ss.str());
     }
     // For const node, it does not need params_dict info, so set it to {}.
     const ParamMap empty_params_dict = {};
@@ -393,14 +383,15 @@ void NodeToONNX(
         // Null output means that the ONNX op doesn't have outputs corresponding
         // to certain PyTorch outputs
         env[py::cast(old)] = py::none();
-        TORCH_CHECK(
-            old->uses().empty(),
-            "symbolic for ",
-            op_name,
-            " returned None for the output ",
-            i,
-            " (indicating conversion for that particular output is not supported), ",
-            "but the network uses this output later");
+        if (!old->uses().empty()) {
+          std::ostringstream ss;
+          ss << "symbolic for " << op_name << " returned None for the output "
+             << i;
+          ss << " (indicating conversion for that particular output is not supported), ";
+          ss << "but the network uses this output later";
+          // TODO: Say what actually used it
+          throw std::runtime_error(ss.str());
+        }
       }
     }
   };
@@ -437,33 +428,32 @@ void NodeToONNX(
   };
 
   // Cast output of symbolic() python implementation
-  auto processSymbolicOutput =
-      [&](const std::string& op_name, Node* n, const py::object& raw_output) {
-        if (raw_output.ptr() == Py_None) {
-          cloneNode(n);
-          return;
-        }
-        // Cast the outputs back to C++ and put them in the new graph
-        std::vector<Value*> outputs;
-        try {
-          if (py::isinstance<Value>(raw_output)) {
-            outputs = value_list{py::cast<Value*>(raw_output)};
-          } else {
-            outputs = py::cast<std::vector<Value*>>(raw_output);
-          }
-        } catch (const std::exception& ex) {
-          TORCH_CHECK(
-              false,
-              "Error casting results of symbolic for ",
-              op_name,
-              ": expected to return list of op nodes, instead received type ''",
-              py::str(py::type::handle_of(raw_output)),
-              "': ",
-              py::str(raw_output));
-        }
+  auto processSymbolicOutput = [&](const std::string& op_name,
+                                   Node* n,
+                                   const py::object& raw_output) {
+    if (raw_output.ptr() == Py_None) {
+      cloneNode(n);
+      return;
+    }
+    // Cast the outputs back to C++ and put them in the new graph
+    std::vector<Value*> outputs;
+    try {
+      if (py::isinstance<Value>(raw_output)) {
+        outputs = value_list{py::cast<Value*>(raw_output)};
+      } else {
+        outputs = py::cast<std::vector<Value*>>(raw_output);
+      }
+    } catch (const std::exception&) {
+      std::ostringstream ss;
+      ss << "Error casting results of symbolic for " << op_name
+         << ": expected to return list of op nodes, instead received type ''"
+         << py::str(py::type::handle_of(raw_output))
+         << "': " << py::str(raw_output);
+      throw std::runtime_error(ss.str());
+    }
 
-        setOutputs(op_name, n, outputs);
-      };
+    setOutputs(op_name, n, outputs);
+  };
 
   auto callPySymbolicFunction = [&](Node* n) {
     // The idea is delegate as much of the actual argument massaging to
@@ -574,7 +564,7 @@ void NodeToONNX(
         TORCH_CHECK(node_it != inputs.end(), "expected too many inputs");
         obj = py::cast(envFn(*node_it++));
       } else {
-        TORCH_CHECK(false, "unexpected calling convention");
+        throw std::runtime_error("unexpected calling convention");
       }
       py_symbolic_args[input_nr++] = obj;
     }
