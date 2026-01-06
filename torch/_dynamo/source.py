@@ -754,7 +754,7 @@ class DictGetItemSource(ChainedSource):
         from .variables import ConstantVariable
 
         assert isinstance(
-            self.index, ConstDictKeySource
+            self.index, (ConstDictKeySource, type)
         ) or ConstantVariable.is_literal(self.index)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
