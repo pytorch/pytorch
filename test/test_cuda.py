@@ -2423,6 +2423,7 @@ exit(2)
         graph = torch.cuda.CUDAGraph()
         x = torch.randn(1, device="cuda")
 
+        large_tensor = None
         with self.assertRaisesRegex(
             RuntimeError, "(operation not permitted|operation failed)"
         ):
@@ -2431,9 +2432,12 @@ exit(2)
                 large_tensor = torch.randn(32 * 1024 * 1024, device="cuda")  # 128MB
                 x.item()  # Sync during capture causes failure
 
-        # Clean up the failed graph - this should release the memory pool
-        del graph
+        # Clean up the failed graph and tensors - this should release the memory pool
+        # Note: large_tensor was allocated before the exception, so it's still alive
+        # and must be explicitly deleted for the memory to be freed
         del x
+        del large_tensor
+        del graph
         torch.cuda.empty_cache()
         torch.cuda.synchronize()
 
