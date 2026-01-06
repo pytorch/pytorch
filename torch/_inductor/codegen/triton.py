@@ -805,6 +805,7 @@ class TritonPrinter(PythonPrinter):
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore [bad-argument-type]
         s = self.parenthesize(expr.args[0], PRECEDENCE["Atom"] - 0.5)
         return f"{s}.to(tl.float64)"
 
@@ -1987,6 +1988,7 @@ class TritonKernelOverrides(TritonOverrides):
         return (mantissa, exponent)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def partial_accumulate(
         name: str,
         reduction_type: str,
@@ -3940,6 +3942,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             """
             Generate a reduction and assign it to an existing variable.
             """
+            # pyrefly: ignore [bad-assignment]
             value, _, _ = final_reduction(buffer, value, result_type)
             buffer.splice(f"{result_var} = {value}")
 
@@ -4006,11 +4009,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     shape=value.shape,
                 )
 
-            masked_value: Union[CSEVariable, Sequence[CSEVariable]]
+            masked_value: Union[CSEVariable, Sequence[CSEVariable], None]
             if reduction_type == "online_softmax_reduce":
                 # Don't generate mask value for online_softmax since we
                 # will fallback below
-                pass
+                masked_value = None
             elif isinstance(value, tuple):
                 masked_value = [_mask_value(v, d) for v, d in zip(value, default)]  # type: ignore[arg-type]
             elif reduction_type == "dot":
@@ -5320,6 +5323,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 mutated_args.add(argname.name)
 
+        # pyrefly: ignore [bad-assignment]
         mutated_args = sorted(mutated_args)
 
         for tree in self.active_range_trees():
@@ -6264,6 +6268,7 @@ class TritonScheduling(SIMDScheduling):
             only_gen_src_code=True,
         )
 
+        # pyrefly: ignore [bad-assignment]
         for src_code, _, node_group in kernel_code_list:
             fused_node_lists = [node.get_nodes() for node in node_group]
             names = [n.get_name() for nodes in fused_node_lists for n in nodes]
