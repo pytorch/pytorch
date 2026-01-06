@@ -103,6 +103,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     fi
   fi
 
+  # Needs to be installed here so pip can build 3.14t wheels
+  conda_install cmake=3.31.6
+
   if [[ "$ANACONDA_PYTHON_VERSION" == "3.13" ]] && [[ "$PYTHON_FREETHREADED" == "1" ]]; then
     # needed for the 3.13t build to build lxml from source
     conda_install_through_forge libxslt libxml2-devel
