@@ -1255,6 +1255,77 @@ class InstructionTranslatorBase(
         """
         A call to some user defined function by inlining it.
         """
+        # SPIKE: Check if this function has a cached compilation from a previous torch.compile
+        # If so, use invoke_subgraph instead of inlining
+        from torch._dynamo.output_graph import _invoke_subgraph_cache
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+
+        try:
+            code = fn.get_code()  # type: ignore[attr-defined]
+            code_id = id(code)
+            if code_id in _invoke_subgraph_cache:
+                cache_entry = _invoke_subgraph_cache[code_id]
+                log.info("SPIKE: Found cached compilation for %s, using invoke_subgraph", code.co_name)
+
+                # Install the subgraph in the output graph's nn_modules
+                subgraph_name = self.output.install_subgraph(
+                    "repeated_subgraph",
+                    cache_entry.gm,
+                )
+
+                # Get proxy args - convert tensor args to their proxies
+                from .variables.builder import wrap_fx_proxy
+
+                proxy_args = []
+                example_inputs = []
+                for arg in args:
+                    if hasattr(arg, 'as_proxy'):
+                        proxy_args.append(arg.as_proxy())
+                    else:
+                        proxy_args.append(arg)
+                    # Get example value for shape propagation
+                    if hasattr(arg, 'as_proxy') and hasattr(arg.as_proxy().node, 'meta'):
+                        example_val = arg.as_proxy().node.meta.get('example_value')
+                        if example_val is not None:
+                            example_inputs.append(example_val)
+
+                # Get the subgraph node (reference to installed module)
+                subgraph_node = self.output.create_proxy(
+                    "get_attr",
+                    subgraph_name,
+                    (),
+                    {},
+                )
+
+                # Compute example output by running the graph with example inputs
+                with torch._guards.TracingContext.try_get().fake_mode:
+                    example_output = cache_entry.gm(*example_inputs) if example_inputs else None
+
+                # Create the invoke_subgraph call
+                hop_args = (subgraph_node, cache_entry.name, *proxy_args)
+                result_proxy = self.output.create_proxy(
+                    "call_function",
+                    invoke_subgraph,
+                    args=hop_args,
+                    kwargs={},
+                )
+
+                # Wrap the result
+                result_vt = wrap_fx_proxy(
+                    tx=self,
+                    proxy=result_proxy,
+                    example_value=example_output,
+                )
+
+                # invoke_subgraph returns a tuple, but the original function returns a single value
+                # Extract the first element to match the expected return type
+                if hasattr(result_vt, 'items') and len(result_vt.items) == 1:
+                    result_vt = result_vt.items[0]
+
+                return result_vt
+        except (AttributeError, TypeError) as e:
+            log.debug("SPIKE: Could not check cache for function: %s", e)
+
         self.is_leaf_tracer = False
         if config.enable_faithful_generator_behavior and is_generator(fn.get_code()):  # type: ignore[attr-defined]
             return self.inline_generator_function(fn, args, kwargs)
