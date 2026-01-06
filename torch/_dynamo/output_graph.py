@@ -3056,6 +3056,41 @@ class SubgraphTracer(fx.Tracer):
     def record_tensor_or_symint_vt(self, vt: VariableTracker):
         self.tracked_tensor_or_symint_vt.add(vt)
 
+    def create_arg(self, a: Any) -> "fx.node.Argument":
+        """Override create_arg to handle opaque objects.
+
+        For opaque objects, we store them in output_graph.nn_modules so they're
+        accessible when FakeRootModule is created. The base fx.Tracer.create_arg
+        would store them on self.root, but that's not the same as FakeRootModule.
+        """
+        from torch._library.opaque_object import is_opaque_reference_type
+
+        # Handle opaque objects specially - store in nn_modules instead of root
+        if is_opaque_reference_type(type(a)):
+            # Check if already registered in nn_modules
+            nn_modules = self.output_graph.nn_modules
+            for name, obj in nn_modules.items():
+                if obj is a:
+                    node = self.create_node("get_attr", name, (), {})
+                    node.meta["example_value"] = a
+                    return node
+
+            # Register new opaque object in nn_modules
+            attr_name = get_unique_name_wrt("_opaque_obj", nn_modules)
+            nn_modules[attr_name] = a
+            node = self.create_node("get_attr", attr_name, (), {})
+            node.meta["example_value"] = a
+
+            # initialize tensor_attrs and root if needed
+            if not hasattr(self, "tensor_attrs"):
+                self.tensor_attrs: dict[Any, str] = {}
+            if not hasattr(self, "root"):
+                self.root = torch.nn.Module()
+
+            return node
+
+        return super().create_arg(a)
+
     # preserve original meta if it is available
     def _maybe_preserve_original_meta(
         self, tx: "InstructionTranslatorBase", node: fx.Node
