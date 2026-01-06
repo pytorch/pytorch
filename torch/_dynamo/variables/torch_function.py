@@ -255,7 +255,9 @@ class TorchFunctionModeStackStateManager:
     @contextlib.contextmanager
     def temp_restore_stack(self) -> Generator[None, None, None]:
         prev = torch.overrides._get_current_function_mode_stack()
-        set_torch_function_mode_stack(self.stack)
+        # Filter out infra modes when restoring - they shouldn't be active during Dynamo tracing
+        non_infra_stack = [m for m in self.stack if not type(m).is_infra_mode()]
+        set_torch_function_mode_stack(non_infra_stack)
         try:
             yield
         finally:
@@ -299,9 +301,14 @@ class SymbolicTorchFunctionState:
         )
 
         for i, val in enumerate(py_stack):
-            self.mode_stack.append(
-                LazyVariableTracker.create(val, source=TorchFunctionModeStackSource(i))  # type: ignore[arg-type]
-            )
+            # Skip infra modes (like TorchFunctionMetadataMode) to avoid
+            # creating guards on their internal state during FX tracing
+            if not type(val).is_infra_mode():
+                self.mode_stack.append(
+                    LazyVariableTracker.create(  # type: ignore[arg-type]
+                        val, source=TorchFunctionModeStackSource(i)
+                    )
+                )
 
     def in_torch_function_mode(self) -> bool:
         return len(self.mode_stack) > 0

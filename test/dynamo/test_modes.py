@@ -799,6 +799,49 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                     )
 
 
+class InfraModeCompileTests(torch._dynamo.test_case.TestCase):
+    def test_infra_mode_with_mutable_state_succeeds(self):
+        """Test that infra modes with mutable state don't cause recompilation.
+
+        A mode marked as is_infra_mode=True is filtered from guard creation,
+        so even if its state mutates during compilation, it won't cause
+        guard failures or recompilation. If we call a function with 100 muls
+        twice, we should see exactly 200 muls total (no recompilation).
+        """
+        torch._dynamo.reset()
+
+        class MutableInfraMode(TorchFunctionMode):
+            def __init__(self):
+                self.mul_count = 0
+
+            @classmethod
+            def is_infra_mode(cls) -> bool:
+                return True
+
+            def __torch_function__(self, func, types, args=(), kwargs=None):
+                if getattr(func, "__name__", None) == "mul":
+                    self.mul_count += 1
+                return func(*args, **(kwargs or {}))
+
+        def many_ops_fn(x):
+            for _ in range(100):
+                x = x * 1.0
+            return x
+
+        compiled_fn = torch.compile(many_ops_fn, backend="eager")
+
+        x = torch.randn(3, 3)
+
+        mode = MutableInfraMode()
+        with mode:
+            compiled_fn(x)
+            # NB: not 200, which would happen if the infra mode was on inside
+            # during compilation!
+            self.assertEqual(mode.mul_count, 100)
+            compiled_fn(x)
+            self.assertEqual(mode.mul_count, 200)
+
+
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
     def test_default_device_restored_after_mode_tests(self):
         case = TorchFunctionModeTests("test_stack_state_mutation_default_device")

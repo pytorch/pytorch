@@ -1564,6 +1564,10 @@ class TorchFunctionMetadataMode(TorchFunctionMode):
     def __init__(self, tracer: _ProxyTracer) -> None:
         self.tracer = tracer
 
+    @classmethod
+    def is_infra_mode(cls) -> bool:
+        return True
+
     def __torch_function__(
         self,
         func: OpOverload,
