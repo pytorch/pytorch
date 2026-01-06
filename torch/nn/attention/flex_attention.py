@@ -1301,6 +1301,13 @@ def create_varlen_block_mask(
     Returns:
         BlockMask: A block mask with offsets and limits set for variable-length handling.
 
+    Note:
+        The varlen block mask is not currently compatible with:
+        - Flex decoding backend (TRITON_DECODE): Will fall back to standard TRITON
+        - Flash attention backend (FLASH): Will fall back to TRITON
+
+        Use BACKEND='TRITON' or BACKEND='AUTO' (default) for best compatibility.
+
     Example:
         >>> def causal_mask(b, h, q_idx, kv_idx):
         ...     return q_idx >= kv_idx

@@ -2129,12 +2129,16 @@ class TestFlexAttention(InductorTestCase):
     # These tests probe edge cases and compare against regular document masking
 
     @supported_platform
-    @unittest.skip("TODO: Redesign test for physical tensor layout")
+    @skip_on_cpu
     @common_utils.parametrize("num_docs", [1, 2, 4, 8])
     @common_utils.parametrize("head_dim", [64, 128])
     @common_utils.parametrize("num_heads", [1, 4])
     def test_varlen_batch_invariance_parametrized(self, device, num_docs, head_dim, num_heads):
-        """Parametrized test for batch invariance across different configurations."""
+        """Parametrized test for batch invariance across different configurations.
+
+        Uses assert_batch_invariance to verify bitwise identical results when
+        processing different subsets of documents together.
+        """
         from torch._inductor._numeric_utils import assert_batch_invariance
 
         torch.manual_seed(42)
@@ -2143,55 +2147,74 @@ class TestFlexAttention(InductorTestCase):
         # Generate random document lengths
         random.seed(num_docs * 1000 + head_dim)
         doc_lens = [random.randint(64, 512) for _ in range(num_docs)]
+        max_doc_len = max(doc_lens)
 
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        q_seq_lens = torch.tensor(doc_lens, device=device)
-        kv_seq_lens = torch.tensor(doc_lens, device=device)
+        # Create seqlens and offsets tensors for assert_batch_invariance
+        seqlens_tensor = torch.tensor(doc_lens, device=device)
+        offset_tensor = torch.zeros(num_docs, device=device, dtype=torch.int64)
+        offset_tensor[1:] = torch.cumsum(seqlens_tensor[:-1], dim=0)
 
-        block_mask = create_varlen_block_mask(
-            causal_mask,
-            B=1,
-            H=num_heads,
-            q_seq_lens=q_seq_lens,
-            kv_seq_lens=kv_seq_lens,
-            device=device,
-            BLOCK_SIZE=BLOCK_SIZE,
-        )
+        # Create full packed tensors
+        physical_len = sum(doc_lens)
+        query_full = torch.randn(1, num_heads, physical_len, head_dim, device=device, dtype=torch.float16)
+        key_full = torch.randn(1, num_heads, physical_len, head_dim, device=device, dtype=torch.float16)
+        value_full = torch.randn(1, num_heads, physical_len, head_dim, device=device, dtype=torch.float16)
 
-        total_q_len = block_mask.seq_lengths[0]
+        def fn(seqlens, offsets, q_full, k_full, v_full):
+            # seqlens and offsets may be subsetted by assert_batch_invariance
+            n_docs = seqlens.shape[0]
 
-        query = torch.randn(1, num_heads, total_q_len, head_dim, device=device, dtype=torch.float16)
-        key = torch.randn(1, num_heads, total_q_len, head_dim, device=device, dtype=torch.float16)
-        value = torch.randn(1, num_heads, total_q_len, head_dim, device=device, dtype=torch.float16)
+            # Repack tokens for selected documents
+            total_tokens = seqlens.sum().item()
+            q_packed = torch.empty(1, num_heads, total_tokens, head_dim, device=device, dtype=q_full.dtype)
+            k_packed = torch.empty(1, num_heads, total_tokens, head_dim, device=device, dtype=k_full.dtype)
+            v_packed = torch.empty(1, num_heads, total_tokens, head_dim, device=device, dtype=v_full.dtype)
 
-        # Compute offsets for unpacking
-        doc_offsets = [0]
-        for doc_len in doc_lens:
-            rounded_len = ((doc_len + BLOCK_SIZE - 1) // BLOCK_SIZE) * BLOCK_SIZE
-            doc_offsets.append(doc_offsets[-1] + rounded_len)
+            dst_offset = 0
+            for i in range(n_docs):
+                src_start = offsets[i].item()
+                doc_len = seqlens[i].item()
+                src_end = src_start + doc_len
+                dst_end = dst_offset + doc_len
 
-        max_doc_len = max(doc_lens)
+                q_packed[:, :, dst_offset:dst_end, :] = q_full[:, :, src_start:src_end, :]
+                k_packed[:, :, dst_offset:dst_end, :] = k_full[:, :, src_start:src_end, :]
+                v_packed[:, :, dst_offset:dst_end, :] = v_full[:, :, src_start:src_end, :]
 
-        def unpack_tensor(seqlens, tensor):
-            result = torch.zeros(
-                num_docs, num_heads, max_doc_len, head_dim, device=device, dtype=tensor.dtype
+                dst_offset = dst_end
+
+            # Create varlen block_mask for repacked tensors
+            block_mask = create_varlen_block_mask(
+                causal_mask,
+                B=1,
+                H=num_heads,
+                q_seq_lens=seqlens,
+                kv_seq_lens=seqlens,
+                device=device,
+                BLOCK_SIZE=BLOCK_SIZE,
             )
-            for i in range(num_docs):
-                src = tensor[0, :, doc_offsets[i]:doc_offsets[i] + seqlens[i], :]
-                result[i, :, :seqlens[i], :] = src
-            return result
 
-        def fn(seqlens, q, k, v):
-            output = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
-            return unpack_tensor(seqlens.tolist(), output)
+            # Run attention
+            output = torch.compile(flex_attention)(q_packed, k_packed, v_packed, block_mask=block_mask)
+
+            # Unpack to [n_docs, num_heads, max_doc_len, head_dim]
+            result = torch.zeros(n_docs, num_heads, max_doc_len, head_dim, device=device, dtype=output.dtype)
+            offset = 0
+            for i in range(n_docs):
+                doc_len = seqlens[i].item()
+                result[i, :, :doc_len, :] = output[0, :, offset:offset + doc_len, :]
+                offset += doc_len
+
+            return result
 
         assert_batch_invariance(
             fn,
-            (0, None, None, None),
-            0,
-            (q_seq_lens, query, key, value),
+            (0, 0, None, None, None),  # seqlens and offsets indexed, q/k/v not
+            0,  # output batch dim
+            (seqlens_tensor, offset_tensor, query_full, key_full, value_full),
         )
 
     @supported_platform
@@ -2246,6 +2269,188 @@ class TestFlexAttention(InductorTestCase):
 
         # Verify output shape
         self.assertEqual(out.shape, (1, NUM_HEADS, total_q_len, HEAD_DIM))
+
+    @supported_platform
+    @skip_on_cpu
+    def test_varlen_non_aligned_doc_lengths_correctness(self, device):
+        """Test varlen correctness with non-block-aligned document lengths.
+
+        This test specifically validates that q_limits/kv_limits work correctly
+        for documents that don't align to BLOCK_SIZE boundaries. It compares
+        packed processing against individual document processing.
+        """
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+        NUM_HEADS = 2
+
+        # Specifically non-aligned lengths to test q_limits/kv_limits
+        doc_lens = [127, 200, 65]  # All non-multiples of 128
+        num_docs = len(doc_lens)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        q_seq_lens = torch.tensor(doc_lens, device=device)
+        kv_seq_lens = torch.tensor(doc_lens, device=device)
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=NUM_HEADS,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Use PHYSICAL tensor size (sum of actual lengths)
+        physical_len = sum(doc_lens)
+
+        # Compute PHYSICAL offsets
+        doc_offsets = [0]
+        for doc_len in doc_lens:
+            doc_offsets.append(doc_offsets[-1] + doc_len)
+
+        # Create packed tensors with physical size
+        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+
+        # Run packed version
+        compiled_flex = torch.compile(flex_attention)
+        out_packed = compiled_flex(query, key, value, block_mask=block_mask)
+
+        # Verify output shape matches physical size
+        self.assertEqual(out_packed.shape, (1, NUM_HEADS, physical_len, HEAD_DIM))
+
+        # Process each document individually and compare
+        for i in range(num_docs):
+            doc_start = doc_offsets[i]
+            doc_end = doc_offsets[i + 1]
+            doc_len = doc_lens[i]
+
+            # Extract this document's inputs
+            q_doc = query[:, :, doc_start:doc_end, :].clone()
+            k_doc = key[:, :, doc_start:doc_end, :].clone()
+            v_doc = value[:, :, doc_start:doc_end, :].clone()
+
+            # Create single-doc block mask
+            single_doc_mask = create_varlen_block_mask(
+                causal_mask,
+                B=1,
+                H=NUM_HEADS,
+                q_seq_lens=torch.tensor([doc_len], device=device),
+                kv_seq_lens=torch.tensor([doc_len], device=device),
+                device=device,
+                BLOCK_SIZE=BLOCK_SIZE,
+            )
+
+            # Run individual document
+            out_individual = compiled_flex(q_doc, k_doc, v_doc, block_mask=single_doc_mask)
+
+            # Extract packed output for this document
+            out_packed_doc = out_packed[:, :, doc_start:doc_end, :]
+
+            # Compare - they should be numerically equivalent
+            self.assertEqual(
+                out_packed_doc, out_individual,
+                msg=f"Document {i} (length={doc_len}) output differs. "
+                    f"This indicates q_limits/kv_limits may not be working correctly."
+            )
+
+    @supported_platform
+    @skip_on_cpu
+    def test_varlen_asymmetric_qkv_lengths(self, device):
+        """Test varlen with different Q and KV sequence lengths per document.
+
+        This validates cross-attention scenarios where queries and keys/values
+        have different lengths within each document.
+        """
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+        NUM_HEADS = 2
+
+        # Asymmetric lengths: Q and KV have different lengths per document
+        q_doc_lens = [200, 150]
+        kv_doc_lens = [300, 100]  # Different from Q lengths
+        num_docs = len(q_doc_lens)
+
+        # Non-causal mask for cross-attention (all positions can attend)
+        def full_mask(b, h, q_idx, kv_idx):
+            return q_idx >= 0  # Always true
+
+        q_seq_lens = torch.tensor(q_doc_lens, device=device)
+        kv_seq_lens = torch.tensor(kv_doc_lens, device=device)
+
+        block_mask = create_varlen_block_mask(
+            full_mask,
+            B=1,
+            H=NUM_HEADS,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        # Physical tensor sizes
+        q_physical_len = sum(q_doc_lens)
+        kv_physical_len = sum(kv_doc_lens)
+
+        # Create packed tensors
+        query = torch.randn(1, NUM_HEADS, q_physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        key = torch.randn(1, NUM_HEADS, kv_physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        value = torch.randn(1, NUM_HEADS, kv_physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+
+        # Run packed version
+        compiled_flex = torch.compile(flex_attention)
+        out_packed = compiled_flex(query, key, value, block_mask=block_mask)
+
+        # Verify output shape matches Q physical size
+        self.assertEqual(out_packed.shape, (1, NUM_HEADS, q_physical_len, HEAD_DIM))
+        self.assertFalse(torch.isnan(out_packed).any(), "Output contains NaN values")
+        self.assertFalse(torch.isinf(out_packed).any(), "Output contains Inf values")
+
+        # Compute offsets
+        q_doc_offsets = [0]
+        kv_doc_offsets = [0]
+        for i in range(num_docs):
+            q_doc_offsets.append(q_doc_offsets[-1] + q_doc_lens[i])
+            kv_doc_offsets.append(kv_doc_offsets[-1] + kv_doc_lens[i])
+
+        # Process each document individually and compare
+        for i in range(num_docs):
+            q_start, q_end = q_doc_offsets[i], q_doc_offsets[i + 1]
+            kv_start, kv_end = kv_doc_offsets[i], kv_doc_offsets[i + 1]
+
+            # Extract this document's inputs
+            q_doc = query[:, :, q_start:q_end, :].clone()
+            k_doc = key[:, :, kv_start:kv_end, :].clone()
+            v_doc = value[:, :, kv_start:kv_end, :].clone()
+
+            # Create single-doc block mask with asymmetric lengths
+            single_doc_mask = create_varlen_block_mask(
+                full_mask,
+                B=1,
+                H=NUM_HEADS,
+                q_seq_lens=torch.tensor([q_doc_lens[i]], device=device),
+                kv_seq_lens=torch.tensor([kv_doc_lens[i]], device=device),
+                device=device,
+                BLOCK_SIZE=BLOCK_SIZE,
+            )
+
+            # Run individual document
+            out_individual = compiled_flex(q_doc, k_doc, v_doc, block_mask=single_doc_mask)
+
+            # Extract packed output for this document
+            out_packed_doc = out_packed[:, :, q_start:q_end, :]
+
+            # Compare
+            self.assertEqual(
+                out_packed_doc, out_individual,
+                msg=f"Document {i} output differs (q_len={q_doc_lens[i]}, kv_len={kv_doc_lens[i]})"
+            )
 
     @supported_platform
     @skip_on_cpu
@@ -2677,9 +2882,13 @@ class TestFlexAttention(InductorTestCase):
         self.assertFalse(torch.isinf(out).any(), "Output contains Inf values")
 
     @supported_platform
-    @unittest.skip("TODO: Redesign test for physical tensor layout")
+    @skip_on_cpu
     def test_varlen_backward_batch_invariance(self, device):
-        """Test that backward pass is also batch-invariant for varlen document mask."""
+        """Test that backward pass is also batch-invariant for varlen document mask.
+
+        Uses assert_batch_invariance to verify bitwise identical gradients when
+        processing different subsets of documents together.
+        """
         if device not in DEVICE_SUPPORTS_BACKWARDS:
             self.skipTest("Backward not supported on this device")
 
@@ -2692,65 +2901,83 @@ class TestFlexAttention(InductorTestCase):
 
         doc_lens = [200, 150, 250]
         num_docs = len(doc_lens)
+        max_doc_len = max(doc_lens)
 
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        q_seq_lens = torch.tensor(doc_lens, device=device)
-        kv_seq_lens = torch.tensor(doc_lens, device=device)
+        # Create seqlens and offsets tensors for assert_batch_invariance
+        seqlens_tensor = torch.tensor(doc_lens, device=device)
+        offset_tensor = torch.zeros(num_docs, device=device, dtype=torch.int64)
+        offset_tensor[1:] = torch.cumsum(seqlens_tensor[:-1], dim=0)
 
-        block_mask = create_varlen_block_mask(
-            causal_mask,
-            B=1,
-            H=NUM_HEADS,
-            q_seq_lens=q_seq_lens,
-            kv_seq_lens=kv_seq_lens,
-            device=device,
-            BLOCK_SIZE=BLOCK_SIZE,
-        )
-
-        # Use physical (compact) tensor size - sum of actual doc lengths
+        # Create full packed tensors
         physical_len = sum(doc_lens)
+        query_full = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
+        key_full = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
+        value_full = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
+        grad_out_full = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
 
-        # Compute offsets for unpacking (physical layout)
-        doc_offsets = [0]
-        for doc_len in doc_lens:
-            doc_offsets.append(doc_offsets[-1] + doc_len)
+        def fn(seqlens, offsets, q_full, k_full, v_full, grad_out_full):
+            # seqlens and offsets may be subsetted by assert_batch_invariance
+            n_docs = seqlens.shape[0]
 
-        max_doc_len = max(doc_lens)
+            # Repack tokens for selected documents
+            total_tokens = seqlens.sum().item()
+            q_packed = torch.empty(1, NUM_HEADS, total_tokens, HEAD_DIM, device=device, dtype=q_full.dtype)
+            k_packed = torch.empty(1, NUM_HEADS, total_tokens, HEAD_DIM, device=device, dtype=k_full.dtype)
+            v_packed = torch.empty(1, NUM_HEADS, total_tokens, HEAD_DIM, device=device, dtype=v_full.dtype)
+            grad_out_packed = torch.empty(1, NUM_HEADS, total_tokens, HEAD_DIM, device=device, dtype=grad_out_full.dtype)
 
-        def unpack_tensor(seqlens, tensor):
-            result = torch.zeros(
-                num_docs, NUM_HEADS, max_doc_len, HEAD_DIM, device=device, dtype=tensor.dtype
+            dst_offset = 0
+            for i in range(n_docs):
+                src_start = offsets[i].item()
+                doc_len = seqlens[i].item()
+                src_end = src_start + doc_len
+                dst_end = dst_offset + doc_len
+
+                q_packed[:, :, dst_offset:dst_end, :] = q_full[:, :, src_start:src_end, :]
+                k_packed[:, :, dst_offset:dst_end, :] = k_full[:, :, src_start:src_end, :]
+                v_packed[:, :, dst_offset:dst_end, :] = v_full[:, :, src_start:src_end, :]
+                grad_out_packed[:, :, dst_offset:dst_end, :] = grad_out_full[:, :, src_start:src_end, :]
+
+                dst_offset = dst_end
+
+            # Enable gradients
+            q_packed = q_packed.requires_grad_(True)
+            k_packed = k_packed.requires_grad_(True)
+            v_packed = v_packed.requires_grad_(True)
+
+            # Create varlen block_mask for repacked tensors
+            block_mask = create_varlen_block_mask(
+                causal_mask,
+                B=1,
+                H=NUM_HEADS,
+                q_seq_lens=seqlens,
+                kv_seq_lens=seqlens,
+                device=device,
+                BLOCK_SIZE=BLOCK_SIZE,
             )
-            for i in range(num_docs):
-                src = tensor[0, :, doc_offsets[i]:doc_offsets[i] + seqlens[i], :]
-                result[i, :, :seqlens[i], :] = src
+
+            # Run forward and backward
+            output = torch.compile(flex_attention)(q_packed, k_packed, v_packed, block_mask=block_mask)
+            output.backward(grad_out_packed)
+
+            # Unpack query gradient to [n_docs, NUM_HEADS, max_doc_len, HEAD_DIM]
+            result = torch.zeros(n_docs, NUM_HEADS, max_doc_len, HEAD_DIM, device=device, dtype=q_packed.grad.dtype)
+            offset = 0
+            for i in range(n_docs):
+                doc_len = seqlens[i].item()
+                result[i, :, :doc_len, :] = q_packed.grad[0, :, offset:offset + doc_len, :]
+                offset += doc_len
+
             return result
-
-        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True)
-        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True)
-        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True)
-
-        def fn(seqlens, q, k, v):
-            q = q.detach().requires_grad_(True)
-            k = k.detach().requires_grad_(True)
-            v = v.detach().requires_grad_(True)
-
-            out = torch.compile(flex_attention)(q, k, v, block_mask=block_mask)
-
-            # Compute backward with unit gradient for gradient extraction
-            grad_out = torch.ones_like(out)
-            out.backward(grad_out)
-
-            # Return unpacked query gradient as the "output" to check batch invariance
-            return unpack_tensor(seqlens.tolist(), q.grad)
 
         assert_batch_invariance(
             fn,
-            (0, None, None, None),
-            0,
-            (q_seq_lens, query, key, value),
+            (0, 0, None, None, None, None),  # seqlens and offsets indexed, others not
+            0,  # output batch dim
+            (seqlens_tensor, offset_tensor, query_full, key_full, value_full, grad_out_full),
         )
 
     @supported_platform
@@ -2813,18 +3040,16 @@ class TestFlexAttention(InductorTestCase):
     def test_varlen_cross_document_isolation(self, device):
         """Verify that attention does not leak across document boundaries.
 
-        Note: Currently, varlen with physical tensor layout works best when document
-        lengths are multiples of BLOCK_SIZE. Non-aligned lengths may have issues
-        with overlapping memory regions for padding.
+        Uses non-aligned document lengths to validate that q_limits/kv_limits
+        properly prevent cross-document attention leakage.
         """
         torch.manual_seed(42)
         BLOCK_SIZE = 128
         HEAD_DIM = 64
         NUM_HEADS = 1
 
-        # Use document lengths aligned to BLOCK_SIZE for correct isolation
-        # TODO: Support non-aligned lengths by using q_limits/kv_limits in kernel
-        doc_lens = [256, 256]  # Each exactly 2 blocks
+        # Use non-aligned document lengths to test q_limits/kv_limits isolation
+        doc_lens = [200, 150]  # Neither is a multiple of BLOCK_SIZE=128
 
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
@@ -2877,6 +3102,98 @@ class TestFlexAttention(InductorTestCase):
             (doc1_out < 0).all(),
             "Document 1 output has non-negative values - possible cross-document leakage"
         )
+
+    @supported_platform
+    @skip_on_cpu
+    def test_varlen_return_lse(self, device):
+        """Test that return_lse works correctly with varlen block mask."""
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+        NUM_HEADS = 2
+
+        doc_lens = [200, 150]
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        q_seq_lens = torch.tensor(doc_lens, device=device)
+        kv_seq_lens = torch.tensor(doc_lens, device=device)
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=NUM_HEADS,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        physical_len = sum(doc_lens)
+
+        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+
+        # Run with return_lse=True
+        compiled_flex = torch.compile(flex_attention)
+        out, lse = compiled_flex(query, key, value, block_mask=block_mask, return_lse=True)
+
+        # Verify output shape
+        self.assertEqual(out.shape, (1, NUM_HEADS, physical_len, HEAD_DIM))
+
+        # Verify LSE shape (should be [B, H, physical_len])
+        self.assertEqual(lse.shape, (1, NUM_HEADS, physical_len))
+
+        # LSE should be finite
+        self.assertFalse(torch.isnan(lse).any(), "LSE contains NaN values")
+        # Note: LSE can be -inf for fully masked rows, so we don't check for isinf
+
+    @supported_platform
+    @skip_on_cpu
+    @common_utils.parametrize("doc_lens", [
+        [1, 200],  # Single token first doc
+        [200, 1],  # Single token last doc
+        [1, 1, 1],  # Multiple single-token docs
+        [32, 32],  # Very small docs (< BLOCK_SIZE)
+    ])
+    def test_varlen_edge_case_small_docs(self, device, doc_lens):
+        """Test varlen with very small document lengths including single-token docs."""
+        torch.manual_seed(42)
+        BLOCK_SIZE = 128
+        HEAD_DIM = 64
+        NUM_HEADS = 1
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        q_seq_lens = torch.tensor(doc_lens, device=device)
+        kv_seq_lens = torch.tensor(doc_lens, device=device)
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=NUM_HEADS,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=BLOCK_SIZE,
+        )
+
+        physical_len = sum(doc_lens)
+
+        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+
+        compiled_flex = torch.compile(flex_attention)
+        out = compiled_flex(query, key, value, block_mask=block_mask)
+
+        # Verify output shape and validity
+        self.assertEqual(out.shape, (1, NUM_HEADS, physical_len, HEAD_DIM))
+        self.assertFalse(torch.isnan(out).any(), f"Output contains NaN for doc_lens={doc_lens}")
+        self.assertFalse(torch.isinf(out).any(), f"Output contains Inf for doc_lens={doc_lens}")
 
     # ============== End of varlen document masking tests ==============
 
