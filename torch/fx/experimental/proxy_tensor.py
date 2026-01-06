@@ -319,7 +319,7 @@ def set_proxy_slot(  # type: ignore[no-redef]
 
 def has_proxy_slot(obj: Tensor, tracer: _ProxyTracer) -> bool:
     assert isinstance(obj, (Tensor, SymNode)), type(obj)
-    # pyrefly: ignore [no-matching-overload]
+
     return bool(get_proxy_slot(obj, tracer, False, lambda _: True))
 
 
@@ -2102,7 +2102,7 @@ class _ModuleStackTracer(PythonKeyTracer):
                 # Warning: We blow away our own attributes here to mimic the base class
                 # - so don't expect `self.x` to do anything useful.
                 # pyrefly: ignore [no-matching-overload]
-                # pyrefly: ignore [bad-override]
+
                 self.__class__ = type(
                     base.__class__.__name__,
                     (self.__class__, base.__class__),
@@ -2125,7 +2125,6 @@ class _ModuleStackTracer(PythonKeyTracer):
                 if not isinstance(attr_val, Module):
                     return attr_val
 
-                # pyrefly: ignore [index-error]
                 return AttrProxy(attr_val, tracer.proxy_paths[self] + "." + name)
 
             def get_base(self) -> Module:
@@ -2138,12 +2137,12 @@ class _ModuleStackTracer(PythonKeyTracer):
                         res = torch.nn.Sequential(
                             OrderedDict(list(self._modules.items())[idx])
                         )
-                        # pyrefly: ignore [index-error]
+
                         return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
                     elif isinstance(self, torch.nn.ModuleList):
                         # Copied from nn/modules/container.py
                         res = torch.nn.ModuleList(list(self._modules.values())[idx])
-                        # pyrefly: ignore [index-error]
+
                         return AttrProxy(res, f"{tracer.proxy_paths[self]}.{idx}")
 
                 return super().__getitem__(idx)  # type: ignore[misc]
