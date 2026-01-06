@@ -325,6 +325,7 @@ def create_hop_joint_graph(
         # Need to first trace out the joint_fn with autograd info on
         # then functionalize the graph otherwise the grad information is lost
         joint_gm = materialize_as_graph(
+            # pyrefly: ignore [bad-argument-type]
             torch.func.functionalize(joint_gm, remove="mutations_and_views"),
             fw_args + example_grads,
         )

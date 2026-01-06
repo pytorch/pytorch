@@ -29,6 +29,11 @@ runs:
   using: composite
 
   steps:
+    - name: Setup uv
+      uses: astral-sh/setup-uv@f0ec1fc3b38f5e7cd731bb6ce540c5af426746bb # v6.1.0
+      with:
+        python-version: 3.12
+
     # Check out pytorch with fetch depth 0
     - name: Check file changes
       id: check-file-changes
@@ -40,8 +45,7 @@ runs:
         JOB_NAME: ${{ inputs.job-name }}
       run: |
         set -x
-        python3 -m pip install boto3==1.35.42
-        python3 ${GITHUB_ACTION_PATH}/reuse_old_whl.py \
+        uv run --no-project --with boto3==1.35.42 --with requests==2.32.3 python ${GITHUB_ACTION_PATH}/reuse_old_whl.py \
           --build-environment "${{ inputs.build-environment }}" \
           --run-id "${{ inputs.run-id }}" \
           --github-ref "${{ github.ref }}"
