@@ -16581,6 +16581,8 @@ op_db: list[OpInfo] = [
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+            # _scaled_mm_v2 is CUDA-only, no CPU implementation
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu'),
             # "add_stub" not implemented for 'Float8_e4m3fn'
             # "ufunc_add_CUDA" not implemented for 'Float8_e4m3fn'
             # https://github.com/pytorch/pytorch/issues/107256
