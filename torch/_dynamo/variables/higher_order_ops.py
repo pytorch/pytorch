@@ -4550,60 +4550,56 @@ class AutogradFunctionApplyVariable(VariableTracker):
                         tracer=bwd_tracer,
                     )
                 )
-            except torch._dynamo.exc.Unsupported as e:
-                if isinstance(
-                    e, torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace
-                ):
-                    # TODO - Do not support this path because of eager
-                    # divergence forced by contiguous calls. Instead suggested
-                    # nonstrict_trace.
-                    from unittest import mock
+            except torch._dynamo.exc.UnknownPropertiesDuringBackwardTrace as e:
+                # TODO - Do not support this path because of eager
+                # divergence forced by contiguous calls. Instead suggested
+                # nonstrict_trace.
+                from unittest import mock
 
-                    bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
-                        tx.output,
-                        parent=fwd_tracer,
-                        source_target=self._HOP_NAME,
+                bwd_tracer = torch._dynamo.output_graph.SubgraphTracer(
+                    tx.output,
+                    parent=fwd_tracer,
+                    source_target=self._HOP_NAME,
+                )
+                from .._trace_wrapped_higher_order_op import (
+                    autograd_function_backward_rewritten,
+                )
+
+                if isinstance(self.bwd_fn, types.FunctionType):
+                    bwd_fn = UserFunctionVariable(
+                        autograd_function_backward_rewritten(self.bwd_fn)
                     )
-                    from .._trace_wrapped_higher_order_op import (
-                        autograd_function_backward_rewritten,
+                elif isinstance(self.bwd_fn, types.MethodType):
+                    bwd_fn = UserMethodVariable(
+                        autograd_function_backward_rewritten(self.bwd_fn.__func__),
+                        UserDefinedClassVariable(self.bwd_fn.__class__),
                     )
-
-                    if isinstance(self.bwd_fn, types.FunctionType):
-                        bwd_fn = UserFunctionVariable(
-                            autograd_function_backward_rewritten(self.bwd_fn)
-                        )
-                    elif isinstance(self.bwd_fn, types.MethodType):
-                        bwd_fn = UserMethodVariable(
-                            autograd_function_backward_rewritten(self.bwd_fn.__func__),
-                            UserDefinedClassVariable(self.bwd_fn.__class__),
-                        )
-                    else:
-                        unimplemented(
-                            gb_type="autograd.Function.apply: non-function or method backward (2)",
-                            context=str(self.bwd_fn),
-                            explanation="Expected backward function to be a function or method.",
-                            hints=[],
-                        )
-
-                    with mock.patch(
-                        "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
-                        [],
-                    ):
-                        bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
-                            speculate_subgraph_with_auto_output_flattening(
-                                tx,
-                                bwd_fn,
-                                bwd_args,
-                                {},
-                                self._HOP_NAME,
-                                enable_grad=False,
-                                set_subgraph_inputs="automatic_with_forced_inputs",
-                                allow_side_effects=False,
-                                tracer=bwd_tracer,
-                            )
-                        )
                 else:
-                    raise e
+                    unimplemented(
+                        gb_type="autograd.Function.apply: non-function or method backward (2)",
+                        context=str(self.bwd_fn),
+                        explanation="Expected backward function to be a function or method.",
+                        hints=[],
+                        from_exc=e,
+                    )
+
+                with mock.patch(
+                    "torch._dynamo.config._autograd_backward_strict_mode_conditional_banned_ops",
+                    [],
+                ):
+                    bwd_out, bwd_graph, bwd_freevars, bwd_graph_output_vts = (
+                        speculate_subgraph_with_auto_output_flattening(
+                            tx,
+                            bwd_fn,
+                            bwd_args,
+                            {},
+                            self._HOP_NAME,
+                            enable_grad=False,
+                            set_subgraph_inputs="automatic_with_forced_inputs",
+                            allow_side_effects=False,
+                            tracer=bwd_tracer,
+                        )
+                    )
 
         # Restore the side effects
         tx.output.side_effects = prev_side_effects
