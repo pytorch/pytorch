@@ -926,7 +926,7 @@ class _TorchDynamoContext:
                         if torch._guards.TracingContext.try_get() is not None:
                             return fn(*args, **kwargs)
                 # Skip nested compile - just inline the function
-                if is_fx_symbolic_tracing():
+                if is_fx_symbolic_tracing() and not config.force_compile_during_fx_trace:
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
                             "Detected that you are using FX to symbolically trace "
