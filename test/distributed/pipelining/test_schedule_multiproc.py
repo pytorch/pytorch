@@ -26,10 +26,12 @@ from torch.distributed.pipelining import (
     ScheduleLoopedBFS,
     ScheduleZBVZeroBubble,
 )
-from torch.distributed.pipelining.schedules import (
-    _Action,
+from torch.distributed.pipelining.runtime import (
     _PipelineContext,
     _PipelineScheduleRuntime,
+)
+from torch.distributed.pipelining.schedules import (
+    _Action,
     _wait_batch_p2p,
     FORWARD,
     OVERLAP_F_B,
