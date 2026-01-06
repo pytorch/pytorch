@@ -3,6 +3,7 @@ import itertools
 import logging
 import os
 import pathlib
+import resource
 import subprocess
 import sys
 import tempfile
@@ -765,6 +766,25 @@ class AOTInductorTestsTemplate:
             {"aot_inductor.package_constants_on_disk_format": "binary_blob"}
         ):
             self.check_model(Model(), example_inputs)
+
+    @unittest.skipIf(IS_WINDOWS, "mmap page alignment only applies to Unix systems")
+    def test_mmap_weights_page_alignment(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = torch.nn.Linear(64, 512)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        example_inputs = (torch.randn(1, 64, device=self.device),)
+        original_getpagesize = resource.getpagesize
+        resource.getpagesize = lambda: 4096
+        try:
+            with config.patch({"aot_inductor.force_mmap_weights": True}):
+                self.check_model(Model(), example_inputs)
+        finally:
+            resource.getpagesize = original_getpagesize
 
     def test_with_offset(self):
         class Model(torch.nn.Module):
