@@ -3,12 +3,19 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
+#include <cuda/atomic>
+#endif
 
 namespace c10d::nccl_extension {
 
 #define THREADS_PER_BLOCK 512
+#define WARP_SIZE 32
 
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#if defined(NCCL_HAS_SYMMEM_SUPPORT) && defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 600)
+#define NCCL_EXTENSIONS_ARE_SUPPORTED
+#endif
+
 __device__ __forceinline__ char* get_remote_ptr(
     void** buffer,  // buffers_dev_
     int peer,  // peer index
@@ -25,6 +32,7 @@ __device__ inline void copy_bytes_vec16(
     size_t tid,
     size_t stride)
 {
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
     if (nbytes == 0) return;
 
     uintptr_t src_addr = reinterpret_cast<uintptr_t>(src_base);
@@ -78,6 +86,9 @@ __device__ inline void copy_bytes_vec16(
     for (size_t i = tid; i < tail; i += stride) {
         dst_base[copied + i] = src_base[copied + i];
     }
+#else
+  CUDA_KERNEL_ASSERT(false);
+#endif
 }
 
 __global__ void lsa_put_kernel(
@@ -87,6 +98,7 @@ __global__ void lsa_put_kernel(
     const void* src,
     size_t nbytes
 ) {
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
     // Calculate index
     const size_t tid    = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t stride = blockDim.x * gridDim.x;
@@ -95,6 +107,9 @@ __global__ void lsa_put_kernel(
     auto dst = get_remote_ptr(buffer, dst_peer, dst_byte_offset);
     const char* src_bytes = reinterpret_cast<const char*>(src);
     copy_bytes_vec16(src_bytes, dst, nbytes, tid, stride);
+#else
+  CUDA_KERNEL_ASSERT(false);
+#endif
 }
 
 __global__ void lsa_put_signal_kernel(
@@ -107,6 +122,7 @@ __global__ void lsa_put_signal_kernel(
     unsigned int* blocks_done,  // global counter of blocks done
     uint64_t  signal_value     // value to write
 ) {
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
     const size_t tid    = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t stride = blockDim.x * gridDim.x;
 
@@ -122,19 +138,22 @@ __global__ void lsa_put_signal_kernel(
     // 2) system fence + signal set
     if (threadIdx.x == 0) {
         // This block is done; increment global completion counter
-        unsigned int prev = atomicAdd(blocks_done, 1);
+        cuda::atomic_ref<unsigned int, cuda::thread_scope_device> blocks_done_ref(*blocks_done);
+        unsigned int prev = blocks_done_ref.fetch_add(1, cuda::memory_order_relaxed);
 
         // If this was the last block to finish:
         if (prev == gridDim.x - 1) {
             uint64_t* signal_pad_peer =
             reinterpret_cast<uint64_t*>(signal_pad[dst_peer]);
 
-            // Single-writer: atomicExch is conservative but safe.
-            atomicExch(
-                reinterpret_cast<unsigned long long*>(signal_pad_peer),
-                static_cast<unsigned long long>(signal_value));
+            cuda::atomic_ref<uint64_t, cuda::thread_scope_system> signal_ref(*signal_pad_peer);
+            // Relaxed order is sufficient due to the system wide fence after put
+            signal_ref.store(signal_value, cuda::memory_order_relaxed);
         }
     }
+#else
+  CUDA_KERNEL_ASSERT(false);
+#endif
 }
 
 __global__ void nccl_wait_for_signal_kernel(
@@ -142,23 +161,27 @@ __global__ void nccl_wait_for_signal_kernel(
     int  cur_rank,
     uint64_t  target_signal_value
 ) {
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
     if (blockIdx.x == 0 && threadIdx.x == 0) {
-        volatile unsigned long long* sig_ptr =
-            reinterpret_cast<volatile unsigned long long*>(signal_pad[cur_rank]);
+        uint64_t* sig_ptr =
+            reinterpret_cast<uint64_t*>(signal_pad[cur_rank]);
+        cuda::atomic_ref<uint64_t, cuda::thread_scope_system> sig_ref(*sig_ptr);
 
         while (true) {
-            unsigned long long val = *sig_ptr;
-            if (val >= static_cast<unsigned long long>(target_signal_value)) break;
+            uint64_t val = sig_ref.load(cuda::memory_order_relaxed);
+            if (val >= target_signal_value) break;
 #if defined(__CUDA_ARCH__) && (__CUDA_ARCH__ >= 700)
             __nanosleep(64);
 #endif
         }
     }
-}
+#else
+  CUDA_KERNEL_ASSERT(false);
 #endif
+}
 
 void nccl_put(at::Tensor& tensor, const int64_t peer) {
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
@@ -182,12 +205,12 @@ void nccl_put(at::Tensor& tensor, const int64_t peer) {
 }
 
 void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
   int cur_rank = symm_mem->get_rank();
-  nccl_wait_for_signal_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
+  nccl_wait_for_signal_kernel<<<1, WARP_SIZE, 0, stream>>>(
     symm_mem->get_signal_pad_ptrs_dev(),
     cur_rank,
     signal);
@@ -198,7 +221,7 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
 }
 
 void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "put op currently supports contiguous tensors only");
@@ -230,7 +253,6 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
 #endif
 }
 
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
 __global__ void lsa_get_kernel(
     void**  buffer,  // buffers_dev_
     int  peer,
@@ -238,6 +260,7 @@ __global__ void lsa_get_kernel(
     void*  dst,
     size_t  nbytes
 ) {
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
     const size_t tid = blockIdx.x * blockDim.x + threadIdx.x;
     const size_t stride = blockDim.x * gridDim.x;
 
@@ -245,11 +268,13 @@ __global__ void lsa_get_kernel(
     auto src = get_remote_ptr(buffer, peer, src_byte_offset);
     char* dst_bytes = reinterpret_cast<char*>(dst);
     copy_bytes_vec16(src, dst_bytes, nbytes, tid, stride);
-}
+#else
+  CUDA_KERNEL_ASSERT(false);
 #endif
+}
 
 void nccl_get(at::Tensor& tensor, const int64_t peer) {
-#ifdef NCCL_HAS_SYMMEM_SUPPORT
+#ifdef NCCL_EXTENSIONS_ARE_SUPPORTED
   // TODO: support non-contiguous tensors
   TORCH_CHECK(tensor.is_contiguous(),
       "get op currently supports contiguous tensors only");
