@@ -935,21 +935,10 @@ class GraphModuleSerializer(metaclass=Final):
             ret["stack_trace"] = stack_trace
 
         if nn_module_stack := node.meta.get("nn_module_stack"):
-
-            def export_nn_module_stack(val):
-                assert isinstance(val, tuple) and len(val) == 2
-                path, ty = val
-
-                assert isinstance(path, str)
-                assert isinstance(ty, str)
-
-                return path + "," + ty
-
-            # Serialize to "key,orig_path,type_str"
-            nn_module_list = [
-                f"{k},{export_nn_module_stack(v)}" for k, v in nn_module_stack.items()
-            ]
-            ret["nn_module_stack"] = ST_DELIMITER.join(nn_module_list)
+            # Use JSON serialization to handle all special characters (commas, brackets, quotes, etc.)
+            # Convert dict[str, tuple[str, str]] to dict[str, list[str, str]] for JSON serialization
+            serializable = {k: [v[0], v[1]] for k, v in nn_module_stack.items()}
+            ret["nn_module_stack"] = json.dumps(serializable, separators=(',', ':'))
 
         if source_fn_st := node.meta.get("source_fn_stack"):
             source_fn_list = [
@@ -3022,31 +3011,9 @@ class GraphModuleDeserializer(metaclass=Final):
             return target
 
         if nn_module_stack_str := metadata.get("nn_module_stack"):
-            # Originally serialized to "key,orig_path,type_str"
-            def import_nn_module_stack(key, path, ty):
-                return key, (path, ty)
-
-            # Helper function to split string by commas, accounting for nested parentheses/brackets
-            def metadata_split(metadata):
-                out = []
-                start, n = 0, 0
-                a, b = "[(", ")]"
-                for end, c in enumerate(metadata):
-                    if c in a:
-                        n += 1
-                    elif c in b:
-                        n -= 1
-                    elif c == "," and n == 0:
-                        out.append(metadata[start:end])
-                        start = end + 1
-                out.append(metadata[start:])
-                assert len(out) == 3
-                return out
-
-            nn_module_stack = dict(
-                import_nn_module_stack(*metadata_split(item))
-                for item in nn_module_stack_str.split(ST_DELIMITER)
-            )
+            # JSON format: dict[str, list[str, str]]
+            deserialized = json.loads(nn_module_stack_str)
+            nn_module_stack = {k: (v[0], v[1]) for k, v in deserialized.items()}
             ret["nn_module_stack"] = nn_module_stack
 
         if source_fn_st_str := metadata.get("source_fn_stack"):
