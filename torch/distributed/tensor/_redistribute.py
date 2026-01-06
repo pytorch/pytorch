@@ -7,7 +7,6 @@ import logging
 import weakref
 from collections import defaultdict
 from collections.abc import Sequence
-from enum import auto, Enum
 from functools import cache
 from typing import cast, NamedTuple
 
@@ -158,14 +157,6 @@ class DTensorRedistributePlanner:
     Note: Use get_redistribute_planner() factory function instead of direct
     instantiation for automatic caching.
     """
-
-    class TransitionType(Enum):
-        SHARD_TO_SHARD = auto()
-        SHARD_TO_REPLICATE = auto()
-        PARTIAL_TO_REPLICATE = auto()
-        REPLICATE_TO_SHARD = auto()
-        PARTIAL_TO_SHARD = auto()
-        REPLICATE_TO_PARTIAL = auto()
 
     @dataclasses.dataclass(frozen=True, slots=True)
     class DistState:
@@ -335,11 +326,7 @@ class DTensorRedistributePlanner:
                 shard_order=state.tensor_dim_to_mesh_dim,
             )
 
-        def cost_function(
-            src_state,
-            dst_state,
-            transition_type: DTensorRedistributePlanner.TransitionType,
-        ):
+        def cost_function(src_state, dst_state):
             return one_step_redistribute_cost(
                 state_to_spec(src_state), state_to_spec(dst_state)
             )
@@ -429,7 +416,6 @@ class DTensorRedistributePlanner:
                 all_next_state[dist_state] = self.cost_function(
                     cur_dist_state,
                     dist_state,
-                    DTensorRedistributePlanner.TransitionType.SHARD_TO_SHARD,
                 )
                 # reset content for next iteration
                 tensor_mesh_dim_dict[src_tensor_dim].append(move_mesh_dim)
@@ -452,7 +438,6 @@ class DTensorRedistributePlanner:
             all_next_state[dist_state] = self.cost_function(
                 cur_dist_state,
                 dist_state,
-                DTensorRedistributePlanner.TransitionType.SHARD_TO_REPLICATE,
             )
 
         ######################################################################
@@ -468,7 +453,6 @@ class DTensorRedistributePlanner:
             all_next_state[dist_state] = self.cost_function(
                 cur_dist_state,
                 dist_state,
-                DTensorRedistributePlanner.TransitionType.PARTIAL_TO_REPLICATE,
             )
 
         ######################################################################
@@ -490,7 +474,6 @@ class DTensorRedistributePlanner:
                 all_next_state[dist_state] = self.cost_function(
                     cur_dist_state,
                     dist_state,
-                    DTensorRedistributePlanner.TransitionType.REPLICATE_TO_SHARD,
                 )
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
@@ -513,7 +496,6 @@ class DTensorRedistributePlanner:
                 all_next_state[dist_state] = self.cost_function(
                     cur_dist_state,
                     dist_state,
-                    DTensorRedistributePlanner.TransitionType.PARTIAL_TO_SHARD,
                 )
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
@@ -530,7 +512,6 @@ class DTensorRedistributePlanner:
             all_next_state[dist_state] = self.cost_function(
                 cur_dist_state,
                 dist_state,
-                DTensorRedistributePlanner.TransitionType.REPLICATE_TO_PARTIAL,
             )
 
         return all_next_state
