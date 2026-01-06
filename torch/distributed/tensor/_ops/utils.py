@@ -374,7 +374,7 @@ class ShardOrderPattern:
 
 def find_compatible_ordering(
     pattern_mesh_dims: tuple[int, ...],
-    output_mesh_dims: frozenset[int],
+    output_mesh_dims: set[int],
 ) -> tuple[int, ...] | None:
     """
     Check if pattern ordering matches output mesh_dims exactly.
@@ -390,16 +390,16 @@ def find_compatible_ordering(
         The ordering to use for output, or None if not an exact match.
 
     Examples:
-        >>> find_compatible_ordering((1, 0, 2), frozenset({0, 1, 2}))
+        >>> find_compatible_ordering((1, 0, 2), {0, 1, 2})
         (1, 0, 2)  # Exact match
 
-        >>> find_compatible_ordering((1, 0, 2), frozenset({0, 1}))
+        >>> find_compatible_ordering((1, 0, 2), {0, 1})
         None  # Different set of mesh dims
 
-        >>> find_compatible_ordering((1, 0), frozenset({0, 1, 2}))
+        >>> find_compatible_ordering((1, 0), {0, 1, 2})
         None  # Different set of mesh dims
     """
-    if frozenset(pattern_mesh_dims) == output_mesh_dims:
+    if set(pattern_mesh_dims) == output_mesh_dims:
         return pattern_mesh_dims
     return None
 
@@ -503,7 +503,7 @@ def generate_shard_order_variants(
 
     # Filter to only multi-sharded dims
     multi_sharded = {
-        td: frozenset(mds)
+        td: set(mds)
         for td, mds in tensor_dim_to_mesh_dims.items()
         if len(mds) > 1
     }

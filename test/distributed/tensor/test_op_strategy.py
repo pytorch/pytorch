@@ -857,22 +857,22 @@ class TestShardOrderPreservation(TestCase):
 
         # Exact match
         self.assertEqual(
-            find_compatible_ordering((1, 0, 2), frozenset({0, 1, 2})), (1, 0, 2)
+            find_compatible_ordering((1, 0, 2), {0, 1, 2}), (1, 0, 2)
         )
 
         # Different ordering of same dims
         self.assertEqual(
-            find_compatible_ordering((2, 0, 1), frozenset({0, 1, 2})), (2, 0, 1)
+            find_compatible_ordering((2, 0, 1), {0, 1, 2}), (2, 0, 1)
         )
 
         # No match: different number of dims
-        self.assertIsNone(find_compatible_ordering((1, 0, 2), frozenset({0, 1})))
+        self.assertIsNone(find_compatible_ordering((1, 0, 2), {0, 1}))
 
         # No match: different mesh dims
-        self.assertIsNone(find_compatible_ordering((1, 0), frozenset({0, 1, 2})))
+        self.assertIsNone(find_compatible_ordering((1, 0), {0, 1, 2}))
 
         # No match: disjoint sets
-        self.assertIsNone(find_compatible_ordering((0, 1), frozenset({2, 3})))
+        self.assertIsNone(find_compatible_ordering((0, 1), {2, 3}))
 
     def test_matches_placement_types(self):
         """Test type matching with _StridedShard normalization."""
