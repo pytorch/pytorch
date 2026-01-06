@@ -20569,6 +20569,7 @@ op_db: list[OpInfo] = [
                                     active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
                                     active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    )),
     OpInfo("nn.functional.smooth_l1_loss",
            ref=reference_smooth_l1_loss,
