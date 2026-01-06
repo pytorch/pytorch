@@ -646,6 +646,10 @@ libtorch_nativert_sources = [
     "torch/nativert/kernels/ETCallDelegateKernel.cpp",
 ]
 
+libtorch_nativert_mtia_sources = [
+    "torch/nativert/executor/triton/fb/MtiaTritonKernelManager.cpp",
+]
+
 libtorch_nativert_cuda_sources = [
     "torch/nativert/executor/triton/CudaTritonKernelManager.cpp",
     "torch/nativert/executor/AOTInductorModelContainerCudaShim.cpp",
@@ -787,6 +791,8 @@ libtorch_cuda_distributed_sources = libtorch_cuda_distributed_base_sources + lib
 libtorch_cuda_sources = libtorch_cuda_core_sources + libtorch_cuda_distributed_sources + [
     "torch/csrc/cuda/nccl.cpp",
 ] + libtorch_nativert_cuda_sources
+
+libtorch_mtia_sources = libtorch_nativert_mtia_sources
 
 torch_cpp_srcs = [
     "torch/csrc/api/src/cuda.cpp",  # this just forwards stuff, no real CUDA

@@ -720,6 +720,72 @@ def forward(self, x):
                     serialized.example_inputs,
                 )
 
+    @unittest.skipIf(
+        not torch.cuda.is_available() or not has_triton(), "requires cuda and triton"
+    )
+    def test_triton_constexpr_matching(self) -> None:
+        """Test that constexpr values are properly matched during serialization.
+
+        This tests the normalization logic that handles various constexpr types
+        (bool, int, float, string) when matching kernel cache entries. The kernel
+        signature stores constexprs as strings which are parsed back to Python types.
+        """
+
+        @triton.jit
+        def kernel_with_constexprs(
+            in_ptr,
+            out_ptr,
+            n_elements,
+            BLOCK_SIZE: "tl.constexpr",
+            USE_FAST_PATH: "tl.constexpr",  # bool constexpr
+        ):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(in_ptr + offsets, mask=mask)
+            tl.store(out_ptr + offsets, x, mask=mask)
+
+        def custom_op(x: torch.Tensor) -> torch.Tensor:
+            output = torch.empty_like(x)
+            n_elements = output.numel()
+
+            def grid(meta):
+                return (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrap_triton(kernel_with_constexprs)[grid](
+                x,
+                output,
+                n_elements,
+                BLOCK_SIZE=128,
+                USE_FAST_PATH=True,  # bool constexpr
+            )
+            return output
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return custom_op(x)
+
+        device = "cuda"
+        m = Model().to(device)
+        args = (torch.randn(1024, device=device),)
+
+        ep = torch.export.export(m, args=args)
+        ep = ep.run_decompositions(decompose_custom_triton_ops=False)
+
+        # This should not raise - constexpr matching should work for bool values
+        serialized = ExportedProgramSerializer().serialize(ep)
+
+        # Verify the triton node was serialized
+        triton_node = None
+        for node in serialized.exported_program.graph_module.graph.nodes:
+            if (
+                node.target
+                == "torch.ops.higher_order.triton_kernel_wrapper_functional"
+            ):
+                triton_node = node
+                break
+        self.assertIsNotNone(triton_node)
+
     def test_kwargs_default(self) -> None:
         """
         Tests that the kwargs default values are serialized even if they are not
