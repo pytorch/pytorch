@@ -3448,6 +3448,16 @@
       ]
     }
   ],
+  "GB6265": [
+    {
+      "Gb_type": "invoke_subgraph: unsupported output type with is_pure=True",
+      "Context": "out_vt: {out_vt}",
+      "Explanation": "invoke_subgraph(is_pure=True) requires the output to be Union[Tensor|tuple[Tensor]]",
+      "Hints": [
+        "Change the output signature to be a tensor or a tuple of tensors"
+      ]
+    }
+  ],
   "GB0313": [
     {
       "Gb_type": "torch.cond: differing branch outputs",

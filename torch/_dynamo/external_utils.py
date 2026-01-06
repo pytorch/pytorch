@@ -290,5 +290,6 @@ def insert_const_values_with_mask(
 def get_state_dict_values(mod):
     # dest is used to avoid any _metadata field read or write
     dest = dict()
-    mod.state_dict(destination=dest)
+    # keep_vars is used to avoid any detaches
+    mod.state_dict(destination=dest, keep_vars=True)
     return list(dest.values())

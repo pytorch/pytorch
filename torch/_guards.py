@@ -718,6 +718,14 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
 class HopSubgraphCache:
     @abstractmethod
+    def add_dynamo_installed_submodule_out_type(
+        self, fn_id: int, out_type: Any
+    ) -> None: ...
+
+    @abstractmethod
+    def get_dynamo_installed_submodule_out_type(self, fn_id: int) -> Any: ...
+
+    @abstractmethod
     def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None: ...
 
     @abstractmethod
@@ -754,12 +762,21 @@ class InvokeSubgraphCache(HopSubgraphCache):
         self.autograd_cache: dict[str, Callable] = {}
         self.proxy_dispatch_cache: dict[str, Callable] = {}
         self.dynamo_installed_submodules: dict[int, list[str]] = defaultdict(list)
+        self.dynamo_installed_submodules_out_type: dict[int, Any] = {}
         self.lazy_bwd_cache: dict[
             str, dict[tuple[object], tuple[torch.fx.GraphModule, int]]
         ] = defaultdict(dict)
         self.effects_cache: dict[
             str, set
         ] = {}  # Maps identifier -> set of effect types
+
+    def add_dynamo_installed_submodule_out_type(
+        self, fn_id: int, out_type: Any
+    ) -> None:
+        self.dynamo_installed_submodules_out_type[fn_id] = out_type
+
+    def get_dynamo_installed_submodule_out_type(self, fn_id: int) -> Any:
+        return self.dynamo_installed_submodules_out_type.get(fn_id)
 
     def add_dynamo_installed_submodule(self, fn_id: int, identifier: str) -> None:
         self.dynamo_installed_submodules[fn_id].append(identifier)

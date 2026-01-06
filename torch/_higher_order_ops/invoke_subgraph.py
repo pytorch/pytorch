@@ -170,7 +170,7 @@ redirect_to_mode(invoke_subgraph, _CachingTorchDispatchMode)
 redirect_to_mode(invoke_subgraph, _CachedTorchDispatchMode)
 
 
-def invoke_subgraph_placeholder(func, *args, **kwargs):
+def invoke_subgraph_placeholder(func, is_pure, *args, **kwargs):
     if torch.compiler.is_dynamo_compiling():
         # This is just a placeholder for Dynamo to replace with invoke_subgraph
         raise RuntimeError("invoke_subgraph should not be called directly in Dynamo")
@@ -178,8 +178,8 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
     if torch.compiler.is_compiling():
         # For non-strict export tracing, we still want to go through Dynamo
 
-        def _invoke_subgraph_placeholder_wrapper(func, args):
-            return invoke_subgraph_placeholder(func, *args)
+        def _invoke_subgraph_placeholder_wrapper(func, is_pure, args):
+            return invoke_subgraph_placeholder(func, is_pure, *args)
 
         from torch._higher_order_ops.utils import setup_compilation_env
 
@@ -188,12 +188,14 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
                 _invoke_subgraph_placeholder_wrapper,
                 backend=backend,
                 fullgraph=True,
-            )(func, args)
+            )(func, is_pure, args)
 
     return func(*args, **kwargs)
 
 
-def mark_compile_region(fn=None, options: Optional[NestedCompileRegionOptions] = None):
+def mark_compile_region(
+    fn=None, options: Optional[NestedCompileRegionOptions] = None, is_pure=False
+):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
     reuse the compiled artifact, instead of the usual way of aggressively
@@ -207,6 +209,11 @@ def mark_compile_region(fn=None, options: Optional[NestedCompileRegionOptions] =
         options: Optional config to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
+        is_pure: If True, indicates that the function is pure (has no side
+            effects and produces the same output for the same inputs). This
+            allows the compiler to apply additional tracing optimizations in
+            the compiler frontend (specifically TorchDynamo) to assume that a
+            single traced graph is sound to be reused again.
     """
 
     def wrap(func):
@@ -215,7 +222,7 @@ def mark_compile_region(fn=None, options: Optional[NestedCompileRegionOptions] =
             inner_func = func
             while hasattr(inner_func, "__marked_compile_region_fn__"):
                 inner_func = inner_func.__marked_compile_region_fn__
-            return invoke_subgraph_placeholder(inner_func, *args, **kwargs)
+            return invoke_subgraph_placeholder(inner_func, is_pure, *args, **kwargs)
 
         inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
         func.__marked_compile_region_config__ = options  # type: ignore[attr-defined]
