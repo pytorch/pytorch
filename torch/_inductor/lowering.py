@@ -1761,7 +1761,7 @@ def quantized_decomposed_quantize_per_tensor_tensor(
             _scale = ops.to_dtype(_scale, torch.float32)
         if zero_point.dtype != torch.float32:
             _zero_point = ops.to_dtype(_zero_point, torch.float32)
-        val = ops.round(input * ops.reciprocal(_scale)) + _zero_point
+        val = input * ops.reciprocal(_scale) + _zero_point
         return ops.to_dtype(val, dtype)
 
     return Pointwise.create(
