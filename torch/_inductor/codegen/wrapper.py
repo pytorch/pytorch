@@ -2204,7 +2204,12 @@ class PythonWrapperCodegen(CodeGen):
 
             import pickle
 
-            output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
+            try:
+                output.writeline(f"{name} = pickle.loads({pickle.dumps(value)!r})")
+            except (TypeError, AttributeError, pickle.PicklingError) as e:
+                output.writeline(
+                    f'raise TypeError("Failed to pickle opaque type {type(value)} for variable {name}: {str(e)}")'
+                )
 
         output.writelines(
             ["", "", "def benchmark_compiled_module(times=10, repeat=10):"]
