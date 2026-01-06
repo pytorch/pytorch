@@ -3240,6 +3240,11 @@ def parse_args(args=None):
         help="Use same settings as --inductor for baseline comparisons",
     )
     parser.add_argument(
+        "--cinder-jit",
+        action="store_true",
+        help="Enable CinderX JIT via cinderx.jit.auto() before running benchmarks",
+    )
+    parser.add_argument(
         "--suppress-errors",
         action="store_true",
         help="Suppress errors instead of raising them",
@@ -3791,6 +3796,13 @@ def run(runner, args, original_dir=None):
     # Pass the parsed args object to benchmark runner object
     torch._dynamo.reset()
     runner.args = args
+
+    if args.cinder_jit:
+        import cinderx.jit
+
+        # cinderx.jit.auto()
+        cinderx.jit.compile_after_n_calls(10)
+        log.info("CinderX JIT enabled via cinderx.jit.auto()")
 
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
