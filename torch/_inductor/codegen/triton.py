@@ -45,6 +45,7 @@ from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
     DeviceProperties,
+    ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
 )
@@ -125,6 +126,10 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
+
+# Threshold for detecting inner reductions based on tiling score ratio.
+# If r0_tiling_score / x_tiling_score >= this value, upgrade DEFAULT hint to INNER.
+INNER_REDUCTION_RATIO_THRESHOLD = 8
 
 
 def get_triton_reduction_function(reduction_type):
@@ -5356,12 +5361,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # large rblock inhibits xblock size, dont attempt if there is a decent amount of
                 # reads coalesced by xblock
                 r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
-                contiguous_red = r_coalesce_ratio >= 8.0
+                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
             else:
-                from torch._inductor.runtime.hints import ReductionHint
-
                 contiguous_red = (
-                    self.features.get_reduction_hint() == ReductionHint.INNER
+                    self.features.get_reduction_hint(tiling_scores)
+                    == ReductionHint.INNER
                 )
 
             looped_mem = memory_stats.looped.memory.bytes
@@ -5446,7 +5450,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         elif self.inside_reduction:
-            reduction_hint = self.features.get_reduction_hint()
+            reduction_hint = self.features.get_reduction_hint(self.tiling_scores)
             heuristics_line = f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r},
