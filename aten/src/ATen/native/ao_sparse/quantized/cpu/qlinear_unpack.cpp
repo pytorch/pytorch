@@ -50,7 +50,7 @@ LinearPackedSerializationType PackedLinearWeight::unpack() {
   }
 
   int8_t* weight_ptr_int8 =
-      reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>());
+      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
 
   packW->unpack(weight_ptr_int8);
 
@@ -68,7 +68,7 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
   const int64_t N = output_channels_;
   const int64_t K = input_channels_;
 
-  const float* w_scales_ptr = w_scales_.const_data_ptr<float>();
+  float* w_scales_ptr = w_scales_.data_ptr<float>();
 
   at::Tensor weight_origin;
   if (q_scheme_ == c10::kPerTensorAffine) {
@@ -104,7 +104,7 @@ LinearPackedSerializationType PackedLinearWeightQnnp::unpack() {
   }
 
   int8_t* weight_ptr_int8 =
-      reinterpret_cast<int8_t*>(weight_origin.mutable_data_ptr<c10::qint8>());
+      reinterpret_cast<int8_t*>(weight_origin.data_ptr<c10::qint8>());
 
   bcsr_matrix_->unpack(
       weight_ptr_int8,

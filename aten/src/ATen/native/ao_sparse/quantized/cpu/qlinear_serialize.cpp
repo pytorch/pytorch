@@ -115,7 +115,7 @@ BCSRSerializationType PackedLinearWeight::serialize() {
       w->C,
       w->RB,
       w->CB,
-      zero_points.mutable_data_ptr<int8_t>(),
+      zero_points.data_ptr<int8_t>(),
       qscheme_per_tensor);
 
   std::vector<int8_t>& packed_weight_values = std::get<0>(untiled_bcsr);

@@ -126,10 +126,10 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
       pytorch_qnnp_setup_fully_connected_sparse_dq_nc_q8(
           sparse_linear_op_.get(),
           rows_input, /* batch size */
-          reinterpret_cast<const uint8_t*>(q_input_contig.const_data_ptr<c10::quint8>()),
+          reinterpret_cast<uint8_t*>(q_input_contig.data_ptr<c10::quint8>()),
           cols_input, /* num input channels */
-          bias_.const_data_ptr<float>(),
-          output.mutable_data_ptr<float>(),
+          bias_.data_ptr<float>(),
+          output.data_ptr<float>(),
           output_channels_);
   TORCH_CHECK(
       status == pytorch_qnnp_status_success,
