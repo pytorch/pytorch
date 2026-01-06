@@ -321,8 +321,6 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(cnts.op_count, 7)
 
     def test_ctx_manager_nested_step_graph_break(self):
-        import contextlib
-
         global f1, f2
 
         def f1(x):
