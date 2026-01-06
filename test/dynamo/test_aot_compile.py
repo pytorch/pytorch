@@ -957,7 +957,7 @@ from user code:
         mod.forward = compiled_fn
         with self.assertRaisesRegex(
             RuntimeError,
-            "Failed to serialize the following objects: \\[SimpleLinearModule",
+            r"Failed to serialize the following objects: \[SimpleLinearModule",
         ):
             compiled_fn.save_compiled_function(self.path())
         compiled_fn.save_compiled_function(
@@ -996,7 +996,7 @@ from user code:
         mod.forward = compiled_fn
         with self.assertRaisesRegex(
             RuntimeError,
-            "Failed to serialize the following objects: \\[SimpleLinearModule",
+            r"Failed to serialize the following objects: \[SimpleLinearModule",
         ):
             compiled_fn.save_compiled_function(self.path())
         compiled_fn.save_compiled_function(
