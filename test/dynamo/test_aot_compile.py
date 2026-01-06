@@ -9,7 +9,6 @@ import pickle
 import tempfile
 import unittest
 from collections import namedtuple
-from collections.abc import Callable
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -298,14 +297,6 @@ class RedistributeModel(torch.nn.Module):
         y = d_x.redistribute(mesh, placements=(Replicate(), Replicate()))
 
         return x, y
-
-
-def wrap_forward_function(fn: Callable):
-    @functools.wraps(fn, assigned=("__doc__", "__annotations__", "__type_params__"))
-    def wrapped(*args, **kwargs):
-        return fn(*args, **kwargs)
-
-    return wrapped
 
 
 @torch._dynamo.config.patch("enable_aot_compile", True)
@@ -937,85 +928,6 @@ from user code:
                 self.assertEqual(expected, actual)
         finally:
             torch.distributed.destroy_process_group()
-
-    def test_aot_compile_with_captured_module(self):
-        mod = SimpleLinearModule()
-
-        fn = mod.forward
-
-        def with_processing(f, *args, **kwargs):
-            return f(*args, **kwargs)
-
-        fn = functools.partial(with_processing, fn)
-
-        fn = wrap_forward_function(fn)
-        mod.forward = fn
-
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
-            ((torch.randn(4, 3),), {})
-        )
-        mod.forward = compiled_fn
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Failed to serialize the following objects: \\[SimpleLinearModule",
-        ):
-            compiled_fn.save_compiled_function(self.path())
-        compiled_fn.save_compiled_function(
-            self.path(),
-            external_data={"mod": mod},
-        )
-        with open(self.path(), "rb") as f:
-            with self.assertRaisesRegex(RuntimeError, "Missing required external ref"):
-                torch.compiler.load_compiled_function(f)
-
-        with open(self.path(), "rb") as f:
-            compiled_fn = torch.compiler.load_compiled_function(
-                f,
-                external_data={"mod": mod},
-            )
-            test_inputs = (torch.randn(4, 3),)
-            expected = fn(*test_inputs)
-            actual = compiled_fn(*test_inputs)
-            self.assertEqual(expected, actual)
-
-    def test_aot_compile_with_captured_module_2(self):
-        mod = SimpleLinearModule()
-
-        fn = mod.forward
-
-        def with_processing(f, *args, **kwargs):
-            return f(*args, **kwargs)
-
-        fn = functools.partial(with_processing, fn)
-
-        fn = wrap_forward_function(fn)
-
-        compiled_fn = torch.compile(fn, fullgraph=True).aot_compile(
-            ((torch.randn(4, 3),), {})
-        )
-        mod.forward = compiled_fn
-        with self.assertRaisesRegex(
-            RuntimeError,
-            "Failed to serialize the following objects: \\[SimpleLinearModule",
-        ):
-            compiled_fn.save_compiled_function(self.path())
-        compiled_fn.save_compiled_function(
-            self.path(),
-            external_data={"mod": mod},
-        )
-        with open(self.path(), "rb") as f:
-            with self.assertRaisesRegex(RuntimeError, "Missing required external ref"):
-                torch.compiler.load_compiled_function(f)
-
-        with open(self.path(), "rb") as f:
-            compiled_fn = torch.compiler.load_compiled_function(
-                f,
-                external_data={"mod": mod},
-            )
-            test_inputs = (torch.randn(4, 3),)
-            expected = fn(*test_inputs)
-            actual = compiled_fn(*test_inputs)
-            self.assertEqual(expected, actual)
 
     def test_aot_compile_with_checkpoint(self):
         from torch.utils.checkpoint import checkpoint

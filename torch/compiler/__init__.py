@@ -712,10 +712,7 @@ def nested_compile_region(
 
 
 def load_compiled_function(
-    file: io.IOBase,
-    *,
-    f_globals: dict[str, object] | None = None,
-    external_data: dict[str, Any] | None = None,
+    file: io.IOBase, *, f_globals: Optional[dict[str, object]] = None
 ) -> Callable[..., Any]:
     """
     Load an aot-compiled function from a file.
@@ -726,10 +723,7 @@ def load_compiled_function(
 
     Args:
         file: A file-like object containing the serialized compiled function.
-        f_globals: Optional global scope enclosing the compiled function.
-        external_data: Optional data to be loaded into the runtime environment
-                       of the compiled function. This should contains the same
-                       data as AOTCompileResult.external_data returned from save_compiled_function() call.
+        f_globals: Optional globals to be loaded into the compiled function.
 
     Returns:
         A torch-compiled function with compilation preloaded from disk.
@@ -737,4 +731,4 @@ def load_compiled_function(
     from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return AOTCompiledFunction.deserialize(data, f_globals, external_data)
+    return AOTCompiledFunction.deserialize(data, f_globals)
