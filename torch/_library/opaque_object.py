@@ -51,11 +51,8 @@ class MemberType(Enum):
     during torch.compile tracing.
     """
 
-    # Creates guards on the member's values. For attribute, guards on the value,
-    # and will trigger a recompilation if the value changes
-    GUARDED = "guarded"
-    # Reads/calls the member at trace time and bakes the result in as a constant
-    CONSTANT = "constant"
+    # Reads/calls the member at trace time with the real object and bakes the result as a constant
+    USE_REAL = "use_real"
     # Inlines/traces the member
     INLINED = "inlined"
 
@@ -82,6 +79,9 @@ OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 class _OpaqueTypeInfo:
     class_name: str
     opaque_typ: Literal["reference", "value"]
+    guard_fn: (
+        Any  # Callable that takes the object and returns list of values to guard on
+    )
     members: dict[str, MemberType]  # Maps member name to how it should be handled
 
 
@@ -116,6 +116,7 @@ def register_opaque_type(
     cls: Any,
     *,
     typ: str,
+    guard_fn: Any = None,
     members: dict[str, MemberType] | None = None,
 ) -> None:
     """
@@ -129,21 +130,27 @@ def register_opaque_type(
         cls (type): The class to register as an opaque type.
         typ (str): Either "reference" or "value". See Note [Opaque Objects] for
             more details.
+        guard_fn (callable | None): A function that takes an instance of the opaque
+            object and returns a list of values to guard on. These values will be compared
+            for equality on each function call, triggering recompilation if they change.
+            Only applicable for reference types.
+            Example: lambda obj: [obj.seed]
+            Example: lambda obj: [obj.x, obj.y]  # Multiple values
         members (dict[str, MemberType] | None): Dictionary mapping member names
             (attributes, properties, or methods) to their MemberType, which controls
             how they are handled during torch.compile tracing:
-            - MemberType.GUARDED: Guards on the member's value (triggers recompilation)
-            - MemberType.INLINED: Inlines the method
-            - MemberType.CONSTANT: Inlines the method result as a constant
+            - MemberType.USE_REAL: Evaluates with the real object at compile time and
+              bakes the result as a constant
+            - MemberType.INLINED: Inlines the method call into the trace
 
     Examples:
         >>> register_opaque_type(
         >>>     MyClass,
         >>>     typ="reference",
+        >>>     guard_fn=lambda obj: [obj.x, obj.y],  # Guard on x and y values
         >>>     members={
-        >>>         "x": MemberType.GUARDED,    # Guard on x attribute
-        >>>         "ndim": MemberType.CONSTANT, # Bake as constant
-        >>>         "compute": MemberType.INLINED, # Inline method call
+        >>>         "ndim": MemberType.USE_REAL,     # Bake ndim as constant
+        >>>         "compute": MemberType.INLINED,   # Inline compute method
         >>>     },
         >>> )
     """
@@ -201,10 +208,17 @@ def register_opaque_type(
                 "on `__eq__`, and all methods will be inlined by default."
             )
 
+        if guard_fn is not None:
+            raise TypeError(
+                "No need to specify `guard_fn` for "
+                f"value-type opaque class {cls} as it will be guarded based "
+                "on `__eq__`."
+            )
+
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
 
-    type_info = _OpaqueTypeInfo(name, typ, members or {})
+    type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {})
     _OPAQUE_TYPES[cls] = type_info
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
