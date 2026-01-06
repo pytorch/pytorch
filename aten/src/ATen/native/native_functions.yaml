@@ -2602,16 +2602,12 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: exp.out
   variants: function, method
-  dispatch:
-    SparseCPU, SparseCUDA, SparseMPS: exp_sparse
   tags: [core, pointwise]
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: exp.out
   variants: function, method
-  dispatch:
-    SparseCPU, SparseCUDA, SparseMPS: exp_sparse_
   tags: pointwise
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -2620,7 +2616,6 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS, MTIA: exp_out
-    SparseCPU, SparseCUDA, SparseMPS: exp_sparse_out
   tags: pointwise
 
 - func: exp2(Tensor self) -> Tensor
@@ -4211,6 +4206,27 @@
   dispatch:
     CUDA: miopen_rnn_backward
   autogen: miopen_rnn_backward.out
+
+- func: _use_miopen_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank) -> bool
+  device_check: NoCheck  # Tensor arguments allowed to be on different devices, see also miopen_ctc_loss
+  dispatch:
+    CUDA: _use_miopen_ctc_loss
+
+- func: _use_miopen_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank) -> bool
+  device_check: NoCheck  # Tensor arguments allowed to be on different devices, see also miopen_ctc_loss
+  dispatch:
+    CUDA: _use_miopen_ctc_loss_tensor
+
+- func: miopen_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
+  device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
+  dispatch:
+    CUDA: miopen_ctc_loss
+  autogen: miopen_ctc_loss.out
+
+- func: miopen_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
+  device_check: NoCheck  # log_probs is expected to be on CUDA while targets is expected to be on CPU
+  dispatch:
+    CUDA: miopen_ctc_loss_tensor
 
 - func: mm(Tensor self, Tensor mat2) -> Tensor
   structured_delegate: mm.out
