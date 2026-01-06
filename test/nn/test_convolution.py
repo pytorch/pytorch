@@ -4226,7 +4226,9 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @serialTest()
     @dtypes(*(torch.half, torch.bfloat16))
     def test_conv3d_cudnn_backward_broken(self, device, dtype):
-        x = torch.rand(1, 16, 124, 1282, 722, dtype=dtype, device=device, requires_grad=True)
+        x = torch.rand(
+            1, 16, 124, 1282, 722, dtype=dtype, device=device, requires_grad=True
+        )
         m = torch.nn.Conv3d(
             16,
             16,
