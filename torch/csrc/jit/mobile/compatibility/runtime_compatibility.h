@@ -19,7 +19,7 @@ struct RuntimeCompatibilityInfo {
   std::pair<uint64_t, uint64_t> min_max_supported_bytecode_version;
   std::unordered_map<std::string, OperatorInfo> operator_info;
   std::unordered_set<std::string> supported_types;
-  std::pair<uint64_t, uint64_t> min_max_supported_opperator_versions;
+  std::pair<uint64_t, uint64_t> min_max_supported_operator_versions;
 
   // Factory Method
   static TORCH_API RuntimeCompatibilityInfo get();
