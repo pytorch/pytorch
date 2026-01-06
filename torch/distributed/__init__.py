@@ -79,8 +79,8 @@ if is_available():
             def interaction(self, *args, **kwargs):
                 _stdin = sys.stdin
                 try:
-                    sys.stdin = open("/dev/stdin")
-                    pdb.Pdb.interaction(self, *args, **kwargs)
+                    with open("/dev/stdin") as sys.stdin:
+                        pdb.Pdb.interaction(self, *args, **kwargs)
                 finally:
                     sys.stdin = _stdin
 
