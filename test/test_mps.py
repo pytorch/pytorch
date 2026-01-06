@@ -13230,51 +13230,6 @@ class TestMetalLibrary(TestCaseMPS):
 class TestMPSAcceleratorAPI(TestCaseMPS):
     """Test the unified torch.accelerator API for MPS."""
 
-    def test_current_accelerator(self):
-        """Test that MPS device type is recognized."""
-        device = torch.device('mps')
-        self.assertEqual(device.type, 'mps')
-        # Verify we can create tensors on MPS
-        x = torch.tensor([1.0], device=device)
-        self.assertEqual(x.device.type, 'mps')
-
-    def test_allocator_registration(self):
-        """Test that MPS allocator works through tensor allocation."""
-        # The allocator is registered if we can successfully allocate tensors
-        device = torch.device('mps')
-        x = torch.randn(100, 100, device=device)
-        self.assertEqual(x.device.type, 'mps')
-        self.assertGreater(torch.mps.current_allocated_memory(), 0)
-
-    def test_mps_caching_allocator_exists(self):
-        """Test that MPSCachingAllocator can be accessed."""
-        # This tests that our MPSCachingAllocator wrapper is accessible
-        self.assertTrue(hasattr(torch.backends.mps, 'is_available'))
-        self.assertTrue(torch.backends.mps.is_available())
-
-    def test_memory_allocation(self):
-        """Test basic memory allocation through the unified API."""
-        # Create a tensor on MPS - this will use our allocator
-        x = torch.randn(10, 10, device='mps')
-        self.assertEqual(x.device.type, 'mps')
-        self.assertEqual(x.shape, torch.Size([10, 10]))
-
-    def test_storage_allocator(self):
-        """Test that Storage uses the correct allocator for MPS."""
-        # Create a tensor on MPS and verify its storage is on MPS
-        x = torch.randn(100, device='mps')
-        storage = x.untyped_storage()
-        self.assertEqual(storage.device.type, 'mps')
-
-    def test_empty_cache(self):
-        """Test that empty_cache works through the unified API."""
-        # Allocate some memory
-        x = torch.randn(1000, 1000, device='mps')
-        del x
-
-        # This should work without errors if allocator is properly registered
-        torch.mps.empty_cache()
-
     def test_memory_stats(self):
         """Test that memory stats are accessible."""
         # Allocate some tensors

@@ -157,9 +157,7 @@ static PyObject* THPStorage_pynew(
         allocator = c10::cuda::CUDACachingAllocator::get();
         break;
 #endif
-#ifdef USE_MPS
-      case at::kMPS:
-#endif
+      case at::DeviceType::MPS:
       case at::DeviceType::XPU:
       case at::DeviceType::HPU:
       case at::DeviceType::Meta:

@@ -109,6 +109,9 @@ unsigned MPSDevice::getCoreCount() const {
 }
 
 at::Allocator* GetMPSAllocator(bool useSharedAllocator) {
+  if (useSharedAllocator) {
+    TORCH_CHECK(false, "Shared allocator is not supported via GetMPSAllocator. Use getIMPSAllocator instead.");
+  }
   // Return the c10-registered allocator
   return c10::GetAllocator(c10::DeviceType::MPS);
 }
