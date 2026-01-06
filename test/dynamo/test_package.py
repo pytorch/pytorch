@@ -30,6 +30,7 @@ from torch.testing._internal.inductor_utils import (
 def compute_loss_helper(x):
     return reduce_to_scalar_loss(x)
 
+
 class _tempTensorSamplerForQualName:
     def __init__(self, val, mask, prob):
         self.val = val
@@ -83,6 +84,7 @@ class _tempNetForQualName(torch.nn.Module):
         x += y.sum()
         x = self.instance_method_with_args(x)
         return x
+
 
 @functorch_config.patch("bundled_autograd_cache", True)
 @torch._dynamo.config.patch({"strict_precompile": True})
