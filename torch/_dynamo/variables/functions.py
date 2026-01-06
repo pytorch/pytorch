@@ -2668,7 +2668,7 @@ class SysFunctionVariable(VariableTracker):
     ) -> VariableTracker:
         if self.value is sys.exc_info:
             return self.exc_info(tx)
-        # pyrefly: ignore[missing-attribute]
+
         assert self.value is sys.exception
         return self.exception(tx)
 

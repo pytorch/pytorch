@@ -1341,7 +1341,7 @@ def get_higher_dtype(
 
         raise RuntimeError("Unexpected type given to _extract_dtype!")
 
-    # pyrefly: ignore [bad-argument-type]
+
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
@@ -1708,10 +1708,10 @@ def elementwise_dtypes(
 
         # Prefers dtype of tensors with one or more dimensions
         if one_plus_dim_tensor_dtype is not None:
-            # pyrefly: ignore [bad-return]
+
             return one_plus_dim_tensor_dtype
 
-        # pyrefly: ignore [bad-return]
+
         return zero_dim_tensor_dtype
 
     if highest_type is float:

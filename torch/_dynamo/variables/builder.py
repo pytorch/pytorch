@@ -1348,7 +1348,7 @@ class VariableBuilder:
             self.install_guards(GuardBuilder.TYPE_MATCH)
             return WrapperUserFunctionVariable(value, "__wrapped__", source=self.source)
         elif value is sys.exc_info or (
-            # pyrefly: ignore[missing-attribute]
+
             sys.version_info >= (3, 11) and value is sys.exception
         ):
             return SysFunctionVariable(value, source=self.source)

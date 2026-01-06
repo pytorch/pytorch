@@ -2318,7 +2318,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # this results in cleaner graphs, but only works for inputs
         # pyrefly: ignore [missing-attribute]
         if data.source:
-            # pyrefly: ignore[bad-argument-type]
+
             return cls._nn_param_via_prefix_insert(tx, data, requires_grad)
 
         if config.graph_break_on_nn_param_ctor:

@@ -192,7 +192,7 @@ class IterationRangesRoot(IterationRanges):
 
         # True if the dimension is implemented as a single program looping over
         # the full dimension (currently only used for non-persistent reduction)
-        # pyrefly: ignore [missing-argument]
+
         assert not is_loop or (self.is_reduction and grid_dim is None)
         self.is_loop = is_loop
         # Index of corresponding dimension on triton tensors
@@ -589,7 +589,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if tree.tensor_dim is None:
                 continue
 
-            # pyrefly: ignore [missing-argument]
+
             if not tree.is_reduction or self.inside_reduction:
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
@@ -1009,7 +1009,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
         return [
             t
             for t in self.range_trees
-            # pyrefly: ignore [missing-argument]
+
             if not t.is_reduction or self.inside_reduction
         ]
 
@@ -2086,13 +2086,13 @@ class SIMDScheduling(BaseScheduling):
 
             for input_name in kernel.named_input_nodes:
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
-                # pyrefly: ignore [missing-attribute]
+
                 partial_code.finalize_hook(subgraph_name, strict=False)
 
             num_store_subgraphs = kernel.get_store_output_count()
             for i in range(num_store_subgraphs):
                 subgraph_name = kernel._get_store_output_subgraph_name(i)
-                # pyrefly: ignore [missing-attribute]
+
                 partial_code.finalize_hook(subgraph_name)
 
             if isinstance(partial_code, str):
