@@ -92,7 +92,8 @@ struct TORCH_CUDA_CPP_API CUDAPluggableAllocator
   void cacheInfo(c10::DeviceIndex device, size_t* largestBlock) override;
   void* getBaseAllocation(void* ptr, size_t* size) override;
 
-  void recordStream(const c10::DataPtr& /*ptr*/, c10::cuda::CUDAStream stream) override;
+  void recordStream(const c10::DataPtr& /*ptr*/, c10::cuda::CUDAStream stream)
+      override;
 
   c10::CachingDeviceAllocator::DeviceStats getDeviceStats(
       c10::DeviceIndex device) override;
