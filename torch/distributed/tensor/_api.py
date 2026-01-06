@@ -9,12 +9,13 @@ from typing import Any
 from typing_extensions import deprecated
 
 import torch
+import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
 from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
-from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
+from torch.distributed.tensor._collective_utils import check_tensor_meta
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._redistribute import (
     Redistribute,
@@ -173,7 +174,7 @@ class _FromTorchTensor(torch.autograd.Function):
                     # broadcast rank 0 tensor to all ranks
                     # only broadcast if run_check is True
                     input = input.contiguous()
-                    mesh_broadcast(input, device_mesh, mesh_dim=idx)
+                    input = funcol.broadcast(input, 0, (device_mesh, idx))
 
         dist_spec = DTensorSpec(
             device_mesh,
