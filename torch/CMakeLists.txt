@@ -51,32 +51,35 @@ endif()
 set(TORCH_PYTHON_INCLUDE_DIRECTORIES
     ${PYTHON_INCLUDE_DIR}
 
-    ${TORCH_ROOT}
-    ${TORCH_ROOT}/aten/src
-    ${TORCH_ROOT}/aten/src/TH
+    $<BUILD_INTERFACE:${TORCH_ROOT}>
+    $<BUILD_INTERFACE:${TORCH_ROOT}/aten/src>
+    $<BUILD_INTERFACE:${TORCH_ROOT}/aten/src/TH>
 
-    ${CMAKE_BINARY_DIR}
-    ${CMAKE_BINARY_DIR}/aten/src
-    ${CMAKE_BINARY_DIR}/caffe2/aten/src
-    ${CMAKE_BINARY_DIR}/third_party
-    ${CMAKE_BINARY_DIR}/third_party/onnx
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}>
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/aten/src>
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/caffe2/aten/src>
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/third_party>
+    $<BUILD_INTERFACE:${CMAKE_BINARY_DIR}/third_party/onnx>
 
-    ${TORCH_ROOT}/third_party/valgrind-headers
+    $<BUILD_INTERFACE:${TORCH_ROOT}/third_party/valgrind-headers>
 
-    ${TORCH_ROOT}/third_party/gloo
-    ${TORCH_ROOT}/third_party/onnx
-    ${TORCH_ROOT}/third_party/flatbuffers/include
-    ${TORCH_ROOT}/third_party/kineto/libkineto/include
-    ${TORCH_ROOT}/third_party/cpp-httplib
-    ${TORCH_ROOT}/third_party/nlohmann/include
+    $<BUILD_INTERFACE:${TORCH_ROOT}/third_party/gloo>
+    $<BUILD_INTERFACE:${TORCH_ROOT}/third_party/onnx>
+    $<BUILD_INTERFACE:${TORCH_ROOT}/third_party/flatbuffers/include>
+    $<BUILD_INTERFACE:${TORCH_ROOT}/third_party/kineto/libkineto/include>
+    $<BUILD_INTERFACE:${TORCH_ROOT}/third_party/cpp-httplib>
+    $<BUILD_INTERFACE:${TORCH_ROOT}/third_party/nlohmann/include>
 
-    ${TORCH_SRC_DIR}/csrc
-    ${TORCH_SRC_DIR}/csrc/api/include
-    ${TORCH_SRC_DIR}/lib
-    ${TORCH_SRC_DIR}/standalone
+    $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc>
+    $<BUILD_INTERFACE:${TORCH_SRC_DIR}/csrc/api/include>
+    $<BUILD_INTERFACE:${TORCH_SRC_DIR}/lib>
+    $<BUILD_INTERFACE:${TORCH_SRC_DIR}/standalone>
+
+    $<INSTALL_INTERFACE:include>
+    $<INSTALL_INTERFACE:include/torch/csrc/api/include>
     )
 
-list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES ${LIBSHM_SRCDIR})
+list(APPEND TORCH_PYTHON_INCLUDE_DIRECTORIES $<BUILD_INTERFACE:${LIBSHM_SRCDIR}>)
 
 set(TORCH_PYTHON_LINK_LIBRARIES
     Python::Module
@@ -466,7 +469,7 @@ if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
 endif()
 
-install(TARGETS torch_python DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+install(TARGETS torch_python EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 # Generate torch/version.py from the appropriate CMake cache variables.
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")
