@@ -71,7 +71,7 @@ void launch_grouped_bgemm_ck_impl_dispatch(
 
     // Synchronize the stream to ensure all prior GPU ops
     // affecting host memory are done.
-    AT_CUDA_CHECK(hipStreamSynchronize(c10::hip::getCurrentHIPStream()));
+    AT_CUDA_CHECK(hipStreamSynchronize(c10::cuda::getCurrentCUDAStream()));
 
     // for each group, calculate m,n,k,lda,ldb,ldc and A,B,out pointer base addresses.
     if (mat_a_dim == 2 && mat_b_dim == 2) {
