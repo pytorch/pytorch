@@ -8,6 +8,7 @@ import json
 import locale
 import os
 import re
+import shlex
 import subprocess
 import sys
 from collections import namedtuple
@@ -119,12 +120,18 @@ PIP_PATTERNS = [
 
 def run(command):
     """Return (return-code, stdout, stderr)."""
-    shell = type(command) is str
-    p = subprocess.Popen(
-        command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=shell
-    )
-    raw_output, raw_err = p.communicate()
-    rc = p.returncode
+    if isinstance(command, str):
+        is_posix = os.name == 'posix'
+        command = shlex.split(command, posix=is_posix)
+    try:
+        p = subprocess.Popen(
+            command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=False
+        )
+        raw_output, raw_err = p.communicate()
+        rc = p.returncode
+    except OSError as e:
+        return 127, "", str(e)
+
     if get_platform() == "win32":
         enc = "oem"
     else:
