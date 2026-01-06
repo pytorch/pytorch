@@ -23,6 +23,7 @@ from torch._library.opaque_object import (
     get_opaque_type_name,
     is_opaque_type,
     is_opaque_value_type,
+    MemberType,
     register_opaque_type,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -66,13 +67,24 @@ class RNGState:
         self.seed = seed
         self.rng = random.Random(self.seed)
 
+    def get_seed(self):
+        return self.seed
+
+    def noisy_inject(self, x):
+        return torch.ops._TestOpaqueObject.noisy_inject(x, self)
+
 
 class Counter:
-    def __init__(self, start):
-        self.counter = torch.tensor(start)
+    def __init__(self, start, end):
+        self.start = start
+        self.end = end
+
+    @property
+    def counter(self):
+        return torch.scalar_tensor(self.start, dtype=torch.int64)
 
     def increment_counter(self):
-        self.counter += 1
+        self.start += 1
 
 
 class AddModule(torch.nn.Module):
@@ -138,8 +150,21 @@ class NestedValueSize:
 
 
 register_opaque_type(OpaqueQueue, typ="reference")
-register_opaque_type(RNGState, typ="reference")
-register_opaque_type(Counter, typ="reference")
+register_opaque_type(
+    RNGState,
+    typ="reference",
+    guard_fn=lambda obj: [obj.seed],
+    members={
+        "seed": MemberType.USE_REAL,
+        "get_seed": MemberType.USE_REAL,
+        "noisy_inject": MemberType.INLINED,
+    },
+)
+register_opaque_type(
+    Counter,
+    typ="reference",
+    guard_fn=lambda obj: obj.start,
+)
 register_opaque_type(AddModule, typ="reference")
 register_opaque_type(ValueConfig, typ="value")
 register_opaque_type(SizeStore, typ="value")
@@ -221,6 +246,7 @@ class TestOpaqueObject(TestCase):
 
         @torch.library.register_fake("_TestOpaqueObject::noisy_inject", lib=self.lib)
         def noisy_inject_fake(x: torch.Tensor, obj: RNGState) -> torch.Tensor:
+            assert obj.seed >= 0
             return torch.empty_like(x)
 
         @torch.library.custom_op(
@@ -540,8 +566,58 @@ def forward(self, arg0_1, arg1_1):
     return (add,)""",  # noqa: B950
         )
 
+    def test_compile_inline_methods(self):
+        def foo(rng_state, x):
+            seed1 = rng_state.get_seed()
+            seed2 = rng_state.seed
+            x = torch.ops._TestOpaqueObject.noisy_inject(x, rng_state)
+            x = x * (seed1 + seed2 + 1)
+            x = rng_state.noisy_inject(x)
+            x = x + x
+            return x
+
+        rng = RNGState(0)
+        x = torch.ones(2, 3)
+
+        backend = AotEagerAndRecordGraphs()
+        torch.compile(foo, fullgraph=True, backend=backend)(rng, x)
+
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1, arg1_1, arg2_1):
+    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg1_1, arg0_1);  arg1_1 = arg0_1 = None
+    mul = torch.ops.aten.mul.Tensor(noisy_inject, 1);  noisy_inject = None
+    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg2_1);  mul = arg2_1 = None
+    add = torch.ops.aten.add.Tensor(noisy_inject_1, noisy_inject_1);  noisy_inject_1 = None
+    return (add,)""",  # noqa: B950
+        )
+
+        res = torch.compile(foo, fullgraph=True, backend="inductor")(rng, x)
+        self.assertFalse(torch.allclose(res, x * x + x))
+
+    def test_reference_type_recompile(self):
+        cnt = CompileCounter()
+
+        def foo(counter, x):
+            z = torch.ops._TestOpaqueObject.increment_counter(counter, x)
+            x = x * z
+            return x
+
+        x = torch.ones(2, 3)
+
+        opt_f = torch.compile(foo, backend=cnt, fullgraph=True)
+        opt_f(Counter(1, 5), x)
+        self.assertEqual(cnt.frame_count, 1)
+
+        opt_f(Counter(1, 6), x)  # we only guard on the first number
+        self.assertEqual(cnt.frame_count, 1)
+
+        opt_f(Counter(2, 5), x)  # recompile!
+        self.assertEqual(cnt.frame_count, 2)
+
     def test_compile_global(self):
-        counter = Counter(0)
+        counter = Counter(0, 10)
 
         def foo(x, y):
             z = torch.ops._TestOpaqueObject.increment_counter(counter, y)
@@ -585,7 +661,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         dynamo_counters.clear()
 
         def foo(x, y):
-            counter = Counter(0)
+            counter = Counter(0, 10)
             z = torch.ops._TestOpaqueObject.increment_counter(counter, y)
             x = x * z
             return x
@@ -599,7 +675,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         )
 
     def test_compile_attribute(self):
-        counter = Counter(0)
+        counter = Counter(0, 10)
 
         def foo(counter, x):
             x = x * x
@@ -607,7 +683,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return x
 
         with self.assertRaisesRegex(
-            RuntimeError, "Attempted to access attributes/methods on an OpaqueObject"
+            RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
         ):
             torch.compile(foo)(counter, torch.ones(2, 3))
 
@@ -617,7 +693,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             return x
 
         with self.assertRaisesRegex(
-            RuntimeError, "Attempted to access attributes/methods on an OpaqueObject"
+            RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
         ):
             torch.compile(bar)(counter, torch.ones(2, 3))
 
@@ -682,6 +758,23 @@ def forward(self, primals, tangents):
 
         self.assertEqual(compiled_fn(*inp), M()(*inp))
 
+    def test_invalid_reference_type(self):
+        class BadMember:
+            def __init__(self, x):
+                self.x = x
+
+        def foo(bad, y):
+            return y + bad.x
+
+        register_opaque_type(
+            BadMember, typ="reference", members={"y": MemberType.USE_REAL}
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            f"Opaque object of type '{get_opaque_type_name(BadMember)}' was specified to have member 'y'",
+        ):
+            torch.compile(foo)(BadMember(1), torch.ones(1))
+
     def test_invalid_value_type(self):
         class NoEq:
             def __init__(self, x):
@@ -716,6 +809,27 @@ def forward(self, primals, tangents):
 
         with self.assertRaisesRegex(TypeError, "expected to have a `__fx_repr__`"):
             register_opaque_type(NoRepr, typ="value")
+
+        class SpecifyMember:
+            def __init__(self, x):
+                self.x = x
+
+            def __eq__(self, other):
+                return self.x == other.x
+
+            def __hash__(self):
+                return hash(self.x)
+
+            def __fx_repr__(self):
+                return f"SpecifyMember({self.x})"
+
+        with self.assertRaisesRegex(TypeError, "No need to specify `members`"):
+            register_opaque_type(
+                SpecifyMember, typ="value", members={"x": MemberType.USE_REAL}
+            )
+
+        with self.assertRaisesRegex(TypeError, "No need to specify `guard_fn`"):
+            register_opaque_type(SpecifyMember, typ="value", guard_fn=lambda obj: [])
 
     def test_invalid_schema(self):
         with self.assertRaisesRegex(

@@ -36,12 +36,25 @@ through `register_opaque_type(MyClass, typ="value")`.
 """
 
 from dataclasses import dataclass
-from typing import Any, Literal, NewType
+from enum import Enum
+from typing import Any, Literal, NewType, Optional
 from weakref import WeakKeyDictionary
 
 import torch
 
 from .fake_class_registry import register_fake_class
+
+
+class MemberType(Enum):
+    """
+    Defines how a member (attribute/property/method) of an opaque object is handled
+    during torch.compile tracing.
+    """
+
+    # Reads/calls the member at trace time with the real object and bakes the result as a constant
+    USE_REAL = "use_real"
+    # Inlines/traces the member
+    INLINED = "inlined"
 
 
 @register_fake_class("aten::OpaqueObject")
@@ -66,6 +79,10 @@ OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 class _OpaqueTypeInfo:
     class_name: str
     opaque_typ: Literal["reference", "value"]
+    guard_fn: (
+        Any  # Callable that takes the object and returns list of values to guard on
+    )
+    members: dict[str, MemberType]  # Maps member name to how it should be handled
 
 
 # Mapping of type -> (string name, reference/value type)
@@ -95,7 +112,13 @@ def get_opaque_type_name(cls: Any) -> str:
     return _OPAQUE_TYPES[cls].class_name
 
 
-def register_opaque_type(cls: Any, *, typ: str) -> None:
+def register_opaque_type(
+    cls: Any,
+    *,
+    typ: str,
+    guard_fn: Any = None,
+    members: dict[str, MemberType] | None = None,
+) -> None:
     """
     Registers the given type as an opaque type which allows this to be consumed
     by a custom operator.
@@ -107,6 +130,29 @@ def register_opaque_type(cls: Any, *, typ: str) -> None:
         cls (type): The class to register as an opaque type.
         typ (str): Either "reference" or "value". See Note [Opaque Objects] for
             more details.
+        guard_fn (callable | None): A function that takes an instance of the opaque
+            object and returns a list of values to guard on. These values will be compared
+            for equality on each function call, triggering recompilation if they change.
+            Only applicable for reference types.
+            Example: lambda obj: [obj.seed]
+            Example: lambda obj: [obj.x, obj.y]  # Multiple values
+        members (dict[str, MemberType] | None): Dictionary mapping member names
+            (attributes, properties, or methods) to their MemberType, which controls
+            how they are handled during torch.compile tracing:
+            - MemberType.USE_REAL: Evaluates with the real object at compile time and
+              bakes the result as a constant
+            - MemberType.INLINED: Inlines the method call into the trace
+
+    Examples:
+        >>> register_opaque_type(
+        >>>     MyClass,
+        >>>     typ="reference",
+        >>>     guard_fn=lambda obj: [obj.x, obj.y],  # Guard on x and y values
+        >>>     members={
+        >>>         "ndim": MemberType.USE_REAL,     # Bake ndim as constant
+        >>>         "compute": MemberType.INLINED,   # Inline compute method
+        >>>     },
+        >>> )
     """
     import torch.utils._pytree as pytree
 
@@ -155,10 +201,24 @@ def register_opaque_type(cls: Any, *, typ: str) -> None:
                 "a tuple of (repr_string, set_of_types)."
             )
 
+        if members is not None:
+            raise TypeError(
+                "No need to specify `members` for "
+                f"value-type opaque class {cls} as it will be guarded based "
+                "on `__eq__`, and all methods will be inlined by default."
+            )
+
+        if guard_fn is not None:
+            raise TypeError(
+                "No need to specify `guard_fn` for "
+                f"value-type opaque class {cls} as it will be guarded based "
+                "on `__eq__`."
+            )
+
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
 
-    type_info = _OpaqueTypeInfo(name, typ)
+    type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {})
     _OPAQUE_TYPES[cls] = type_info
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
@@ -243,3 +303,30 @@ def get_opaque_obj_repr(obj: Any) -> tuple[str, dict[str, type]]:
         )
 
     return repr_str, globals_dict
+
+
+def get_opaque_obj_info(cls: Any) -> Optional[_OpaqueTypeInfo]:
+    if not is_opaque_type(cls):
+        return None
+
+    if isinstance(cls, str):
+        return _OPAQUE_TYPES_BY_NAME[cls]
+
+    return _OPAQUE_TYPES[cls]
+
+
+def get_member_type(cls: Any, member_name: str) -> Optional[MemberType]:
+    """
+    Get the MemberType for a specific member of an opaque object class.
+
+    Args:
+        cls: The opaque object class (or its string name)
+        member_name: The name of the member to query
+
+    Returns:
+        MemberType if the member is registered, None otherwise
+    """
+    info = get_opaque_obj_info(cls)
+    if info is None:
+        return None
+    return info.members.get(member_name)

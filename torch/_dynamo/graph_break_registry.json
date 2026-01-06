@@ -3426,6 +3426,16 @@
       ]
     }
   ],
+  "GB2078": [
+    {
+      "Gb_type": "Attempted to access unregistered member on an OpaqueObject",
+      "Context": "value={self.value}, attr={name}",
+      "Explanation": "Member '{name}' is not registered for this opaque object type.",
+      "Hints": [
+        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
+      ]
+    }
+  ],
   "GB0310": [
     {
       "Gb_type": "torch.cond: improper predicate",
