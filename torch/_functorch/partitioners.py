@@ -984,7 +984,7 @@ def _extract_fwd_bwd_modules(
     # See Note [Activations with no version counter checks in eager]
     # Sort saved_values so that tensors with saved_tensor_with_no_vc_check=True
     # are at the end. This allows us to have two consecutive slices:
-    # 1. tensors_saved_for_backwards_slice - tensors saved via save_for_backward
+    # 1. tensors_saved_with_vc_check_slice - tensors saved via save_for_backward
     # 2. tensors_saved_with_no_vc_check_slice - tensors stashed on ctx without save_for_backward
     # The sort is stable, so the relative order within each group is preserved.
     saved_values_with_vc_check = []

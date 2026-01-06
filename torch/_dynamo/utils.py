@@ -170,7 +170,7 @@ counters: collections.defaultdict[str, Counter[str]] = collections.defaultdict(
 )
 optimus_scuba_log: dict[str, Any] = {}
 troubleshooting_url = "https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.recompilation.html"
-nnmodule_doc_url = "https://pytorch.org/docs/main/torch.compiler_nn_module.html"
+nnmodule_doc_url = "https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_nn_module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
 

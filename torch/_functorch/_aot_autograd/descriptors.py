@@ -750,7 +750,7 @@ class SavedForBackwardsAOTOutput(AOTOutput):
 
 
 # Note [Activations with no version counter checks in eager]
-# In eager, when a tensor is saved or backward, the autograd engine
+# In eager, when a tensor is saved for backward, the autograd engine
 # generally performs version counter checks when grabbing the activation
 # at backward time.
 # One exception is in a custom autograd.Function: if the user stashes a tensor
