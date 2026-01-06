@@ -186,7 +186,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     ],
                 )
 
-            if member_type in (MemberType.CONSTANT, MemberType.GUARDED):
+            if member_type == MemberType.USE_REAL:
                 value = getattr(
                     self.value.real_obj,  # pyrefly: ignore[missing-attribute]
                     name,
@@ -269,7 +269,21 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             constant_val = method(*args_const, **kwargs_const)
 
-            if self.source:
+            # If the result is a reference-type opaque obj then it will be
+            # lifted as an input. It should have a CallMethodSource so that we
+            # can properly reconstruct this.
+            # However, we can only create CallMethodSource if all arguments are
+            # reconstructable (i.e., not opaque objects themselves).
+            from torch._library.opaque_object import is_opaque_type
+
+            has_opaque_args = any(
+                is_opaque_type(type(arg)) for arg in args_const
+            ) or any(is_opaque_type(type(v)) for v in kwargs_const.values())
+
+            if (
+                self.source
+                and not has_opaque_args
+            ):
                 # convert to tuple to make it hashable
                 kwargs_tuple = tuple(sorted(kwargs_const.items()))
                 call_source = CallMethodSource(
@@ -291,7 +305,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 name,
             )
 
-            if member_type in (MemberType.CONSTANT, MemberType.GUARDED):
+            if member_type == MemberType.USE_REAL:
                 return call_method_and_return_constant(self.value)
 
         unimplemented(

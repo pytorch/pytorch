@@ -16,6 +16,7 @@ import torch.nn as nn
 from torch._C import FileCheck
 from torch._dynamo.functional_export import dynamo_graph_capture_for_export
 from torch._dynamo.testing import AotEagerAndRecordGraphs
+from torch._functorch._aot_autograd.autograd_cache import check_cacheable
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._guards import tracing
 from torch._inductor.utils import run_and_get_triton_code
@@ -1058,10 +1059,34 @@ def forward(self, arg0_1, arg1_1):
 
         x = torch.ones(1)
         ref = fn(x)
-        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
-        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
         res = opt_fn(x)
         self.assertEqual(res, ref)
+        self.assertExpectedInline(
+            str(backend.graphs[0].code).strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.DeviceMesh):
+    l_x_ = L_x_
+    l_mesh_ = L_mesh_
+    dt = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = None
+    redistribute = dt.redistribute(l_mesh_, [torch.distributed.tensor.placement_types.Replicate()]);  dt = l_mesh_ = None
+    to_local = redistribute.to_local();  redistribute = None
+    add = to_local + 2;  to_local = None
+    return (add,)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            str(backend.fw_graphs[0].code).strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    _to_copy = torch.ops.aten._to_copy.default(arg0_1, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0));  arg0_1 = None
+    view = torch.ops.aten.view.default(_to_copy, [1]);  _to_copy = None
+    all_gather_into_tensor = torch.ops._c10d_functional.all_gather_into_tensor.default(view, 2, '0');  view = None
+    wait_tensor = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+    view_1 = torch.ops.aten.view.default(wait_tensor, [2]);  wait_tensor = None
+    add = torch.ops.aten.add.Tensor(view_1, 2);  view_1 = None
+    return (add,)""",  # noqa: B950
+        )
 
         def redistribute_kwargs_fn(x):
             dt = DTensor.from_local(x, mesh, [Shard(0)], run_check=False)
@@ -1072,11 +1097,39 @@ def forward(self, arg0_1, arg1_1):
 
         x = torch.ones(1)
         ref = redistribute_kwargs_fn(x)
+        backend = AotEagerAndRecordGraphs()
         opt_kwargs_fn = torch.compile(
-            redistribute_kwargs_fn, backend=cnt, fullgraph=True
+            redistribute_kwargs_fn, backend=backend, fullgraph=True
         )
         res = opt_kwargs_fn(x)
         self.assertEqual(res, ref)
+        self.assertExpectedInline(
+            str(backend.graphs[0].code).strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.DeviceMesh):
+    l_x_ = L_x_
+    l_mesh_ = L_mesh_
+    dt = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = None
+    redistribute = dt.redistribute(device_mesh = l_mesh_, placements = [torch.distributed.tensor.placement_types.Replicate()]);  dt = l_mesh_ = None
+    to_local = redistribute.to_local();  redistribute = None
+    add = to_local + 2;  to_local = None
+    return (add,)""",  # noqa: B950
+        )
+        self.assertExpectedInline(
+            str(backend.fw_graphs[0].code).strip(),
+            """\
+def forward(self, arg0_1, arg1_1):
+    _to_copy = torch.ops.aten._to_copy.default(arg0_1, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0));  arg0_1 = None
+    view = torch.ops.aten.view.default(_to_copy, [1]);  _to_copy = None
+    all_gather_into_tensor = torch.ops._c10d_functional.all_gather_into_tensor.default(view, 2, '0');  view = None
+    wait_tensor = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+    view_1 = torch.ops.aten.view.default(wait_tensor, [2]);  wait_tensor = None
+    add = torch.ops.aten.add.Tensor(view_1, 2);  view_1 = None
+    return (add,)""",  # noqa: B950
+        )
+
+        # This should not throw a BypassAOTAutogradCache error
+        check_cacheable(backend.graphs[0])
 
     @skipIfHpu
     def test_dynamo_dtensor_from_local_redistribute_async(self):
