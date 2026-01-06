@@ -153,18 +153,17 @@ register_opaque_type(OpaqueQueue, typ="reference")
 register_opaque_type(
     RNGState,
     typ="reference",
+    guard_fn=lambda obj: [obj.seed],
     members={
-        "seed": MemberType.GUARDED,
-        "get_seed": MemberType.CONSTANT,
+        "seed": MemberType.USE_REAL,
+        "get_seed": MemberType.USE_REAL,
         "noisy_inject": MemberType.INLINED,
     },
 )
 register_opaque_type(
     Counter,
     typ="reference",
-    members={
-        "start": MemberType.GUARDED,
-    },
+    guard_fn=lambda obj: obj.start,
 )
 register_opaque_type(AddModule, typ="reference")
 register_opaque_type(ValueConfig, typ="value")
@@ -759,6 +758,23 @@ def forward(self, primals, tangents):
 
         self.assertEqual(compiled_fn(*inp), M()(*inp))
 
+    def test_invalid_reference_type(self):
+        class BadMember:
+            def __init__(self, x):
+                self.x = x
+
+        def foo(bad, y):
+            return y + bad.x
+
+        register_opaque_type(
+            BadMember, typ="reference", members={"y": MemberType.USE_REAL}
+        )
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.InternalTorchDynamoError,
+            f"Opaque object of type '{get_opaque_type_name(BadMember)}' was specified to have member 'y'",
+        ):
+            torch.compile(foo)(BadMember(1), torch.ones(1))
+
     def test_invalid_value_type(self):
         class NoEq:
             def __init__(self, x):
@@ -793,6 +809,27 @@ def forward(self, primals, tangents):
 
         with self.assertRaisesRegex(TypeError, "expected to have a `__fx_repr__`"):
             register_opaque_type(NoRepr, typ="value")
+
+        class SpecifyMember:
+            def __init__(self, x):
+                self.x = x
+
+            def __eq__(self, other):
+                return self.x == other.x
+
+            def __hash__(self):
+                return hash(self.x)
+
+            def __fx_repr__(self):
+                return f"SpecifyMember({self.x})"
+
+        with self.assertRaisesRegex(TypeError, "No need to specify `members`"):
+            register_opaque_type(
+                SpecifyMember, typ="value", members={"x": MemberType.USE_REAL}
+            )
+
+        with self.assertRaisesRegex(TypeError, "No need to specify `guard_fn`"):
+            register_opaque_type(SpecifyMember, typ="value", guard_fn=lambda obj: [])
 
     def test_invalid_schema(self):
         with self.assertRaisesRegex(

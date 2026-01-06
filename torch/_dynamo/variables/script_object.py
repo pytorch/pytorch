@@ -186,7 +186,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     ],
                 )
 
-            if member_type in (MemberType.CONSTANT, MemberType.GUARDED):
+            if member_type == MemberType.USE_REAL:
                 value = getattr(
                     self.value.real_obj,  # pyrefly: ignore[missing-attribute]
                     name,
@@ -277,7 +277,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 name,
             )
 
-            if member_type in (MemberType.CONSTANT, MemberType.GUARDED):
+            if member_type == MemberType.USE_REAL:
                 return call_method_and_return_constant(self.value)
 
         unimplemented(
