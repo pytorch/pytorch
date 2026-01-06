@@ -38,7 +38,7 @@ from torch.fx.proxy import Proxy
 from .. import graph_break_hints
 from ..eval_frame import skip_code
 from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
-from ..source import AttrSource
+from ..source import AttrSource, CallMethodSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
@@ -243,6 +243,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
+        from .builder import SourcelessBuilder, VariableBuilder
+
         value_type = type(self.value)
 
         def call_method_and_return_constant(real_obj):
@@ -266,7 +268,33 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 return real_obj  # pyrefly: ignore[bad-return]
 
             constant_val = method(*args_const, **kwargs_const)
-            return ConstantVariable(constant_val)
+
+            # If the result is a reference-type opaque obj then it will be
+            # lifted as an input. It should have a CallMethodSource so that we
+            # can properly reconstruct this.
+            # However, we can only create CallMethodSource if all arguments are
+            # reconstructable (i.e., not opaque objects themselves).
+            from torch._library.opaque_object import is_opaque_type
+
+            has_opaque_args = any(
+                is_opaque_type(type(arg)) for arg in args_const
+            ) or any(is_opaque_type(type(v)) for v in kwargs_const.values())
+
+            if (
+                self.source
+                and not has_opaque_args
+            ):
+                # convert to tuple to make it hashable
+                kwargs_tuple = tuple(sorted(kwargs_const.items()))
+                call_source = CallMethodSource(
+                    self.source,
+                    name,
+                    tuple(args_const),
+                    kwargs_tuple,  # pyrefly: ignore[bad-argument-type]
+                )
+                return VariableBuilder(tx, call_source)(constant_val)
+            else:
+                return SourcelessBuilder.create(tx, constant_val)
 
         if is_opaque_value_type(value_type):
             return call_method_and_return_constant(self.value)
