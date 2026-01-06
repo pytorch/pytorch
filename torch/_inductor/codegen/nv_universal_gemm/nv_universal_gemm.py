@@ -139,14 +139,16 @@ class NVUniversalGemmCaller(ChoiceCaller):
     def output_node(self) -> TensorBox:
         from torch._inductor.ir import NVUniversalGemmBuffer
 
-        return TensorBox.create(
-            NVUniversalGemmBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                kernel=self.kernel,
-                accumulator_type=self.accumulator_type,
-            )
+        buffer = NVUniversalGemmBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            kernel=self.kernel,
+            accumulator_type=self.accumulator_type,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return TensorBox.create(buffer)
 
     def call_name(self) -> str:
         return self.name
