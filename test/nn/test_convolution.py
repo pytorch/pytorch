@@ -4203,7 +4203,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @largeTensorTest("48GB", "cuda")
     @serialTest()
     @dtypes(*(torch.half, torch.bfloat16))
-    def test_conv3d_cudnn_broken(self, device):
+    def test_conv3d_cudnn_broken(self, device, dtype):
         x = torch.rand(1, 16, 124, 1282, 722, dtype=dtype, device=device)
         m = torch.nn.Conv3d(
             16,

@@ -653,12 +653,19 @@ bool plan_errata_exception(
             { "version" : 1, 
               "rules"   : 
                 [ 
+                    { "rule_id"             : "163539", 
+                      "operation"           : "ConvFwd",
+                      "engine"              : 23, 
+                      "cudnn_version_start" : 90800, 
+                      "cudnn_version_end"   : 91500 
+                    },
                     { "rule_id"             : "ConvBwdData", 
                       "operation"           : "ConvBwdData",
                       "engine"              : 24, 
                       "cudnn_version_start" : 8000, 
                       "cudnn_version_end"   : -1 
                     }
+                ]
             })");
   if (!has_json) {
     return cudnn_frontend::check_errata(
