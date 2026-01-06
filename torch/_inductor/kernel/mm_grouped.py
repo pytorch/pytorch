@@ -524,7 +524,7 @@ def _tuned_grouped_mm_common(
         try:
             from triton.experimental.gluon.tools.ragged_tma import (  # noqa: F401
                 create_ragged_descriptor_device_2d,
-                store_ragged,
+                to_ragged_indices,
             )
 
             has_ragged_tma = True

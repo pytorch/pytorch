@@ -217,7 +217,7 @@ class Counter:
 
 {%- if USE_RAGGED_TENSOR_DESCRIPTOR %}
 @gluon.jit
-def store_ragged(TMA, slice_off, slice_size, coords, data, ragged_dim: ttgl.constexpr = 0):
+def store_ragged(TMA, slice_off, slice_size, coords, data, ragged_dim: gl.constexpr = 0):
     c0, c1, c2 = to_ragged_indices(slice_off, slice_size, coords[ragged_dim])
     full_coords = [c0, c1] + coords[:ragged_dim] + [c2] + coords[ragged_dim + 1:]
     tma.async_copy_shared_to_global(TMA, full_coords, data)
@@ -524,9 +524,9 @@ def store_partition(pargs: PartitionArgs):
 {%- else %}
     c_desc = create_ragged_descriptor_device_2d(
         c_ptr,
-        dim0=M, dim1=N,
-        stride0=c_stride_m, stride1=c_stride_n,
-        block0=BLOCK_M, block1=BLOCK_N,
+        shape_0=M, shape_1=N,
+        stride_0=c_stride_m, stride_1=c_stride_n,
+        block_shape_0=BLOCK_M, block_shape_1=BLOCK_N,
         layout=c_layout_ragged,
         ragged_dim=0,
     )
