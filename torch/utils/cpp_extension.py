@@ -2643,12 +2643,6 @@ def _get_rocm_arch_flags(cflags: list[str] | None = None) -> list[str]:
         logger.warning(
             f"The environment variable `PYTORCH_ROCM_ARCH` is not set, all archs for visible cards are included for compilation ({archs}).\n"
             "If this is not desired, please set the environment variable `PYTORCH_ROCM_ARCH` to specific architectures.")
-            logger.warning(
-                "Failed to auto-detect ROCm architecture. Extensions will be compiled "
-                "without architecture-specific optimizations. Set PYTORCH_ROCM_ARCH "
-                "environment variable to specify target architectures "
-                "(e.g., export PYTORCH_ROCM_ARCH='gfx90a;gfx942')."
-            )
     else:
         archs = _archs.replace(' ', ';')
     
