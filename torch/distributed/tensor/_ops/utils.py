@@ -4,6 +4,7 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from typing import cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
@@ -354,57 +355,52 @@ def generate_redistribute_costs(
     return redistribute_costs
 
 
+@dataclass(frozen=True)
+class ShardOrderPattern:
+    """
+    Represents a shard ordering pattern extracted from input DTensorSpecs.
+
+    Used to preserve efficient shard orderings when expanding single-mesh-dim
+    strategies to full mesh strategies.
+
+    Attributes:
+        mesh_dims: Mesh dimension ordering, e.g., (1, 0, 2)
+        placement_types: Corresponding placement types, e.g., (Shard, Shard, Shard)
+    """
+
+    mesh_dims: tuple[int, ...]
+    placement_types: tuple[type, ...]
+
+
 def find_compatible_ordering(
     pattern_mesh_dims: tuple[int, ...],
     output_mesh_dims: frozenset[int],
 ) -> tuple[int, ...] | None:
     """
-    Check if pattern ordering is compatible with output mesh_dims via prefix/suffix relationship.
+    Check if pattern ordering matches output mesh_dims exactly.
 
-    Compatible cases (aligned with redistribute planner's .pop()/.append() operations):
-    1. Exact match: same mesh_dims
-    2. Suffix subset: output is a prefix of pattern (removing from suffix)
-    3. Suffix superset: pattern extends to output (adding to suffix)
+    Only applies the pattern if the output uses exactly the same set of mesh
+    dimensions. We don't extrapolate orderings we haven't observed.
 
     Args:
         pattern_mesh_dims: Mesh dimension ordering from input, e.g., (1, 0, 2)
         output_mesh_dims: Set of mesh dimensions in output, e.g., {0, 1, 2}
 
     Returns:
-        The ordering to use for output, or None if incompatible.
+        The ordering to use for output, or None if not an exact match.
 
     Examples:
         >>> find_compatible_ordering((1, 0, 2), frozenset({0, 1, 2}))
         (1, 0, 2)  # Exact match
 
         >>> find_compatible_ordering((1, 0, 2), frozenset({0, 1}))
-        (1, 0)  # Suffix removal: output is prefix
+        None  # Different set of mesh dims
 
         >>> find_compatible_ordering((1, 0), frozenset({0, 1, 2}))
-        (1, 0, 2)  # Suffix extension
-
-        >>> find_compatible_ordering((1, 0), frozenset({2, 0, 1}))
-        None  # Not a prefix/suffix relationship
+        None  # Different set of mesh dims
     """
-    pattern_set = frozenset(pattern_mesh_dims)
-
-    # Case 1: Exact match
-    if pattern_set == output_mesh_dims:
+    if frozenset(pattern_mesh_dims) == output_mesh_dims:
         return pattern_mesh_dims
-
-    # Case 2: Output is subset - check if it forms a prefix
-    if output_mesh_dims.issubset(pattern_set):
-        prefix = tuple(md for md in pattern_mesh_dims if md in output_mesh_dims)
-        # Verify it's a contiguous prefix (not scattered)
-        if prefix == pattern_mesh_dims[: len(prefix)]:
-            return prefix
-        return None
-
-    # Case 3: Pattern is subset - extend to suffix
-    if pattern_set.issubset(output_mesh_dims):
-        remaining = sorted(output_mesh_dims - pattern_set)
-        return pattern_mesh_dims + tuple(remaining)
-
     return None
 
 
@@ -467,7 +463,7 @@ def matches_placement_types(
 
 def generate_shard_order_variants(
     output_placements: tuple[Placement, ...],
-    patterns: frozenset[tuple[tuple[int, ...], tuple[type, ...]]],
+    patterns: list[ShardOrderPattern],
 ) -> list[ShardOrder | None]:
     """
     Generate compatible shard_order variants for output placements.
@@ -478,14 +474,17 @@ def generate_shard_order_variants(
 
     Args:
         output_placements: Placements for the output spec
-        patterns: Extracted patterns from inputs as (mesh_dims, types) tuples
+        patterns: List of ShardOrderPattern extracted from inputs
 
     Returns:
         List of ShardOrder tuples to use when creating DTensorSpec variants.
         Returns [None] if no multi-dim sharding or no compatible patterns found.
 
     Example:
-        >>> patterns = frozenset({((1, 0), (Shard, Shard))})
+        >>> pattern = ShardOrderPattern(
+        ...     mesh_dims=(1, 0), placement_types=(Shard, Shard)
+        ... )
+        >>> patterns = [pattern]
         >>> output_placements = (Shard(0), Shard(0), Shard(0))
         >>> generate_shard_order_variants(output_placements, patterns)
         [(ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),)]
@@ -517,14 +516,16 @@ def generate_shard_order_variants(
         tensor_dim, mesh_dims_set = next(iter(multi_sharded.items()))
         compatible = []
 
-        for pattern_mesh_dims, pattern_types in patterns:
+        for pattern in patterns:
             # Check prefix/suffix compatibility
-            ordering = find_compatible_ordering(pattern_mesh_dims, mesh_dims_set)
+            ordering = find_compatible_ordering(pattern.mesh_dims, mesh_dims_set)
             if ordering is None:
                 continue
 
             # Check type compatibility
-            if not matches_placement_types(pattern_types, output_placements, ordering):
+            if not matches_placement_types(
+                pattern.placement_types, output_placements, ordering
+            ):
                 continue
 
             # Build complete ShardOrder including ALL sharded dimensions
@@ -568,8 +569,7 @@ def expand_to_full_mesh_op_strategy(
         [list[DTensorSpec], tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
-    shard_order_patterns: frozenset[tuple[tuple[int, ...], tuple[type, ...]]]
-    | None = None,
+    shard_order_patterns: list[ShardOrderPattern] | None = None,
 ) -> OpStrategy:
     """
     Convenience function to allow writing a sharding strategy considering only a single mesh dimension,
@@ -585,7 +585,7 @@ def expand_to_full_mesh_op_strategy(
         input_index: the number of outputs of the op, defaults to 1
         inplace_op: whether the op is inplace or not, defaults to False
         is_valid_strategy_cb: a callback function to filter out invalid sharding rules, defaults to None.
-        shard_order_patterns: extracted shard order patterns from inputs as (mesh_dims, types) tuples.
+        shard_order_patterns: list of ShardOrderPattern extracted from inputs.
             If provided, generates strategy variants with compatible shard orderings. Defaults to None.
 
     Example: Let's say `my_op(tensor_x, tensor_y) - > output_tensor`  can support sharding or replicating tensor_x,

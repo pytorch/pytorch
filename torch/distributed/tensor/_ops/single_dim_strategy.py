@@ -160,7 +160,7 @@ def _get_num_tensor_inputs(op_schema: OpSchema) -> int:
 
 def extract_shard_order_patterns(
     op_schema: OpSchema,
-) -> frozenset[tuple[tuple[int, ...], tuple[type, ...]]]:
+) -> list["ShardOrderPattern"]:  # type: ignore[name-defined]
     """
     Extract shard order patterns from input specs with type normalization.
 
@@ -175,15 +175,18 @@ def extract_shard_order_patterns(
         op_schema: The op schema containing input strategies
 
     Returns:
-        Set of patterns as (mesh_dims, types) tuples. Empty set if no patterns found.
+        List of ShardOrderPattern objects. Empty list if no patterns found.
 
     Example:
         >>> # Input with shard_order: ((1, 0),) and placements: (_StridedShard(0), Shard(0))
         >>> patterns = extract_shard_order_patterns(op_schema)
         >>> patterns
-        frozenset({((1, 0), (Shard, Shard))})  # _StridedShard normalized to Shard
+        [ShardOrderPattern(mesh_dims=(1, 0), placement_types=(Shard, Shard))]
     """
-    patterns: set[tuple[tuple[int, ...], tuple[type, ...]]] = set()
+    # Import here to avoid circular dependency
+    from torch.distributed.tensor._ops.utils import ShardOrderPattern
+
+    patterns: set[ShardOrderPattern] = set()
 
     def _extract_from_strategy(obj: Any) -> None:
         if isinstance(obj, DTensorSpec):
@@ -191,6 +194,13 @@ def extract_shard_order_patterns(
                 # Compute default shard_order to compare against
                 default_shard_order = DTensorSpec.compute_default_shard_order(
                     obj.placements
+                )
+
+                # Get normalized placements (StridedShard -> Shard conversion)
+                normalized_placements, _ = (
+                    DTensorSpec._normalize_placements_into_shard_order(
+                        obj.placements, obj.mesh
+                    )
                 )
 
                 # Only extract patterns that differ from default
@@ -212,16 +222,11 @@ def extract_shard_order_patterns(
                     ):
                         continue
 
-                    # Extract types with normalization
-                    types = []
-                    for md in mesh_dims:
-                        placement = obj.placements[md]
-                        # Normalize _StridedShard → Shard for semantic comparison
-                        if isinstance(placement, _StridedShard):
-                            types.append(Shard)
-                        else:
-                            types.append(type(placement))
-                    patterns.add((mesh_dims, tuple(types)))
+                    # Extract types from normalized placements
+                    types = tuple(type(normalized_placements[md]) for md in mesh_dims)
+                    patterns.add(
+                        ShardOrderPattern(mesh_dims=mesh_dims, placement_types=types)
+                    )
         elif isinstance(obj, OpStrategy):
             for strategy in obj.strategies:
                 _extract_from_strategy(strategy.output_spec)
@@ -232,7 +237,7 @@ def extract_shard_order_patterns(
     for obj in op_schema.args_schema:
         _extract_from_strategy(obj)
 
-    return frozenset(patterns)
+    return list(patterns)
 
 
 def _expand_single_dim_strategy_to_mesh(
