@@ -1,31 +1,16 @@
+#include <ATen/core/MemPool.h>
 #include <ATen/cuda/MemPool.h>
 
 namespace at::cuda {
-
-// uid_ is incremented when a user creates a MemPool,
-// for example: using graph_pool_handle() or c10::cuda::MemPool().
-//
-// uuid_ is incremented when CUDAGraph creates a MemPool
-// as a result of a user not providing a pool.
-//
-// MempoolId_t of {0, 0} is used to denote when no MemPool has been
-// passed to a function, either by user or CUDAGraphs. For example,
-// default value of MempoolId_t for capture_begin function is {0, 0}.
-// That's why uid_ and uuid_ start at 1.
-std::atomic<CaptureId_t> MemPool::uid_{1};
-std::atomic<CaptureId_t> MemPool::uuid_{1};
 
 MemPool::MemPool(
     CUDACachingAllocator::CUDAAllocator* allocator,
     bool is_user_created,
     bool use_on_oom,
     bool no_split)
-    : allocator_(allocator), is_user_created_(is_user_created) {
-  if (is_user_created_) {
-    id_ = {0, uid_++};
-  } else {
-    id_ = {uuid_++, 0};
-  }
+    : allocator_(allocator),
+      is_user_created_(is_user_created),
+      id_(create_mempool_id(is_user_created)) {
   device_ = c10::cuda::current_device();
   CUDACachingAllocator::createOrIncrefPool(device_, id_, allocator);
   if (use_on_oom) {
@@ -64,10 +49,7 @@ c10::DeviceIndex MemPool::device() {
 }
 
 MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
-  if (is_user_created) {
-    return {0, uid_++};
-  }
-  return {uuid_++, 0};
+  return at::create_mempool_id(is_user_created);
 }
 
 } // namespace at::cuda
