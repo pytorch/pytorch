@@ -31,8 +31,6 @@ project-excludes = [
   "torch/utils/data/standard_pipes.ipynb",
   # formatting issues, will turn on after adjusting where suppressions can be
   # in import statements
-  "torch/package/_package_pickler.py",
-  "torch/jit/annotations.py",
   "torch/utils/data/datapipes/_typing.py",
   "torch/nn/functional.py",
   "torch/_export/utils.py",
