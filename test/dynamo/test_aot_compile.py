@@ -387,6 +387,21 @@ class TestAOTCompile(torch._inductor.test_case.TestCase):
             actual = compiled_fn(mod, *inputs)
             self.assertEqual(expected, actual)
 
+    def test_code_cache(self):
+        from torch._dynamo.package import SerializedCode
+
+        def foo():
+            pass
+
+        serialized_code = SerializedCode.from_code_object(foo.__code__)
+        object.__setattr__(
+            serialized_code, "co_consts", serialized_code.co_consts + ({1: 2},)
+        )
+
+        new_code = SerializedCode.to_code_object(serialized_code)
+        new_serialized_code = SerializedCode.from_code_object(new_code)
+        self.assertEqual(new_serialized_code, serialized_code)
+
     def test_decorated_function_aot(self):
         def check_inputs(fn):
             def _fn(*args, **kwargs):
